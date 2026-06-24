@@ -1,0 +1,109 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://openhearth.dev/schema/ohcourse-1.0.json",
+  "title": "ohcourse",
+  "description": "Trellis curriculum file (v1.0) — a prerequisite DAG of concepts, each with an intake passage and a difficulty-laddered retrieval set.",
+  "type": "object",
+  "required": ["schemaVersion", "id", "title", "nodes"],
+  "additionalProperties": false,
+  "properties": {
+    "schemaVersion": { "const": "1.0" },
+    "id": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+    "title": { "type": "string", "minLength": 1 },
+    "subtitle": { "type": "string" },
+    "subject": { "type": "string" },
+    "level": { "type": "string" },
+    "description": { "type": "string" },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "kind": { "enum": ["researched", "from-source"] },
+        "generatedBy": { "type": "string" },
+        "created": { "type": "string" },
+        "sources": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "title": { "type": "string" },
+              "url": { "type": "string" },
+              "note": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "srsDefaults": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "algorithm": { "enum": ["sm2"] },
+        "initialEase": { "type": "number" },
+        "firstIntervalDays": { "type": "number" }
+      }
+    },
+    "nodes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/node" }
+    }
+  },
+  "$defs": {
+    "node": {
+      "type": "object",
+      "required": ["id", "title", "intake", "items"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "pattern": "^[a-z0-9]+(-[a-z0-9]+)*$" },
+        "title": { "type": "string", "minLength": 1 },
+        "summary": { "type": "string" },
+        "prereqs": { "type": "array", "items": { "type": "string" } },
+        "diagramMermaid": { "type": "string" },
+        "intake": { "type": "string", "minLength": 1 },
+        "items": { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/item" } }
+      }
+    },
+    "item": {
+      "type": "object",
+      "required": ["id", "type", "rung"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "type": { "enum": ["cloze", "qa", "discrimination", "procedure"] },
+        "rung": { "type": "integer", "minimum": 1, "maximum": 4 },
+        "hints": { "type": "array", "items": { "type": "string" } },
+        "sources": { "type": "array", "items": { "type": "string" } }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "type": { "const": "cloze" } } },
+          "then": { "required": ["text", "answers"],
+            "properties": { "text": { "type": "string" }, "answers": { "type": "object" } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "qa" } } },
+          "then": { "required": ["prompt", "answer"],
+            "properties": { "prompt": { "type": "string" }, "answer": { "type": "string" },
+              "acceptable": { "type": "array", "items": { "type": "string" } },
+              "rubric": { "type": "string" } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "discrimination" } } },
+          "then": { "required": ["prompt", "choices", "correctIndex"],
+            "properties": { "prompt": { "type": "string" },
+              "choices": { "type": "array", "minItems": 2, "items": { "type": "string" } },
+              "correctIndex": { "type": "integer", "minimum": 0 },
+              "explanation": { "type": "string" } } }
+        },
+        {
+          "if": { "properties": { "type": { "const": "procedure" } } },
+          "then": { "required": ["prompt", "steps"],
+            "properties": { "prompt": { "type": "string" },
+              "steps": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+              "rubric": { "type": "string" } } }
+        }
+      ]
+    }
+  }
+}
