@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect width="1024" height="1024" fill="#FBF7F0"/>
+  <g stroke="#A85040" fill="none" stroke-width="30" stroke-linecap="round" stroke-linejoin="round">
+    <!-- upright post -->
+    <line x1="512" y1="320" x2="512" y2="772"/>
+    <!-- base -->
+    <line x1="424" y1="800" x2="600" y2="800"/>
+    <!-- beam -->
+    <line x1="232" y1="330" x2="792" y2="330"/>
+    <!-- hanger strings to each pan -->
+    <path d="M 232 330 L 176 476 M 232 330 L 288 476"/>
+    <path d="M 792 330 L 736 476 M 792 330 L 848 476"/>
+    <!-- pans (open-top bowls) -->
+    <path d="M 168 476 A 64 58 0 0 0 296 476"/>
+    <path d="M 728 476 A 64 58 0 0 0 856 476"/>
+  </g>
+  <!-- central pivot -->
+  <circle cx="512" cy="330" r="26" fill="#A85040"/>
+</svg>
