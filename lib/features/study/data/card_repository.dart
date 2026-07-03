@@ -15,21 +15,40 @@ class CardRepository {
   Map<String, CardState> load(String courseId) {
     final raw = _prefs.getString(_key(courseId));
     if (raw == null) return {};
-    final map = json.decode(raw) as Map<String, dynamic>;
-    return map.map((itemId, v) {
-      final m = v as Map<String, dynamic>;
-      return MapEntry(
-        itemId,
-        CardState(
+    try {
+      final decoded = json.decode(raw);
+      if (decoded is! Map<String, dynamic>) return {};
+      final result = <String, CardState>{};
+      decoded.forEach((itemId, v) {
+        if (v is! Map<String, dynamic>) return;
+        final ease = v['ease'];
+        final intervalDays = v['intervalDays'];
+        final dueEpochDay = v['dueEpochDay'];
+        final reps = v['reps'];
+        final lapses = v['lapses'];
+        // Skip a malformed entry rather than losing the whole course's progress.
+        if (ease is! num ||
+            intervalDays is! int ||
+            dueEpochDay is! int ||
+            reps is! int ||
+            lapses is! int) {
+          return;
+        }
+        result[itemId] = CardState(
           itemId: itemId,
-          ease: (m['ease'] as num).toDouble(),
-          intervalDays: m['intervalDays'] as int,
-          dueEpochDay: m['dueEpochDay'] as int,
-          reps: m['reps'] as int,
-          lapses: m['lapses'] as int,
-        ),
-      );
-    });
+          ease: ease.toDouble(),
+          intervalDays: intervalDays,
+          dueEpochDay: dueEpochDay,
+          reps: reps,
+          lapses: lapses,
+        );
+      });
+      return result;
+    } catch (_) {
+      // Corrupt store must not crash study startup (load runs in initState);
+      // start this course fresh.
+      return {};
+    }
   }
 
   Future<void> save(String courseId, Map<String, CardState> cards) {
