@@ -9,8 +9,16 @@ class MdText extends StatelessWidget {
   final TextStyle? style;
 
   @override
-  Widget build(BuildContext context) =>
-      GptMarkdown(data, style: style ?? Theme.of(context).textTheme.bodyMedium);
+  Widget build(BuildContext context) => GptMarkdown(
+        data,
+        style: style ?? Theme.of(context).textTheme.bodyMedium,
+        // Never auto-fetch remote images. Course markdown is untrusted (imported
+        // .ohcourse files), and the default renderer turns ![](https://…) into
+        // an Image(NetworkImage(url)) — a silent outbound GET that a tracking
+        // beacon could exploit. Render a placeholder instead of fetching.
+        imageBuilder: (context, url, width, height) =>
+            const Icon(Icons.image_outlined, size: 20),
+      );
 }
 
 // Compiled once, not per call (this runs over multi-KB passages on rebuilds).
