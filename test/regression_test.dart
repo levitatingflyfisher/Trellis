@@ -46,6 +46,18 @@ void main() {
       expect(() => parseCourse(bad), throwsFormatException);
     });
 
+    test('a prerequisite cycle (a -> b -> a) is rejected', () {
+      final bad = _baseCourse();
+      (bad['nodes'] as List)[0]['prereqs'] = ['b'];
+      (bad['nodes'] as List)[1]['prereqs'] = ['a'];
+      expect(
+        () => parseCourse(bad),
+        throwsA(isA<FormatException>()
+            .having((e) => e.message, 'message', contains('cycle'))),
+        reason: 'immediate-prereq gating makes cycle nodes permanently locked',
+      );
+    });
+
     test('an empty cloze answers map is rejected', () {
       final bad = _baseCourse();
       (bad['nodes'] as List)[0]['items'][0]['answers'] = <String, dynamic>{};

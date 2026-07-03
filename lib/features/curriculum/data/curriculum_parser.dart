@@ -83,6 +83,33 @@ Course parseCourse(Map<String, dynamic> json) {
     }
   }
 
+  // Reject prerequisite cycles (a -> b -> a). Node unlocking only requires the
+  // immediate prereqs to reach mastery, so every node on a cycle would be
+  // permanently unreachable. DFS with a colour map; a back edge is a cycle.
+  final byId = {for (final n in nodes) n.id: n};
+  final visitState = <String, int>{}; // 0/unset = unvisited, 1 = on stack, 2 = done
+  final path = <String>[];
+  void visit(String id) {
+    visitState[id] = 1;
+    path.add(id);
+    for (final p in byId[id]!.prereqs) {
+      final s = visitState[p] ?? 0;
+      if (s == 1) {
+        final from = path.indexOf(p);
+        final cycle = [...path.sublist(from), p].join(' -> ');
+        throw FormatException(
+            "node '$id': prerequisites form a cycle ($cycle)");
+      }
+      if (s == 0) visit(p);
+    }
+    path.removeLast();
+    visitState[id] = 2;
+  }
+
+  for (final n in nodes) {
+    if ((visitState[n.id] ?? 0) == 0) visit(n.id);
+  }
+
   return Course(
     id: id,
     title: title,
