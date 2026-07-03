@@ -242,4 +242,19 @@ void main() {
       expect(suggestGrade(coverage), Grade.easy);
     });
   });
+
+  _clozeOrderTests();
+}
+
+void _clozeOrderTests() {
+  group('clozeKeysInTextOrder', () {
+    test('follows text order, not lexicographic key order', () {
+      // c2 appears before c10 in the text; a lexicographic sort puts c10 first.
+      const text = 'The {{c2::quick}} brown {{c10::fox}} jumps';
+      expect(clozeKeysInTextOrder(text, ['c10', 'c2']), ['c2', 'c10']);
+    });
+    test('appends answer keys that are not present in the text', () {
+      expect(clozeKeysInTextOrder('only {{c1::a}}', ['c1', 'c3']), ['c1', 'c3']);
+    });
+  });
 }

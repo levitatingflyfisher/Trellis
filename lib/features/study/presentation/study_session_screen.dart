@@ -234,7 +234,7 @@ class _StudySessionScreenState extends ConsumerState<StudySessionScreen> {
   // ---- cloze -------------------------------------------------------------
   Widget _cloze(ClozeItem item) {
     final theme = Theme.of(context);
-    final keys = item.answers.keys.toList()..sort();
+    final keys = clozeKeysInTextOrder(item.text, item.answers.keys);
     final display = item.text.replaceAll(_clozeRe, '  ____  ');
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,

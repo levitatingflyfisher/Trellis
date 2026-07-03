@@ -87,3 +87,24 @@ Grade suggestGrade(double coverage) {
   if (coverage < 0.85) return Grade.good;
   return Grade.easy;
 }
+
+final _clozeKeyRe = RegExp(r'\{\{(c\d+)(?:::[^}]*)?\}\}');
+
+/// Cloze blank keys in the order they appear in [text] (first occurrence,
+/// deduped), with any [answerKeys] not present in the text appended.
+///
+/// The blanks and the reveal list must follow text order, not a lexicographic
+/// sort of the answer keys — otherwise `c10` sorts before `c2` and the numbered
+/// "Blank N" fields no longer line up with the ____ markers in the sentence.
+List<String> clozeKeysInTextOrder(String text, Iterable<String> answerKeys) {
+  final seen = <String>{};
+  final ordered = <String>[];
+  for (final m in _clozeKeyRe.allMatches(text)) {
+    final k = m.group(1)!;
+    if (seen.add(k)) ordered.add(k);
+  }
+  for (final k in answerKeys) {
+    if (seen.add(k)) ordered.add(k);
+  }
+  return ordered;
+}
