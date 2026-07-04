@@ -1,5 +1,9 @@
 # Trellis
 
+> **Reading is the setup; recall is the product.** A local-first spaced-repetition
+> reader that turns any source into a dependency graph of concepts and drills it
+> into durable, re-derivable, *teachable* memory.
+
 Stop reading like a caveman. Load any source — a podcast transcript, a paper, a
 textbook chapter, a talk — or just name a topic, and Trellis turns it into a
 **dependency graph of concepts**, each with a dense **RSVP intake** passage and a
@@ -10,6 +14,17 @@ give a 3Blue1Brown/Karpathy-grade explanation — intuitive, re-derivable, story
 Retrieval-first, not consumption: you read fast, then you *recall*, and the
 schedule strips the cue away over time (cloze → free generation).
 
+> **This is the native app in the Trellis line.** The line's *primary, unified*
+> reader is **ohPrimer** (the PWA); this Flutter build is the **secondary/native**
+> surface — same loop, packaged for offline Android/desktop, with native share and
+> Anki export. Both read the same shared `.ohcourse` format. See
+> [`VISION.md`](VISION.md), [`docs/whitepaper.md`](docs/whitepaper.md), and
+> [ADR-0006](docs/adr/0006-native-secondary-to-ohprimer.md).
+
+**See the docs:** start at [`VISION.md`](VISION.md) (the north star + honest
+scorecard), then the [documentation hub](docs/README.md) (Diátaxis-organized:
+tutorials · how-to · reference · explanation). Agents/contributors: [`AGENTS.md`](AGENTS.md).
+
 ## Three pieces
 
 1. **`.ohcourse` format** — the shareable curriculum file (versioned JSON).
@@ -17,9 +32,9 @@ schedule strips the cue away over time (cloze → free generation).
    [`schema/ohcourse.schema.json`](schema/ohcourse.schema.json). Designed to be
    diffable and GitHub-shareable (the long-term "Yoto-cards-for-knowledge" /
    homeschool-curriculum-sharing vision).
-2. **`trellis-author` skill** (in `iss-skills/`) — paste a source *or* give it a
-   topic; it researches (deep-research for zero-to-hero), builds the graph + intake
-   passages + recall ladder, validates, and writes an `.ohcourse`.
+2. **`trellis-author` skill** (external authoring tool) — paste a source *or* give
+   it a topic; it researches (deep-research for zero-to-hero), builds the graph +
+   intake passages + recall ladder, validates, and writes an `.ohcourse`.
 3. **this Flutter app** — imports an `.ohcourse`, runs the loop, schedules (SM-2),
    tracks mastery. Builds to **APK + web**.
 
@@ -49,15 +64,16 @@ via the **+** button (paste an `.ohcourse`).
 ## Authoring a course
 
 Use the `trellis-author` skill: *"build me a Trellis course on X"* or *"turn
-this transcript into an .ohcourse"*. It writes a validated file you import. Validate
-by hand with `python3 iss-skills/skills/trellis-author/scripts/validate_ohcourse.py <file>`.
+this transcript into an .ohcourse"*. It writes a validated file you import. The app
+validates on import; to check a file by hand, validate it against
+[`schema/ohcourse.schema.json`](schema/ohcourse.schema.json).
 
 ## Architecture
 
 Clean-ish layers per feature (`domain` / `data` / `presentation`), Riverpod for
 state, shared_preferences for persistence (SM-2 card state + imported courses).
-See [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md). Pure logic (parser, SM-2,
-grading) is unit-tested; the screens have golden tests.
+See [`docs/architecture/OVERVIEW.md`](docs/architecture/OVERVIEW.md). Pure logic
+(parser, SM-2, grading) is unit-tested; the screens have golden tests.
 
 ## Roadmap (deferred)
 
