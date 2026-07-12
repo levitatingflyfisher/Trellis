@@ -45,6 +45,17 @@ dependencies:
   path_provider: ^2.1.6
   crypto: ^3.0.7
 
+  # Encrypted backup (SANCTUARY-BRIEF §4.W2), consumed by sibling path
+  # dependency — see the eloEngine precedent and Lullaby's README.
+  sanctuary_auth_core:
+    path: ../packages/sanctuary_auth_core
+  sanctuary_backup_ui:
+    path: ../packages/sanctuary_backup_ui
+  # Restore's file-selection UI (sanctuary_backup_ui's BackupSettingsSection).
+  # Widened range set by the package itself; this app was on no file_picker
+  # dependency before, so any version in range is fine.
+  file_picker: ^9.2.3
+
 dev_dependencies:
   flutter_test:
     sdk: flutter
@@ -55,6 +66,25 @@ dev_dependencies:
   # package. See that file for information about deactivating specific lint
   # rules and activating additional ones.
   flutter_lints: ^6.0.0
+
+# sanctuary_backup_ui pins share_plus ^10.0.0 (the version Lullaby was built
+# against). Trellis was already on share_plus ^13.1.0 for the Anki-export
+# share sheet (SharePlus.instance.share/ShareParams) before this wave, and
+# those two constraints don't overlap. share_plus 13.1.0 keeps the legacy
+# `Share.shareXFiles` static API the package's BackupSettingsSection calls —
+# deprecated, not removed — so pinning here (rather than downgrading Trellis
+# to 10.x, which lacks ShareParams) is safe. See scout-Trellis.md's
+# share_plus gotcha.
+#
+# That in turn surfaces a second, transitive conflict: share_plus 13.1.0
+# requires win32 ^6.0.1, but every file_picker release in
+# sanctuary_backup_ui's supported range still pins win32 ^5.9.0. win32 is
+# Windows-only native bindings; this app has no windows/ platform directory
+# and never builds for Windows, so forcing the newer win32 here is inert for
+# every target Trellis actually ships (Android + web).
+dependency_overrides:
+  share_plus: ^13.1.0
+  win32: ^6.0.1
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
