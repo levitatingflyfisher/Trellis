@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../core/providers.dart';
+import '../../sanctuary_backup/presentation/backup_screen.dart';
 import '../domain/models.dart';
 import 'course_map_screen.dart';
 
@@ -15,6 +16,13 @@ class LibraryScreen extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('Trellis'),
         actions: [
+          IconButton(
+            tooltip: 'Backup & restore',
+            icon: const Icon(Icons.lock_outline),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(builder: (_) => const BackupScreen()),
+            ),
+          ),
           IconButton(
             tooltip: 'Import a .ohcourse',
             icon: const Icon(Icons.add),
