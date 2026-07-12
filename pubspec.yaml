@@ -41,7 +41,7 @@ dependencies:
   sqlite3: ^3.3.3
   sqlite3_flutter_libs: ^0.6.0+eol
   archive: ^4.0.9
-  share_plus: ^13.1.0
+  share_plus: ^12.0.2
   path_provider: ^2.1.6
   crypto: ^3.0.7
 
@@ -68,23 +68,21 @@ dev_dependencies:
   flutter_lints: ^6.0.0
 
 # sanctuary_backup_ui pins share_plus ^10.0.0 (the version Lullaby was built
-# against). Trellis was already on share_plus ^13.1.0 for the Anki-export
-# share sheet (SharePlus.instance.share/ShareParams) before this wave, and
-# those two constraints don't overlap. share_plus 13.1.0 keeps the legacy
-# `Share.shareXFiles` static API the package's BackupSettingsSection calls —
-# deprecated, not removed — so pinning here (rather than downgrading Trellis
-# to 10.x, which lacks ShareParams) is safe. See scout-Trellis.md's
-# share_plus gotcha.
-#
-# That in turn surfaces a second, transitive conflict: share_plus 13.1.0
-# requires win32 ^6.0.1, but every file_picker release in
-# sanctuary_backup_ui's supported range still pins win32 ^5.9.0. win32 is
-# Windows-only native bindings; this app has no windows/ platform directory
-# and never builds for Windows, so forcing the newer win32 here is inert for
-# every target Trellis actually ships (Android + web).
+# against), which lacks the SharePlus.instance.share(ShareParams(...)) API
+# Trellis's own Anki-export share sheet already used at ^13.1.0
+# (scout-Trellis.md's share_plus gotcha). share_plus 13.x also bumps its
+# win32 dependency to ^6.0.1, which conflicts with every file_picker release
+# in sanctuary_backup_ui's supported range (win32 ^5.9.0) — and win32 IS
+# compiled for `flutter test`/analyze regardless of target platform (no
+# windows/ directory needed to trigger it), so overriding win32 alone breaks
+# the build. share_plus 12.0.2 is the sweet spot: it already ships
+# SharePlus/ShareParams (so Trellis's own share call is unaffected) while its
+# win32 ^5.5.3 stays inside file_picker's range — no win32 override needed.
+# The override below exists only to defeat sanctuary_backup_ui's hard
+# ^10.0.0 pin; the `dependencies:` entry above states the real intended
+# version.
 dependency_overrides:
-  share_plus: ^13.1.0
-  win32: ^6.0.1
+  share_plus: ^12.0.2
 
 # For information on the generic Dart part of this file, see the
 # following page: https://dart.dev/tools/pub/pubspec
