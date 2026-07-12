@@ -10,10 +10,16 @@ class CardRepository {
   CardRepository(this._prefs);
   final SharedPreferences _prefs;
 
-  String _key(String courseId) => 'cards:$courseId';
+  /// shared_preferences key prefix for per-course SM-2 progress. Public so
+  /// the encrypted-backup serializer (lib/features/sanctuary_backup) can
+  /// enumerate every course with progress — bundled or imported — without
+  /// duplicating the literal string (SANCTUARY-BRIEF §4.W2).
+  static const keyPrefix = 'cards:';
+
+  static String key(String courseId) => '$keyPrefix$courseId';
 
   Map<String, CardState> load(String courseId) {
-    final raw = _prefs.getString(_key(courseId));
+    final raw = _prefs.getString(key(courseId));
     if (raw == null) return {};
     try {
       final decoded = json.decode(raw);
@@ -59,7 +65,7 @@ class CardRepository {
           'reps': c.reps,
           'lapses': c.lapses,
         }));
-    return _prefs.setString(_key(courseId), json.encode(map));
+    return _prefs.setString(key(courseId), json.encode(map));
   }
 
   Future<void> upsert(String courseId, CardState card) async {

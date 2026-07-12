@@ -13,8 +13,15 @@ class CourseRepository {
   CourseRepository(this._prefs);
   final SharedPreferences _prefs;
 
-  static const _indexKey = 'imported_ids';
-  String _courseKey(String id) => 'course:$id';
+  /// shared_preferences key for the index of imported course ids. Public so
+  /// the encrypted-backup serializer (lib/features/sanctuary_backup) can dump
+  /// and restore the exact same keys without duplicating the literal string
+  /// (SANCTUARY-BRIEF §4.W2 — reduces churn if this key ever changes).
+  static const indexKey = 'imported_ids';
+
+  /// shared_preferences key holding a single imported course's raw
+  /// `.ohcourse` JSON text.
+  static String courseKey(String id) => 'course:$id';
 
   Future<List<Course>> listCourses() async {
     final byId = <String, Course>{};
@@ -22,7 +29,7 @@ class CourseRepository {
       byId[c.id] = c;
     }
     for (final id in _importedIds()) {
-      final raw = _prefs.getString(_courseKey(id));
+      final raw = _prefs.getString(courseKey(id));
       if (raw == null) continue;
       try {
         byId[id] = parseCourseString(raw);
@@ -39,13 +46,13 @@ class CourseRepository {
   /// [FormatException] (from the parser) if malformed.
   Future<Course> importFromJson(String jsonText) async {
     final course = parseCourseString(jsonText); // throws on malformed
-    await _prefs.setString(_courseKey(course.id), jsonText);
+    await _prefs.setString(courseKey(course.id), jsonText);
     final ids = _importedIds().toSet()..add(course.id);
-    await _prefs.setStringList(_indexKey, ids.toList());
+    await _prefs.setStringList(indexKey, ids.toList());
     return course;
   }
 
-  List<String> _importedIds() => _prefs.getStringList(_indexKey) ?? const [];
+  List<String> _importedIds() => _prefs.getStringList(indexKey) ?? const [];
 
   // Bundled courses are listed explicitly in assets/courses/index.json (a JSON
   // array of filenames). This is deterministic — unlike AssetManifest, which has
