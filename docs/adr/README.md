@@ -18,6 +18,7 @@ whether you're fixing a mistake or unknowingly reopening a settled trade-off.
 | [0004](0004-retrieval-first-sm2.md) | Retrieval-first, cue-laddered items; SM-2 for v1 | Accepted |
 | [0005](0005-no-remote-fetch-from-courses.md) | Never fetch from untrusted course content | Accepted |
 | [0006](0006-native-secondary-to-ohprimer.md) | Flutter Trellis is secondary to the ohPrimer PWA | Accepted |
+| [0007](0007-encrypted-backup.md) | Encrypted backup via the shared `sanctuary_*` packages | Accepted |
 
 ## Writing a new one
 

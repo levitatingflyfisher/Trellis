@@ -13,21 +13,42 @@ you how to *verify*, not just trust.)
 | Bundled courses | `assets/courses/` in the app | No |
 | Study progress (per-item SM-2 `CardState`) | `shared_preferences`, on-device | No |
 | WPM / UI preferences | in-memory / on-device | No |
+| Recovery phrase / derived encryption keys | OS keychain (`flutter_secure_storage`), on-device | No |
+| Encrypted `.ohbk` backup file | wherever *you* save/share it (see below) | Only when you export it, and only as ciphertext |
 
 There is **no account, no user id, no server, and no telemetry.** The app performs
 **no network requests of its own** for any core function.
 
 ## The only ways anything leaves the device
 
-Both are **user-initiated and explicit** — nothing is automatic or background:
+All are **user-initiated and explicit** — nothing is automatic or background:
 
 1. **Anki export (native only).** When *you* tap "Export to Anki," the app builds an
    `.apkg` file locally and hands it to the OS **share sheet**. Where it goes next is
    your choice in that share sheet; the app itself uploads nothing.
-2. **Importing a course** brings *in* a file you chose. That's inbound, and the app
-   validates it before storing it (see below).
+2. **Exporting an encrypted backup.** When *you* tap "Export backup" (the lock icon
+   → Backup & Restore), the app builds a **ChaCha20-Poly1305-encrypted** `.ohbk` file
+   locally — under a key derived from a 12-word recovery phrase only you hold — and
+   hands it to the OS share sheet, same as Anki export. Nobody without your phrase can
+   read it, including whoever it's shared through. See
+   [ADR-0007](adr/0007-encrypted-backup.md).
+3. **Importing a course** or **restoring a backup file** brings data *in* — a file
+   you chose. Course imports are validated before storing (see below); backup restores
+   are decrypted locally and never touch the network either.
 
 That's the complete list.
+
+## The encrypted-backup dependency, honestly
+
+Encrypted backup is built on `sanctuary_auth_core`, a shared OpenHearth package.
+That package's *own* dependency tree includes `http` and a `SyncService` — because it
+also implements a cross-device sync tier for apps that want one. **Trellis never
+instantiates that sync tier or the `http` client it needs.** The `flutter analyze` /
+`pubspec.yaml` dependency list will show `http` and `flutter_secure_storage` after
+this feature; the former is dead weight for Trellis's purposes (only the keychain
+wrapper and the local encrypt/decrypt primitives are used), not a live network path.
+Encrypted backup here is **local-file only**: out via the share sheet, in via the
+file picker, zero network — exactly like Anki export was before it.
 
 ## The tracking vector we deliberately closed
 
@@ -50,14 +71,19 @@ silently half-load.
 
 - **Read the dependency list** (`pubspec.yaml`): there is no analytics, ads, crash-
   reporting, or account SDK. The networking-capable packages (`sqlite3`, `crypto`,
-  `archive`, `path_provider`, `share_plus`) are used **only** for local Anki export
-  and OS sharing — grep `lib/` to confirm none of them run in the core loop.
-- **Watch the network** while studying (device network inspector / a proxy): a full
-  study session — import, RSVP intake, recall, grade, schedule — emits **zero**
-  outbound traffic.
-- **Search the source** for HTTP clients: the app has no `HttpClient`/`http` usage in
-  its core paths; the markdown `imageBuilder` proves the one obvious fetch site is
-  stubbed to a placeholder.
+  `archive`, `path_provider`, `share_plus`, `file_picker`) are used **only** for local
+  Anki/backup export and OS sharing — grep `lib/` to confirm none of them run in the
+  core loop. `sanctuary_auth_core` pulls in `http`, but grep its consumer,
+  `lib/features/sanctuary_backup/`, and `lib/main.dart`'s provider overrides: only
+  `sanctuaryAppDomainProvider`, `sanctuaryBackupConfigProvider`, and
+  `backupSerializerProvider` are touched — the package's `syncServiceProvider` (the
+  one thing that would actually use `http`) is never referenced.
+- **Watch the network** while studying, importing, exporting, or restoring a backup
+  (device network inspector / a proxy): every one of those flows emits **zero**
+  outbound traffic — encryption and decryption both happen entirely on-device.
+- **Search the source** for HTTP clients: the app has no `HttpClient`/direct `http`
+  usage in its own code; the markdown `imageBuilder` proves the one obvious fetch site
+  is stubbed to a placeholder.
 
 ## If sync is ever added
 

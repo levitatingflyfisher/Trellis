@@ -48,10 +48,26 @@ the next review → mastery advances and unlocks downstream concepts.
 
 ## Run / build
 
+Trellis's encrypted backup ([below](#encrypted-backup)) is built on two shared
+packages consumed by **sibling path dependency** (`../packages/...`, the same
+convention as `eloEngine`). Clone them next to this repo so the paths resolve:
+
+```
+packages/
+  sanctuary_auth_core/     # github: levitatingflyfisher/sanctuaryAuthCore
+  sanctuary_backup_ui/     # github: levitatingflyfisher/sanctuaryBackupUi
+Trellis/                   # this repo
+```
+
 ```bash
+git clone https://github.com/levitatingflyfisher/sanctuaryAuthCore packages/sanctuary_auth_core
+git clone https://github.com/levitatingflyfisher/sanctuaryBackupUi packages/sanctuary_backup_ui
+git clone <repo-url> Trellis
+cd Trellis
+
 # from this directory, using the repo's Flutter SDK
 flutter pub get
-flutter test                        # 99 tests (parser, SM-2, grading, screen goldens)
+flutter test                        # 138 tests (parser, SM-2, grading, screen goldens, backup)
 flutter run                         # on a device/emulator
 flutter build apk --debug           # installable debug APK (build/app/outputs/flutter-apk/)
 flutter build web --release         # build/web/  (serve statically)
@@ -60,6 +76,16 @@ flutter build web --release         # build/web/  (serve statically)
 A real **Kalman-filter course** (KF → EKF → UKF → IMM, 5 concepts / 20 items) is
 bundled in `assets/courses/`, so the app has content on first launch. Import more
 via the **+** button (paste an `.ohcourse`).
+
+## Encrypted backup
+
+The lock icon beside the **+** import button opens **Backup & Restore**: a
+12-word recovery phrase you write down once, then use to export an encrypted
+`.ohbk` file (imported courses + all study progress, including progress
+against the bundled course) or restore one on a new device. There is no
+server and no account — the phrase *is* the recovery key. See
+[ADR-0007](docs/adr/0007-encrypted-backup.md) and the [privacy
+model](docs/privacy-model.md).
 
 ## Authoring a course
 

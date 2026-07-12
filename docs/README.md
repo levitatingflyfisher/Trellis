@@ -39,6 +39,9 @@ node unlock in 10 minutes" walkthrough. If you write one, put it in
   `.ohcourse` into the app and validate it.
 - **[Export to Anki](how-to/export-to-anki.md)** — turn a course into an `.apkg`
   deck (native targets).
+- *Gap (contributions welcome):* a step-by-step "back up and restore your
+  progress" walkthrough. See the [encrypted backup ADR](adr/0007-encrypted-backup.md)
+  and the [README](../README.md#encrypted-backup) in the meantime.
 
 ## Reference
 *Information-oriented — tell me exactly, precisely, completely.*
