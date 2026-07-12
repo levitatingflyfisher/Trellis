@@ -24,8 +24,10 @@ app never phones out.
 Progress lives in `shared_preferences` on the device
 ([ADR-0002](adr/0002-shared-preferences-storage.md)). Consequences:
 
-- **No sync, no backup, no cross-device continuity.** Uninstalling loses your
-  progress unless you've separately exported the course.
+- **No cloud sync or cross-device continuity.** Progress lives on this device.
+  You can make an **encrypted backup** (Settings → the backup action: a
+  passphrase-protected `.ohbk` file you save yourself) and restore it on a new
+  device, but there is no automatic sync between devices.
 - **No review history / analytics.** Only current SM-2 state per item is kept, not a
   log of past reviews.
 - **Whole-map read/writes.** A course's card map is loaded and saved as one blob —
