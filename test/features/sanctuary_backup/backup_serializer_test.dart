@@ -169,6 +169,57 @@ void main() {
   });
 
   group('restoreAll — rejection', () {
+    test(
+        'a rejected restore (wrong app, then future schema) leaves existing '
+        'data completely untouched — fail closed, never a partial restore',
+        () async {
+      await seedImportedCourse('kalman-filters', kalmanCourseJson);
+      await seedCards('kalman-filters', kalmanCards);
+
+      final wrongApp = Uint8List.fromList(utf8.encode(jsonEncode({
+        'app': 'lullaby',
+        'schemaVersion': 1,
+        'payload': {
+          'importedIds': ['other-course'],
+          'courses': {'other-course': otherCourseJson},
+          'cards': {},
+        },
+      })));
+      await expectLater(
+          () => serializer.restoreAll(wrongApp), throwsA(isA<FormatException>()));
+
+      final futureSchema = Uint8List.fromList(utf8.encode(jsonEncode({
+        'app': 'trellis',
+        'schemaVersion': 999,
+        'payload': {
+          'importedIds': ['other-course'],
+          'courses': {'other-course': otherCourseJson},
+          'cards': {},
+        },
+      })));
+      await expectLater(() => serializer.restoreAll(futureSchema),
+          throwsA(isA<BackupSchemaException>()));
+
+      // Neither rejected attempt touched the store: original data intact,
+      // and the rejected blob's own data never got written.
+      expect(
+        prefs.getStringList(CourseRepository.indexKey),
+        ['kalman-filters'],
+      );
+      expect(
+        prefs.getString(CourseRepository.courseKey('kalman-filters')),
+        kalmanCourseJson,
+      );
+      expect(
+        prefs.getString(CardRepository.key('kalman-filters')),
+        kalmanCards,
+      );
+      expect(
+        prefs.getString(CourseRepository.courseKey('other-course')),
+        isNull,
+      );
+    });
+
     test('rejects a backup made for a different app', () async {
       final bytes = Uint8List.fromList(utf8.encode(jsonEncode({
         'app': 'lullaby',

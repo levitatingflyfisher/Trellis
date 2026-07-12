@@ -67,7 +67,7 @@ cd Trellis
 
 # from this directory, using the repo's Flutter SDK
 flutter pub get
-flutter test                        # 138 tests (parser, SM-2, grading, screen goldens, backup)
+flutter test                        # 139 tests (parser, SM-2, grading, screen goldens, backup)
 flutter run                         # on a device/emulator
 flutter build apk --debug           # installable debug APK (build/app/outputs/flutter-apk/)
 flutter build web --release         # build/web/  (serve statically)
