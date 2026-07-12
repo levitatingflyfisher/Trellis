@@ -19,9 +19,11 @@ class CourseRepository {
   /// (SANCTUARY-BRIEF §4.W2 — reduces churn if this key ever changes).
   static const indexKey = 'imported_ids';
 
-  /// shared_preferences key holding a single imported course's raw
+  /// shared_preferences key prefix for a single imported course's raw
   /// `.ohcourse` JSON text.
-  static String courseKey(String id) => 'course:$id';
+  static const coursePrefix = 'course:';
+
+  static String courseKey(String id) => '$coursePrefix$id';
 
   Future<List<Course>> listCourses() async {
     final byId = <String, Course>{};
