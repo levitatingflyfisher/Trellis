@@ -25,6 +25,17 @@ All notable changes to Trellis will be documented in this file.
   than 7 days and a backup key exists.
 
 ### Changed
+- Graduated to the shared `openhearth_design` system: the theme is now
+  the canonical `OhTheme.light` / `OhTheme.hearthDark` (hearth is
+  Trellis's brand — no accent override) instead of a hand-rolled
+  `ColorScheme.fromSeed` on the same hearth literal. Surfaces move to
+  the warm linen / brown-black ramps, buttons become stadium-shaped,
+  and the app now bundles and uses the fleet's Lora (headings) and
+  Nunito (UI/body) fonts — offline, zero font fetches.
+- Restored heading hierarchy under the new type ladder (course-card
+  titles, the library empty state and the course-map "Concepts" heading
+  now use `titleLarge`) and kept the RSVP play/pause glyph visible on
+  its filled button.
 - Backup envelope emission/validation now goes through the shared
   `sanctuary_backup_ui` 0.2.0 `BackupEnvelope` helper instead of a
   hand-rolled copy of the same shape.
