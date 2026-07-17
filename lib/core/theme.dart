@@ -1,19 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:openhearth_design/openhearth_design.dart';
 
-/// Warm OpenHearth palette (hearth/copper seed), Material 3.
-ThemeData TrellisTheme(Brightness brightness) {
-  final scheme = ColorScheme.fromSeed(
-    seedColor: const Color(0xFFA85040),
-    brightness: brightness,
-  );
-  return ThemeData(
-    useMaterial3: true,
-    colorScheme: scheme,
-    scaffoldBackgroundColor: scheme.surface,
-    appBarTheme: AppBarTheme(
-      backgroundColor: scheme.surface,
-      foregroundColor: scheme.onSurface,
-      centerTitle: false,
-    ),
-  );
-}
+/// Warm OpenHearth palette, Material 3 — via the canonical design system.
+///
+/// Trellis was hearth-branded from day one (the old theme seeded
+/// `ColorScheme.fromSeed` with the exact hearth500 literal); this graduates
+/// it to the real grammar: [OhTheme.light] / [OhTheme.hearthDark] with no
+/// `appAccent` override, because hearth IS the Trellis brand. Keeps the
+/// `TrellisTheme(Brightness)` signature so call sites don't churn.
+ThemeData TrellisTheme(Brightness brightness) =>
+    brightness == Brightness.dark ? OhTheme.hearthDark() : OhTheme.light();

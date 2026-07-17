@@ -123,7 +123,9 @@ class _CourseCard extends StatelessWidget {
       clipBehavior: Clip.antiAlias,
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        title: Text(course.title, style: theme.textTheme.titleMedium),
+        // titleLarge, not titleMedium: OhTheme maps titleMedium to a 14px
+        // label — smaller than the ListTile subtitle's 16px bodyMedium.
+        title: Text(course.title, style: theme.textTheme.titleLarge),
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
@@ -153,7 +155,9 @@ class _Empty extends StatelessWidget {
               const Icon(Icons.school_outlined, size: 48),
               const SizedBox(height: 12),
               Text('No courses yet',
-                  style: Theme.of(context).textTheme.titleMedium),
+                  // titleLarge: OhTheme's titleMedium (14px label) would
+                  // rank below the 16px explainer body under it.
+                  style: Theme.of(context).textTheme.titleLarge),
               const SizedBox(height: 8),
               const Text(
                 'Tap + to paste a .ohcourse, or generate one with the '

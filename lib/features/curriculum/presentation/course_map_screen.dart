@@ -118,7 +118,9 @@ class _CourseMapScreenState extends ConsumerState<CourseMapScreen> {
             ],
           ),
           const SizedBox(height: 20),
-          Text('Concepts', style: theme.textTheme.titleMedium),
+          // titleLarge, not titleMedium: OhTheme maps titleMedium to a 14px
+          // label, which would rank the section heading below the 16px body.
+          Text('Concepts', style: theme.textTheme.titleLarge),
           const SizedBox(height: 8),
           ...course.nodes.map((n) => _NodeTile(
                 node: n,

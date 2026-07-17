@@ -168,9 +168,15 @@ class _RsvpReaderState extends State<RsvpReader> {
           children: [
             IconButton.filled(
               onPressed: _toggle,
-              icon: Icon(_done
-                  ? Icons.replay
-                  : (_playing ? Icons.pause : Icons.play_arrow)),
+              icon: Icon(
+                _done
+                    ? Icons.replay
+                    : (_playing ? Icons.pause : Icons.play_arrow),
+                // Explicit onPrimary: M3 IconButton treats OhTheme's global
+                // primary-colored iconTheme as an override, which would paint
+                // this glyph primary-on-primary — invisible on the fill.
+                color: theme.colorScheme.onPrimary,
+              ),
             ),
           ],
         ),
