@@ -12,6 +12,12 @@ All notable changes to Trellis will be documented in this file.
 - Size budgets recorded in `budgets.json` (gzipped web `main.dart.js`
   and arm64 release APK, measured +5%), ratcheted by the fleet
   conformance suite so growth is a deliberate decision.
+- Fleet conformance suite (`oh_fleet_conformance` dev dependency +
+  `test/fleet_conformance_test.dart`): the OpenHearth standards as
+  tests that can fail — canonical design package with no retyped token
+  hex, backup-retention enforcement, size budgets, the zero-permission
+  Android manifest claim, and harness canon (test config / lint config /
+  CI pin).
 - Snapshot vault ("Previous backups" on the Backup & Restore screen):
   every encrypted export and every restore leaves a stamped on-device
   snapshot (keep-10, pinnable) you can restore, pin or delete.

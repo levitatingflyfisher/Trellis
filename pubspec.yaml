@@ -65,6 +65,12 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
 
+  # Fleet conformance suite — the OpenHearth standards as tests that can
+  # fail (style / backup / budgets / permissions / harness). Sibling path
+  # dep like the sanctuary pair.
+  oh_fleet_conformance:
+    path: ../packages/oh_fleet_conformance
+
   # The "flutter_lints" package below contains a set of recommended lints to
   # encourage good coding practices. The lint set provided by the package is
   # activated in the `analysis_options.yaml` file located at the root of your
