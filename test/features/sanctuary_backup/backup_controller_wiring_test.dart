@@ -41,6 +41,10 @@ void main() {
   }) {
     final c = ProviderContainer(overrides: [
       secureKeyStoreProvider.overrideWithValue(store),
+      // v0.2.0's restore takes a MANDATORY verified pre-restore snapshot;
+      // without an in-memory vault the platform store (path_provider) is
+      // unavailable under test and every restore ends in snapshotFailed.
+      vaultStoreProvider.overrideWithValue(InMemoryVaultStore()),
       cryptoServiceProvider.overrideWithValue(const DefaultCryptoService()),
       sanctuaryAppDomainProvider.overrideWithValue('trellis'),
       backupSerializerProvider
