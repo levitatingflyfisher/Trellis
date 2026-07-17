@@ -51,8 +51,27 @@ Future<void> main() async {
   );
 }
 
-class TrellisApp extends StatelessWidget {
+class TrellisApp extends ConsumerStatefulWidget {
   const TrellisApp({super.key});
+
+  @override
+  ConsumerState<TrellisApp> createState() => _TrellisAppState();
+}
+
+class _TrellisAppState extends ConsumerState<TrellisApp> {
+  @override
+  void initState() {
+    super.initState();
+    // Silent freshness snapshot (BACKUP_RETENTION_SPEC §3): if the newest
+    // vault snapshot is >7 days old and a key exists, take one. Post-frame
+    // + fire-and-forget — never blocks boot, never surfaces errors. (The
+    // Sundial pattern; extra valuable here because Trellis's restore is
+    // SharedPreferences-based and not crash-atomic, so the vault is the
+    // safety net.)
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      ref.read(backupControllerProvider.notifier).runStartupMaintenance();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
