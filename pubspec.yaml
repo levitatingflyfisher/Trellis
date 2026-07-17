@@ -45,6 +45,11 @@ dependencies:
   path_provider: ^2.1.6
   crypto: ^3.0.7
 
+  # OpenHearth design system (canonical hearth/linen tokens, OhTheme,
+  # bundled-font typography) — sibling path dep like eloEngine/sanctuary.
+  openhearth_design:
+    path: ../ohStyle/openhearth_design
+
   # Encrypted backup (SANCTUARY-BRIEF §4.W2), consumed by sibling path
   # dependency — see the eloEngine precedent and Lullaby's README.
   sanctuary_auth_core:
@@ -80,6 +85,29 @@ flutter:
 
   assets:
     - assets/courses/
+
+  # Bundled design-system fonts (openhearth_design resolves 'Lora'/'Nunito'
+  # from the consuming app's assets — zero network fetches, offline by
+  # construction). Same files + block as Sundial/Furrow/WeatherGlass.
+  fonts:
+    - family: Lora
+      fonts:
+        - asset: assets/fonts/Lora-Regular.ttf
+        - asset: assets/fonts/Lora-Italic.ttf
+          style: italic
+        - asset: assets/fonts/Lora-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Lora-Bold.ttf
+          weight: 700
+    - family: Nunito
+      fonts:
+        - asset: assets/fonts/Nunito-Regular.ttf
+        - asset: assets/fonts/Nunito-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Nunito-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Nunito-Bold.ttf
+          weight: 700
 
   # An image asset can refer to one or more resolution-specific "variants", see
   # https://flutter.dev/to/resolution-aware-images
