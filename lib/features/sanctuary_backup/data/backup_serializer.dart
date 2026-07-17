@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:sanctuary_backup_ui/sanctuary_backup_ui.dart';
@@ -23,11 +22,17 @@ import '../../study/data/card_repository.dart';
 /// bundled or imported, while course *content* is dumped only for imported
 /// ids (`imported_ids` + `course:<id>`).
 ///
-/// The JSON envelope carries `{app, schemaVersion, payload}` so [restoreAll]
-/// can reject a backup made for a different app or a future schema version —
-/// defense in depth behind the AEAD context that already scopes the
-/// encrypted blob to this app (SANCTUARY-BRIEF §2.3, §2.8).
-class TrellisBackupSerializer implements BackupSerializer {
+/// The JSON envelope is the fleet-standard [BackupEnvelope] shape
+/// `{app, schemaVersion, createdAt, payload}` — `createdAt` is ADDITIVE on
+/// top of the `{app, schemaVersion, payload}` shape Trellis shipped, so old
+/// installs (which read only those three keys) keep restoring new backups,
+/// and [BackupEnvelope.unwrap]'s tolerant parse keeps old backups restoring
+/// here. The envelope lets [restoreAll] reject a backup made for a different
+/// app or a future schema version — defense in depth behind the AEAD context
+/// that already scopes the encrypted blob to this app (SANCTUARY-BRIEF §2.3,
+/// §2.8).
+class TrellisBackupSerializer
+    implements BackupSerializer, PreviewableBackupSerializer {
   final SharedPreferences _prefs;
 
   const TrellisBackupSerializer(this._prefs);
@@ -57,17 +62,52 @@ class TrellisBackupSerializer implements BackupSerializer {
       cards[k.substring(CardRepository.keyPrefix.length)] = raw;
     }
 
-    final envelope = <String, dynamic>{
-      'app': _appId,
-      'schemaVersion': _schemaVersion,
-      'payload': {
+    // The shared fleet envelope (BACKUP_RETENTION_SPEC §2.F): identical to
+    // the hand-rolled shape this replaced plus createdAt, which feeds
+    // preview-before-restore and staleness copy.
+    return BackupEnvelope.wrap(
+      appId: _appId,
+      schemaVersion: _schemaVersion,
+      createdAt: DateTime.now(),
+      payload: {
         'importedIds': importedIds,
         'courses': courses,
         'cards': cards,
       },
-    };
-    return Uint8List.fromList(utf8.encode(jsonEncode(envelope)));
+    );
   }
+
+  /// The dry-run parse behind preview-before-restore and export
+  /// verify-by-read-back: validates exactly like [restoreAll] (wrong app,
+  /// future schema, malformed payload) and reports the manifest — but never
+  /// writes.
+  @override
+  Future<BackupManifest> describeBackup(Uint8List plaintext) async {
+    _requirePayload(_unwrap(plaintext).payload); // throws what restoreAll would
+    return BackupEnvelope.describe(plaintext);
+  }
+
+  /// The payload-content gate [restoreAll] applies — shared so describe and
+  /// restore can never drift apart. Every backup Trellis ever wrote carries
+  /// all three collections, so requiring them costs no compatibility; it is
+  /// what turns unwrap's "whole envelope as payload" fallback back into the
+  /// missing-payload rejection this app always had.
+  static void _requirePayload(Map<String, Object?> payload) {
+    if (payload['importedIds'] is! List ||
+        payload['courses'] is! Map ||
+        payload['cards'] is! Map) {
+      throw const FormatException('Missing payload in backup file');
+    }
+  }
+
+  /// Envelope validation via the shared helper. Trellis has always stamped
+  /// the `app` key, so the strict default (`requireAppKey: true`) keeps the
+  /// missing-app rejection the shipped app enforced.
+  UnwrappedBackup _unwrap(Uint8List data) => BackupEnvelope.unwrap(
+        data,
+        expectedAppId: _appId,
+        currentSchemaVersion: _schemaVersion,
+      );
 
   /// Restores all user data from an OHBK envelope previously produced by
   /// [dumpAll].
@@ -91,34 +131,8 @@ class TrellisBackupSerializer implements BackupSerializer {
   /// this app understands.
   @override
   Future<void> restoreAll(Uint8List data) async {
-    final Object? decoded;
-    try {
-      decoded = jsonDecode(utf8.decode(data));
-    } on FormatException {
-      rethrow;
-    }
-    if (decoded is! Map<String, dynamic>) {
-      throw const FormatException('Backup envelope is not a JSON object');
-    }
-    final envelope = decoded;
-
-    final app = envelope['app'] as String?;
-    if (app != _appId) {
-      throw FormatException("Not a Trellis backup (app='${app ?? 'missing'}')");
-    }
-
-    final version = envelope['schemaVersion'] as int?;
-    if (version == null) {
-      throw const FormatException('Missing schemaVersion in backup payload');
-    }
-    if (version > _schemaVersion) {
-      throw BackupSchemaException(version, _schemaVersion);
-    }
-
-    final payload = envelope['payload'];
-    if (payload is! Map<String, dynamic>) {
-      throw const FormatException('Missing payload in backup file');
-    }
+    final payload = _unwrap(data).payload;
+    _requirePayload(payload);
 
     final importedIds = _stringList(payload['importedIds']);
     final courses = _stringMap(payload['courses']);

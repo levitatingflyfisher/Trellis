@@ -168,6 +168,118 @@ void main() {
     });
   });
 
+  group('dumpAll — v0.2.0 envelope (BackupEnvelope.wrap)', () {
+    test(
+        'emits createdAt ADDITIVELY: every legacy key the shipped app reads '
+        'is still present (wire-compat law)', () async {
+      await seedImportedCourse('kalman-filters', kalmanCourseJson);
+      await seedCards('kalman-filters', kalmanCards);
+
+      final bytes = await serializer.dumpAll();
+      final envelope = jsonDecode(utf8.decode(bytes)) as Map<String, dynamic>;
+
+      // New: the creation stamp preview/staleness copy needs.
+      expect(DateTime.tryParse(envelope['createdAt'] as String? ?? ''),
+          isNotNull);
+      // Unchanged legacy shape: the OLD shipped app validates exactly these
+      // keys and must keep restoring new backups.
+      expect(envelope['app'], 'trellis');
+      expect(envelope['schemaVersion'], isA<int>());
+      final payload = envelope['payload'] as Map<String, dynamic>;
+      expect(payload['importedIds'], ['kalman-filters']);
+      expect((payload['courses'] as Map)['kalman-filters'], kalmanCourseJson);
+      expect((payload['cards'] as Map)['kalman-filters'], kalmanCards);
+    });
+  });
+
+  group('describeBackup (preview-before-restore)', () {
+    test('describes a fresh backup: app id, schema, createdAt', () async {
+      await seedImportedCourse('kalman-filters', kalmanCourseJson);
+      final bytes = await serializer.dumpAll();
+
+      final manifest =
+          await (serializer as PreviewableBackupSerializer).describeBackup(bytes);
+
+      expect(manifest.appId, 'trellis');
+      expect(manifest.schemaVersion, isA<int>());
+      expect(manifest.createdAt, isNotNull);
+    });
+
+    test('shares restoreAll\'s gate: rejects a wrong app id', () async {
+      final bytes = Uint8List.fromList(utf8.encode(jsonEncode({
+        'app': 'lullaby',
+        'schemaVersion': 1,
+        'payload': {'importedIds': [], 'courses': {}, 'cards': {}},
+      })));
+      expect(
+        () => (serializer as PreviewableBackupSerializer).describeBackup(bytes),
+        throwsA(isA<FormatException>()),
+      );
+    });
+
+    test('shares restoreAll\'s gate: rejects a future schema version',
+        () async {
+      final bytes = Uint8List.fromList(utf8.encode(jsonEncode({
+        'app': 'trellis',
+        'schemaVersion': 999,
+        'payload': {'importedIds': [], 'courses': {}, 'cards': {}},
+      })));
+      expect(
+        () => (serializer as PreviewableBackupSerializer).describeBackup(bytes),
+        throwsA(isA<BackupSchemaException>()),
+      );
+    });
+
+    test('shares restoreAll\'s gate: rejects a missing payload', () async {
+      final bytes = Uint8List.fromList(utf8.encode(jsonEncode({
+        'app': 'trellis',
+        'schemaVersion': 1,
+      })));
+      expect(
+        () => (serializer as PreviewableBackupSerializer).describeBackup(bytes),
+        throwsA(isA<FormatException>()),
+      );
+    });
+  });
+
+  group('legacy blob (pre-0.2.0 envelope, no createdAt)', () {
+    Uint8List legacyBlob() => Uint8List.fromList(utf8.encode(jsonEncode({
+          'app': 'trellis',
+          'schemaVersion': 1,
+          'payload': {
+            'importedIds': ['kalman-filters'],
+            'courses': {'kalman-filters': kalmanCourseJson},
+            'cards': {'kalman-filters': kalmanCards},
+          },
+        })));
+
+    test('an old shipped backup still restores (tolerant unwrap)', () async {
+      await serializer.restoreAll(legacyBlob());
+
+      expect(
+        prefs.getStringList(CourseRepository.indexKey),
+        ['kalman-filters'],
+      );
+      expect(
+        prefs.getString(CourseRepository.courseKey('kalman-filters')),
+        kalmanCourseJson,
+      );
+      expect(
+        prefs.getString(CardRepository.key('kalman-filters')),
+        kalmanCards,
+      );
+    });
+
+    test('an old shipped backup previews with unknown age, never an error',
+        () async {
+      final manifest = await (serializer as PreviewableBackupSerializer)
+          .describeBackup(legacyBlob());
+
+      expect(manifest.appId, 'trellis');
+      expect(manifest.createdAt, isNull); // "unknown age" in the UI
+    });
+  });
+
   group('restoreAll — rejection', () {
     test(
         'a rejected restore (wrong app, then future schema) leaves existing '
