@@ -5,6 +5,10 @@ All notable changes to Trellis will be documented in this file.
 ## [Unreleased]
 
 ### Added
+- Continuous integration — Trellis's first CI ever. A GitHub Actions
+  workflow (push + PR) clones the sibling path-dep packages, pins the
+  fleet's Flutter 3.38.7, and runs `flutter analyze` + the full test
+  suite. Until now nothing verified that Trellis even built.
 - Snapshot vault ("Previous backups" on the Backup & Restore screen):
   every encrypted export and every restore leaves a stamped on-device
   snapshot (keep-10, pinnable) you can restore, pin or delete.
