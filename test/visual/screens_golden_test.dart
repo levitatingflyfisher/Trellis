@@ -33,7 +33,7 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [sharedPreferencesProvider.overrideWithValue(prefs), ...extra],
-        child: MaterialApp(theme: TrellisTheme(Brightness.light), home: screen),
+        child: MaterialApp(theme: trellisTheme(Brightness.light), home: screen),
       ),
     );
     await tester.pumpAndSettle();

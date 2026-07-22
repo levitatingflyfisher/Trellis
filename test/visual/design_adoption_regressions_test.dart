@@ -45,7 +45,7 @@ void main() {
           sharedPreferencesProvider.overrideWithValue(prefs),
           ...extra
         ],
-        child: MaterialApp(theme: TrellisTheme(Brightness.light), home: screen),
+        child: MaterialApp(theme: trellisTheme(Brightness.light), home: screen),
       ),
     );
     await tester.pumpAndSettle();
@@ -114,7 +114,7 @@ void main() {
   }
 
   double bodySize() =>
-      TrellisTheme(Brightness.light).textTheme.bodyMedium!.fontSize!;
+      trellisTheme(Brightness.light).textTheme.bodyMedium!.fontSize!;
 
   testWidgets('cloze prompt outranks the body text under it', (t) async {
     await pumpToItem(
@@ -166,7 +166,7 @@ void main() {
 
   testWidgets('RSVP play glyph is visible on its filled button', (t) async {
     await pumpScreen(t, StudySessionScreen(course: course));
-    final theme = TrellisTheme(Brightness.light);
+    final theme = trellisTheme(Brightness.light);
     final glyphColor = t
         .renderObject<RenderParagraph>(find.descendant(
             of: find.byIcon(Icons.play_arrow),

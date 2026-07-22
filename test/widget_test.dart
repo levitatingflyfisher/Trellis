@@ -47,7 +47,7 @@ void main() {
           coursesProvider.overrideWith((ref) async => [course]),
         ],
         child: MaterialApp(
-          theme: TrellisTheme(Brightness.light),
+          theme: trellisTheme(Brightness.light),
           home: const LibraryScreen(),
         ),
       ),

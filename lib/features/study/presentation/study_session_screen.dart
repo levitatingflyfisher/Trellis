@@ -370,20 +370,31 @@ class _StudySessionScreenState extends ConsumerState<StudySessionScreen> {
       children: [
         MdText(item.prompt, style: theme.textTheme.titleLarge),
         const SizedBox(height: 12),
-        for (var k = 0; k < item.choices.length; k++)
-          Card(
-            color: !_revealed
-                ? null
-                : (k == item.correctIndex
-                    ? Colors.green.withValues(alpha: 0.18)
-                    : (k == _chosen ? theme.colorScheme.errorContainer : null)),
-            child: RadioListTile<int>(
-              value: k,
-              groupValue: _chosen,
-              onChanged: _revealed ? null : (v) => setState(() => _chosen = v),
-              title: MdText(item.choices[k]),
-            ),
+        RadioGroup<int>(
+          groupValue: _chosen,
+          onChanged: (v) {
+            if (!_revealed) setState(() => _chosen = v);
+          },
+          child: Column(
+            children: [
+              for (var k = 0; k < item.choices.length; k++)
+                Card(
+                  color: !_revealed
+                      ? null
+                      : (k == item.correctIndex
+                          ? Colors.green.withValues(alpha: 0.18)
+                          : (k == _chosen
+                              ? theme.colorScheme.errorContainer
+                              : null)),
+                  child: RadioListTile<int>(
+                    value: k,
+                    enabled: !_revealed,
+                    title: MdText(item.choices[k]),
+                  ),
+                ),
+            ],
           ),
+        ),
         if (_revealed && item.explanation != null) ...[
           const SizedBox(height: 8),
           _AnswerBox(label: 'Why', body: item.explanation!),

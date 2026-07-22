@@ -78,8 +78,8 @@ class _TrellisAppState extends ConsumerState<TrellisApp> {
     return MaterialApp(
       title: 'Trellis',
       debugShowCheckedModeBanner: false,
-      theme: TrellisTheme(Brightness.light),
-      darkTheme: TrellisTheme(Brightness.dark),
+      theme: trellisTheme(Brightness.light),
+      darkTheme: trellisTheme(Brightness.dark),
       themeMode: ThemeMode.system,
       home: const LibraryScreen(),
     );

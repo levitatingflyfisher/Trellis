@@ -8,8 +8,8 @@ import 'package:trellis/core/theme.dart';
 /// tests pin the real grammar — the canonical OhTheme surfaces and bundled
 /// Lora/Nunito type — instead of whatever fromSeed derives from the literal.
 void main() {
-  group('TrellisTheme(Brightness.light) is the canonical OhTheme.light', () {
-    final theme = TrellisTheme(Brightness.light);
+  group('trellisTheme(Brightness.light) is the canonical OhTheme.light', () {
+    final theme = trellisTheme(Brightness.light);
 
     test('linen surfaces', () {
       expect(theme.colorScheme.surface, OhColors.linen100);
@@ -26,9 +26,9 @@ void main() {
     });
   });
 
-  group('TrellisTheme(Brightness.dark) is the canonical OhTheme.hearthDark',
+  group('trellisTheme(Brightness.dark) is the canonical OhTheme.hearthDark',
       () {
-    final theme = TrellisTheme(Brightness.dark);
+    final theme = trellisTheme(Brightness.dark);
 
     test('hearth-dark surfaces', () {
       expect(theme.colorScheme.surface, OhColors.darkSurfaceCard);
