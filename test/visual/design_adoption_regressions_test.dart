@@ -4,6 +4,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:trellis/core/markdown.dart';
 import 'package:trellis/core/providers.dart';
 import 'package:trellis/core/theme.dart';
 import 'package:trellis/features/curriculum/data/curriculum_parser.dart';
@@ -80,6 +81,87 @@ void main() {
     final headingSize = fontSizeOf(t, find.text('Concepts'));
     final bodySize = fontSizeOf(t, find.text(course.description));
     expect(headingSize, greaterThan(bodySize));
+  });
+
+  // Effective font size of the MdText matched by [pred]: its explicit style,
+  // or the bodyMedium default MdText falls back to — exactly what renders.
+  double mdSizeOf(WidgetTester t, bool Function(MdText) pred) {
+    final finder =
+        find.byWidgetPredicate((w) => w is MdText && pred(w));
+    final element = t.element(finder);
+    final md = element.widget as MdText;
+    final style = md.style ?? Theme.of(element).textTheme.bodyMedium!;
+    return style.fontSize!;
+  }
+
+  Course singleItemCourse(RetrievalItem item) => Course(
+        id: 'design-regression',
+        title: 'Design regression',
+        nodes: [
+          KnowledgeNode(
+            id: 'n1',
+            title: 'Node',
+            intake: 'Some intake prose.',
+            items: [item],
+          ),
+        ],
+      );
+
+  Future<void> pumpToItem(WidgetTester t, RetrievalItem item) async {
+    await pumpScreen(t, StudySessionScreen(course: singleItemCourse(item)));
+    await t.tap(find.text('Recall'));
+    await t.pumpAndSettle();
+  }
+
+  double bodySize() =>
+      TrellisTheme(Brightness.light).textTheme.bodyMedium!.fontSize!;
+
+  testWidgets('cloze prompt outranks the body text under it', (t) async {
+    await pumpToItem(
+        t,
+        const ClozeItem(
+          id: 'c1',
+          rung: 1,
+          text: 'The capital of France is {{c1::Paris}}.',
+          answers: {'c1': 'Paris'},
+        ));
+    final promptSize = mdSizeOf(t, (w) => w.data.contains('____'));
+    expect(promptSize, greaterThan(bodySize()),
+        reason: 'the cloze passage is the card\'s heading — it must outrank '
+            'the 16px body/answer text beneath it');
+  });
+
+  testWidgets('free-recall prompt outranks the body text under it', (t) async {
+    await pumpToItem(
+        t,
+        const QaItem(
+          id: 'q1',
+          rung: 1,
+          prompt: 'What is the capital of France?',
+          answer: 'Paris',
+        ));
+    final promptSize =
+        mdSizeOf(t, (w) => w.data == 'What is the capital of France?');
+    expect(promptSize, greaterThan(bodySize()),
+        reason: 'the QA/procedure prompt is the card\'s heading — it must '
+            'outrank the 16px answer text revealed beneath it');
+  });
+
+  testWidgets('discrimination prompt outranks its choices', (t) async {
+    await pumpToItem(
+        t,
+        const DiscriminationItem(
+          id: 'd1',
+          rung: 1,
+          prompt: 'Which city is the capital of France?',
+          choices: ['Paris', 'Lyon'],
+          correctIndex: 0,
+        ));
+    final promptSize =
+        mdSizeOf(t, (w) => w.data == 'Which city is the capital of France?');
+    final choiceSize = mdSizeOf(t, (w) => w.data == 'Paris');
+    expect(promptSize, greaterThan(choiceSize),
+        reason: 'the question must read as the heading over its 16px choices');
   });
 
   testWidgets('RSVP play glyph is visible on its filled button', (t) async {

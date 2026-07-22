@@ -239,7 +239,7 @@ class _StudySessionScreenState extends ConsumerState<StudySessionScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        MdText(display, style: theme.textTheme.titleMedium),
+        MdText(display, style: theme.textTheme.titleLarge),
         const SizedBox(height: 16),
         for (var j = 0; j < keys.length; j++) _clozeBlank(item, keys[j], j),
         if (_revealed) ...[
@@ -330,7 +330,7 @@ class _StudySessionScreenState extends ConsumerState<StudySessionScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        MdText(prompt, style: theme.textTheme.titleMedium),
+        MdText(prompt, style: theme.textTheme.titleLarge),
         const SizedBox(height: 12),
         TextField(
           controller: _ctl('${item.id}:a'),
@@ -368,7 +368,7 @@ class _StudySessionScreenState extends ConsumerState<StudySessionScreen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        MdText(item.prompt, style: theme.textTheme.titleMedium),
+        MdText(item.prompt, style: theme.textTheme.titleLarge),
         const SizedBox(height: 12),
         for (var k = 0; k < item.choices.length; k++)
           Card(
