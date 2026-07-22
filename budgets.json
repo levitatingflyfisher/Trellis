@@ -1,4 +1,5 @@
 {
   "main_dart_js_gz_max_bytes": 1149382,
-  "apk_arm64_max_bytes": 22550349
+  "apk_arm64_max_bytes": 24333333,
+  "_apk_note": "2026-07-22 deliberate ratchet: fresh 3.38.7 release build = 23174602 bytes (+5%). Growth vs the stale baseline is engine+AOT (OhTheme Tier F, backup v0.2.0)."
 }
