@@ -44,4 +44,9 @@ jobs:
         run: flutter analyze
 
       - name: Test
+        # Runs the full suite including the fleet conformance checks. Note
+        # the C3 size-budget ratchet only compares budgets.json against
+        # build artifacts when they exist — CI has no build step (a
+        # deliberate deferral), so the ratchet bites on local/deploy
+        # builds, where the fleet's deploy-first loop produces artifacts.
         run: flutter test
