@@ -43,6 +43,9 @@ jobs:
       - name: Analyze
         run: flutter analyze
 
+      # C3: the gz-JS size budget only bites when build/web exists
+      - name: Build web (C3 budget artifact)
+        run: flutter build web --release
       - name: Test
         # Runs the full suite including the fleet conformance checks. Note
         # the C3 size-budget ratchet only compares budgets.json against
