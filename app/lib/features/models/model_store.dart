@@ -109,6 +109,13 @@ abstract class ModelStore {
   /// `.../<tokensFileName>`, `.../<dataDirName>/`.
   String voiceDirOf(ModelSpec spec);
 
+  /// Where a dictionary's EXTRACTED files live (meaningful only when
+  /// `spec.dictionaryArchiveLayout != null`, Campaign 4 Phase 3):
+  /// `<dir>/<layout.ifoFileName>`, `.../<idxFileName>`,
+  /// `.../<dictFileName>` — a separate directory from [voiceDirOf] since
+  /// the two archive shapes never mix in one spec.
+  String dictionaryDirOf(ModelSpec spec);
+
   /// Starts (or resumes) the download. Throws [StateError] before anything
   /// touches the wire when any file of [spec] is unpinned.
   ModelDownload download(ModelSpec spec);
@@ -133,7 +140,14 @@ class DiskModelStore implements ModelStore {
   String voiceDirOf(ModelSpec spec) => '${baseDir.path}/${spec.id}/voice';
 
   @override
+  String dictionaryDirOf(ModelSpec spec) =>
+      '${baseDir.path}/${spec.id}/dictionary';
+
+  @override
   Future<bool> isDownloaded(ModelSpec spec) async {
+    if (spec.dictionaryArchiveLayout != null) {
+      return Directory(dictionaryDirOf(spec)).existsSync();
+    }
     if (spec.archiveLayout != null) {
       // Completeness IS the extracted directory's existence — the rename
       // that creates it is atomic, so there is no partially-extracted
@@ -184,6 +198,47 @@ class DiskModelStore implements ModelStore {
     await finalDir.parent.create(recursive: true);
     // Atomic on the same filesystem — the promotion law, one level up
     // from a plain file's hash-then-rename.
+    await unwrapped.rename(finalDir.path);
+    if (stagingDir.existsSync()) await stagingDir.delete(recursive: true);
+    await tarballFile.delete();
+  }
+
+  /// The dictionary-archive path (Campaign 4 Phase 3), additive alongside
+  /// [_extract] rather than a generalization of it: the pinned file is a
+  /// `.tar.gz` (GZipDecoder), where a voice's is `.tar.bz2` (BZip2Decoder)
+  /// — a genuinely different codec, not a naming difference — but every
+  /// other step (stage, verify the wrapper dir, atomic rename, delete the
+  /// tarball) mirrors [_extract]'s own promotion law exactly.
+  Future<void> _extractDictionary(
+      ModelSpec spec, DictionaryArchiveLayout layout) async {
+    final tarballFile = File(pathOf(spec, spec.files.single));
+    final Archive archive;
+    try {
+      final compressed = await tarballFile.readAsBytes();
+      final tarBytes = GZipDecoder().decodeBytes(compressed);
+      archive = TarDecoder().decodeBytes(tarBytes);
+    } catch (e) {
+      throw ModelExtractionException(
+          'model "${spec.id}": the downloaded archive could not be read '
+          '($e) — try re-downloading it');
+    }
+
+    final stagingDir = Directory(
+        '${baseDir.path}/${spec.id}/.extracting-${_nowMs()}');
+    await extractArchiveToDisk(archive, stagingDir.path);
+
+    final unwrapped = Directory('${stagingDir.path}/${layout.topLevelDir}');
+    if (!unwrapped.existsSync()) {
+      await stagingDir.delete(recursive: true);
+      throw ModelExtractionException(
+          'model "${spec.id}": the extracted archive did not contain the '
+          'expected "${layout.topLevelDir}" directory — the upstream '
+          'release layout may have changed');
+    }
+
+    final finalDir = Directory(dictionaryDirOf(spec));
+    if (finalDir.existsSync()) await finalDir.delete(recursive: true);
+    await finalDir.parent.create(recursive: true);
     await unwrapped.rename(finalDir.path);
     if (stagingDir.existsSync()) await stagingDir.delete(recursive: true);
     await tarballFile.delete();
@@ -270,6 +325,10 @@ class DiskModelStore implements ModelStore {
         final layout = spec.archiveLayout;
         if (layout != null) {
           await _extract(spec, layout);
+        }
+        final dictLayout = spec.dictionaryArchiveLayout;
+        if (dictLayout != null) {
+          await _extractDictionary(spec, dictLayout);
         }
         if (!controller.isClosed) {
           controller.add(ModelDownloadProgress(

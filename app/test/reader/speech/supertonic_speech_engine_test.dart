@@ -104,6 +104,19 @@ void main() {
     expect(result.samples.length, 160);
   });
 
+  test('Spanish now renders through the SAME voice (ADR-0008 "Babel" Phase '
+      '4): the M1 embedding is untested for Spanish, never redownloaded — '
+      'widening supertonicSupportedLangs is the whole change', () async {
+    final handle = _FakeVoiceHandle();
+    final engine =
+        SupertonicSpeechEngine(files: files, openHandle: (_) async => handle);
+
+    final result = await engine.synthesize('Hola.', lang: 'es');
+
+    expect(handle.calls, [(text: 'Hola.', lang: 'es')]);
+    expect(result.sampleRate, 44100);
+  });
+
   test('a null lang defaults to English — the one voice this entry ships',
       () async {
     final handle = _FakeVoiceHandle();

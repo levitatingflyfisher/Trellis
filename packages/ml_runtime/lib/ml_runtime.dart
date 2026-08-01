@@ -6,6 +6,7 @@
 library;
 
 export 'src/fakes.dart';
+export 'src/marian_tokenizer.dart';
 export 'src/registry.dart';
 export 'src/residency.dart';
 export 'src/seams.dart';

@@ -310,6 +310,9 @@ class TranscribeCoordinator extends ChangeNotifier {
         if (outcome == TransferOutcome.cancelled) {
           return await _pause(workId);
         }
+        // P4 "archive, never forget": the audio is back on disk, so a
+        // stale archived mark (from an earlier eviction) would be a lie.
+        await db.feedsDao.setArchived(workId, null);
       }
       if (flow.cancelRequested) return await _pause(workId);
 

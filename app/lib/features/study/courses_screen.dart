@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:study_core/study_core.dart' as study;
@@ -5,8 +7,10 @@ import 'package:study_core/study_core.dart' as study;
 import '../../db/database.dart';
 import '../brain/brain_settings_screen.dart';
 import '../brain/brain_store.dart';
+import '../intake/paste_intake.dart' show epochDayUtcNow;
 import 'course_import.dart';
 import 'course_map_screen.dart';
+import 'daily_review_screen.dart';
 
 typedef _Entry = ({CourseRow row, study.Course course});
 
@@ -22,6 +26,13 @@ class CoursesScreen extends StatefulWidget {
   /// navigation).
   final VoidCallback? onOpenBackup;
 
+  /// Campaign 4 Phase 5: opens Trellis Echo, the reader's own private
+  /// year-in-review — same door-not-navigation shape as [onOpenBackup].
+  /// Never PIN-gated: that's ParentDashboardScreen's, a different
+  /// audience (a parent reviewing a household, not a reader reviewing
+  /// themselves).
+  final VoidCallback? onOpenEcho;
+
   /// The Thinking door's store. Tests inject in-memory secrets; the app
   /// default is the production wiring (secure storage + real Anthropic).
   final BrainStore? brainStore;
@@ -36,6 +47,7 @@ class CoursesScreen extends StatefulWidget {
       required this.db,
       required this.profile,
       this.onOpenBackup,
+      this.onOpenEcho,
       this.brainStore,
       this.localMlAvailable});
 
@@ -45,6 +57,17 @@ class CoursesScreen extends StatefulWidget {
 
 class _CoursesScreenState extends State<CoursesScreen> {
   List<_Entry>? _entries;
+
+  /// The study crown's home surface (Phase 1): daily review's OWN due
+  /// count, separate from any course's — null while loading, 0 hides the
+  /// chip entirely (quiet means quiet, ADR-0003 law 5: no permanent zero).
+  int? _dailyReviewDue;
+
+  /// The profile's scheduler choice ('classic' the default, or 'fsrs') —
+  /// the study crown's toggle. Loaded once per [_load]; grading itself
+  /// reads it fresh from the database (study_session_screen.dart), so this
+  /// field only drives the settings menu's own checkmark.
+  String _scheduler = 'classic';
 
   @override
   void initState() {
@@ -63,8 +86,58 @@ class _CoursesScreenState extends State<CoursesScreen> {
         // rather than crashing the whole tab.
       }
     }
+    final due = await widget.db.dailyReviewDao
+        .dueCount(widget.profile.id, epochDayUtcNow());
+    final scheduler = await widget.db.profilesDao.scheduler(widget.profile.id);
     if (!mounted) return;
-    setState(() => _entries = entries);
+    setState(() {
+      _entries = entries;
+      _dailyReviewDue = due;
+      _scheduler = scheduler;
+    });
+  }
+
+  Future<void> _openDailyReview() async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) =>
+            DailyReviewScreen(db: widget.db, profileId: widget.profile.id)));
+    await _load(); // the due count moved
+  }
+
+  /// The study crown's toggle (ADR-0009). Switching TO FSRS is the
+  /// direction with a real, easy-to-miss consequence (the lossy-switch-
+  /// back law), so it asks first, in one honest sentence naming what
+  /// actually changes — never just "are you sure?". Switching BACK to
+  /// Classic is an instant resume: there is nothing new to warn about in
+  /// that direction, so it flips with no dialog, matching the reader's own
+  /// settings-escape idiom (ADR-0006's `_toggleVoicePreference`).
+  Future<void> _toggleScheduler() async {
+    final next = _scheduler == 'fsrs' ? 'classic' : 'fsrs';
+    if (next == 'fsrs') {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialog) => AlertDialog(
+          title: const Text('Use FSRS for grading?'),
+          content: const Text(
+              'FSRS learns each card\'s own difficulty and memory curve to '
+              'schedule reviews more precisely than Classic\'s fixed steps; '
+              'switching back to Classic later resumes right where Classic '
+              'left off, but FSRS\'s own progress won\'t carry over.'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(dialog, false),
+                child: const Text('Not now')),
+            FilledButton(
+                onPressed: () => Navigator.pop(dialog, true),
+                child: const Text('Use FSRS')),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+    await widget.db.profilesDao.setScheduler(widget.profile.id, next);
+    if (!mounted) return;
+    setState(() => _scheduler = next);
   }
 
   Future<void> _paste() async {
@@ -166,6 +239,28 @@ class _CoursesScreenState extends State<CoursesScreen> {
               icon: const Icon(Icons.settings_backup_restore),
               onPressed: widget.onOpenBackup,
             ),
+          if (widget.onOpenEcho != null)
+            IconButton(
+              key: const Key('open-echo'),
+              tooltip: 'Trellis Echo',
+              icon: const Icon(Icons.auto_awesome_outlined),
+              onPressed: widget.onOpenEcho,
+            ),
+          PopupMenuButton<String>(
+            key: const Key('study-settings'),
+            tooltip: 'Study settings',
+            onSelected: (value) {
+              if (value == 'scheduler') unawaited(_toggleScheduler());
+            },
+            itemBuilder: (_) => [
+              CheckedPopupMenuItem<String>(
+                key: const Key('scheduler-toggle'),
+                value: 'scheduler',
+                checked: _scheduler == 'fsrs',
+                child: const Text('FSRS scheduler (beta)'),
+              ),
+            ],
+          ),
         ],
       ),
       floatingActionButton: (entries == null || entries.isEmpty)
@@ -174,18 +269,40 @@ class _CoursesScreenState extends State<CoursesScreen> {
               onPressed: _addSheet,
               icon: const Icon(Icons.add),
               label: const Text('Add')),
-      body: switch (entries) {
-        null => const Center(child: CircularProgressIndicator()),
-        [] => _EmptyState(
-            onPaste: _paste, onPick: _pickFile, onStarter: _addStarter),
-        _ => ListView.builder(
-            padding: const EdgeInsets.only(bottom: 88),
-            itemCount: entries.length,
-            itemBuilder: (_, i) => _courseTile(entries[i]),
+      body: Column(
+        children: [
+          if ((_dailyReviewDue ?? 0) > 0) _dailyReviewChip(),
+          Expanded(
+            child: switch (entries) {
+              null => const Center(child: CircularProgressIndicator()),
+              [] => _EmptyState(
+                  onPaste: _paste, onPick: _pickFile, onStarter: _addStarter),
+              _ => ListView.builder(
+                  padding: const EdgeInsets.only(bottom: 88),
+                  itemCount: entries.length,
+                  itemBuilder: (_, i) => _courseTile(entries[i]),
+                ),
+            },
           ),
-      },
+        ],
+      ),
     );
   }
+
+  /// The quiet due chip: only rendered at all when there is something due
+  /// (see [_dailyReviewDue]'s doc comment) — never a permanent zero.
+  Widget _dailyReviewChip() => Card(
+        key: const Key('daily-review-chip'),
+        margin: const EdgeInsets.fromLTRB(12, 12, 12, 0),
+        clipBehavior: Clip.antiAlias,
+        child: ListTile(
+          onTap: _openDailyReview,
+          leading: const Icon(Icons.auto_awesome_outlined),
+          title: const Text('Daily review'),
+          subtitle: Text('$_dailyReviewDue due'),
+          trailing: const Icon(Icons.chevron_right),
+        ),
+      );
 
   Widget _courseTile(_Entry e) {
     final n = e.course.nodes.length;

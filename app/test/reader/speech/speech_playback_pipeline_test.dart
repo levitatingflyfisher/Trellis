@@ -70,6 +70,17 @@ void main() {
     expect(queue.playCalls, 0);
   });
 
+  test('langOverrides wins per-sentence over the uniform lang — the Babel '
+      'speak-in-Spanish fallback (ADR-0008 Phase 4): a sentence with no '
+      'stored translation still speaks, tagged in its ORIGINAL language, '
+      'never the batch\'s', () async {
+    final pipeline = buildPipeline(lookahead: 2);
+    await pipeline.start(['Hola.', 'Two.', 'Adios.'],
+        lang: 'en', langOverrides: ['es', null, 'es']);
+
+    expect(engine.calls.map((c) => c.lang).toList(), ['es', 'en', 'es']);
+  });
+
   test('appends sentences in SENTENCE order even when later synth calls '
       'resolve first', () async {
     final pipeline = buildPipeline(lookahead: 2);

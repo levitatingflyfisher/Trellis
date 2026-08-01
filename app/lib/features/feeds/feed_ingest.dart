@@ -13,6 +13,7 @@ import 'dart:convert';
 import 'package:comms_core/comms_core.dart';
 
 import '../../db/database.dart';
+import 'feed_rules.dart';
 
 /// RFC-822/1123 (`Wed, 05 Aug 2026 12:00:00 +0200`, seconds and weekday
 /// optional, numeric or named zone) or ISO-8601. Null on garbage — the
@@ -127,27 +128,50 @@ String guidOf(FeedItem item) {
 
 /// Inserts unseen items as ephemeron works + episode rows in one
 /// transaction. Returns how many were new.
+///
+/// [rules] (Campaign 5 Phase 3), evaluated per item against the FIRST
+/// matching rule (see [evaluateFeedRules]): skip means no row is created
+/// at all — not even counted toward [seen], so a still-skipped item is
+/// simply re-evaluated (and re-skipped) on the next refresh, which is the
+/// honest reading of "never enters"; markReadOnArrival and autoKeep both
+/// insert normally, then apply the same transition Let-it-pass/Keep
+/// perform by hand. An empty (or absent) rule list is every feed's
+/// default and behaves exactly as ingestion did before this parameter
+/// existed.
 Future<int> ingestFeedItems(
     {required AppDatabase db,
     required int profileId,
     required int feedId,
     required List<FeedItem> items,
-    required int nowMs}) async {
+    required int nowMs,
+    List<FeedRule> rules = const []}) async {
   final seen = await db.feedsDao.guidsOf(feedId);
   var added = 0;
   await db.transaction(() async {
     for (final item in items) {
       final guid = guidOf(item);
       if (!seen.add(guid)) continue;
+      final action = rules.isEmpty
+          ? null
+          : evaluateFeedRules(rules,
+              title: item.title, description: item.desc);
+      if (action == FeedRuleAction.skip) continue;
       final enclosureUrl = item.enclosure?.url;
+      // Tracker stripping (Campaign 5 Phase 4, the Miniflux lesson) applies
+      // only to the article LINK, never the enclosure: a signed CDN/audio
+      // URL's query params can be load-bearing, the same reason feed fetch
+      // URLs themselves are never touched. guidOf (above) already ran on
+      // the RAW item — stripping sourceUrl here can never make an
+      // already-seen item look new.
+      final sourceUrl = enclosureUrl ??
+          (item.link.isEmpty ? null : canonicalizeForDedup(item.link));
       final workId = await db.spineDao.insertWork(
           profileId: profileId,
           kind: enclosureUrl != null ? 'episode' : 'article',
           title: item.title.isEmpty ? 'Untitled' : item.title,
           persistence: 'ephemeron',
           firstSeenEpochDay: nowMs ~/ Duration.millisecondsPerDay,
-          sourceUrl:
-              enclosureUrl ?? (item.link.isEmpty ? null : item.link));
+          sourceUrl: sourceUrl);
       if (item.desc.isNotEmpty) {
         await db.spineDao.insertSegments(
             workId, [(idx: 0, kind: 'prose', text: item.desc)]);
@@ -158,6 +182,13 @@ Future<int> ingestFeedItems(
           guid: guid,
           enclosureUrl: enclosureUrl,
           publishedAtMs: parsePublishedMs(item.date) ?? nowMs);
+      if (action == FeedRuleAction.markReadOnArrival) {
+        await db.feedsDao.setReadAt(workId, nowMs);
+      } else if (action == FeedRuleAction.autoKeep) {
+        // The same transition Keep performs by hand (river_triage.dart).
+        await db.spineDao.promoteWork(workId);
+        await db.feedsDao.setReadAt(workId, nowMs);
+      }
       added++;
     }
   });

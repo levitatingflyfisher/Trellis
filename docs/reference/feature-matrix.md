@@ -9,7 +9,7 @@ Statuses: **covered** (parity or better) · **degraded** (kept, worse — how is
 stated) · **dropped** (gone, with the reason and the roadmap cure). As phases
 land, entries gain a `✅ shipped` mark; until then this is the plan of record.
 
-## Covered (58)
+## Covered (60)
 
 - RSVP classic mode: ORP red pivot, guide ticks, punctuation dwell, long-word shrink (both donors merged into one reader core)
 - Parafoveal ticker mode with Gaussian fade + sigma/window settings (CustomPainter port)
@@ -37,17 +37,28 @@ land, entries gain a `✅ shipped` mark; until then this is the plan of record.
 - Sentinel segments (tables/code/figures pause + show modal + always-skip pref)
 - Chapter cards + TOC drawer (EPUB nav/NCX or synthesized from headings)
 - Page panel + minimap on wide layouts; context strip
-- Translation strip per-segment with persisted per-language layers (mechanism v1 = Brain seam; see degraded)
-- Whisper transcription UPGRADED: multilingual tiny/base/small + built-in translate task + language picker + detected-language on the work — the language-learner-via-podcast case works for the first time
+- Translation strip per-segment with persisted per-language layers. Mechanism v1, whisper's own built-in translate task (X->EN, timestamp-projected onto the transcript's segments) — this entry previously claimed an LLM-translation mechanism through the Brain boundary; that was never actually built for translation and the claim was wrong (caught auditing ADR-0008). Mechanism v2, ADR-0008 "Babel": a real on-device Marian engine (en->es, `opus-mt-en-es`) — a per-work sentence-indexed store (schema v13), a cancellable/resumable "Translate to Spanish" batch action gated on the model actually being downloaded, and a scroll-mode "Show Spanish" dual display pairing each original sentence with its stored translation, subordinate in style — see degraded for what's still open.
+- Whisper transcription UPGRADED: multilingual tiny/base/small + built-in translate task + language picker + detected-language on the work — the language-learner-via-podcast case works for the first time. ADR-0008 shipped the organ the FOUNDING DREAM actually needs (real on-device en->es MT) AND wired it through: the reader can translate a work, show the pairing, and — see below — speak it. See degraded for the honesty caveats that come with that.
+- Speak-in-Spanish (ADR-0008 "Babel" Phase 4): with Show Spanish on, a session-only toggle makes the speak loop substitute each STORED translated sentence for whichever voice is speaking (system TTS or the downloaded Supertonic voice) while the karaoke cursor keeps advancing through the ORIGINAL sentences — a sentence with no stored translation (or a stale one) speaks English from the original, no gap. `supertonicSupportedLangs` widened from English-only to include Spanish — see degraded for the verdict behind that and what remains unverified.
 - Word-timing audio sync: token-level timestamps -> Alignment rows; RSVP cursor follows audio; tap word seeks audio; both directions
-- Podcast audio bar UPGRADED to background playback (just_audio + audio_service, lock-screen controls), ±15/+30, 6 speeds, chapters (podcast:chapters JSON + PSC)
-- Episode offline caching to real files, profile-stamped and in the eviction cascade (fixes donor orphan/cross-profile leak)
+- Podcast audio bar: ±15/+30, 6 speeds, sleep timer (durations or end-of-episode, fade, shake-to-extend — Campaign 1 ✅ shipped), smart resume (Campaign 1 ✅ shipped), per-podcast speed/skip-intro/skip-outro (Campaign 1 ✅ shipped), Up Next queue with auto-advance (Campaign 1 ✅ shipped). Corrected (Campaign 7): this row previously also claimed podcast chapters ("podcast:chapters JSON + PSC") — `comms_core`'s feed parser DOES parse `<podcast:chapters>`/`<psc:chapters>` into `FeedItem.chapters`/`chaptersUrl`, but `feed_ingest.dart`'s `ingestFeedItems` never reads either field; the parse exists, nothing downstream consumes it, and no chapters UI for feed episodes exists. Wiring that is out of scope for the campaign that found it (`docs/adr/0013-audiobooks-are-a-door.md`). Corrected earlier: this row previously also claimed background playback via audio_service and lock-screen controls; that was never wired (`just_audio_player.dart` names it explicitly deferred) — see Degraded.
+- Episode offline caching to real files, profile-stamped, works never deleted by storage reclaim — only the audio FILE, per a feed's own keep-latest-N setting, archived rows dimmed with a re-download affordance (Campaign 1 Phase 4, "archive, never forget" ✅ shipped). Corrected: this row previously claimed the file-level eviction already existed "in the eviction cascade"; the pre-existing cascade (`deleteWork`/`deleteFeedCascade`) only ever removed database rows, never an audio file — Campaign 1 is what actually adds file-level eviction. Corrected again (Campaign 6): through 8a1af19 the cached file was never actually PLAYED from — `playWork` called `setUrl(work.sourceUrl)` unconditionally, so the local copy existed only to feed transcription and streaming happened regardless of what was on disk. `PlayerController.playWork` now prefers the local file over the network URL whenever one exists (`docs/adr/0012-offline-dsp.md`), so eviction/re-download now compose with playback for real: the file's presence or absence actually changes what plays. The download itself no longer requires requesting a transcript either — a standalone "Download" item on each audio row's menu (through the same one consent dialog transcribe uses) fetches the audio for offline listening on its own; a quiet indicator marks a row already on disk, and the item is not offered once one is.
 - Feed subscriptions RSS2/Atom/Media-RSS + auto-discovery (Substack/Medium/YouTube/WP guesses) — direct fetch on native, zero proxies
-- Feed hygiene: conditional GET ETag/Last-Modified, 429/503 Retry-After, failure breaker, pull-to-refresh
-- Auto-download queue with metered + disk-space guards, re-checked between downloads
-- River view: reverse-chronological only, unread/audio/text filters, read tracking, ephemera decay
-- Library: debounced search, sorts, filters, pin/rename/delete, progress bars, source lines, feed tiles
-- Bulk multi-file + true folder import on native (file_picker directory mode)
+- Feed hygiene: conditional GET ETag/Last-Modified, 429/503 Retry-After, failure breaker, pull-to-refresh. UPGRADED beyond both donors: RFC 5005 paged-feed archive following — an explicit, capped, per-feed "Fetch older episodes" action recovers episodes a host's RSS truncation hid, with an honest note when the feed offers no archive at all (see `docs/reference/feed-archives.md`)
+- Beyond both donors (Campaign 5, ADR-0011, the Inoreader/Miniflux lesson) — per-feed rules: skip / mark-read-on-arrival / auto-keep, matched on title or description (contains/not-contains, case-insensitive), evaluated in order at ingest, before an item ever becomes a row. Editable from each feed's own settings screen.
+- Beyond both donors (Campaign 5, ADR-0011) — cross-feed dedup: a canonical-URL match (after tracker-parameter stripping) or an exact-normalized title within 48h hides the younger copy of a story syndicated across feeds; never within the same feed (a repost is the author's own choice). Suppressed rows are hidden, never deleted, and un-hide themselves if the canonical row they duplicate is later removed.
+- Beyond both donors (Campaign 5, ADR-0011, the Miniflux lesson) — tracker-parameter stripping: a curated, documented list (utm_*, ad-platform click ids, newsletter send tracking) stripped from stored article links and dedup comparisons; never from feed fetch URLs or episode audio URLs, whose query params can be load-bearing.
+- River view: reverse-chronological only, unread/audio/text filters, read tracking, ephemera decay. Campaign 5 (ADR-0011) added the triage verbs Keep and Let it pass (swipe or overflow menu — every row now has one; text/article rows had none before), both undoable to the exact prior state; no new "Kept" filter chip exists, by law — kept things live in the library.
+- Library: pin/delete, progress bars. Corrected: this row previously also claimed "debounced search, sorts, ... rename, ... source lines, feed tiles" — none of that existed; `LibraryScreen` had no search, sort, or filter of any kind, and no rename action, before Campaign 5. What Campaign 5 (ADR-0011) actually built: instant (not debounced) title search, a filter model (type/feed/read-state/pinned, any combination) with saveable, reorderable, deletable named views shown as chips. Sort controls, rename, and per-row feed/source display are still not built — not removed by this campaign, never present.
+- Text intake has no bulk/folder-import door — corrected (Campaign 7): this
+  row previously claimed "Bulk multi-file + true folder import on native
+  (file_picker directory mode)" for text works. No such door was ever built:
+  grepping the app for `getDirectoryPath`/multi-file `pickFiles` outside
+  single-file pickers (EPUB, course import, OPML, backup) turns up nothing.
+  Every text-intake door (paste, EPUB, web, Gutenberg) is single-source. The
+  claim was never backed by code (`docs/adr/0013-audiobooks-are-a-door.md`
+  §Context) — the audiobook door below is the app's first real bulk/folder
+  import, for audio, not text.
 - EPUB parser ported pure-Dart (archive+xml): spine walk, nav/NCX TOC, figure blobs, front-matter skip, charset quirks — donor heuristics as test fixtures
 - PDF text extraction on native via pdfium (pdfrx) with column/footnote heuristics ported
 - Plain-text/MD heuristics (chapter headings, dividers, code blocks, pipe tables)
@@ -57,7 +68,7 @@ land, entries gain a `✅ shipped` mark; until then this is the plan of record.
 - .ohcourse import — Trellis strict parser is the single authority (schemaVersion, per-type validation, prereq referential integrity, cycle rejection, never half-imports)
 - AI passage generation via Brain seam (topic/level/length)
 - Extract-to-card flow (tap/drag focus span, instant vocab flag) PLUS new per-word known/learning/new ledger (LingQ mechanic) feeding context-carrying cards
-- SM-2 review queue with monotonic-interval floor — Trellis scheduler verbatim, 183 tests unmodified; epoch-day UTC; in-session relearn with cleared inputs
+- SM-2 review queue with monotonic-interval floor — Trellis scheduler verbatim, sealed; epoch-day UTC; in-session relearn with cleared inputs. The "183 tests" figure elsewhere in this repo's docs (VISION.md, ADR-0001) names the FULL donor Trellis app's suite — domain plus Flutter UI/session/backup/export — as the eventual porting target, not what has landed. As of the study-crown campaign (2026-08), `packages/study_core`'s actual landed suite is 104 tests across sm2_scheduler_test.dart (23), grading_test.dart (42), curriculum_parser_test.dart (38) and progress_unlock_test.dart (1) — verified by running `flutter test` in the package, not read off a comment. The remaining ~132 load-bearing invariants (line below) are still to port into `app/`.
 - Prerequisite DAG unlock gating + unlock-is-first-exposure-only + mastery threshold + course map (reborn as the Espalier Wall with due chips and presentable-due FAB)
 - Four typed recall items (cloze/qa/discrimination/procedure) with distinct UIs, hints ExpansionTile, rungs, post-reveal sources
 - Auto-grading + suggested grade (normalized cloze, discrimination index, keyword coverage; learner self-rating drives SRS — kept as law even with LLM judge)
@@ -73,7 +84,7 @@ land, entries gain a `✅ shipped` mark; until then this is the plan of record.
 - Backup: encrypted .ohbk (sanctuary_auth_core, appDomain espalier) superseding donor JSON; BOTH donor formats importable (Trellis .ohbk re-encrypt, ohPrimer JSON sanitized import); startup vault snapshot kept; index-last destructive restore
 - OPML import/export (import validates by fetching); reading-list JSON import
 - Share/deep-link: ?url= on web kept; Android share-target intake on APK (superior)
-- Settings: high contrast, OpenDyslexic bundled (C7 cmap-checked), eviction policy, word timestamps, voice pickers with preview, AI provider
+- Settings: high contrast, eviction policy, word timestamps, voice pickers with preview, AI provider. **Honesty fix (Campaign 4, ADR-0010):** this line previously also claimed "OpenDyslexic bundled (C7 cmap-checked)" and that no settings screen existed — neither was true. The pubspec bundles exactly two faces (Lora, Nunito), both C7-checked; OpenDyslexic was never added. A real reader-typography settings screen ✅ shipped in Campaign 4 Phase 1 (`reader_typography_settings_screen.dart`) — see the "Beyond both donors — reader depth" section below for what it actually covers.
 - Storage panel with real disk accounting, per-feed buckets incl. previously-orphaned ones, purge, boot eviction
 - Theme auto/light/dark + OS listener + high-contrast/dyslexia modes (fleet conventions)
 - Position persistence — structurally fixed: tiny Position row + flush on pause/background, not whole-record rewrites
@@ -86,8 +97,32 @@ land, entries gain a `✅ shipped` mark; until then this is the plan of record.
 - Bundled starter courses (Kalman 26-concept + a new language-learning starter)
 - Study-ahead affordance answering Trellis's documented empty-app jank — bounded, opt-in, display mastery unchanged
 - Behavior + visual test harness: widget/golden/integration + visual-loop skill + oh_fleet_conformance C1-C7
+- Audiobooks (Campaign 7 ✅ shipped, `docs/adr/0013-audiobooks-are-a-door.md`):
+  pick a folder's worth of MP3/M4A/M4B/OGG/OPUS/FLAC files (multi-select —
+  the folder-vs-files distinction collapses on Android, see the ADR),
+  natural-sort ordering (the "1, 2, 10" problem, RED-first tested pure
+  function; disc/track-tag ordering is real and tested but unwired — no
+  probe populates a tag yet), an editable guessed title, copy into app
+  storage (the referenced-vs-copied verdict is "copied, always" — this
+  app's one shipped native tier can't back a durable reference). M4B/M4A
+  chapter atoms (chpl, verified against ffmpeg's own reader) parsed
+  live when the Chapters drawer opens; an MP3 or a chapterless M4B is one
+  chapter per file. Playback goes through the SAME player every episode
+  uses — gapless multi-file auto-advance via `just_audio`'s own playlist
+  engine (no auto-advance code exists; the engine does it), shared sleep
+  timer/smart-resume/Up-Next-queue, per-book speed override (a parallel
+  column, not a generalized `Feeds` one — see the ADR), one-touch
+  bookmark reusing the study crown's Captures table (file-index-tagged).
+  Position law: (fileIdx, offset), never a single cross-file millisecond.
+  Library tile shows New/Started/Finished + a file-count-coarse progress
+  bar (never time-precise — a file's duration is learned lazily, the
+  first time it plays). The read↔listen handoff for a TRANSCRIBED
+  audiobook (this campaign's own stretch goal) was investigated and NOT
+  built — three named structural blockers in `TranscribeCoordinator`/
+  `Alignments`, recorded precisely in the ADR's own Phase 3 section rather
+  than forced.
 
-## Degraded (10)
+## Degraded (12)
 
 - Web-surface fetching is CORS-bound (measured from the deployed origin,
   2026-08-12): the PWA fetches directly from the browser with **no proxy
@@ -107,7 +142,7 @@ land, entries gain a `✅ shipped` mark; until then this is the plan of record.
   same-origin, same as the installed app. LAN/phone access to that same
   daemon is an open problem (docs/adr/0005), not shipped.
 - Web-surface local ML at v1.0: NO in-browser Whisper/translation/Kokoro at launch — browser users get the full T0 app + BYOK cloud LLM + SpeechSynthesis system TTS; the transformers.js-v4 interop tier (whisper-tiny int8 ~41MB, WASM/WebGPU) is Phase 6. Until then a browser-only user cannot transcribe locally, which the donor could do (slowly, unreliably, English-only).
-- Translation: v1 mechanism is Brain-seam LLM translation (Qwen2.5 local / stove / BYOK) + Whisper's translate task for speech-to-English — strong for major languages, but NLLB's 200-language long tail is unavailable until the Phase-6 onnxruntime seq2seq engine (opus-mt ~110MB/pair, NLLB-600M ~600-800MB). The UI names the translating model so quality expectations are honest.
+- Translation: v1's whisper-transcript mechanism is unchanged (X->EN only, timestamp-projected onto the transcript's segments) — a prior version of this entry claimed a Brain-routed LLM-translation mechanism (Qwen2.5 local / stove / BYOK); that was never built and the claim was wrong (caught auditing ADR-0008, corrected there). ADR-0008 "Babel" shipped a SECOND mechanism end to end: opus-mt-en-es (int8, ~246MB, not the ~110MB first guessed) behind a per-work sentence store, a downloaded-model gate, a resumable batch action, a scroll-mode dual display, and speak-in-Spanish through both voices. Two things remain genuinely unverified, not just "not built": (1) the ONNX Runtime sessions — Marian's AND Supertonic's — have never opened on a real device, only proven against faked session boundaries and, for Marian specifically, against the real model in Python; (2) Supertonic speaking Spanish is an UNTESTED capability, not a confirmed one — the M1 voice embedding was reviewed for English only, `supertonicSupportedLangs` was widened to `{'en','es'}` on the strength of an architectural finding (the model and engine already support all 5 of Supertonic v2's languages; there is no separate Spanish voice file upstream to gate on instead), and nobody has heard the result. NLLB's 200-language long tail remains unavailable. The UI names the translating model so quality expectations stay honest.
 - Voice-clone read-aloud: the donor's 4 SpeechT5/CMU-ARCTIC preset voice
   identities do not carry over — v1's Supertonic voice is one English
   voice, not a clone gallery (ADR-0007). Whole-doc synthesize+cache,
@@ -124,6 +159,8 @@ land, entries gain a `✅ shipped` mark; until then this is the plan of record.
 - Stove household tier on the web surface: impossible today (stove server has no CORS; https PWA cannot fetch http LAN — packet finding); household brain is native-only until the server grows CORS + a serving-context answer.
 - Word-level timestamps on non-English audio: shipped with a documented drift caveat + VAD mitigation (the donor was English-only and never faced this; forced alignment a la WhisperX is out of scope).
 - 32-bit (armeabi-v7a) potato phones: full T0 app + whisper-tiny (slow); LiteRT local LLM is arm64-only, so their Brain tiers are stove/BYOK.
+- Background podcast playback (audio_service, lock-screen controls): not wired — `just_audio_player.dart` names it deferred by design, and `audio_service` isn't a pubspec dependency. Foreground playback (the mini player bar, sleep timer, per-podcast settings, Up Next) is unaffected; what's missing is continuing audio and transport controls when the app is backgrounded or the screen is locked.
+- Auto-download queue: not wired (Campaign 5, ADR-0011 §5 — corrected from a prior "Covered" claim of "metered + disk-space guards, re-checked between downloads", none of which was ever built). `Feeds.autoDownload` is a column with a DAO setter and zero callers; no filter UI exists to set it from; no episode-audio-download path exists anywhere outside the transcription pipeline, which is itself gated behind `confirmDownload`'s consent screen. Left unwired deliberately, not for lack of time: an automatic refresh-time download would bypass ADR-0003 law 6's one egress consent gate silently, a sovereignty-law violation independent of whether metered/disk guards are also added.
 
 ## Dropped (4)
 
@@ -131,6 +168,171 @@ land, entries gain a `✅ shipped` mark; until then this is the plan of record.
 - SpeechT5 + x-vector preset voices — a generation behind per the research packet; replaced by Supertonic/Kokoro rather than ported (Piper was the original replacement, ADR-0006; Supertonic replaced Piper in turn, ADR-0007).
 - Dormant encrypted relay sync code — both donors already ship without it (entry points throw); the file-backup-only stance is retained deliberately; .ohbk is the device-to-device medium.
 - Public-CORS-proxy fetching as a primary path — native surfaces fetch direct; the proxy chain survives only as the web surface's consent-gated fallback. (A mechanism removal, listed for completeness.)
+
+## Beyond both donors — the study crown (2026-08, ADR-0009)
+
+Neither donor had these; they are not donor-parity items and are listed
+separately for that reason. Statuses follow the same convention as above.
+
+- ✅ shipped — **FSRS-5 as an opt-in scheduler, reachable end to end.** A
+  second pure scheduler function (`study_core/lib/src/fsrs_scheduler.dart`)
+  beside the sealed SM-2 one, same (state, grade, day) -> new-state shape.
+  Per-profile `Profiles.scheduler` ('classic'|'fsrs') is set from a real
+  settings menu on the Courses tab (one honest sentence of copy on the way
+  in; instant, no-dialog on the way back out) and `study_session_screen.dart`
+  now reads it and dispatches grading accordingly — Classic byte-for-byte
+  as it always graded, FSRS through `scheduleFsrs`, seeded lazily from a
+  card's classic history on its first FSRS grade. A card's FSRS half rides
+  the existing `Cards.stateJson` blob under `fsrs`-prefixed keys, so
+  switching schedulers never erases the other's stored progress — grading
+  under one leaves the other's fields exactly as they were. **Stated scope
+  limit, not a gap**: curriculum progression (unlock/mastery) stays
+  Classic-`CardState`-based regardless of the active scheduler —
+  `study_core`'s prereq DAG (`progress.dart`) is untouched surface this
+  campaign did not extend, so a course studied entirely under FSRS still
+  unlocks/masters exactly as a Classic profile's would.
+- ✅ shipped — **Read<->listen handoff verbs.** "Listen from here" (reader
+  app bar, when a work has aligned audio) and "Read from here" (karaoke
+  view app bar) over the SAME `Positions` row and the SAME
+  `Spine.positionAtAudioTime`/`projectAudioTime` projections the player
+  and reader already used implicitly — made explicit and discoverable,
+  not new state. The round trip holds at sentence (segment) granularity,
+  not word — `Alignment` carries no word-level timing, a pre-existing
+  property of this data model, not a regression introduced here (property-
+  tested in `packages/loom_core/test/cursor_law_test.dart`).
+- ✅ shipped, degraded — **Capture-while-listening.** One-tap capture on
+  the player surface (`MiniPlayerBar`) and the karaoke view, sentence-
+  snapped via the same alignment projection (never a raw ±15s guess — the
+  Snipd quality bar named in ADR-0009). A capture taken before a
+  transcript exists still saves, unbound, and is backfilled automatically
+  once transcription completes. **Not built**: the playback-notification
+  capture action (`audio_service` isn't a dependency; adding one plus a
+  background-playback lifecycle to satisfy one sub-bullet was judged out
+  of scope for an additive campaign — see ADR-0009) and "make this an
+  extract" (there is no extract/passage-authoring entity in this
+  checkout to feed — see the next entry).
+- ✅ shipped, degraded — **Daily review (zero-effort resurfacing).** A
+  two-button (Soon/Eventually -> the sealed scheduler's again/good)
+  surface over the word ledger and captures, in a new `DailyReviewCards`
+  table keyed by (profileId, sourceType, sourceId) rather than a
+  once-and-for-all foreign key, since a review item comes from either
+  source. **Degraded**: the spec's "front = passage context with the
+  focus span blanked" needs an extract-authoring mechanism this checkout
+  does not have — `grep -rin extract app/lib/features/reader` found no
+  extract-creation UI, and the word ledger (`WordLedger`) is word-only, no
+  `segmentIdx`/`wordIdx`, no SM-2 fields of its own. The front actually
+  shipped is honestly plainer: a bare word for a ledger entry, the bound
+  sentence for a capture that has one. Note the natural fit that emerged:
+  captures (above) already carry passage context once bound, so they are
+  a real (if partial) realization of "extract" for this queue — not
+  invented to fill the gap, just the closest thing that already existed.
+
+## Beyond both donors — offline DSP (Campaign 6, ADR-0012)
+
+Neither donor had this — Overcast's Smart Speed/Voice Boost is the
+comparison point, not a donor feature, so it's listed here rather than
+claimed as covered-with-shape against a donor row that never existed.
+
+- ✅ shipped — **Offline trim-silence & even-out-volume, on downloaded
+  episodes, on this device.** Architectural rather than imitative:
+  streaming playback is never touched; a conservative
+  `silenceremove` (only silences over 1.5s, shrunk to 0.5s — a natural
+  pause is never trimmed) chained with single-pass `loudnorm` to the
+  podcast-standard -16 LUFS runs once, offline, right after an episode
+  actually downloads (never on the stream). Fail-closed: a sanity
+  check (non-zero size, a plausible duration) gates the atomic
+  promote, so a bad encode leaves the original completely untouched.
+  A per-feed toggle (default: the household setting, also configurable)
+  is the only door — there is no separate manual "process now" action,
+  a stated scope limit matching the feature's own "processed on
+  download" promise. The lifetime "time saved" counter (the Overcast-
+  style loyalty number) sums every processed episode's own saved
+  seconds, shown only when positive (the fleet's positive-framing law).
+  **Also required, and shipped alongside it, not separately**: the
+  local-file playback foundation this feature turned out to need —
+  through 8a1af19 downloaded episode audio was never actually read for
+  playback (`playWork` streamed the network URL unconditionally); a
+  standalone "Download" door decoupled from transcription (previously
+  the only way audio ever landed on disk); and a licensing fix (the
+  pinned ffmpeg dependency was Full-GPL, contradicting ADR-0007's
+  "MIT-clean APK" claim — swapped for the same publisher's LGPL-only
+  audio variant, ~22MB smaller per arm64 ABI as a side effect). Full
+  accounting in `docs/adr/0012-offline-dsp.md`.
+
+## Beyond both donors — reader depth (2026-08, ADR-0010)
+
+Neither donor had a fused typography-settings screen, restored priming
+visuals as a single toggle, an on-device dictionary, spoiler-safe recaps,
+or a private year-in-review — listed separately for the same reason as
+the study crown above. Statuses follow the same convention.
+
+- ✅ shipped — **Reader typography settings.** A real settings screen
+  (`reader_typography_settings_screen.dart`) with live preview: typeface
+  (Lora/Nunito — the two faces actually bundled, both C7 cmap-checked;
+  never OpenDyslexic, see the honesty fix above), line height, font
+  scale, justification. Applies to the scroll/print reader only — RSVP
+  and the ticker keep their own tuned displays, which never needed this
+  control. **Honest ceiling**: justified text has no hyphenation (the
+  reader's own per-word `Wrap`, not `Text.justify`), so wide gaps can
+  appear on narrow screens or short lines; the settings copy says so.
+- ✅ shipped — **Parafoveal mode and the ORP anchor fix.** The donor's
+  lost third RSVP display (its own name "ticker" was already taken by
+  this app's existing classic mode's test vocabulary, so it ships here
+  as "Parafoveal") — Gaussian neighbor fade/scale/blur ported verbatim
+  from the donor's math, a sigma slider, and guide+tick marks in classic
+  mode. **Not a stronger claim than the donor's own CSS achieves**: the
+  ORP anchor reserves a constant before-pivot width per ORP bucket,
+  removing glyph-width jitter — it is a jitter fix, not a perfect 50%
+  anchor, since the free-width after-span can still shift a row's center
+  for words of very different lengths (see ADR-0010's own honest
+  accounting).
+- ✅ shipped — **Follow-along guided pacing (scroll mode).** Reuses the
+  RSVP cursor/timer wholesale (`_wordIdx`/`_step`) to auto-scroll the
+  currently-read segment into view (`Scrollable.ensureVisible`, the
+  karaoke view's own `_followPlayback` pattern) — no second highlighter,
+  no second dwell path.
+- ✅ shipped — **On-device dictionary lookup.** A pure-Dart StarDict
+  parser (`packages/stardict_core`) with real dictzip random access (no
+  whole-file decompress), one pinned starter dictionary
+  (`wiktionary-en-en-stardict`, dual CC-BY-SA-3.0/GFDL-1.3,
+  sha256-verified), and a tap-hold definition sheet that ABSORBS the
+  reader's existing "add to word ledger" long-press rather than stacking
+  a second gesture on the same word. **Honest ceiling**: the sheet's
+  empty state cannot distinguish "no dictionary downloaded" from "word
+  not in the one you have" — the information exists in `DeviceServices`
+  but isn't threaded through yet.
+- ✅ shipped — **"Catch me up?" session recaps.** A dismissible chip on
+  a work reopened after more than 3 UTC days untouched with real (>10%,
+  <100%) progress, offering a Brain-generated spoiler-safe summary in a
+  bottom sheet — never saved, gone when the sheet closes. Spoiler-safety
+  is two layers: the prompt is assembled from segments strictly before
+  the reader's own cursor (a pure, independently tested filter), and the
+  prompt itself also instructs the model not to invent anything beyond
+  what it was shown. Reuses the distill flow's exact consent order
+  (gesture → cloud-tier egress consent naming the host → Brain call).
+- ✅ shipped, degraded — **Trellis Echo (lifetime totals + a private
+  year-in-review).** The spec asked for three headline totals — words
+  read, minutes listened, works finished — and only the third is
+  computable from this schema; verified, not assumed (orientation found
+  no words-read counter and no listening-duration tracking anywhere).
+  Extended the household layer's existing lifetime-totals dashboard
+  (`HouseholdDao.lifetimeBuiltOf`, pre-dates this campaign) with an
+  `activeReadingDays` tile from a new per-day append-only table
+  (`ReadingDays`) rather than building a parallel query. Echo itself is
+  a new, reader-facing (never PIN-gated) screen off the Courses tab:
+  works finished, active reading days, words collected, cards
+  mastered/reviewed, captures, and audio position **reached** (not
+  "minutes listened" — furthest position reached, summed per work, is
+  what this schema actually tracks; see `LifetimeBuilt`'s own doc
+  comment). A shareable card (RepaintBoundary → PNG → share sheet) is
+  native only; the web tier gets the screen with no share button.
+  **Degraded**: the spec's "Export highlights" doesn't exist as
+  specced — there is no highlight/passage/marginalia table in this
+  schema, so the export is named for what it actually produces (the
+  word ledger plus captures, plain Markdown + JSON). **Cut**: "top
+  works"/"top feeds" — no already-reviewed cheap aggregation exists for
+  either; left for a future pass rather than building one unverified
+  this pass.
 
 ## Donor inventories (the checklist this ledger must satisfy)
 

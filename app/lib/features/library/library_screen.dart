@@ -1,18 +1,36 @@
+import 'dart:convert';
+
 import 'package:comms_core/comms_core.dart';
 import 'package:flutter/material.dart';
 
-import '../../db/database.dart';
+import '../../db/database.dart' hide Alignment;
 import '../../net/io_fetcher.dart';
 import '../../services/device_services.dart';
 import '../intake/epub_intake.dart';
 import '../intake/gutenberg_screen.dart';
 import '../intake/paste_intake.dart';
 import '../intake/url_intake.dart';
+import '../player/player_controller.dart';
+import '../reader/reader_logic.dart' show shouldOfferRecap;
 import '../reader/reader_screen.dart';
 import '../reader/speech/speech_engine.dart';
 import '../reader/speech/speech_temp_files.dart';
+import '../reader/translation/marian_engine.dart';
+import 'library_filter_screen.dart';
+import 'library_query.dart';
 
-typedef _Entry = ({Work work, int segmentCount, Position? position});
+typedef _Entry = ({
+  Work work,
+  int segmentCount,
+  Position? position,
+  Episode? episode,
+  String? feedTitle,
+  // Campaign 7 (ADR-0013): an audiobook has no Segments/Positions rows at
+  // all — its progress reads PlayerPositions (fileIdx) and its own file
+  // count instead. Both null for every non-audiobook work.
+  PlayerPosition? playerPosition,
+  int? audiobookFileCount,
+});
 
 /// One reader's works: pinned first, then newest; progress is the cursor
 /// law's numerator over the segment count. The empty state is an invitation,
@@ -51,12 +69,43 @@ class LibraryScreen extends StatefulWidget {
   final Future<SynthesisSpeechEngine?> Function({String? lang})?
       resolveSpeechEngine;
 
+  /// Campaign 4 Phase 3's on-device dictionary lookup — the shell closes
+  /// over `DeviceServices.lookupDefinition`, same threading shape as
+  /// [resolveSpeechEngine]; null keeps every reader this screen opens on
+  /// the sheet's own honest empty state.
+  final Future<String?> Function(String word)? lookupDefinition;
+
   /// Where a reader this screen opens writes per-sentence WAV temp files
   /// while speaking neurally — the shell closes over
   /// `DeviceServices.createSpeechTempFiles` (the location app start
   /// sweeps); null falls back to `ReaderScreen`'s own plain-systemTemp
   /// default.
   final SpeechTempFiles Function()? createSpeechTempFiles;
+
+  /// The study crown's "Listen from here" — threaded on to every reader
+  /// this screen opens, same shape as [tts]/[resolveSpeechEngine]; null
+  /// (existing call sites) just hides the button.
+  final PlayerController? player;
+
+  /// Resolves the Spanish translator (ADR-0008 "Babel" Phase 3) — the
+  /// shell closes over `DeviceServices.resolveTranslator`; null keeps
+  /// every reader this screen opens without a "Translate to Spanish"
+  /// action, the same shape as [resolveSpeechEngine].
+  final Future<MarianTranslator?> Function()? resolveTranslator;
+
+  /// The audiobook door (Campaign 7, ADR-0013): pick, confirm a title,
+  /// copy. Null hides the "Audiobook" option — the shell only wires this
+  /// when [localMlAvailable], the same law gating every other real-file
+  /// door in this app (a web-tier picker can never return a usable path
+  /// for the sync-copy this door needs).
+  final Future<int?> Function(BuildContext)? onImportAudiobook;
+
+  /// Deletes an audiobook's copied files from disk (ADR-0013) — the
+  /// shell wires `services.audiobookDirFor(workId)`'s deletion. Called
+  /// BEFORE the DB rows go, so a mid-delete failure leaves an orphaned
+  /// directory (recoverable by re-importing) rather than a DB row
+  /// pointing at nothing.
+  final void Function(int workId)? onDeleteAudiobookFiles;
 
   const LibraryScreen(
       {super.key,
@@ -69,7 +118,12 @@ class LibraryScreen extends StatefulWidget {
       this.lane = WebFetchLane.direct,
       this.localMlAvailable = true,
       this.resolveSpeechEngine,
-      this.createSpeechTempFiles});
+      this.lookupDefinition,
+      this.createSpeechTempFiles,
+      this.player,
+      this.resolveTranslator,
+      this.onImportAudiobook,
+      this.onDeleteAudiobookFiles});
 
   @override
   State<LibraryScreen> createState() => _LibraryScreenState();
@@ -77,6 +131,8 @@ class LibraryScreen extends StatefulWidget {
 
 class _LibraryScreenState extends State<LibraryScreen> {
   List<_Entry>? _entries;
+  LibraryQuery? _activeQuery;
+  List<SavedViewRow> _savedViews = const [];
 
   SpineDao get _dao => widget.db.spineDao;
 
@@ -89,22 +145,87 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   Future<void> _load() async {
-    final works = await _dao.worksOf(widget.profile.id);
+    final queryEntries =
+        await widget.db.libraryDao.libraryQueryEntriesOf(widget.profile.id);
     final entries = <_Entry>[
-      for (final w in works)
-        (
-          work: w,
-          segmentCount: await _dao.segmentCount(w.id),
-          position:
-              await _dao.position(profileId: widget.profile.id, workId: w.id),
-        )
+      for (final qe in queryEntries)
+        if (qe.work.kind == 'audiobook')
+          (
+            work: qe.work,
+            segmentCount: 0,
+            position: null,
+            episode: qe.episode,
+            feedTitle: qe.feedTitle,
+            playerPosition: await widget.db.feedsDao.playerPosition(
+                profileId: widget.profile.id, workId: qe.work.id),
+            audiobookFileCount:
+                await widget.db.audiobooksDao.fileCountOf(qe.work.id),
+          )
+        else
+          (
+            work: qe.work,
+            segmentCount: await _dao.segmentCount(qe.work.id),
+            position: await _dao.position(
+                profileId: widget.profile.id, workId: qe.work.id),
+            episode: qe.episode,
+            feedTitle: qe.feedTitle,
+            playerPosition: null,
+            audiobookFileCount: null,
+          )
     ];
     entries.sort((a, b) {
       if (a.work.pinned != b.work.pinned) return a.work.pinned ? -1 : 1;
       return b.work.id.compareTo(a.work.id); // newest first
     });
+    final savedViews = await widget.db.libraryDao.savedViewsOf(widget.profile.id);
     if (!mounted) return;
-    setState(() => _entries = entries);
+    setState(() {
+      _entries = entries;
+      _savedViews = savedViews;
+    });
+  }
+
+  /// The filtered view of [_entries] — pure, re-evaluated on every build
+  /// rather than stored, so applying/clearing a filter never needs a DB
+  /// round-trip.
+  List<_Entry> get _visibleEntries {
+    final entries = _entries ?? const [];
+    final query = _activeQuery;
+    if (query == null) return entries;
+    return [
+      for (final e in entries)
+        if (matchesLibraryQuery(
+            (work: e.work, episode: e.episode, feedTitle: e.feedTitle), query))
+          e
+    ];
+  }
+
+  /// The filter icon (Campaign 5 Phase 2): no active filter opens the
+  /// builder; an active one clears in one tap without a screen at all —
+  /// the reachable, low-friction path (ergonomic-ux: state is a design
+  /// surface, not an afterthought).
+  Future<void> _openFilter() async {
+    final active = _activeQuery;
+    if (active != null && !active.isEmpty) {
+      setState(() => _activeQuery = null);
+      return;
+    }
+    final result = await Navigator.of(context).push<LibraryQuery>(
+        MaterialPageRoute(
+            builder: (_) => LibraryFilterScreen(
+                db: widget.db,
+                profileId: widget.profile.id,
+                initial: active ?? const LibraryQuery())));
+    if (!mounted) return;
+    setState(() => _activeQuery =
+        (result == null || result.isEmpty) ? null : result);
+    await _load(); // a view may have been created/deleted/reordered too
+  }
+
+  void _applySavedView(SavedViewRow v) {
+    final query = LibraryQuery.fromJson(
+        jsonDecode(v.queryJson) as Map<String, Object?>);
+    setState(() => _activeQuery = query.isEmpty ? null : query);
   }
 
   Future<void> _pasteText() async {
@@ -142,6 +263,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
             profileId: widget.profile.id,
             fetcher: _fetcher,
             lane: widget.lane)));
+    if (workId != null) await _load();
+  }
+
+  Future<void> _importAudiobook() async {
+    final onImportAudiobook = widget.onImportAudiobook;
+    if (onImportAudiobook == null) return;
+    final workId = await onImportAudiobook(context);
     if (workId != null) await _load();
   }
 
@@ -184,6 +312,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 _fromGutenberg();
               },
             ),
+            if (widget.onImportAudiobook != null)
+              ListTile(
+                leading: const Icon(Icons.headphones_outlined),
+                title: const Text('Audiobook (pick files)'),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  _importAudiobook();
+                },
+              ),
           ],
         ),
       ),
@@ -216,11 +353,27 @@ class _LibraryScreenState extends State<LibraryScreen> {
       ),
     );
     if (confirmed != true) return;
+    // Campaign 7 (ADR-0013): deleteWork only ever removes DB rows (the
+    // same law ADR-0012 recorded for a downloaded episode's audio file) —
+    // an audiobook's copied bytes on disk are this screen's own job to
+    // clear, or Remove silently leaks the whole book.
+    if (e.work.kind == 'audiobook') widget.onDeleteAudiobookFiles?.call(e.work.id);
     await _dao.deleteWork(e.work.id);
     await _load();
   }
 
   Future<void> _open(_Entry e) async {
+    // Campaign 7 (ADR-0013): "the audiobook opens into the EXISTING
+    // player surface" — there is no separate audiobook reader screen,
+    // tapping the tile starts playback and the persistent mini player bar
+    // (chapters, speed, sleep timer, bookmark) is the whole interface
+    // from here.
+    if (e.work.kind == 'audiobook') {
+      await widget.player?.playAudiobook(e.work);
+      if (!mounted) return;
+      await _load();
+      return;
+    }
     // Resolved before the push (ADR-0006): the neural-voice hint and the
     // settings-escape menu both need to know whether a voice exists BEFORE
     // the reader ever shows its first frame — cheap (a directory-exists
@@ -230,6 +383,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
         ? false
         : await resolver(lang: e.work.lang) != null;
     if (!mounted) return;
+    // Campaign 4 Phase 4: same "resolved before the push" shape as
+    // offerNeuralVoice above — shouldOfferRecap's own trigger rules are
+    // pure and tested in isolation (reader_logic_test.dart); this is just
+    // the real Position/segmentCount data feeding them.
+    final position = e.position;
+    final offerRecap = shouldOfferRecap(
+        lastTouchedEpochDay: position == null
+            ? null
+            : position.updatedAtMs ~/ Duration.millisecondsPerDay,
+        todayEpochDay: epochDayUtcNow(),
+        progress: e.segmentCount == 0
+            ? 0
+            : (position?.segmentIdx ?? 0) / e.segmentCount);
     await Navigator.of(context).push(MaterialPageRoute<void>(
       builder: (_) => ReaderScreen(
           db: widget.db,
@@ -238,7 +404,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
           tts: widget.tts,
           offerNeuralVoice: widget.localMlAvailable && !hasVoice,
           resolveSpeechEngine: widget.resolveSpeechEngine,
-          createSpeechTempFiles: widget.createSpeechTempFiles),
+          lookupDefinition: widget.lookupDefinition,
+          createSpeechTempFiles: widget.createSpeechTempFiles,
+          player: widget.player,
+          resolveTranslator: widget.resolveTranslator,
+          offerRecap: offerRecap),
     ));
     await _load(); // progress may have moved
   }
@@ -246,10 +416,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
   @override
   Widget build(BuildContext context) {
     final entries = _entries;
+    final hasFilter = _activeQuery != null;
     return Scaffold(
       appBar: AppBar(
         title: const Text('Library'),
         actions: [
+          IconButton(
+            key: const Key('open-filter'),
+            tooltip: hasFilter ? 'Clear filter' : 'Filter & saved views',
+            icon: Icon(hasFilter ? Icons.filter_alt_off : Icons.filter_alt_outlined),
+            onPressed: _openFilter,
+          ),
           if (widget.onOpenModels != null)
             IconButton(
               key: const Key('open-models'),
@@ -285,25 +462,89 @@ class _LibraryScreenState extends State<LibraryScreen> {
             onPaste: _pasteText,
             onEpub: _importEpub,
             onWeb: _fromWeb,
-            onGutenberg: _fromGutenberg),
-        _ => ListView.builder(
-            padding: const EdgeInsets.only(bottom: 88),
-            itemCount: entries.length,
-            itemBuilder: (_, i) => _workTile(entries[i]),
+            onGutenberg: _fromGutenberg,
+            onAudiobook:
+                widget.onImportAudiobook != null ? _importAudiobook : null),
+        _ => Column(
+            children: [
+              if (_savedViews.isNotEmpty) _savedViewChips(),
+              Expanded(child: _libraryList(_visibleEntries)),
+            ],
           ),
       },
     );
   }
 
+  /// Saved views as tappable chips (Campaign 5 Phase 2) — reordering and
+  /// deleting live on the filter screen; this row is the one-tap-apply
+  /// fast path.
+  Widget _savedViewChips() {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: Row(
+        children: [
+          for (final v in _savedViews)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: ActionChip(
+                key: Key('saved-view-${v.name}'),
+                label: Text(v.name),
+                onPressed: () => _applySavedView(v),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _libraryList(List<_Entry> visible) {
+    if (visible.isEmpty) {
+      // A real filter that matched nothing is a different state from an
+      // empty library — the intake invitation would be misleading here.
+      return const Center(
+        child: Padding(
+          padding: EdgeInsets.all(24),
+          child: Text('Nothing matches this filter.',
+              textAlign: TextAlign.center),
+        ),
+      );
+    }
+    return ListView.builder(
+      padding: const EdgeInsets.only(bottom: 88),
+      itemCount: visible.length,
+      itemBuilder: (_, i) => _workTile(visible[i]),
+    );
+  }
+
+  /// Progress for an audiobook (ADR-0013): file-count-coarse — how many of
+  /// the book's files the stored position has reached, ignoring the exact
+  /// offset within the current one. Deliberately not time-precise (a
+  /// per-file duration is only ever learned once that file has actually
+  /// played — see [AudiobookFiles.durationMs]), the same Voice/SABP-shape
+  /// honesty the spec asks for.
+  double _audiobookProgress(_Entry e) {
+    final count = e.audiobookFileCount ?? 0;
+    if (count == 0) return 0.0;
+    final fileIdx = e.playerPosition?.fileIdx ?? 0;
+    return (fileIdx / count).clamp(0.0, 1.0);
+  }
+
   Widget _workTile(_Entry e) {
-    final progress = e.segmentCount == 0
-        ? 0.0
-        : ((e.position?.segmentIdx ?? 0) / e.segmentCount).clamp(0.0, 1.0);
+    final progress = e.work.finishedEpochDay != null
+        ? 1.0
+        : e.work.kind == 'audiobook'
+            ? _audiobookProgress(e)
+            : e.segmentCount == 0
+                ? 0.0
+                : ((e.position?.segmentIdx ?? 0) / e.segmentCount)
+                    .clamp(0.0, 1.0);
     return ListTile(
       onTap: () => _open(e),
       leading: Icon(switch (e.work.kind) {
         'book' => Icons.menu_book_outlined,
         'article' => Icons.article_outlined,
+        'audiobook' => Icons.headphones_outlined,
         _ => Icons.notes_outlined,
       }),
       title: Text(e.work.title, overflow: TextOverflow.ellipsis, maxLines: 2),
@@ -344,11 +585,13 @@ class _EmptyState extends StatelessWidget {
   final VoidCallback onEpub;
   final VoidCallback onWeb;
   final VoidCallback onGutenberg;
+  final VoidCallback? onAudiobook;
   const _EmptyState(
       {required this.onPaste,
       required this.onEpub,
       required this.onWeb,
-      required this.onGutenberg});
+      required this.onGutenberg,
+      this.onAudiobook});
 
   @override
   Widget build(BuildContext context) {
@@ -391,6 +634,13 @@ class _EmptyState extends StatelessWidget {
                   onPressed: onGutenberg,
                   icon: const Icon(Icons.local_library_outlined),
                   label: const Text('Project Gutenberg')),
+              if (onAudiobook != null) ...[
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                    onPressed: onAudiobook,
+                    icon: const Icon(Icons.headphones_outlined),
+                    label: const Text('Audiobook (pick files)')),
+              ],
             ],
           ),
         ),

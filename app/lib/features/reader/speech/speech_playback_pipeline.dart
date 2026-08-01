@@ -69,7 +69,16 @@ class SpeechPlaybackPipeline {
   /// Starts speaking [sentences] from index [startAt] (so a resumed
   /// position skips sentences already heard). Supersedes any run already
   /// in flight — starting a new run stops the old one.
-  Future<void> start(List<String> sentences, {int startAt = 0, String? lang}) async {
+  ///
+  /// [langOverrides], when given, must be the same length as [sentences]:
+  /// a non-null entry at index `i` is the language sentence `i` is
+  /// synthesized in INSTEAD of [lang] — the Babel speak-in-Spanish
+  /// fallback (ADR-0008 Phase 4), where a batch mixes stored Spanish
+  /// translations with English originals sentence-by-sentence and each
+  /// one must be tagged in the language it's ACTUALLY written in, not the
+  /// run's predominant one.
+  Future<void> start(List<String> sentences,
+      {int startAt = 0, String? lang, List<String?>? langOverrides}) async {
     await _reset();
     final gen = _gen;
     if (sentences.isEmpty || startAt >= sentences.length) return;
@@ -87,14 +96,15 @@ class SpeechPlaybackPipeline {
 
     final runDone = Completer<void>();
     _done = runDone.future;
-    unawaited(_synthesizeLoop(sentences, startAt, gen, lang, runDone));
+    unawaited(
+        _synthesizeLoop(sentences, startAt, gen, lang, langOverrides, runDone));
   }
 
   Future<void> _synthesizeLoop(List<String> sentences, int startAt, int gen,
-      String? lang, Completer<void> runDone) async {
+      String? lang, List<String?>? langOverrides, Completer<void> runDone) async {
     final inFlight = <int, Future<SynthResult>>{};
     Future<SynthResult> futureFor(int i) => inFlight.putIfAbsent(
-        i, () => engine.synthesize(sentences[i], lang: lang));
+        i, () => engine.synthesize(sentences[i], lang: langOverrides?[i] ?? lang));
 
     try {
       for (var i = startAt; i < sentences.length; i++) {

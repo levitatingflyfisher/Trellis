@@ -193,4 +193,34 @@ void main() {
     expect(r.url, 'https://example.org/post');
     expect(extractArticle('<html></html>').url, isNull);
   });
+
+  group('tracking pixels (Campaign 5 Phase 4, the Miniflux lesson)', () {
+    // This pins an invariant that already holds by construction, not one
+    // this test file fixes: extractArticle's part tags are text-only
+    // (p/h1-h6/li/blockquote/pre — see the top-level `_partTags` const),
+    // so no <img> — 1x1 tracker or otherwise — has ever been able to
+    // reach a block or the joined text. Confirmed with a genuine RED:
+    // temporarily adding 'img' to `_partTags` plus a src-emitting branch
+    // made this test fail with the tracker's URL showing up in `text`;
+    // reverting that restored the invariant. No code change was needed
+    // here — only this regression pin.
+    test('a 1x1 tracking pixel never appears in extracted text or blocks',
+        () {
+      final r = extractArticle('<html><body><article>'
+          '<img src="https://tracker.test/pixel.gif?id=1" width="1" '
+          'height="1">'
+          '<p>$_longA</p>'
+          '<img src="https://cdn.test/hero.jpg" alt="A real photo">'
+          '<p>$_longB</p>'
+          '</article></body></html>');
+
+      expect(r.text, isNot(contains('tracker.test')));
+      expect(r.text, isNot(contains('cdn.test')));
+      expect(r.blocks, hasLength(2),
+          reason: 'exactly the two prose paragraphs — neither image, '
+              'tracker or real, becomes a block');
+      expect(r.blocks.whereType<TextBlock>().map((b) => b.text),
+          [_longA, _longB]);
+    });
+  });
 }

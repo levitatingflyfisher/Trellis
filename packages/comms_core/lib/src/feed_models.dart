@@ -72,9 +72,23 @@ class FeedItem {
 }
 
 class ParsedFeed {
-  const ParsedFeed({required this.title, required this.items});
+  const ParsedFeed(
+      {required this.title,
+      required this.items,
+      this.nextPageUrl,
+      this.nextPageRel});
 
   /// Channel/feed title, falling back to the feed URL.
   final String title;
   final List<FeedItem> items;
+
+  /// The older archive page's URL (RFC 5005), resolved against the feed's
+  /// own URL — from a channel/feed-level `<atom:link rel="next">` or, when
+  /// that is absent, `rel="prev-archive"`. Null when the host publishes
+  /// neither, which is the overwhelmingly common case.
+  final String? nextPageUrl;
+
+  /// Which relation produced [nextPageUrl] — `'next'` or `'prev-archive'`
+  /// — or null when there is none.
+  final String? nextPageRel;
 }

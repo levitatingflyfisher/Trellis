@@ -3,10 +3,11 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
-  ffmpeg_kit_flutter_new
+  ffmpeg_kit_flutter_new_audio
   flutter_onnxruntime
   flutter_secure_storage_linux
   sqlite3_flutter_libs
+  url_launcher_linux
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST

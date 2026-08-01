@@ -1,10 +1,14 @@
+import 'dart:io';
+
 import 'package:comms_core/comms_core.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/feeds/feed_ingest.dart';
+import 'package:trellis/features/feeds/feed_rules.dart';
 import 'package:trellis/features/feeds/feeds_repository.dart';
 
+import '../support/fake_services.dart';
 import '../support/scripted_fetcher.dart';
 
 const _rssTwo = '''
@@ -177,6 +181,79 @@ void main() {
       expect(await db.spineDao.segmentsOf(work.id), isEmpty);
     });
 
+    group('tracker stripping on outbound article links (Campaign 5 Phase 4, '
+        'the Miniflux lesson)', () {
+      test('an article link with tracking params is stored clean', () async {
+        await ingestFeedItems(
+            db: db,
+            profileId: profileId,
+            feedId: feedId,
+            items: const [
+              FeedItem(
+                  title: 'Meteor showers',
+                  link: 'https://cast.test/meteors?utm_source=newsletter'
+                      '&fbclid=xyz',
+                  date: '',
+                  desc: ''),
+            ],
+            nowMs: nowMs);
+        final work = (await db.spineDao.worksOf(profileId)).single;
+        expect(work.sourceUrl, 'https://cast.test/meteors');
+      });
+
+      test('an enclosure (audio) URL is NEVER stripped — signed CDN params '
+          'can be load-bearing there, unlike a plain article link',
+          () async {
+        await ingestFeedItems(
+            db: db,
+            profileId: profileId,
+            feedId: feedId,
+            items: const [
+              FeedItem(
+                  title: 'Episode',
+                  link: '',
+                  date: '',
+                  desc: '',
+                  enclosure: Enclosure(
+                      url: 'https://cast.test/ep.mp3?utm_source=feed&sig=abc')),
+            ],
+            nowMs: nowMs);
+        final work = (await db.spineDao.worksOf(profileId)).single;
+        expect(work.sourceUrl,
+            'https://cast.test/ep.mp3?utm_source=feed&sig=abc');
+      });
+
+      test('stripping the stored sourceUrl never changes item identity: '
+          're-ingesting the same tracked link is still deduped by its RAW '
+          'guid, not the cleaned URL', () async {
+        final items = const [
+          FeedItem(
+              title: 'Meteor showers',
+              link: 'https://cast.test/meteors?utm_source=newsletter',
+              date: '',
+              desc: ''),
+        ];
+        expect(
+            await ingestFeedItems(
+                db: db,
+                profileId: profileId,
+                feedId: feedId,
+                items: items,
+                nowMs: nowMs),
+            1);
+        expect(
+            await ingestFeedItems(
+                db: db,
+                profileId: profileId,
+                feedId: feedId,
+                items: items,
+                nowMs: nowMs),
+            0,
+            reason: 'guidOf hashes the raw link — stripping sourceUrl at '
+                'storage time must never make an already-seen item look new');
+      });
+    });
+
     test('re-ingesting the same items adds nothing (guid dedupe)', () async {
       final items = const [
         FeedItem(
@@ -222,6 +299,126 @@ void main() {
           ],
           nowMs: nowMs);
       expect((await db.spineDao.worksOf(profileId)).single.title, 'Untitled');
+    });
+
+    group('per-feed rules (Campaign 5 Phase 3, before an item enters at all)',
+        () {
+      const skipSponsored = FeedRule(
+          field: FeedRuleField.title,
+          match: FeedRuleMatch.contains,
+          text: 'sponsored',
+          action: FeedRuleAction.skip);
+
+      test('skip: the item never becomes a row at all', () async {
+        final added = await ingestFeedItems(
+            db: db,
+            profileId: profileId,
+            feedId: feedId,
+            items: const [
+              FeedItem(
+                  title: 'A Sponsored segment',
+                  link: 'https://c/1',
+                  date: '',
+                  desc: ''),
+            ],
+            nowMs: nowMs,
+            rules: const [skipSponsored]);
+        expect(added, 0);
+        expect(await db.spineDao.worksOf(profileId), isEmpty);
+      });
+
+      test('skip only applies to items that match; others enter normally',
+          () async {
+        final added = await ingestFeedItems(
+            db: db,
+            profileId: profileId,
+            feedId: feedId,
+            items: const [
+              FeedItem(
+                  title: 'A Sponsored segment',
+                  link: 'https://c/1',
+                  date: '',
+                  desc: ''),
+              FeedItem(title: 'A real episode', link: 'https://c/2',
+                  date: '', desc: ''),
+            ],
+            nowMs: nowMs,
+            rules: const [skipSponsored]);
+        expect(added, 1);
+        expect((await db.spineDao.worksOf(profileId)).single.title,
+            'A real episode');
+      });
+
+      test('markReadOnArrival: enters normally, but with no unread dot',
+          () async {
+        const rule = FeedRule(
+            field: FeedRuleField.title,
+            match: FeedRuleMatch.contains,
+            text: 'housekeeping',
+            action: FeedRuleAction.markReadOnArrival);
+        await ingestFeedItems(
+            db: db,
+            profileId: profileId,
+            feedId: feedId,
+            items: const [
+              FeedItem(
+                  title: 'Housekeeping note',
+                  link: 'https://c/1',
+                  date: '',
+                  desc: ''),
+            ],
+            nowMs: nowMs,
+            rules: const [rule]);
+        final work = (await db.spineDao.worksOf(profileId)).single;
+        expect(work.persistence, 'ephemeron');
+        final episode = (await db.feedsDao.episodeOf(work.id))!;
+        expect(episode.readAtMs, nowMs);
+      });
+
+      test('autoKeep: enters, promoted to the library, marked read',
+          () async {
+        const rule = FeedRule(
+            field: FeedRuleField.description,
+            match: FeedRuleMatch.contains,
+            text: 'must-listen',
+            action: FeedRuleAction.autoKeep);
+        await ingestFeedItems(
+            db: db,
+            profileId: profileId,
+            feedId: feedId,
+            items: const [
+              FeedItem(
+                  title: 'Episode 9',
+                  link: 'https://c/1',
+                  date: '',
+                  desc: 'A must-listen episode.'),
+            ],
+            nowMs: nowMs,
+            rules: const [rule]);
+        final work = (await db.spineDao.worksOf(profileId)).single;
+        expect(work.persistence, 'work',
+            reason: 'auto-keep is the same transition Keep performs');
+        final episode = (await db.feedsDao.episodeOf(work.id))!;
+        expect(episode.readAtMs, nowMs);
+      });
+
+      test('no rules (the default) behaves exactly as before this feature',
+          () async {
+        final added = await ingestFeedItems(
+            db: db,
+            profileId: profileId,
+            feedId: feedId,
+            items: const [
+              FeedItem(
+                  title: 'Anything', link: 'https://c/1', date: '',
+                  desc: ''),
+            ],
+            nowMs: nowMs);
+        expect(added, 1);
+        final work = (await db.spineDao.worksOf(profileId)).single;
+        expect(work.persistence, 'ephemeron');
+        expect((await db.feedsDao.episodeOf(work.id))!.readAtMs, isNull);
+      });
     });
   });
 
@@ -358,6 +555,123 @@ void main() {
       expect(after.breakerJson, feed.breakerJson);
     });
 
+    test('a fresh fetch adopts the archive link the parse found', () async {
+      final fetcher = ScriptedFetcher((url, headers) => textResponse('''
+<rss><channel><title>t</title>
+  <atom:link rel="next" href="https://cast.test/feed?page=2"/>
+</channel></rss>
+'''));
+      final feed = await seedFeed();
+
+      await repo(fetcher).refreshFeed(feed);
+
+      expect((await db.feedsDao.feedsOf(profileId)).single.nextPageUrl,
+          'https://cast.test/feed?page=2');
+    });
+
+    test('a fresh fetch with no archive link clears a previously known one',
+        () async {
+      final fetcher = ScriptedFetcher((url, headers) => textResponse(_rssTwo));
+      var feed = await seedFeed();
+      await db.feedsDao.updateRefreshState(feed.id,
+          title: '',
+          etag: null,
+          lastModified: null,
+          breakerJson: '{}',
+          nextPageUrl: 'https://cast.test/feed?page=2',
+          updateNextPageUrl: true);
+      feed = (await db.feedsDao.feedsOf(profileId)).single;
+
+      await repo(fetcher).refreshFeed(feed);
+
+      expect((await db.feedsDao.feedsOf(profileId)).single.nextPageUrl, isNull,
+          reason: 'the host stopped advertising an archive on this page');
+    });
+
+    test('a non-fresh outcome (304) leaves a known archive link untouched',
+        () async {
+      final fetcher =
+          ScriptedFetcher((url, headers) => textResponse('', status: 304));
+      var feed = await seedFeed(etag: '"v1"', lastModified: 'lm');
+      await db.feedsDao.updateRefreshState(feed.id,
+          title: '',
+          etag: '"v1"',
+          lastModified: 'lm',
+          breakerJson: '{}',
+          nextPageUrl: 'https://cast.test/feed?page=2',
+          updateNextPageUrl: true);
+      feed = (await db.feedsDao.feedsOf(profileId)).single;
+
+      final outcome = await repo(fetcher).refreshFeed(feed);
+      expect(outcome.status, RefreshStatus.notModified);
+      expect((await db.feedsDao.feedsOf(profileId)).single.nextPageUrl,
+          'https://cast.test/feed?page=2');
+    });
+
+    test('cross-feed dedup runs after ingest: the same story from two feeds '
+        'hides the younger copy from the river (Campaign 5 Phase 3)',
+        () async {
+      // Feed A already carries the original post.
+      final feedA = await db.feedsDao
+          .insertFeed(profileId: profileId, url: 'https://a.test/feed');
+      await ingestFeedItems(
+          db: db,
+          profileId: profileId,
+          feedId: feedA,
+          items: const [
+            FeedItem(
+                title: 'Breaking: something happened',
+                link: 'https://original.test/post',
+                date: 'Tue, 04 Aug 2026 12:00:00 GMT',
+                desc: '')
+          ],
+          nowMs: nowMs);
+
+      // Feed B (a syndicating mirror) republishes the SAME canonical URL,
+      // just with tracking params, one day later.
+      final feedB = await db.feedsDao
+          .insertFeed(profileId: profileId, url: 'https://b.test/feed');
+      final fetcher = ScriptedFetcher((url, headers) => textResponse('''
+<rss><channel><title>Mirror</title>
+  <item>
+    <title>Breaking: something happened</title>
+    <link>https://original.test/post?utm_source=mirror</link>
+    <pubDate>Wed, 05 Aug 2026 12:00:00 GMT</pubDate>
+  </item>
+</channel></rss>
+'''));
+      final feedBRow = (await db.feedsDao.feedsOf(profileId))
+          .firstWhere((f) => f.id == feedB);
+
+      await repo(fetcher).refreshFeed(feedBRow);
+
+      // Both rows exist (dedup hides, never deletes)…
+      expect(await db.spineDao.worksOf(profileId), hasLength(2));
+      // …but only the original shows in the river.
+      final river = await db.feedsDao.riverItems(profileId);
+      expect(river, hasLength(1));
+      expect(river.single.feedTitle, isNot('Mirror'));
+    });
+
+    test('a feed URL with tracker-looking query params is fetched '
+        'byte-identical — the normalizer never touches feed fetch URLs, '
+        'only outbound article links and dedup canonicalization (Campaign '
+        '5 Phase 4)', () async {
+      final fetcher = ScriptedFetcher((url, headers) => textResponse(_rssTwo));
+      final feedId = await db.feedsDao.insertFeed(
+          profileId: profileId,
+          url: 'https://cast.test/feed?utm_source=directory&fbclid=xyz');
+      final feed = (await db.feedsDao.feedsOf(profileId))
+          .firstWhere((f) => f.id == feedId);
+
+      await repo(fetcher).refreshFeed(feed);
+
+      expect(fetcher.calls.single.url.toString(),
+          'https://cast.test/feed?utm_source=directory&fbclid=xyz',
+          reason: "a feed URL's query params can be load-bearing (API "
+              'keys, pagination tokens) — never strip them');
+    });
+
     test('refreshAll walks every feed of the profile', () async {
       final fetcher = ScriptedFetcher((url, headers) => textResponse(_rssTwo));
       await db.feedsDao
@@ -368,6 +682,66 @@ void main() {
       await repo(fetcher).refreshAll(profileId);
       expect(fetcher.calls.map((c) => c.url.host).toSet(),
           {'a.test', 'b.test'});
+    });
+
+    test('a fresh refresh evicts stale audio per the feed\'s '
+        'keepLatestAudio policy (P4 "archive, never forget")', () async {
+      final dir = Directory.systemTemp.createTempSync('trellis-refresh-evict');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final services = testServices(dir);
+      final fetcher = ScriptedFetcher((url, headers) => textResponse(_rssTwo));
+      final feed = await seedFeed();
+      await db.feedsDao.updatePlaybackSettings(feed.id, keepLatestAudio: 1);
+      // Two episodes already on this feed (distinct guids from the RSS
+      // fixture, so refresh doesn't re-touch them), each with real audio
+      // already on disk from an earlier transcription.
+      Future<int> seedWithAudio(
+          {required String title,
+          required String guid,
+          required int publishedAtMs}) async {
+        final url = 'https://cast.test/$guid.mp3';
+        final workId = await db.spineDao.insertWork(
+            profileId: profileId,
+            kind: 'episode',
+            title: title,
+            persistence: 'ephemeron',
+            firstSeenEpochDay: 100,
+            sourceUrl: url);
+        await db.feedsDao.insertEpisode(
+            workId: workId,
+            feedId: feed.id,
+            guid: guid,
+            enclosureUrl: url,
+            publishedAtMs: publishedAtMs);
+        final file = services.audioFileFor(workId, url);
+        file.parent.createSync(recursive: true);
+        file.writeAsStringSync('audio for $title');
+        return workId;
+      }
+
+      final older =
+          await seedWithAudio(title: 'Older', guid: 'older', publishedAtMs: 1);
+      final newer =
+          await seedWithAudio(title: 'Newer', guid: 'newer', publishedAtMs: 2);
+      final olderFile =
+          services.audioFileFor(older, 'https://cast.test/older.mp3');
+      final newerFile =
+          services.audioFileFor(newer, 'https://cast.test/newer.mp3');
+
+      final repository = FeedsRepository(
+          db: db,
+          fetcher: fetcher,
+          services: services,
+          now: () => DateTime.fromMillisecondsSinceEpoch(nowMs));
+      final outcome = await repository.refreshFeed(feed);
+
+      expect(outcome.status, RefreshStatus.fresh);
+      expect(olderFile.existsSync(), isFalse,
+          reason: 'beyond keepLatestAudio: 1');
+      expect(newerFile.existsSync(), isTrue);
+      expect((await db.feedsDao.episodeOf(older))!.archivedAtMs, isNotNull);
+      expect(await db.spineDao.workById(older), isNotNull,
+          reason: 'the row survives — only the file went');
     });
   });
 
@@ -449,6 +823,123 @@ void main() {
           .subscribe(profileId: profileId, rawUrl: 'https://cast.test/blog');
       expect(result, isA<SubscribeFailure>());
       expect(await db.feedsDao.feedsOf(profileId), isEmpty);
+    });
+
+    test('subscribing adopts the archive link from the first page', () async {
+      final fetcher = ScriptedFetcher((url, headers) => textResponse('''
+<rss><channel><title>The Night Sky Cast</title>
+  <atom:link rel="next" href="https://cast.test/feed?page=2"/>
+  <item><title>Aurora season</title><link>https://cast.test/aurora</link></item>
+</channel></rss>
+'''));
+      await repo(fetcher)
+          .subscribe(profileId: profileId, rawUrl: 'https://cast.test/feed');
+
+      expect((await db.feedsDao.feedsOf(profileId)).single.nextPageUrl,
+          'https://cast.test/feed?page=2');
+    });
+  });
+
+  group('FeedsRepository fetchOlderEpisodes', () {
+    late AppDatabase db;
+    late int profileId;
+    setUp(() async {
+      db = AppDatabase.forTesting(NativeDatabase.memory());
+      profileId = await db.profilesDao.create('Ada');
+    });
+    tearDown(() => db.close());
+
+    FeedsRepository repo(ScriptedFetcher fetcher) =>
+        FeedsRepository(db: db, fetcher: fetcher);
+
+    Future<Feed> seedFeedWithNextPage(String? nextPageUrl) async {
+      final id = await db.feedsDao
+          .insertFeed(profileId: profileId, url: 'https://cast.test/feed');
+      await db.feedsDao.updateRefreshState(id,
+          title: 'The Night Sky Cast',
+          etag: null,
+          lastModified: null,
+          breakerJson: '{}',
+          nextPageUrl: nextPageUrl,
+          updateNextPageUrl: true);
+      return (await db.feedsDao.feedsOf(profileId)).single;
+    }
+
+    test('no known archive link: reports the calm note, no fetch runs',
+        () async {
+      final fetcher =
+          ScriptedFetcher((url, headers) => throw Exception('must not run'));
+      final feed = await seedFeedWithNextPage(null);
+
+      final outcome = await repo(fetcher).fetchOlderEpisodes(feed);
+
+      expect(outcome.newItems, 0);
+      expect(outcome.message,
+          "The publisher's feed offers only these episodes — older ones "
+          "aren't published in it.");
+      expect(fetcher.calls, isEmpty);
+    });
+
+    test('walks the archive and ingests new older episodes, deduping what '
+        'is already stored (the existing repository dedup path)', () async {
+      final feed = await seedFeedWithNextPage('https://cast.test/feed?page=2');
+      // Already subscribed: "Aurora season" is already in the DB, through
+      // the same ingest path a normal refresh uses.
+      await ingestFeedItems(db: db, profileId: profileId, feedId: feed.id,
+          items: const [
+            FeedItem(
+                title: 'Aurora season',
+                link: 'https://cast.test/aurora',
+                date: '',
+                desc: '')
+          ],
+          nowMs: 1000);
+
+      final fetcher = ScriptedFetcher((url, headers) {
+        expect(url.toString(), 'https://cast.test/feed?page=2');
+        return textResponse('''
+<rss><channel><title>t</title>
+  <item><title>Aurora season</title><link>https://cast.test/aurora</link></item>
+  <item><title>Comet watch</title><link>https://cast.test/comet</link></item>
+</channel></rss>
+''');
+      });
+
+      final outcome = await repo(fetcher).fetchOlderEpisodes(feed);
+
+      expect(outcome.newItems, 1,
+          reason: 'Aurora season was already stored; only Comet watch is new');
+      expect(outcome.message, 'Found 1 older episode.');
+      final titles =
+          (await db.feedsDao.episodesOfFeed(feed.id)).map((r) => r.work.title);
+      expect(titles, contains('Comet watch'));
+    });
+
+    test('an archive with nothing new reports the "no older episodes" '
+        'sentence', () async {
+      final feed = await seedFeedWithNextPage('https://cast.test/feed?page=2');
+      final fetcher = ScriptedFetcher(
+          (url, headers) => textResponse('<rss><channel><title>t</title>'
+              '</channel></rss>'));
+
+      final outcome = await repo(fetcher).fetchOlderEpisodes(feed);
+
+      expect(outcome.newItems, 0);
+      expect(outcome.message,
+          "No older episodes were published in the feed's archive.");
+    });
+
+    test('a failed hop surfaces the honest technical sentence instead of a '
+        'false "no older episodes" claim', () async {
+      final feed = await seedFeedWithNextPage('https://cast.test/feed?page=2');
+      final fetcher =
+          ScriptedFetcher((url, headers) => throw Exception('reset'));
+
+      final outcome = await repo(fetcher).fetchOlderEpisodes(feed);
+
+      expect(outcome.newItems, 0);
+      expect(outcome.message, isNot(contains('No older episodes')));
+      expect(outcome.message, contains("couldn't be reached"));
     });
   });
 }

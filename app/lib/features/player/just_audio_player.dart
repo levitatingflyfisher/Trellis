@@ -25,6 +25,31 @@ class JustAudioEpisodePlayer implements EpisodePlayer {
   }
 
   @override
+  Future<void> setFilePath(String path) async {
+    await _player.setFilePath(path);
+  }
+
+  @override
+  Future<void> setFilePaths(
+    List<String> paths, {
+    int initialIndex = 0,
+    Duration initialPosition = Duration.zero,
+  }) async {
+    await _player.setAudioSources(
+      [for (final p in paths) AudioSource.uri(Uri.file(p))],
+      initialIndex: initialIndex,
+      initialPosition: initialPosition,
+    );
+  }
+
+  @override
+  Stream<int> get currentIndexStream =>
+      _player.currentIndexStream.where((i) => i != null).cast<int>();
+
+  @override
+  int? get currentIndex => _player.currentIndex;
+
+  @override
   Future<void> play() async {
     // just_audio's play() future completes when playback STOPS; fire and
     // return like every UI integration of the package does.
@@ -39,6 +64,9 @@ class JustAudioEpisodePlayer implements EpisodePlayer {
 
   @override
   Future<void> setSpeed(double speed) => _player.setSpeed(speed);
+
+  @override
+  Future<void> setVolume(double volume) => _player.setVolume(volume);
 
   @override
   Duration get position => _player.position;

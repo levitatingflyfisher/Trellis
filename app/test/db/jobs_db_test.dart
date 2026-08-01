@@ -15,19 +15,21 @@ void main() {
   setUp(() => db = AppDatabase.forTesting(NativeDatabase.memory()));
   tearDown(() => db.close());
 
-  Job job(String id,
-          {JobState state = JobState.running,
-          String? checkpoint,
-          int totalUnits = 10,
-          int doneUnits = 0}) =>
-      Job(
-          id: id,
-          kind: 'transcribe',
-          state: state,
-          checkpoint: checkpoint,
-          totalUnits: totalUnits,
-          doneUnits: doneUnits,
-          createdAtMs: 1234);
+  Job job(
+    String id, {
+    JobState state = JobState.running,
+    String? checkpoint,
+    int totalUnits = 10,
+    int doneUnits = 0,
+  }) => Job(
+    id: id,
+    kind: 'transcribe',
+    state: state,
+    checkpoint: checkpoint,
+    totalUnits: totalUnits,
+    doneUnits: doneUnits,
+    createdAtMs: 1234,
+  );
 
   group('JobsDao as JobStore', () {
     test('save and load roundtrip every field', () async {
@@ -68,13 +70,20 @@ void main() {
       expect(loaded.createdAtMs, 1234, reason: 'creation time untouched');
     });
 
-    test('saveCheckpoint for an unknown id throws and writes nothing',
-        () async {
-      await expectLater(db.jobsDao.saveCheckpoint('ghost', 'c', 1),
-          throwsA(isA<StateError>()));
-      expect(await db.jobsDao.load('ghost'), isNull,
-          reason: 'a checkpoint may never invent a row');
-    });
+    test(
+      'saveCheckpoint for an unknown id throws and writes nothing',
+      () async {
+        await expectLater(
+          db.jobsDao.saveCheckpoint('ghost', 'c', 1),
+          throwsA(isA<StateError>()),
+        );
+        expect(
+          await db.jobsDao.load('ghost'),
+          isNull,
+          reason: 'a checkpoint may never invent a row',
+        );
+      },
+    );
 
     test('delete abandons the row, checkpoint and all', () async {
       await db.jobsDao.save(job('j1', checkpoint: 'c'));
@@ -105,25 +114,30 @@ void main() {
       expect(await db.jobsDao.payloadOf('j1'), '{"workId":7}');
     });
 
-    test('unfinished lists resumable jobs, oldest first, never done ones',
-        () async {
-      await db.jobsDao.save(job('running'));
-      await db.jobsDao.save(job('done', state: JobState.done, doneUnits: 10));
-      await db.jobsDao.save(job('failed', state: JobState.failed));
-      await db.jobsDao.save(job('cancelled', state: JobState.cancelled));
+    test(
+      'unfinished lists resumable jobs, oldest first, never done ones',
+      () async {
+        await db.jobsDao.save(job('running'));
+        await db.jobsDao.save(job('done', state: JobState.done, doneUnits: 10));
+        await db.jobsDao.save(job('failed', state: JobState.failed));
+        await db.jobsDao.save(job('cancelled', state: JobState.cancelled));
 
-      final rows = await db.jobsDao.unfinished();
-      expect([for (final r in rows) r.id],
-          containsAll(['running', 'failed', 'cancelled']));
-      expect([for (final r in rows) r.id], isNot(contains('done')));
-    });
+        final rows = await db.jobsDao.unfinished();
+        expect([
+          for (final r in rows) r.id,
+        ], containsAll(['running', 'failed', 'cancelled']));
+        expect([for (final r in rows) r.id], isNot(contains('done')));
+      },
+    );
 
-    test('setTotalUnits sizes a placeholder row once the plan is known',
-        () async {
-      await db.jobsDao.save(job('j1', totalUnits: 0));
-      await db.jobsDao.setTotalUnits('j1', 42);
-      expect((await db.jobsDao.load('j1'))!.totalUnits, 42);
-    });
+    test(
+      'setTotalUnits sizes a placeholder row once the plan is known',
+      () async {
+        await db.jobsDao.save(job('j1', totalUnits: 0));
+        await db.jobsDao.setTotalUnits('j1', 42);
+        expect((await db.jobsDao.load('j1'))!.totalUnits, 42);
+      },
+    );
   });
 
   group('schema migration v3 → v4', () {
@@ -136,21 +150,44 @@ void main() {
       // version, drop exactly what v4 added, stamp user_version 3. v4 is
       // purely additive, so what remains IS the v3 schema. `createTable`
       // migrations are idempotent so later tables surviving from the live
-      // schema don't matter — but schema v7's `addColumn` is NOT, so that
-      // column has to go too (see household_db_test.dart's fuller note).
+      // schema don't matter — but every `addColumn` since (v7, v8, v9,
+      // v12, v13) is NOT, so those columns have to go too (see
+      // household_db_test.dart's fuller note); v3 is after feeds/episodes
+      // (v2), so v8's and v12's columns on those two tables are in scope
+      // here too.
       final seed = AppDatabase.forTesting(NativeDatabase(file));
       await seed.profilesDao.create('Ada');
       await seed.spineDao.insertWork(
-          profileId: 1,
-          kind: 'book',
-          title: 'Kept Book',
-          persistence: 'work',
-          firstSeenEpochDay: 100);
+        profileId: 1,
+        kind: 'book',
+        title: 'Kept Book',
+        persistence: 'work',
+        firstSeenEpochDay: 100,
+      );
       await seed.close();
       final v3 = raw.sqlite3.open(file.path);
       v3.execute('''
         DROP TABLE jobs;
         ALTER TABLE profiles DROP COLUMN prefer_system_voice;
+        ALTER TABLE profiles DROP COLUMN scheduler;
+        ALTER TABLE profiles DROP COLUMN reader_prefs_json;
+        DROP TABLE reading_days;
+        ALTER TABLE feeds DROP COLUMN next_page_url;
+        ALTER TABLE profiles DROP COLUMN keep_finished_in_queue;
+        ALTER TABLE feeds DROP COLUMN speed_override;
+        ALTER TABLE feeds DROP COLUMN skip_intro_seconds;
+        ALTER TABLE feeds DROP COLUMN skip_outro_seconds;
+        ALTER TABLE feeds DROP COLUMN keep_latest_audio;
+        ALTER TABLE episodes DROP COLUMN archived_at_ms;
+        ALTER TABLE works DROP COLUMN show_translation_layer;
+        ALTER TABLE feeds DROP COLUMN rules_json;
+        ALTER TABLE episodes DROP COLUMN dedup_reason;
+        ALTER TABLE episodes DROP COLUMN duplicate_of_work_id;
+        ALTER TABLE feeds DROP COLUMN dsp_enabled;
+        ALTER TABLE episodes DROP COLUMN dsp_original_duration_ms;
+        ALTER TABLE episodes DROP COLUMN dsp_processed_duration_ms;
+        ALTER TABLE profiles DROP COLUMN dsp_global_default;
+        ALTER TABLE player_positions DROP COLUMN file_idx;
         PRAGMA user_version = 3;
       ''');
       v3.dispose();

@@ -13,12 +13,16 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:ml_runtime/ml_runtime.dart';
+import 'package:stardict_core/stardict_core.dart';
 
 import '../features/models/model_store.dart';
 import '../features/reader/speech/speech_engine.dart';
 import '../features/reader/speech/supertonic_engine.dart';
 import '../features/reader/speech/supertonic_voice_handle.dart';
 import '../features/reader/speech/speech_temp_files.dart';
+import '../features/dsp/dsp_encoder.dart';
+import '../features/dsp/dsp_ffmpeg_encoder.dart';
+import '../features/reader/translation/marian_engine.dart';
 import '../features/transcribe/audio_fetcher.dart';
 import '../features/transcribe/decoder.dart';
 import '../features/transcribe/ffmpeg_decoder.dart';
@@ -120,6 +124,12 @@ class DeviceServices {
   final JobForegroundGate foregroundGate;
   final DeviceTier tier;
 
+  /// The offline DSP preprocess's platform boundary (Campaign 6). Optional
+  /// with an honest-refusal default ([UnavailableDspEncoder]) so every
+  /// existing construction site stays additive — only `.real()`'s Android
+  /// branch and tests that actually exercise DSP ever pass a real one.
+  final DspEncoder dspEncoder;
+
   /// The speak-mode voice. Optional with a silent default so the fakes-only
   /// test constructor stays additive; the platform wiring passes the real
   /// engine.
@@ -156,30 +166,36 @@ class DeviceServices {
     required this.foregroundGate,
     required this.engineFor,
     TtsSpeaker? tts,
+    DspEncoder? dspEncoder,
     this.databaseFile,
     this.localMlAvailable = true,
     this.tier = DeviceTier.t1,
     this.webFetchLane = WebFetchLane.direct,
-  }) : tts = tts ?? NoopTtsSpeaker();
+  }) : tts = tts ?? NoopTtsSpeaker(),
+       dspEncoder = dspEncoder ?? UnavailableDspEncoder();
 
   /// The platform wiring. [supportDir] is the app-support directory
   /// (path_provider), resolved by an async `main` before `runApp`.
-  factory DeviceServices.real(Directory supportDir,
-          {File? databaseFile}) =>
+  factory DeviceServices.real(Directory supportDir, {File? databaseFile}) =>
       DeviceServices(
         supportDir: supportDir,
-        modelStore:
-            DiskModelStore(baseDir: Directory('${supportDir.path}/models')),
+        modelStore: DiskModelStore(
+          baseDir: Directory('${supportDir.path}/models'),
+        ),
         registry: ModelRegistry.starter(),
         decoder: _isAndroid ? FfmpegDecoder() : WavPassthroughDecoder(),
         audioFetcher: DioAudioFetcher(),
         executor: IsolateTranscribeExecutor(),
-        foregroundGate:
-            _isAndroid ? AndroidJobForegroundGate() : NoopJobForegroundGate(),
+        foregroundGate: _isAndroid
+            ? AndroidJobForegroundGate()
+            : NoopJobForegroundGate(),
         tts: FlutterTtsSpeaker(),
+        dspEncoder: _isAndroid ? FfmpegDspEncoder() : UnavailableDspEncoder(),
         databaseFile: databaseFile,
         engineFor: (modelPath) => WhisperEngineSpec(
-            modelPath: modelPath, libraryPath: whisperLibraryPath()),
+          modelPath: modelPath,
+          libraryPath: whisperLibraryPath(),
+        ),
       );
 
   /// A placeholder for surfaces that never start a P3 flow (plain widget
@@ -187,7 +203,8 @@ class DeviceServices {
   /// dir points into systemTemp and is only created if actually used.
   factory DeviceServices.detached() {
     final dir = Directory(
-        '${Directory.systemTemp.path}/trellis-detached-services');
+      '${Directory.systemTemp.path}/trellis-detached-services',
+    );
     return DeviceServices(
       supportDir: dir,
       modelStore: DiskModelStore(baseDir: Directory('${dir.path}/models')),
@@ -197,7 +214,9 @@ class DeviceServices {
       executor: InlineTranscribeExecutor(),
       foregroundGate: NoopJobForegroundGate(),
       engineFor: (modelPath) => WhisperEngineSpec(
-          modelPath: modelPath, libraryPath: whisperLibraryPath()),
+        modelPath: modelPath,
+        libraryPath: whisperLibraryPath(),
+      ),
     );
   }
 
@@ -232,18 +251,25 @@ class DeviceServices {
     if (!await modelStore.isDownloaded(voiceSpec)) return null;
     return SupertonicSpeechEngine(
       files: SupertonicVoiceFiles(
-        durationPredictorPath:
-            _pathForNamedFile(voiceSpec, layout.durationPredictorFileName),
-        textEncoderPath:
-            _pathForNamedFile(voiceSpec, layout.textEncoderFileName),
-        vectorEstimatorPath:
-            _pathForNamedFile(voiceSpec, layout.vectorEstimatorFileName),
+        durationPredictorPath: _pathForNamedFile(
+          voiceSpec,
+          layout.durationPredictorFileName,
+        ),
+        textEncoderPath: _pathForNamedFile(
+          voiceSpec,
+          layout.textEncoderFileName,
+        ),
+        vectorEstimatorPath: _pathForNamedFile(
+          voiceSpec,
+          layout.vectorEstimatorFileName,
+        ),
         vocoderPath: _pathForNamedFile(voiceSpec, layout.vocoderFileName),
-        unicodeIndexerPath:
-            _pathForNamedFile(voiceSpec, layout.unicodeIndexerFileName),
+        unicodeIndexerPath: _pathForNamedFile(
+          voiceSpec,
+          layout.unicodeIndexerFileName,
+        ),
         ttsConfigPath: _pathForNamedFile(voiceSpec, layout.ttsConfigFileName),
-        voiceStylePath:
-            _pathForNamedFile(voiceSpec, layout.voiceStyleFileName),
+        voiceStylePath: _pathForNamedFile(voiceSpec, layout.voiceStyleFileName),
       ),
     );
   }
@@ -257,7 +283,8 @@ class DeviceServices {
     final file = spec.files.firstWhere(
       (f) => Uri.parse(f.url).pathSegments.last == fileName,
       orElse: () => throw StateError(
-          'model "${spec.id}": no registered file named "$fileName"'),
+        'model "${spec.id}": no registered file named "$fileName"',
+      ),
     );
     return modelStore.pathOf(spec, file);
   }
@@ -289,6 +316,117 @@ class DeviceServices {
     return speechEngineFor(spec);
   }
 
+  /// The Marian translator (ADR-0008 "Babel" Phase 3) for [modelSpec], if
+  /// it's actually usable right now — [speechEngineFor]'s same
+  /// download-honesty gate, one layer deeper: even on a tier that CAN run
+  /// local ML, the model must be DOWNLOADED before the reader's "Translate
+  /// to Spanish" action may offer itself. Returns null (never throws) when
+  /// it isn't. Cheap: [MarianTranslator] opens its ONNX Runtime sessions
+  /// lazily on first `translate()`, so this call never touches a file.
+  Future<MarianTranslator?> translatorFor(ModelSpec modelSpec) async {
+    if (!localMlAvailable) return null;
+    if (!tier.atLeast(modelSpec.minTier)) return null;
+    final layout = modelSpec.marianLayout;
+    if (layout == null) return null; // a mis-registered spec; refuse quietly
+    if (!await modelStore.isDownloaded(modelSpec)) return null;
+    return MarianTranslator(
+      files: MarianTranslatorFiles(
+        encoderPath: _pathForNamedFile(modelSpec, layout.encoderFileName),
+        decoderMergedPath:
+            _pathForNamedFile(modelSpec, layout.decoderMergedFileName),
+        sourceSpmPath: _pathForNamedFile(modelSpec, layout.sourceSpmFileName),
+        vocabPath: _pathForNamedFile(modelSpec, layout.vocabFileName),
+      ),
+    );
+  }
+
+  /// The ONE call a `ReaderScreen` closes over for translation (mirrors
+  /// [resolveSpeechEngine]): the registry's selection law picks the model
+  /// that produces [targetLang] at this device's tier, then
+  /// [translatorFor] applies the download-honesty gate. Null either way
+  /// means the reader's translate action stays hidden — this never throws.
+  Future<MarianTranslator?> resolveTranslator({String targetLang = 'es'}) async {
+    final spec = registry.pickModel(ModelTask.translation, tier,
+        langHint: targetLang);
+    if (spec == null) return null;
+    return translatorFor(spec);
+  }
+
+  /// Campaign 4 Phase 3's own version of [resolveSpeechEngine]: the ONE
+  /// call `ReaderScreen` closes over for the definition sheet. Parses the
+  /// on-disk dictionary at most once per [DeviceServices] instance
+  /// (the residency law — [_dictionary] caches the built
+  /// [StarDictDictionary], not just the file paths, since building it
+  /// means reading the whole `.idx` and sorting it) and reuses it for
+  /// every later lookup this session. Null covers every honest "nothing
+  /// to show" case alike (no dictionary registered for this tier, none
+  /// downloaded yet, or the word truly isn't in it) — the sheet shows one
+  /// calm empty state regardless of which.
+  StarDictDictionary? _dictionary;
+  bool _dictionaryLoadAttempted = false;
+
+  Future<String?> lookupDefinition(String word) async {
+    final dict = await _openDictionary();
+    if (dict == null) return null;
+    final match = dict.lookup(word);
+    if (match == null) return null;
+    return _stripHtml(dict.definitionOf(match.entry));
+  }
+
+  Future<StarDictDictionary?> _openDictionary() async {
+    if (_dictionary != null) return _dictionary;
+    if (_dictionaryLoadAttempted) return null; // tried once, nothing there
+    _dictionaryLoadAttempted = true;
+    if (!localMlAvailable) return null;
+    final spec = registry.pickModel(ModelTask.dictionary, tier);
+    if (spec == null) return null;
+    final layout = spec.dictionaryArchiveLayout;
+    if (layout == null) return null;
+    if (!await modelStore.isDownloaded(spec)) return null;
+    final dir = modelStore.dictionaryDirOf(spec);
+    try {
+      final ifoRaw = await File('$dir/${layout.ifoFileName}').readAsString();
+      final idxBytes = await File('$dir/${layout.idxFileName}').readAsBytes();
+      final dictBytes =
+          await File('$dir/${layout.dictFileName}').readAsBytes();
+      StarDictIfo.parse(ifoRaw); // validated, but only entries/body matter
+      final entries = parseIdx32(idxBytes);
+      _dictionary =
+          StarDictDictionary(entries: entries, body: DictzipBody(dictBytes));
+      return _dictionary;
+    } on FormatException {
+      return null; // a corrupt/partial dictionary reads as "none available"
+    } on FileSystemException {
+      return null;
+    }
+  }
+
+  static final _tagRe = RegExp('<[^>]*>');
+  static final _wsRe = RegExp(r'[ \t]+');
+  static final _blankLinesRe = RegExp(r'\n{3,}');
+
+  /// A calm, plain-text rendering of a `sametypesequence=h` (HTML) entry
+  /// body — good enough for a dismissible sheet without pulling in a full
+  /// HTML renderer this pass: block-level tags become line breaks, then
+  /// every remaining tag is dropped and a small set of entities decoded.
+  static String _stripHtml(String html) {
+    var s = html
+        .replaceAll(RegExp(r'<br\s*/?>', caseSensitive: false), '\n')
+        .replaceAll(RegExp(r'</(p|li|div|h[1-6])>', caseSensitive: false), '\n')
+        .replaceAll(RegExp(r'<li[^>]*>', caseSensitive: false), '• ');
+    s = s.replaceAll(_tagRe, '');
+    s = s
+        .replaceAll('&amp;', '&')
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&#39;', "'")
+        .replaceAll('&nbsp;', ' ');
+    s = s.replaceAll(_wsRe, ' ');
+    s = s.replaceAll(_blankLinesRe, '\n\n');
+    return s.trim();
+  }
+
   File audioFileFor(int workId, String url) {
     final path = Uri.parse(url).path;
     final dot = path.lastIndexOf('.');
@@ -297,4 +435,21 @@ class DeviceServices {
   }
 
   File pcmFileFor(int workId) => File('${supportDir.path}/pcm/$workId.f32');
+
+  /// Campaign 7 (ADR-0013): where an audiobook's own copied files live —
+  /// one directory per book, so removing a book is deleting one directory
+  /// rather than hunting down N files by row.
+  Directory audiobookDirFor(int workId) =>
+      Directory('${supportDir.path}/audiobooks/$workId');
+
+  /// The copied destination for file [fileIdx] of audiobook [workId],
+  /// preserving [sourceName]'s own extension (chapter parsing and
+  /// playback both key off the extension, e.g. distinguishing an m4b's
+  /// chpl atom from an mp3 with no chapters of its own).
+  File audiobookFileFor(int workId, int fileIdx, String sourceName) {
+    final dot = sourceName.lastIndexOf('.');
+    final ext =
+        dot < 0 || sourceName.length - dot > 6 ? '' : sourceName.substring(dot);
+    return File('${audiobookDirFor(workId).path}/$fileIdx$ext');
+  }
 }

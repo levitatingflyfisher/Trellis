@@ -20,3 +20,7 @@ String distilledByLine(Provenance p) =>
 /// The provenance line for a critique.
 String critiqueByLine(Provenance p) =>
     'Critique by ${p.modelId} · ${tierDisplayName(p.brainTier)}';
+
+/// The provenance line for a Campaign 4 Phase 4 recap.
+String recapByLine(Provenance p) =>
+    'Recapped by ${p.modelId} · ${tierDisplayName(p.brainTier)}';

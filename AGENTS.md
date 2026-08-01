@@ -27,7 +27,11 @@ packages/
   whisper_ffi/  dart:ffi over natives/ whisper.cpp (wfs_ shim ABI).
   transcribe_core/ The 30s/5s pipeline as a ChunkedTask; kill-proven.
   brain_wiring/ Brain tiers (domovoi), AnthropicBrain, Distiller with the
-                generated-course-must-parse invariant, discourse grading.
+                generated-course-must-parse invariant, discourse grading,
+                RecapGenerator (spoiler-safe "Catch me up?" summaries).
+  stardict_core/ Pure-Dart StarDict dictionary parser: .ifo/.idx/.dict.dz,
+                real dictzip random access (per-chunk inflate, never a
+                whole-file decompress). Pure Dart, TDD from scratch.
   backup_core/  .ohbk envelope (appDomain constant renames with the app) +
                 both-donor migration. Sanctuary dep is Flutter-bound, so
                 its tests run under flutter test.
@@ -37,7 +41,8 @@ packages/
                 server) — the *_core "no dart:io" law below doesn't apply
                 to it; it isn't a *_core package.
 app/            Flutter app (pkg name trellis): reader, library, intake,
-                feeds/river, player, study, models, transcribe. Drift schema
+                feeds/river, player, study, models, transcribe, echo (the
+                lifetime-totals/year-in-review screen). Drift schema
                 versioned with migration tests.
 docs/research/  The design panel's full output. Treat as provenance, not law.
 ```

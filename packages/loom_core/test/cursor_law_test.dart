@@ -100,4 +100,44 @@ void main() {
       expect(partial.projectAudioTime(pos), 0);
     });
   });
+
+  group('the study crown — read<->listen handoff round-trips', () {
+    // Phase 3's "Listen from here" / "Read from here" verbs are thin UI
+    // wiring over positionAtAudioTime/projectAudioTime, which already exist
+    // (this file proves them). The spec asks for a "position symmetry
+    // property... round-trips within one word" — that claim does not hold
+    // for THIS data model: Alignment is (segmentIdx, tStartMs, tEndMs), no
+    // word-level timing, so positionAtAudioTime always returns wordIdx: 0
+    // and projectAudioTime never reads wordIdx at all (see both bodies in
+    // spine.dart). The honest, provable claim is: round-trips within one
+    // SEGMENT — sentence-level is the alignment guarantee ADR-0002 already
+    // states. wordIdx survives the round trip unchanged only because
+    // projectAudioTime ignores it, not because it was honored.
+    for (final startMs in [0, 1999, 2000, 3200, 4999, 5000, 6499]) {
+      test(
+          'listen($startMs) -> read -> listen lands back on the same segment '
+          '(start time may move to the segment\'s own start — that IS the '
+          'projection, not drift)', () {
+        final firstStop = spine.positionAtAudioTime(startMs);
+        final backToAudio = spine.projectAudioTime(firstStop);
+        final secondStop = spine.positionAtAudioTime(backToAudio);
+        expect(secondStop.segmentIdx, firstStop.segmentIdx);
+      });
+    }
+
+    test('read -> listen -> read round-trips a reading Position\'s segment '
+        'exactly (wordIdx is preserved too, since the reader supplies it '
+        'and nothing on this path can overwrite it)', () {
+      const reading =
+          Position(segmentIdx: 1, wordIdx: 2, lastModality: Modality.read);
+      final audioMs = spine.projectAudioTime(reading);
+      final backToListen = spine.positionAtAudioTime(audioMs);
+      expect(backToListen.segmentIdx, reading.segmentIdx);
+      // The listen side is honestly wordIdx: 0 (see the group doc comment) —
+      // the READER is what re-supplies wordIdx 2 on the way back, not this
+      // projection. Assert what the pure function actually promises, not
+      // more.
+      expect(backToListen.wordIdx, 0);
+    });
+  });
 }

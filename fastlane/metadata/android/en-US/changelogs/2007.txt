@@ -1,0 +1,12 @@
+Trellis 1.3 closes the gap map: eight campaigns in one release.
+
+• Translate a work to Spanish on your device and hear it spoken, karaoke over the words
+• Reader typography settings, the Parafoveal display, follow-along scrolling
+• Hold a word for an offline dictionary definition; "Catch me up?" recaps when you return
+• Trellis Echo: a private year-in-review of what you actually read and built
+• River triage gestures, saved library views, per-feed rules, duplicate folding
+• Downloaded episodes can trim silence and even out volume, offline
+• Audiobooks: pick a folder, it becomes the book — gapless, chaptered, resumable
+• Player mercies: per-feed speed, skip intro/outro, Up Next queue
+
+Everything stays on your device: no accounts, no ads, no tracking. Every model download starts only when you ask for it.

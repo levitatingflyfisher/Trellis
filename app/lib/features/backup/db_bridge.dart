@@ -16,13 +16,15 @@ import '../../db/database.dart';
 /// are the opposite — they carry donor-scoped string ids and MERGE into one
 /// profile, because a migration lands beside a life already in progress.
 ///
-/// **Two riders keep the canonical 11 tables honest.** The schema grew
-/// `episodes` and `wordLedger` after the payload shape froze, and each is
-/// metadata OF a canonical row: river metadata rides on its work row under
-/// `episode` (an episode IS a spine work — see [Episodes]), and the word
-/// ledger rides on its profile row under `wordLedger` (the ledger is the
-/// user's own collection, ADR-0003 law 2). `Row.fromJson` ignores unknown
-/// keys, so the riders cost nothing on the way back in.
+/// **Three riders keep the canonical 11 tables honest.** The schema grew
+/// `episodes`, `wordLedger` and `captures` after the payload shape froze,
+/// and each is metadata OF a canonical row: river metadata rides on its
+/// work row under `episode` (an episode IS a spine work — see [Episodes]),
+/// the word ledger rides on its profile row under `wordLedger` (the ledger
+/// is the user's own collection, ADR-0003 law 2), and captures ride on
+/// their work row under `captures` — list-shaped like `wordLedger`, since a
+/// work can hold many (the study crown, Phase 2). `Row.fromJson` ignores
+/// unknown keys, so the riders cost nothing on the way back in.
 ///
 /// The `jobs` table never travels: checkpoints name files on THIS device.
 class DbBridge {
@@ -56,6 +58,15 @@ class DbBridge {
           .putIfAbsent(w.profileId, () => [])
           .add(Map<String, Object?>.from(w.toJson()));
     }
+    final captures = await (db.select(db.captures)
+          ..orderBy([(c) => OrderingTerm.asc(c.id)]))
+        .get();
+    final capturesByWork = <int, List<Map<String, Object?>>>{};
+    for (final c in captures) {
+      capturesByWork
+          .putIfAbsent(c.workId, () => [])
+          .add(Map<String, Object?>.from(c.toJson()));
+    }
 
     final profiles = await (db.select(db.profiles)
           ..orderBy([(p) => OrderingTerm.asc(p.id)]))
@@ -79,6 +90,8 @@ class DbBridge {
             ...w.toJson(),
             if (episodeByWork.containsKey(w.id))
               'episode': episodeByWork[w.id],
+            if (capturesByWork.containsKey(w.id))
+              'captures': capturesByWork[w.id],
           }
       ],
       'segments': rows(await (db.select(db.segments)
@@ -143,6 +156,7 @@ class DbBridge {
         db.cards,
         db.courses,
         db.wordLedger,
+        db.captures,
         db.playerPositions,
         db.episodes,
         db.positions,
@@ -181,6 +195,17 @@ class DbBridge {
             if (entry is Map) {
               await db.into(db.wordLedger).insert(
                   WordLedgerRow.fromJson(Map<String, dynamic>.from(entry)));
+            }
+          }
+        }
+      }
+      for (final row in t['works']!) {
+        final captures = row['captures'];
+        if (captures is List) {
+          for (final entry in captures) {
+            if (entry is Map) {
+              await db.into(db.captures).insert(
+                  CaptureRow.fromJson(Map<String, dynamic>.from(entry)));
             }
           }
         }

@@ -94,9 +94,12 @@ void main() {
     await openReader(tester);
     await toScroll(tester);
 
-    // Long-press → the ledger, cleaned, with the calm snackbar.
+    // Long-press → the definition sheet (Campaign 4 Phase 3); its own
+    // keep button reaches the ledger, cleaned, with the calm snackbar.
     await tester.longPress(find.byKey(const Key('drop-cap')));
-    await tester.pump();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('definition-sheet-keep')));
+    await tester.pumpAndSettle();
     final rows = await db.ledgerDao.wordsOf(profileId);
     expect(rows.single.word, 'One');
     expect(rows.single.sourceWorkId, workId);

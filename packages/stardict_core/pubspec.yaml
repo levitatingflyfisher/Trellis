@@ -1,0 +1,13 @@
+name: stardict_core
+description: >
+  StarDict dictionary format (.ifo/.idx/.dict or .dict.dz) — parsing and
+  binary-search lookup, including real random-access dictzip chunk
+  inflate. Pure Dart, no dart:io.
+version: 0.1.0
+publish_to: none
+environment:
+  sdk: ^3.5.0
+dependencies:
+  archive: ^4.0.7
+dev_dependencies:
+  test: ^1.25.0

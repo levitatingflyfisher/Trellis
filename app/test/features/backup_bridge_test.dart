@@ -157,6 +157,11 @@ Future<void> seedRichly(AppDatabase db) async {
       lang: 'en',
       sourceWorkId: walden,
       nowMs: 555);
+
+  // The study crown, Phase 2: a capture rides on its work row, list-shaped
+  // like wordLedger-on-profile (a work can hold many).
+  await db.capturesDao.capture(
+      profileId: ada, workId: episodeWork, positionMs: 4200, nowMs: 777);
 }
 
 void main() {
@@ -251,6 +256,10 @@ void main() {
       expect((await db2.studyDao.revlogOf(courseRow.id)).single.tsMs, 999);
       expect(
           (await db2.ledgerDao.wordsOf(ada.id)).single.word, 'woods');
+      expect((await db2.capturesDao.capturesOf(episodeWork.id)).single.positionMs,
+          4200,
+          reason: 'a capture is a rider on its work row too — it must '
+              'travel with the device, not just export/export-equal empty');
     });
   });
 

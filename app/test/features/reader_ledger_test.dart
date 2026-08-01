@@ -12,11 +12,14 @@ import 'package:trellis/main.dart';
 import '../support/fake_player.dart';
 
 /// The word ledger's UI half (the schema half is ledger_db_test): a
-/// long-press on any word — scroll mode, RSVP, karaoke — sets it aside via
-/// the ONE dao path, cleaned of surrounding punctuation; the ledger screen
-/// off the reader app bar lists and removes. The collection is the user's
-/// hand (ADR-0003 law 2), so every add is calm and idempotent — no counter,
-/// no streak, just a snackbar naming what was kept.
+/// long-press on any word sets it aside via the ONE dao path, cleaned of
+/// surrounding punctuation; the ledger screen off the reader app bar
+/// lists and removes. The collection is the user's hand (ADR-0003 law 2),
+/// so every add is calm and idempotent — no counter, no streak, just a
+/// snackbar naming what was kept. Since Campaign 4 Phase 3, scroll mode
+/// and RSVP route that long-press through the definition sheet first
+/// (dictionary_sheet_test.dart covers the sheet itself); karaoke's own
+/// long-press is untouched, still direct.
 void main() {
   late AppDatabase db;
   setUp(() => db = AppDatabase.forTesting(NativeDatabase.memory()));
@@ -47,8 +50,11 @@ void main() {
   }
 
   testWidgets(
-      'long-press on a scroll-mode word keeps it, cleaned, with a calm '
-      'snackbar; a second long-press stays idempotent', (tester) async {
+      'long-press on a scroll-mode word opens the definition sheet; its '
+      'own keep button adds the word, cleaned, with a calm snackbar; '
+      'doing that twice stays idempotent (Campaign 4 Phase 3: the sheet '
+      'absorbs the keep gesture rather than stacking a second long-press)',
+      (tester) async {
     final (profileId, workId) = await seed('One two three four five.');
     await openReader(tester);
 
@@ -56,7 +62,10 @@ void main() {
     await tester.pumpAndSettle();
 
     await tester.longPress(find.text('five.'));
-    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('dictionary-sheet')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('definition-sheet-keep')));
+    await tester.pumpAndSettle();
 
     expect(find.text('“five” is in your word ledger.'), findsOneWidget);
     var rows = await db.ledgerDao.wordsOf(profileId);
@@ -65,13 +74,16 @@ void main() {
     expect(rows.single.sourceWorkId, workId);
 
     await tester.longPress(find.text('five.'));
-    await tester.pump();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('definition-sheet-keep')));
+    await tester.pumpAndSettle();
     rows = await db.ledgerDao.wordsOf(profileId);
     expect(rows, hasLength(1), reason: 'the dao dedupe is the only path');
   });
 
-  testWidgets('long-press on the RSVP word keeps the word under the cursor',
-      (tester) async {
+  testWidgets(
+      'long-press on the RSVP word opens the sheet; its keep button sets '
+      'the word under the cursor', (tester) async {
     final (profileId, _) = await seed('One two three four five.');
     await openReader(tester);
 
@@ -81,7 +93,10 @@ void main() {
         .tapAt(Offset(rect.left + rect.width * 5 / 6, rect.center.dy));
     await tester.pump();
     await tester.longPress(find.byKey(const Key('reader-tapzone')));
-    await tester.pump();
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('dictionary-sheet')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('definition-sheet-keep')));
+    await tester.pumpAndSettle();
 
     final rows = await db.ledgerDao.wordsOf(profileId);
     expect(rows.single.word, 'two');

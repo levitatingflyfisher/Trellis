@@ -78,11 +78,17 @@ void main() {
 
       // Build a real v5 file from drift's own DDL: create at the current
       // version, drop exactly what v6 added, stamp user_version 5. v6 is
-      // purely additive, so what remains IS the v5 schema. Schema v7
-      // (ADR-0006's speak-voice preference) arrived AFTER this test was
-      // written, on a table v5 already had — its column is stripped here
-      // too, or `profiles` would silently carry a v7 column into a
-      // database claiming to be v5.
+      // purely additive, so what remains IS the v5 schema. Every column/
+      // table a LATER version added onto a table v5 already had must be
+      // stripped here too, or a database claiming to be v5 would silently
+      // carry columns from the future: v7 (ADR-0006's speak-voice
+      // preference), v8 (RFC 5005's `Feeds.nextPageUrl`), v9 (the study
+      // crown's `Profiles.scheduler`), v12 (Campaign 1: per-podcast
+      // settings, the queue, audio eviction), and v13 (ADR-0008's Babel
+      // translation toggle) all land on tables v5 already had. v10/v11
+      // (`captures`/`daily_review_cards`) are new TABLES, not columns —
+      // `createTable` is idempotent, so leaving them out here is safe,
+      // unlike an omitted column.
       final seed = AppDatabase.forTesting(NativeDatabase(file));
       await seed.profilesDao.create('Ada');
       await seed.spineDao.insertWork(
@@ -97,6 +103,26 @@ void main() {
       v5.execute('''
         DROP TABLE household_pin;
         ALTER TABLE profiles DROP COLUMN prefer_system_voice;
+        ALTER TABLE profiles DROP COLUMN scheduler;
+        ALTER TABLE profiles DROP COLUMN reader_prefs_json;
+        DROP TABLE reading_days;
+        ALTER TABLE feeds DROP COLUMN next_page_url;
+        ALTER TABLE profiles DROP COLUMN keep_finished_in_queue;
+        ALTER TABLE feeds DROP COLUMN speed_override;
+        ALTER TABLE feeds DROP COLUMN skip_intro_seconds;
+        ALTER TABLE feeds DROP COLUMN skip_outro_seconds;
+        ALTER TABLE feeds DROP COLUMN keep_latest_audio;
+        ALTER TABLE episodes DROP COLUMN archived_at_ms;
+        DROP TABLE queue;
+        ALTER TABLE works DROP COLUMN show_translation_layer;
+        ALTER TABLE feeds DROP COLUMN rules_json;
+        ALTER TABLE episodes DROP COLUMN dedup_reason;
+        ALTER TABLE episodes DROP COLUMN duplicate_of_work_id;
+        ALTER TABLE feeds DROP COLUMN dsp_enabled;
+        ALTER TABLE episodes DROP COLUMN dsp_original_duration_ms;
+        ALTER TABLE episodes DROP COLUMN dsp_processed_duration_ms;
+        ALTER TABLE profiles DROP COLUMN dsp_global_default;
+        ALTER TABLE player_positions DROP COLUMN file_idx;
         PRAGMA user_version = 5;
       ''');
       v5.dispose();
@@ -198,6 +224,8 @@ void main() {
         // A collected word.
         await db.ledgerDao
             .add(profileId: profileId, word: 'word$profileId', nowMs: 3);
+        // Campaign 4 Phase 5: a recorded reading day.
+        await db.profilesDao.recordReadingDay(profileId, 100);
       }
 
       await seedReader(ada);
@@ -213,6 +241,13 @@ void main() {
       expect(await db.ledgerDao.wordsOf(ada), isEmpty);
       expect(await db.spineDao.allPositions(), hasLength(1));
       expect(await db.feedsDao.allPlayerPositions(), hasLength(1));
+      expect(
+          await (db.select(db.readingDays)
+                ..where((t) => t.profileId.equals(ada)))
+              .get(),
+          isEmpty,
+          reason: 'Campaign 4 Phase 5: no orphan ReadingDays rows left '
+              'behind for a deleted profile');
 
       // Grace is untouched.
       expect(await db.spineDao.worksOf(grace), hasLength(2));
@@ -221,6 +256,11 @@ void main() {
       expect(await db.studyDao.loadCardStates(graceCourse.id), hasLength(1));
       expect(await db.studyDao.revlogOf(graceCourse.id), hasLength(1));
       expect((await db.ledgerDao.wordsOf(grace)).single.word, 'word2');
+      expect(
+          await (db.select(db.readingDays)
+                ..where((t) => t.profileId.equals(grace)))
+              .get(),
+          hasLength(1));
     });
   });
 
@@ -302,6 +342,12 @@ void main() {
       await db.ledgerDao.add(profileId: ada, word: 'saudade', nowMs: 1);
       await db.ledgerDao.add(profileId: ada, word: 'hygge', nowMs: 2);
 
+      // Campaign 4 Phase 5: three distinct reading days, one replayed.
+      await db.profilesDao.recordReadingDay(ada, 100);
+      await db.profilesDao.recordReadingDay(ada, 101);
+      await db.profilesDao.recordReadingDay(ada, 101);
+      await db.profilesDao.recordReadingDay(ada, 103);
+
       // Grace's data must not leak into Ada's card.
       await db.spineDao.insertWork(
           profileId: grace,
@@ -310,6 +356,7 @@ void main() {
           persistence: 'work',
           firstSeenEpochDay: 100);
       await db.ledgerDao.add(profileId: grace, word: 'sisu', nowMs: 3);
+      await db.profilesDao.recordReadingDay(grace, 100);
 
       final built = await db.householdDao.lifetimeBuiltOf(ada);
       expect(built.worksKept, 2);
@@ -319,6 +366,8 @@ void main() {
       expect(built.listeningMs, 120000 + 180000,
           reason: 'max per work (w2: aligned 180000 beats raw 30000), '
               'summed across works');
+      expect(built.activeReadingDays, 3,
+          reason: 'a replayed day (101 twice) still counts once');
       expect(built.currentCourse, isNotNull);
       expect(built.currentCourse!.title, 'A Ladder of Two',
           reason: 'the latest import is the current course');
@@ -335,6 +384,7 @@ void main() {
       expect(built.cardsMastered, 0);
       expect(built.wordsCollected, 0);
       expect(built.listeningMs, 0);
+      expect(built.activeReadingDays, 0);
       expect(built.currentCourse, isNull);
     });
   });

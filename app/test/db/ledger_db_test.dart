@@ -23,44 +23,68 @@ void main() {
 
   Future<int> seedWork(int profileId, {String title = 'Fado Lyrics'}) =>
       db.spineDao.insertWork(
-          profileId: profileId,
-          kind: 'note',
-          title: title,
-          persistence: 'work',
-          firstSeenEpochDay: 100,
-          lang: 'pt');
+        profileId: profileId,
+        kind: 'note',
+        title: title,
+        persistence: 'work',
+        firstSeenEpochDay: 100,
+        lang: 'pt',
+      );
 
   group('LedgerDao', () {
     test('add, list newest-first, remove — per profile', () async {
       final ada = await db.profilesDao.create('Ada');
       final grace = await db.profilesDao.create('Grace');
 
-      final id1 = await db.ledgerDao
-          .add(profileId: ada, word: 'saudade', lang: 'pt', nowMs: 1000);
-      await db.ledgerDao
-          .add(profileId: ada, word: 'hygge', lang: 'da', nowMs: 2000);
+      final id1 = await db.ledgerDao.add(
+        profileId: ada,
+        word: 'saudade',
+        lang: 'pt',
+        nowMs: 1000,
+      );
+      await db.ledgerDao.add(
+        profileId: ada,
+        word: 'hygge',
+        lang: 'da',
+        nowMs: 2000,
+      );
       await db.ledgerDao.add(profileId: grace, word: 'sisu', nowMs: 3000);
 
       final adas = await db.ledgerDao.wordsOf(ada);
-      expect([for (final w in adas) w.word], ['hygge', 'saudade'],
-          reason: 'newest first');
+      expect(
+        [for (final w in adas) w.word],
+        ['hygge', 'saudade'],
+        reason: 'newest first',
+      );
       expect(adas.last.lang, 'pt');
-      expect([for (final w in await db.ledgerDao.wordsOf(grace)) w.word],
-          ['sisu'], reason: 'ledgers are per profile');
+      expect(
+        [for (final w in await db.ledgerDao.wordsOf(grace)) w.word],
+        ['sisu'],
+        reason: 'ledgers are per profile',
+      );
 
       await db.ledgerDao.remove(id1);
-      expect([for (final w in await db.ledgerDao.wordsOf(ada)) w.word],
-          ['hygge']);
+      expect(
+        [for (final w in await db.ledgerDao.wordsOf(ada)) w.word],
+        ['hygge'],
+      );
     });
 
     test('dedupe is case-insensitive and idempotent, per profile', () async {
       final ada = await db.profilesDao.create('Ada');
       final grace = await db.profilesDao.create('Grace');
 
-      final first = await db.ledgerDao
-          .add(profileId: ada, word: 'Saudade', lang: 'pt', nowMs: 1000);
-      final again = await db.ledgerDao
-          .add(profileId: ada, word: 'saudade', nowMs: 2000);
+      final first = await db.ledgerDao.add(
+        profileId: ada,
+        word: 'Saudade',
+        lang: 'pt',
+        nowMs: 1000,
+      );
+      final again = await db.ledgerDao.add(
+        profileId: ada,
+        word: 'saudade',
+        nowMs: 2000,
+      );
 
       expect(again, first, reason: 'the existing row is the answer');
       final rows = await db.ledgerDao.wordsOf(ada);
@@ -74,23 +98,30 @@ void main() {
       expect(await db.ledgerDao.wordsOf(ada), hasLength(1));
     });
 
-    test('deleting the source work keeps the word, provenance goes null',
-        () async {
-      final ada = await db.profilesDao.create('Ada');
-      final workId = await seedWork(ada);
-      await db.ledgerDao.add(
+    test(
+      'deleting the source work keeps the word, provenance goes null',
+      () async {
+        final ada = await db.profilesDao.create('Ada');
+        final workId = await seedWork(ada);
+        await db.ledgerDao.add(
           profileId: ada,
           word: 'saudade',
           lang: 'pt',
           sourceWorkId: workId,
-          nowMs: 1000);
+          nowMs: 1000,
+        );
 
-      await db.spineDao.deleteWork(workId);
+        await db.spineDao.deleteWork(workId);
 
-      final row = (await db.ledgerDao.wordsOf(ada)).single;
-      expect(row.word, 'saudade', reason: 'the collection survives its source');
-      expect(row.sourceWorkId, isNull, reason: 'SET NULL, never CASCADE');
-    });
+        final row = (await db.ledgerDao.wordsOf(ada)).single;
+        expect(
+          row.word,
+          'saudade',
+          reason: 'the collection survives its source',
+        );
+        expect(row.sourceWorkId, isNull, reason: 'SET NULL, never CASCADE');
+      },
+    );
   });
 
   group('schema migration v4 → v5', () {
@@ -103,21 +134,45 @@ void main() {
       // version, drop exactly what v5 added, stamp user_version 4. v5 is
       // purely additive, so what remains IS the v4 schema. `createTable`
       // migrations are idempotent so later tables surviving from the live
-      // schema don't matter — but schema v7's `addColumn` is NOT, so that
-      // column has to go too (see household_db_test.dart's fuller note).
+      // schema don't matter for correctness — but every `addColumn` since
+      // (v7, v8, v9, v12, v13) is NOT, so those columns have to go too
+      // (see household_db_test.dart's fuller note); `queue` is dropped
+      // anyway for an honest v4 snapshot even though its own re-creation
+      // would tolerate surviving.
       final seed = AppDatabase.forTesting(NativeDatabase(file));
       await seed.profilesDao.create('Ada');
       await seed.spineDao.insertWork(
-          profileId: 1,
-          kind: 'book',
-          title: 'Kept Book',
-          persistence: 'work',
-          firstSeenEpochDay: 100);
+        profileId: 1,
+        kind: 'book',
+        title: 'Kept Book',
+        persistence: 'work',
+        firstSeenEpochDay: 100,
+      );
       await seed.close();
       final v4 = raw.sqlite3.open(file.path);
       v4.execute('''
         DROP TABLE word_ledger;
         ALTER TABLE profiles DROP COLUMN prefer_system_voice;
+        ALTER TABLE profiles DROP COLUMN scheduler;
+        ALTER TABLE profiles DROP COLUMN reader_prefs_json;
+        DROP TABLE reading_days;
+        ALTER TABLE feeds DROP COLUMN next_page_url;
+        ALTER TABLE profiles DROP COLUMN keep_finished_in_queue;
+        ALTER TABLE feeds DROP COLUMN speed_override;
+        ALTER TABLE feeds DROP COLUMN skip_intro_seconds;
+        ALTER TABLE feeds DROP COLUMN skip_outro_seconds;
+        ALTER TABLE feeds DROP COLUMN keep_latest_audio;
+        ALTER TABLE episodes DROP COLUMN archived_at_ms;
+        DROP TABLE queue;
+        ALTER TABLE works DROP COLUMN show_translation_layer;
+        ALTER TABLE feeds DROP COLUMN rules_json;
+        ALTER TABLE episodes DROP COLUMN dedup_reason;
+        ALTER TABLE episodes DROP COLUMN duplicate_of_work_id;
+        ALTER TABLE feeds DROP COLUMN dsp_enabled;
+        ALTER TABLE episodes DROP COLUMN dsp_original_duration_ms;
+        ALTER TABLE episodes DROP COLUMN dsp_processed_duration_ms;
+        ALTER TABLE profiles DROP COLUMN dsp_global_default;
+        ALTER TABLE player_positions DROP COLUMN file_idx;
         PRAGMA user_version = 4;
       ''');
       v4.dispose();
@@ -132,7 +187,11 @@ void main() {
       // …and the new table works, SET NULL included — the migration's DDL
       // must carry the same referential action as a fresh create.
       await migrated.ledgerDao.add(
-          profileId: 1, word: 'kept', sourceWorkId: work.id, nowMs: 1);
+        profileId: 1,
+        word: 'kept',
+        sourceWorkId: work.id,
+        nowMs: 1,
+      );
       await migrated.spineDao.deleteWork(work.id);
       final row = (await migrated.ledgerDao.wordsOf(1)).single;
       expect(row.word, 'kept');

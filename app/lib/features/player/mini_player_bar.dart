@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'player_controller.dart';
+import 'sleep_timer_sheet.dart';
 
 /// The persistent playback bar: play/pause, ±15/+30, speed cycling
 /// (1.0–2.0×), a seek slider — and, when the playing work has synced text
@@ -13,8 +14,36 @@ class MiniPlayerBar extends StatelessWidget {
   /// only shows when the current work HAS alignments — the promise is never
   /// dangled before it can be kept.
   final VoidCallback? onOpenSyncedText;
+
+  /// The study crown, Phase 2: saves a capture at the current playback
+  /// position. Unlike the karaoke door, this works with or without
+  /// alignments (a capture is still worth taking before a transcript
+  /// exists — see [PlayerController.capture]'s backfill note), so it is
+  /// gated only on the callback being wired at all.
+  final VoidCallback? onCapture;
+
+  /// Opens the captures list for the current work; the shell wires it.
+  final VoidCallback? onOpenCaptures;
+
+  /// Opens the Up Next queue view; the shell wires it. Shown whenever the
+  /// bar itself is (something is always playing when the bar shows), so no
+  /// gate beyond that.
+  final VoidCallback? onOpenQueue;
+
+  /// Opens the chapters drawer (Campaign 7, ADR-0013); the shell wires it.
+  /// Shown only when the current work IS an audiobook — the same
+  /// promise-never-dangled law [onOpenSyncedText] follows for
+  /// [PlayerController.hasAlignments].
+  final VoidCallback? onOpenChapters;
+
   const MiniPlayerBar(
-      {super.key, required this.controller, this.onOpenSyncedText});
+      {super.key,
+      required this.controller,
+      this.onOpenSyncedText,
+      this.onCapture,
+      this.onOpenCaptures,
+      this.onOpenQueue,
+      this.onOpenChapters});
 
   String _speedLabel(double s) =>
       '${s.toStringAsFixed(2).replaceFirst(RegExp(r'0$'), '')}×';
@@ -56,6 +85,45 @@ class MiniPlayerBar extends StatelessWidget {
                           icon: const Icon(Icons.subtitles_outlined),
                           onPressed: onOpenSyncedText,
                         ),
+                      if (onCapture != null)
+                        IconButton(
+                          key: const Key('player-capture'),
+                          tooltip: 'Capture this moment',
+                          icon: const Icon(Icons.bookmark_add_outlined),
+                          onPressed: onCapture,
+                        ),
+                      if (onOpenCaptures != null)
+                        IconButton(
+                          key: const Key('open-captures'),
+                          tooltip: 'Captures',
+                          icon: const Icon(Icons.bookmark_outlined),
+                          onPressed: onOpenCaptures,
+                        ),
+                      if (onOpenQueue != null)
+                        IconButton(
+                          key: const Key('open-queue'),
+                          tooltip: 'Up Next',
+                          icon: const Icon(Icons.queue_music_outlined),
+                          onPressed: onOpenQueue,
+                        ),
+                      if (controller.isAudiobook && onOpenChapters != null)
+                        IconButton(
+                          key: const Key('open-chapters'),
+                          tooltip: 'Chapters',
+                          icon: const Icon(Icons.list_alt_outlined),
+                          onPressed: onOpenChapters,
+                        ),
+                      IconButton(
+                        key: const Key('open-sleep-timer'),
+                        tooltip: 'Sleep timer',
+                        icon: Icon(controller.sleepTimerMode == null
+                            ? Icons.bedtime_outlined
+                            : Icons.bedtime),
+                        onPressed: () => showModalBottomSheet<void>(
+                          context: context,
+                          builder: (_) => SleepTimerSheet(controller: controller),
+                        ),
+                      ),
                       IconButton(
                         key: const Key('player-close'),
                         tooltip: 'Stop',

@@ -67,6 +67,14 @@ class StudySessionScreen extends StatefulWidget {
 class _StudySessionScreenState extends State<StudySessionScreen> {
   late final int _today;
   Map<String, study.CardState>? _cards;
+
+  /// Non-null only when the profile's scheduler setting (read once, in
+  /// [_load]) is 'fsrs' — its presence IS the dispatch flag [_buildQueue]
+  /// and [_grade] branch on, so a Classic profile's code path is
+  /// unreachable code-wise, not just untaken at runtime (the byte-for-byte
+  /// guarantee: nothing about grading a Classic profile changed by this
+  /// campaign's FSRS work).
+  Map<String, study.FsrsCardState>? _fsrsCards;
   List<_Step>? _steps;
   int _declaredItems = 0;
   int _declaredConcepts = 0;
@@ -111,6 +119,16 @@ class _StudySessionScreenState extends State<StudySessionScreen> {
     final row = await (widget.db.select(widget.db.courses)
           ..where((c) => c.id.equals(widget.courseRowId)))
         .getSingleOrNull();
+    // The study crown: read the OWNING profile's scheduler choice off the
+    // course row itself — no new constructor parameter needed, and every
+    // existing call site (CourseMapScreen, every test that predates FSRS)
+    // keeps compiling and behaving exactly as it did.
+    final scheduler = row == null
+        ? 'classic'
+        : await widget.db.profilesDao.scheduler(row.profileId);
+    final fsrsCards = scheduler == 'fsrs'
+        ? await widget.db.studyDao.loadFsrsCardStates(widget.courseRowId, _today)
+        : null;
     var discourse = <String, List<brain.DiscourseItem>>{};
     brain.Provenance? provenance;
     if (row != null) {
@@ -131,10 +149,11 @@ class _StudySessionScreenState extends State<StudySessionScreen> {
       }
     }
     final selection = await _brainStore.selection();
-    final steps = _buildQueue(cards, _today, discourse);
+    final steps = _buildQueue(cards, fsrsCards, _today, discourse);
     if (!mounted) return;
     setState(() {
       _cards = cards;
+      _fsrsCards = fsrsCards;
       _provenance = provenance;
       _brainEnabled = selection.brainEnabled;
       _steps = steps;
@@ -152,18 +171,34 @@ class _StudySessionScreenState extends State<StudySessionScreen> {
     super.dispose();
   }
 
-  List<_Step> _buildQueue(Map<String, study.CardState> cards, int today,
+  List<_Step> _buildQueue(
+      Map<String, study.CardState> cards,
+      Map<String, study.FsrsCardState>? fsrsCards,
+      int today,
       Map<String, List<brain.DiscourseItem>> discourse) {
     final steps = <_Step>[];
     for (final node in widget.course.nodes) {
       // Lock only first exposure: a node already started stays available, so
       // a lapse on a prerequisite never buries reviews the learner owns.
+      // Unlock/mastery gating stays Classic-CardState-based regardless of
+      // the active scheduler — study_core's prereq DAG (nodeUnlocked) is
+      // CardState-typed and untouched by this campaign (see ADR-0009); a
+      // course studied under FSRS still progresses through the same
+      // curriculum gate a Classic profile would.
       final started = node.items.any((it) => cards[it.id] != null);
       if (!started &&
           !study.nodeUnlocked(node, widget.course, cards, today)) {
         continue;
       }
+      // Due-ness, in contrast, is a scheduling question and DOES follow the
+      // active scheduler: [fsrsCards] is non-null only for an FSRS profile
+      // (see [_load]), and its own due dates are what actually govern
+      // whether an item resurfaces once FSRS is driving it.
       final due = node.items.where((it) {
+        if (fsrsCards != null) {
+          final f = fsrsCards[it.id];
+          return f == null || f.isDue(today);
+        }
         final c = cards[it.id];
         return c == null || c.isDue(today);
       }).toList();
@@ -285,23 +320,58 @@ class _StudySessionScreenState extends State<StudySessionScreen> {
       _ItemStep(:final node) => node,
       _ => null,
     };
-    final card = _cards![item.id] ??
-        study.CardState.initial(item.id, widget.course.srsDefaults, _today);
-    final next = study.scheduleSm2(card, g, _today,
-        firstIntervalDays: widget.course.srsDefaults.firstIntervalDays);
-    // The grade appends to the revlog and upserts the card atomically —
-    // awaited, so what the screen shows is what the database holds.
-    await widget.db.studyDao.recordGrade(
-        courseRowId: widget.courseRowId,
-        before: card,
-        after: next,
-        grade: g,
-        tsMs: DateTime.now().millisecondsSinceEpoch);
-    _cards![item.id] = next;
-    // A lapse ("Again") sets the card due today — relearn it in THIS
-    // session by re-queuing it at the end, with the failed attempt cleared
-    // so the learner recalls, not re-reads.
-    if (node != null && next.isDue(_today)) {
+    final tsMs = DateTime.now().millisecondsSinceEpoch;
+    final bool dueAgainToday;
+
+    if (_fsrsCards != null) {
+      // FSRS dispatch. The "before" state is lazily seeded from classic
+      // history on this card's first FSRS touch (ADR-0009's lazy-seeding
+      // law) — never a bulk seed at switch time, and never re-seeded once
+      // a real FSRS row exists.
+      final classicBefore = _cards![item.id] ??
+          study.CardState.initial(item.id, widget.course.srsDefaults, _today);
+      final fsrsBefore = await widget.db.studyDao.fsrsStateToGradeFrom(
+          courseRowId: widget.courseRowId,
+          itemId: item.id,
+          classicBefore: classicBefore,
+          todayEpochDay: _today);
+      final fsrsNext = study.scheduleFsrs(fsrsBefore, g, _today);
+      await widget.db.studyDao.recordGradeFsrs(
+          courseRowId: widget.courseRowId,
+          before: fsrsBefore,
+          after: fsrsNext,
+          grade: g,
+          tsMs: tsMs);
+      _fsrsCards![item.id] = fsrsNext;
+      dueAgainToday = fsrsNext.isDue(_today);
+    } else {
+      // Classic dispatch — BYTE-FOR-BYTE the code this campaign found here:
+      // scheduleSm2, recordGrade, nothing added, nothing reordered.
+      final card = _cards![item.id] ??
+          study.CardState.initial(item.id, widget.course.srsDefaults, _today);
+      final next = study.scheduleSm2(card, g, _today,
+          firstIntervalDays: widget.course.srsDefaults.firstIntervalDays);
+      // The grade appends to the revlog and upserts the card atomically —
+      // awaited, so what the screen shows is what the database holds.
+      await widget.db.studyDao.recordGrade(
+          courseRowId: widget.courseRowId,
+          before: card,
+          after: next,
+          grade: g,
+          tsMs: tsMs);
+      _cards![item.id] = next;
+      dueAgainToday = next.isDue(_today);
+    }
+
+    // A lapse due again TODAY relearns in THIS session by re-queuing it at
+    // the end, with the failed attempt cleared so the learner recalls, not
+    // re-reads. Under Classic, "Again" always lands here (SM-2 resets to
+    // due-today). Under FSRS this rarely fires: FSRS schedules at least
+    // one day out even for a lapse (day-granularity, no same-day
+    // relearning steps — see fsrs_scheduler.dart's doc comment) — a real,
+    // intentional behavioral difference between the two schedulers, not a
+    // gap in this check.
+    if (node != null && dueAgainToday) {
       _steps!.add(_ItemStep(node, item));
       _clearResponses(item);
     }

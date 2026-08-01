@@ -154,6 +154,28 @@ void main() {
         containsAll(['Ola mundo.', 'Tudo bem?']));
   });
 
+  testWidgets(
+      'transcribing (which downloads audio) clears a stale archived flag '
+      '(P4 "archive, never forget")', (tester) async {
+    final seeded = await seedEpisode();
+    final store = FakeModelStore(downloadedIds: {'whisper-tiny-ggml'});
+    final services = testServices(tmp, modelStore: store);
+    // The audio was evicted earlier (keepLatestAudio) — no file on disk,
+    // and the row remembers it.
+    await db.feedsDao.setArchived(seeded.workId, 12345);
+
+    await openRiver(tester, services);
+    await chooseTranscribe(tester, seeded.workId);
+    // Only the audio is missing (the model is already local), but that's
+    // still a download — the consent chokepoint still fires.
+    expect(find.byKey(const Key('consent-dialog')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('consent-accept')));
+    await tester.pumpAndSettle();
+
+    expect((await db.feedsDao.episodeOf(seeded.workId))!.archivedAtMs, isNull,
+        reason: 'the audio is back on disk — the row should say so');
+  });
+
   testWidgets('transcribe + translate writes an English mt layer over the '
       'same segments', (tester) async {
     final seeded = await seedEpisode();

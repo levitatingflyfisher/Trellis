@@ -21,7 +21,17 @@ there is no espeak-ng-shaped second license to carry.
   research verdict, not assumed from the repo name)
 - Sample rate: 44,100 Hz · languages the MODEL covers: en/ko/es/pt/fr (this
   entry claims only `en` — one voice embedding, reviewed for one language;
-  see ADR-0007's language-honesty section)
+  see ADR-0007's language-honesty section). UPDATE (ADR-0008 "Babel"
+  Phase 4): the app-level gate (`supertonicSupportedLangs`) has since
+  been widened to `{'en', 'es'}` — checked directly against this repo's
+  own `voice_styles/` listing (`F1`-`F5`/`M1`-`M5`, speaker timbres with
+  no language suffix) and the official example's usage (`lang` and
+  `voice_style` are independent parameters): there is no separate
+  Spanish voice to register here: `supertonic-en-m1`'s SAME files are
+  what a Spanish utterance runs through. This is an architectural
+  finding, not a listening verification — the M1 embedding's Spanish
+  output has not been heard on real hardware; see ADR-0008's Phase 4
+  section for the full accounting.
 - Total size: 263,520,679 bytes (~263.5 MB) across seven files, all
   downloaded directly and hashed locally 2026-08-14:
 

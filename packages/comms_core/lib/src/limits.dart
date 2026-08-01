@@ -19,6 +19,10 @@ const int maxAudioFetchBytes = 300 * 1024 * 1024;
 /// Feed/OPML parse ceiling (donor MAX_XML_BYTES, M19 entity-expansion guard).
 const int maxXmlBytes = 8 * 1024 * 1024;
 
+/// The hard stop on an RFC 5005 archive walk (`walkFeedArchive`): a looping
+/// or hostile chain of rel="next"/rel="prev-archive" links must not spin.
+const int defaultArchivePageCap = 25;
+
 /// Collects [body] into one buffer, throwing [SizeCapException] the moment
 /// the running total exceeds [maxBytes] — the rest of the stream is never
 /// pulled. [onBytes] fires after each chunk that survived the cap check

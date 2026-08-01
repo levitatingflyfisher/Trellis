@@ -32,6 +32,8 @@ const Map<String, String> kModelLabels = {
   'silero-vad': 'Silence filter — voice activity detection',
   'qwen2.5-0.5b-instruct-litert': 'Qwen 2.5 0.5B — small local assistant',
   'supertonic-en-m1': 'Supertonic voice (English) — read aloud, offline',
+  'opus-mt-en-es': 'Spanish translation — English to Spanish, offline',
+  'wiktionary-en-en-stardict': 'Wiktionary dictionary (English) — word lookups, offline',
 };
 
 String modelLabel(String id) => kModelLabels[id] ?? id;
@@ -50,12 +52,13 @@ class ModelsScreen extends StatefulWidget {
   /// in-memory test dbs) skips the row gracefully.
   final File? databaseFile;
 
-  const ModelsScreen(
-      {super.key,
-      required this.store,
-      required this.registry,
-      this.services,
-      this.databaseFile});
+  const ModelsScreen({
+    super.key,
+    required this.store,
+    required this.registry,
+    this.services,
+    this.databaseFile,
+  });
 
   @override
   State<ModelsScreen> createState() => _ModelsScreenState();
@@ -78,18 +81,22 @@ class WebTierModelsNotice extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('This is the web tier',
-                style: Theme.of(context).textTheme.titleLarge),
+            Text(
+              'This is the web tier',
+              style: Theme.of(context).textTheme.titleLarge,
+            ),
             const SizedBox(height: 12),
             const Text(
-                'Reading, feeds, courses, study and backup all live here, '
-                'in your browser’s own storage — nothing leaves this '
-                'device unless you export it.'),
+              'Reading, feeds, courses, study and backup all live here, '
+              'in your browser’s own storage — nothing leaves this '
+              'device unless you export it.',
+            ),
             const SizedBox(height: 12),
             const Text(
-                'Downloading models and transcribing episodes ride the '
-                'installed app, where the files and processors are yours '
-                'to use. Your backup file carries everything across.'),
+              'Downloading models and transcribing episodes ride the '
+              'installed app, where the files and processors are yours '
+              'to use. Your backup file carries everything across.',
+            ),
           ],
         ),
       ),
@@ -166,9 +173,12 @@ class _ModelsScreenState extends State<ModelsScreen> {
   }
 
   Future<void> _download(ModelSpec spec) async {
-    final ok = await confirmDownload(context, items: [
-      DownloadItem('${modelLabel(spec.id)} (${formatBytes(spec.sizeBytes)})'),
-    ]);
+    final ok = await confirmDownload(
+      context,
+      items: [
+        DownloadItem('${modelLabel(spec.id)} (${formatBytes(spec.sizeBytes)})'),
+      ],
+    );
     if (!ok || !mounted) return;
 
     final row = _rows[spec.id]!;
@@ -202,17 +212,21 @@ class _ModelsScreenState extends State<ModelsScreen> {
       builder: (context) => AlertDialog(
         key: const Key('delete-model-dialog'),
         title: const Text('Remove this model?'),
-        content: Text('${modelLabel(spec.id)} frees '
-            '${formatBytes(spec.sizeBytes)}. You can download it again '
-            'anytime.'),
+        content: Text(
+          '${modelLabel(spec.id)} frees '
+          '${formatBytes(spec.sizeBytes)}. You can download it again '
+          'anytime.',
+        ),
         actions: [
           TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Keep')),
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Keep'),
+          ),
           FilledButton(
-              key: const Key('delete-model-confirm'),
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Remove')),
+            key: const Key('delete-model-confirm'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Remove'),
+          ),
         ],
       ),
     );
@@ -224,11 +238,12 @@ class _ModelsScreenState extends State<ModelsScreen> {
   /// One confirm, then the cache directory goes. Only ever pointed at the
   /// audio/PCM cache roots — the database is not offered here at all, which
   /// is how "deleting cache never touches works/segments" stays structural.
-  Future<void> _clearCache(
-      {required String what,
-      required Directory dir,
-      required int bytes,
-      required String reassurance}) async {
+  Future<void> _clearCache({
+    required String what,
+    required Directory dir,
+    required int bytes,
+    required String reassurance,
+  }) async {
     final ok = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
@@ -237,13 +252,15 @@ class _ModelsScreenState extends State<ModelsScreen> {
         content: Text('Frees ${formatBytes(bytes)}. $reassurance'),
         actions: [
           TextButton(
-              key: const Key('storage-clear-cancel'),
-              onPressed: () => Navigator.of(context).pop(false),
-              child: const Text('Keep')),
+            key: const Key('storage-clear-cancel'),
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Keep'),
+          ),
           FilledButton(
-              key: const Key('storage-clear-confirm'),
-              onPressed: () => Navigator.of(context).pop(true),
-              child: const Text('Delete')),
+            key: const Key('storage-clear-confirm'),
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Delete'),
+          ),
         ],
       ),
     );
@@ -254,8 +271,9 @@ class _ModelsScreenState extends State<ModelsScreen> {
 
   void _tell(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context)
-        .showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(
+      context,
+    ).showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -291,15 +309,20 @@ class _ModelsScreenState extends State<ModelsScreen> {
       ),
       Padding(
         padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-        child: Text('Everything this app keeps on disk.',
-            style: theme.textTheme.bodySmall),
+        child: Text(
+          'Everything this app keeps on disk.',
+          style: theme.textTheme.bodySmall,
+        ),
       ),
       for (final spec in onDisk)
         ListTile(
           key: Key('storage-model-${spec.id}'),
           dense: true,
-          title: Text(modelLabel(spec.id),
-              maxLines: 2, overflow: TextOverflow.ellipsis),
+          title: Text(
+            modelLabel(spec.id),
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+          ),
           trailing: Text(formatBytes(_modelDiskBytes(spec))),
         ),
       _cacheTile(
@@ -308,11 +331,12 @@ class _ModelsScreenState extends State<ModelsScreen> {
         title: 'Episode audio',
         bytes: _audioBytes,
         onClear: () => _clearCache(
-            what: 'cached episode audio',
-            dir: _audioDir,
-            bytes: _audioBytes,
-            reassurance:
-                'Episodes stay in your library and can be fetched again.'),
+          what: 'cached episode audio',
+          dir: _audioDir,
+          bytes: _audioBytes,
+          reassurance:
+              'Episodes stay in your library and can be fetched again.',
+        ),
       ),
       _cacheTile(
         rowKey: const Key('storage-pcm'),
@@ -320,11 +344,12 @@ class _ModelsScreenState extends State<ModelsScreen> {
         title: 'Decoded audio (PCM)',
         bytes: _pcmBytes,
         onClear: () => _clearCache(
-            what: 'leftover decoded audio',
-            dir: _pcmDir,
-            bytes: _pcmBytes,
-            reassurance:
-                'It is rebuilt automatically the next time it is needed.'),
+          what: 'leftover decoded audio',
+          dir: _pcmDir,
+          bytes: _pcmBytes,
+          reassurance:
+              'It is rebuilt automatically the next time it is needed.',
+        ),
       ),
       if (_dbBytes != null)
         Card(
@@ -335,14 +360,20 @@ class _ModelsScreenState extends State<ModelsScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Library database',
-                    style: Theme.of(context).textTheme.titleSmall),
+                Text(
+                  'Library database',
+                  style: Theme.of(context).textTheme.titleSmall,
+                ),
                 const SizedBox(height: 2),
-                Text('Your works, positions and courses — not a cache.',
-                    style: Theme.of(context).textTheme.bodySmall),
+                Text(
+                  'Your works, positions and courses — not a cache.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
                 const SizedBox(height: 8),
-                Text(formatBytes(_dbBytes!),
-                    style: Theme.of(context).textTheme.bodySmall),
+                Text(
+                  formatBytes(_dbBytes!),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
               ],
             ),
           ),
@@ -354,12 +385,13 @@ class _ModelsScreenState extends State<ModelsScreen> {
   /// Same card shape as the model tiles, so the storage rows survive large
   /// text scales the same way (button below the text, never crammed into a
   /// ListTile trailing).
-  Widget _cacheTile(
-      {required Key rowKey,
-      required Key clearKey,
-      required String title,
-      required int bytes,
-      required Future<void> Function() onClear}) {
+  Widget _cacheTile({
+    required Key rowKey,
+    required Key clearKey,
+    required String title,
+    required int bytes,
+    required Future<void> Function() onClear,
+  }) {
     final theme = Theme.of(context);
     return Card(
       key: rowKey,
@@ -399,8 +431,9 @@ class _ModelsScreenState extends State<ModelsScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           LinearProgressIndicator(
-              key: Key('model-progress-${spec.id}'),
-              value: p == null ? null : p.receivedBytes / p.totalBytes),
+            key: Key('model-progress-${spec.id}'),
+            value: p == null ? null : p.receivedBytes / p.totalBytes,
+          ),
           const SizedBox(height: 4),
           Text(
             '${formatBytes(p?.receivedBytes ?? 0)} of '
@@ -410,19 +443,26 @@ class _ModelsScreenState extends State<ModelsScreen> {
         ],
       );
     } else if (row.downloaded) {
-      stateLine = Text('On this device',
-          key: Key('model-state-${spec.id}'),
-          style: theme.textTheme.bodySmall
-              ?.copyWith(color: theme.colorScheme.primary));
+      stateLine = Text(
+        'On this device',
+        key: Key('model-state-${spec.id}'),
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: theme.colorScheme.primary,
+        ),
+      );
     } else if (row.partialBytes > 0) {
       stateLine = Text(
-          'Paused — ${formatBytes(row.partialBytes)} of '
-          '${formatBytes(spec.sizeBytes)} kept',
-          key: Key('model-state-${spec.id}'),
-          style: theme.textTheme.bodySmall);
+        'Paused — ${formatBytes(row.partialBytes)} of '
+        '${formatBytes(spec.sizeBytes)} kept',
+        key: Key('model-state-${spec.id}'),
+        style: theme.textTheme.bodySmall,
+      );
     } else {
-      stateLine = Text('Not downloaded',
-          key: Key('model-state-${spec.id}'), style: theme.textTheme.bodySmall);
+      stateLine = Text(
+        'Not downloaded',
+        key: Key('model-state-${spec.id}'),
+        style: theme.textTheme.bodySmall,
+      );
     }
 
     return Card(
@@ -460,8 +500,7 @@ class _ModelsScreenState extends State<ModelsScreen> {
                     TextButton(
                       key: Key('model-download-${spec.id}'),
                       onPressed: () => _download(spec),
-                      child: Text(
-                          row.partialBytes > 0 ? 'Resume' : 'Download'),
+                      child: Text(row.partialBytes > 0 ? 'Resume' : 'Download'),
                     ),
                 ],
               ),

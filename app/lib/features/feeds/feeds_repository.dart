@@ -12,7 +12,11 @@ import 'dart:async';
 import 'package:comms_core/comms_core.dart';
 
 import '../../db/database.dart';
+import '../../services/device_services.dart';
+import 'audio_eviction.dart';
+import 'feed_dedup.dart';
 import 'feed_ingest.dart';
+import 'feed_rules.dart';
 
 /// Proxy consent that never grants: the native app has no proxy path.
 class NativeDirectConsent implements ProxyConsent {
@@ -84,10 +88,21 @@ enum RefreshStatus {
 
 typedef RefreshOutcome = ({RefreshStatus status, int newItems});
 
+/// The calm line the feed detail screen shows after a feed's oldest known
+/// episode when the host publishes no RFC 5005 archive at all — the
+/// overwhelmingly common case. Shared with [FeedsRepository.fetchOlderEpisodes]'s
+/// own defensive fallback so the two never drift apart.
+const String noFeedArchiveNote =
+    "The publisher's feed offers only these episodes — older ones aren't "
+    'published in it.';
+
+typedef FetchOlderOutcome = ({int newItems, String message});
+
 class FeedsRepository {
   FeedsRepository(
       {required this.db,
       required HttpFetcher fetcher,
+      this.services,
       DateTime Function()? now})
       : nowFn = now ?? DateTime.now,
         _fetcher = fetcher,
@@ -96,6 +111,12 @@ class FeedsRepository {
 
   final AppDatabase db;
   final CommsClient client;
+
+  /// Where downloaded audio files live — needed only for the "archive,
+  /// never forget" eviction pass after a fresh refresh (P4). Null (the
+  /// default) simply skips eviction; every other refresh behavior is
+  /// unaffected, so tests that don't care about storage never need it.
+  final DeviceServices? services;
 
   /// The raw seam, kept for the one non-feed fetch this repository makes:
   /// the podcast-directory search (no conditional GET, no breaker).
@@ -206,13 +227,17 @@ class FeedsRepository {
     final state = applyFetchResult(
         FeedRefreshState(url: feedUrl), res,
         nowMs: nowMs, parsedTitle: parsed.title);
-    await _persistState(feedId, state);
+    await _persistState(feedId, state,
+        nextPageUrl: parsed.nextPageUrl, updateNextPageUrl: true);
+    // A brand-new feed has no rules yet (rulesJson is still the '[]'
+    // default) — nothing to decode, the ingest default applies.
     final added = await ingestFeedItems(
         db: db,
         profileId: profileId,
         feedId: feedId,
         items: parsed.items,
         nowMs: nowMs);
+    if (added > 0) await _runDedupPass(profileId);
     return SubscribeSuccess(
         feedId: feedId, title: state.title, newItems: added);
   }
@@ -240,13 +265,21 @@ class FeedsRepository {
       }
       state = applyFetchResult(state, res,
           nowMs: nowMs, parsedTitle: parsed.title);
-      await _persistState(feed.id, state);
+      await _persistState(feed.id, state,
+          nextPageUrl: parsed.nextPageUrl, updateNextPageUrl: true);
       final added = await ingestFeedItems(
           db: db,
           profileId: feed.profileId,
           feedId: feed.id,
           items: parsed.items,
-          nowMs: nowMs);
+          nowMs: nowMs,
+          rules: decodeFeedRules(feed.rulesJson));
+      if (added > 0) await _runDedupPass(feed.profileId);
+      final deviceServices = services;
+      if (deviceServices != null) {
+        await evictStaleAudio(
+            db: db, services: deviceServices, feedId: feed.id, nowMs: nowMs);
+      }
       return (status: RefreshStatus.fresh, newItems: added);
     }
 
@@ -274,10 +307,66 @@ class FeedsRepository {
     return added;
   }
 
-  Future<void> _persistState(int feedId, FeedRefreshState s) =>
+  Future<void> _persistState(int feedId, FeedRefreshState s,
+          {String? nextPageUrl, bool updateNextPageUrl = false}) =>
       db.feedsDao.updateRefreshState(feedId,
           title: s.title,
           etag: s.etag,
           lastModified: s.lastModified,
-          breakerJson: encodeBreakerState(s));
+          breakerJson: encodeBreakerState(s),
+          nextPageUrl: nextPageUrl,
+          updateNextPageUrl: updateNextPageUrl);
+
+  /// The explicit "Fetch older episodes" action (RFC 5005): walks the
+  /// archive from [feed]'s last-known [Feed.nextPageUrl] and ingests
+  /// whatever the walk turns up through the same dedup path a normal
+  /// refresh uses — a host repeating an already-stored episode across
+  /// archive pages adds nothing new.
+  ///
+  /// Reported plainly: how many episodes this call actually added, and one
+  /// sentence — the two exact happy-path sentences the feed detail screen
+  /// promises, or comms_core's own honest account of a walk that stopped
+  /// short (capped, a failed hop, an unsafe next link) rather than a false
+  /// claim of "nothing more to find".
+  Future<FetchOlderOutcome> fetchOlderEpisodes(Feed feed) async {
+    final startUrl = feed.nextPageUrl;
+    if (startUrl == null) {
+      return (newItems: 0, message: noFeedArchiveNote);
+    }
+    final result = await walkFeedArchive(client, startPageUrl: startUrl);
+    final added = await ingestFeedItems(
+        db: db,
+        profileId: feed.profileId,
+        feedId: feed.id,
+        items: result.items,
+        nowMs: _nowMs,
+        rules: decodeFeedRules(feed.rulesJson));
+    if (added > 0) await _runDedupPass(feed.profileId);
+    final message = added > 0
+        ? 'Found $added older ${added == 1 ? 'episode' : 'episodes'}.'
+        : (result.stopReason == ArchiveWalkStopReason.noMorePages
+            ? "No older episodes were published in the feed's archive."
+            : result.message);
+    return (newItems: added, message: message);
+  }
+
+  /// Cross-feed dedup (Campaign 5 Phase 3): re-evaluates every currently-
+  /// visible episode in the profile's river and suppresses any new
+  /// duplicate pair — see `feed_dedup.dart`. Runs after any ingest that
+  /// actually added something; a no-op refresh (304, throttled, error)
+  /// never touches dedup state. Called once per ingest site rather than
+  /// once per [refreshAll] pass — [refreshAll] loops [refreshFeed] per
+  /// feed, so a multi-feed pull-to-refresh may run this more than once;
+  /// each pass is correct on its own (already-suppressed rows are
+  /// excluded from the candidate pool) and the repeat cost is a full
+  /// profile scan, acceptable at a personal river's size.
+  Future<void> _runDedupPass(int profileId) async {
+    final candidates = await db.feedsDao.dedupCandidatesOf(profileId);
+    final verdicts = findDuplicates(candidates);
+    for (final entry in verdicts.entries) {
+      await db.feedsDao.setDedup(entry.key,
+          reason: entry.value.reason,
+          canonicalWorkId: entry.value.canonicalWorkId);
+    }
+  }
 }

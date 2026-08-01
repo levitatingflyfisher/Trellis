@@ -13,6 +13,11 @@ import 'package:loom_core/loom_core.dart' as core;
 
 import '../../db/database.dart';
 import '../reader/reader_logic.dart' show ledgerWord;
+import '../reader/reader_screen.dart' show ReaderScreen;
+import '../reader/speech/speech_engine.dart';
+import '../reader/speech/speech_temp_files.dart';
+import '../reader/translation/marian_engine.dart';
+import '../../services/device_services.dart' show TtsSpeaker;
 import '../transcribe/transcript_writer.dart' show decodeWordTimingBlob;
 import 'player_controller.dart';
 
@@ -20,11 +25,41 @@ class KaraokeScreen extends StatefulWidget {
   final AppDatabase db;
   final PlayerController controller;
   final Work work;
+
+  /// The speak-mode voice, handed on to the reader "Read from here" opens —
+  /// see `LibraryScreen.tts`. Null lets that reader fall back to the
+  /// platform speaker, the same as any other call site that doesn't wire
+  /// one.
+  final TtsSpeaker? tts;
+
+  /// Resolves the neural voice for the reader "Read from here" opens
+  /// (ADR-0006) — see `LibraryScreen.resolveSpeechEngine`. Null keeps that
+  /// reader on the system voice.
+  final Future<SynthesisSpeechEngine?> Function({String? lang})?
+      resolveSpeechEngine;
+
+  /// Where the reader "Read from here" opens writes per-sentence WAV temp
+  /// files while speaking neurally — see
+  /// `LibraryScreen.createSpeechTempFiles`.
+  final SpeechTempFiles Function()? createSpeechTempFiles;
+
+  /// Resolves the Spanish translator (ADR-0008 "Babel" Phase 3) for the
+  /// reader "Read from here" opens — see `LibraryScreen.resolveTranslator`.
+  /// Null keeps that reader without a "Translate to Spanish" action, the
+  /// same built-but-unreachable gap library/river-opened readers had
+  /// before that threading landed; this closes the SAME gap for this
+  /// third entry point.
+  final Future<MarianTranslator?> Function()? resolveTranslator;
+
   const KaraokeScreen(
       {super.key,
       required this.db,
       required this.controller,
-      required this.work});
+      required this.work,
+      this.tts,
+      this.resolveSpeechEngine,
+      this.createSpeechTempFiles,
+      this.resolveTranslator});
 
   @override
   State<KaraokeScreen> createState() => _KaraokeScreenState();
@@ -105,6 +140,26 @@ class _KaraokeScreenState extends State<KaraokeScreen> {
     }
   }
 
+  /// "Read from here": the reverse of the reader's "Listen from here". A
+  /// live playback time isn't itself the cursor law's currency — a
+  /// Position row is — so this writes through the SAME row the reader
+  /// already loads via [PlayerController.saveProgress] (no second store)
+  /// and then opens the reader, which picks the row up in its own [_load].
+  Future<void> _readFromHere() async {
+    await widget.controller.saveProgress();
+    if (!mounted) return;
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => ReaderScreen(
+            db: widget.db,
+            profileId: widget.work.profileId,
+            work: widget.work,
+            player: widget.controller,
+            tts: widget.tts,
+            resolveSpeechEngine: widget.resolveSpeechEngine,
+            createSpeechTempFiles: widget.createSpeechTempFiles,
+            resolveTranslator: widget.resolveTranslator)));
+  }
+
   @override
   Widget build(BuildContext context) {
     final rows = _rows;
@@ -112,6 +167,14 @@ class _KaraokeScreenState extends State<KaraokeScreen> {
       appBar: AppBar(
         title: Text(widget.work.title,
             overflow: TextOverflow.ellipsis, maxLines: 1),
+        actions: [
+          IconButton(
+            key: const Key('read-from-here'),
+            tooltip: 'Read from here',
+            icon: const Icon(Icons.chrome_reader_mode_outlined),
+            onPressed: _readFromHere,
+          ),
+        ],
       ),
       body: rows == null
           ? const Center(child: CircularProgressIndicator())

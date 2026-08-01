@@ -15,7 +15,10 @@ void main() {
       ModelSpec(
         id: id,
         task: task,
-        files: [ModelFile.unverified(url: 'https://example.test/$id.bin', bytes: bytes)],
+        files: [
+          ModelFile.unverified(
+              url: 'https://example.test/$id.bin', bytes: bytes)
+        ],
         licenses: const ['MIT'],
         minTier: minTier,
         langs: langs,
@@ -23,7 +26,8 @@ void main() {
 
   group('ModelFile', () {
     test('an empty sha256 means unpinned', () {
-      final f = ModelFile.unverified(url: 'https://example.test/m.bin', bytes: 10);
+      final f =
+          ModelFile.unverified(url: 'https://example.test/m.bin', bytes: 10);
       expect(f.isPinned, isFalse);
     });
 
@@ -38,11 +42,13 @@ void main() {
 
     test('a malformed sha256 is rejected — no half-pins', () {
       expect(
-        () => ModelFile(url: 'https://example.test/m.bin', sha256: 'abc', bytes: 10),
+        () => ModelFile(
+            url: 'https://example.test/m.bin', sha256: 'abc', bytes: 10),
         throwsArgumentError,
       );
       expect(
-        () => ModelFile(url: 'https://example.test/m.bin', sha256: 'Z' * 64, bytes: 10),
+        () => ModelFile(
+            url: 'https://example.test/m.bin', sha256: 'Z' * 64, bytes: 10),
         throwsArgumentError,
       );
     });
@@ -55,18 +61,20 @@ void main() {
     });
 
     test('an empty url is rejected', () {
-      expect(() => ModelFile.unverified(url: '', bytes: 10), throwsArgumentError);
+      expect(
+          () => ModelFile.unverified(url: '', bytes: 10), throwsArgumentError);
     });
   });
 
   group('VoiceArchiveLayout (TTS voices, ADR-0006)', () {
-    test('archiveLayout is null by default — every existing spec shape '
+    test(
+        'archiveLayout is null by default — every existing spec shape '
         'keeps compiling unchanged', () {
-      expect(spec('plain', ModelTask.asr, DeviceTier.t1).archiveLayout,
-          isNull);
+      expect(spec('plain', ModelTask.asr, DeviceTier.t1).archiveLayout, isNull);
     });
 
-    test('a TTS voice spec carries its archive layout — the "data, not '
+    test(
+        'a TTS voice spec carries its archive layout — the "data, not '
         'code" surface for adding a voice', () {
       const layout = VoiceArchiveLayout(
         topLevelDir: 'vits-piper-en_US-example-medium',
@@ -90,13 +98,15 @@ void main() {
   });
 
   group('SupertonicVoiceLayout (TTS voices, ADR-0007)', () {
-    test('supertonicLayout is null by default — every existing spec shape '
+    test(
+        'supertonicLayout is null by default — every existing spec shape '
         'keeps compiling unchanged', () {
-      expect(spec('plain', ModelTask.asr, DeviceTier.t1).supertonicLayout,
-          isNull);
+      expect(
+          spec('plain', ModelTask.asr, DeviceTier.t1).supertonicLayout, isNull);
     });
 
-    test('a Supertonic voice spec names which downloaded filename plays '
+    test(
+        'a Supertonic voice spec names which downloaded filename plays '
         'which role — the "data, not code" surface for a voice whose '
         'files ship loose (no archive to extract)', () {
       const layout = SupertonicVoiceLayout(
@@ -113,8 +123,7 @@ void main() {
         task: ModelTask.tts,
         files: [
           ModelFile.unverified(
-              url: 'https://example.test/duration_predictor.onnx',
-              bytes: 1000),
+              url: 'https://example.test/duration_predictor.onnx', bytes: 1000),
         ],
         licenses: const ['OpenRAIL-M'],
         minTier: DeviceTier.t2,
@@ -125,7 +134,8 @@ void main() {
   });
 
   group('ModelSpec', () {
-    test('sizeBytes is the sum of its files — derived, never a second copy', () {
+    test('sizeBytes is the sum of its files — derived, never a second copy',
+        () {
       final s = ModelSpec(
         id: 'two-file',
         task: ModelTask.asr,
@@ -157,7 +167,9 @@ void main() {
         () => ModelSpec(
           id: 'unlicensed',
           task: ModelTask.asr,
-          files: [ModelFile.unverified(url: 'https://example.test/m.bin', bytes: 1)],
+          files: [
+            ModelFile.unverified(url: 'https://example.test/m.bin', bytes: 1)
+          ],
           licenses: const [],
           minTier: DeviceTier.t1,
         ),
@@ -255,8 +267,11 @@ void main() {
   group('the starter registry', () {
     final starter = ModelRegistry.starter();
 
-    test('carries the pinned v1 catalog: whisper tiny/base ggml, silero '
-        'vad, qwen2.5 litert, the supertonic starter voice', () {
+    test(
+        'carries the pinned v1 catalog: whisper tiny/base ggml, silero '
+        'vad, qwen2.5 litert, the supertonic starter voice, the Babel '
+        'starter translation pair, the Wiktionary StarDict dictionary',
+        () {
       expect(
         starter.specs.map((s) => s.id),
         containsAll([
@@ -265,11 +280,69 @@ void main() {
           'silero-vad',
           'qwen2.5-0.5b-instruct-litert',
           'supertonic-en-m1',
+          'opus-mt-en-es',
+          'wiktionary-en-en-stardict',
         ]),
       );
     });
 
-    test('the starter voice carries its loose-file layout and its ONE '
+    test(
+        'the Babel starter pair carries its loose-file layout, its '
+        'target-language hint, and CC-BY-4.0 (ADR-0008 — the license '
+        'record is docs/reference/mt-models.md)', () {
+      final mt = starter.byId('opus-mt-en-es')!;
+      expect(mt.task, ModelTask.translation);
+      expect(mt.minTier, DeviceTier.t2);
+      expect(mt.langs, {'es'});
+      expect(mt.licenses, ['CC-BY-4.0']);
+      final layout = mt.marianLayout;
+      expect(layout, isNotNull);
+      expect(layout!.encoderFileName, 'encoder_model_quantized.onnx');
+      expect(
+          layout.decoderMergedFileName, 'decoder_model_merged_quantized.onnx');
+      expect(layout.sourceSpmFileName, 'source.spm');
+      expect(layout.vocabFileName, 'vocab.json');
+    });
+
+    test(
+        'picking a translation model by target-language hint finds the '
+        'Babel starter pair; a tier below it finds nothing (T0 by design '
+        'gets nothing)', () {
+      expect(
+        starter
+            .pickModel(ModelTask.translation, DeviceTier.t2, langHint: 'es')
+            ?.id,
+        'opus-mt-en-es',
+      );
+      expect(
+        starter.pickModel(ModelTask.translation, DeviceTier.t1, langHint: 'es'),
+        isNull,
+      );
+      expect(
+        starter.pickModel(ModelTask.translation, DeviceTier.t2, langHint: 'fr'),
+        isNull,
+        reason: 'the starter catalog has no fr pair yet — other pairs are '
+            'registry data, not an engine change (ADR-0008)',
+      );
+    });
+
+    test('the dictionary carries its archive layout, its dual license, and '
+        'the dictionary task (Campaign 4 Phase 3)', () {
+      final dict = starter.byId('wiktionary-en-en-stardict')!;
+      expect(dict.task, ModelTask.dictionary);
+      expect(dict.licenses, ['CC-BY-SA-3.0', 'GFDL-1.3']);
+      final layout = dict.dictionaryArchiveLayout;
+      expect(layout, isNotNull);
+      expect(layout!.topLevelDir,
+          'English-English Wiktionary dictionary stardict');
+      expect(layout.ifoFileName, 'English-English Wiktionary dictionary.ifo');
+      expect(layout.idxFileName, 'English-English Wiktionary dictionary.idx');
+      expect(layout.dictFileName,
+          'English-English Wiktionary dictionary.dict.dz');
+    });
+
+    test(
+        'the starter voice carries its loose-file layout and its ONE '
         'license — OpenRAIL-M, no engine license alongside it, because '
         'there is no longer an engine license to list (ADR-0007)', () {
       final voice = starter.byId('supertonic-en-m1')!;
@@ -288,7 +361,9 @@ void main() {
       expect(layout.voiceStyleFileName, 'M1.json');
     });
 
-    test('the tier ladder matches the proposal-2 ML plan: T1 = tiny+vad, T2 = base+llm', () {
+    test(
+        'the tier ladder matches the proposal-2 ML plan: T1 = tiny+vad, T2 = base+llm',
+        () {
       expect(starter.byId('whisper-tiny-ggml')!.minTier, DeviceTier.t1);
       expect(starter.byId('silero-vad')!.minTier, DeviceTier.t1);
       expect(starter.byId('whisper-base-ggml')!.minTier, DeviceTier.t2);
@@ -321,6 +396,11 @@ void main() {
       // ADR).
       expect(starter.byId('supertonic-en-m1')!.sizeBytes,
           closeTo(263000000, 5000000));
+      // ~246MB for the int8-quantized encoder+decoder pair (ADR-0008):
+      // larger than the spec's original ~113MB guess — verified by
+      // downloading both files directly, not assumed from a listing.
+      expect(starter.byId('opus-mt-en-es')!.sizeBytes,
+          closeTo(246000000, 5000000));
     });
 
     test('every file is https and every license named', () {
@@ -412,6 +492,45 @@ void main() {
             'https://huggingface.co/Supertone/supertonic-2/resolve/main/voice_styles/M1.json',
             'a04c823cbda6dd1c7de131ec68fea83bbb70d7f29d61623304eb871e3b83b5a1',
             420510,
+          ),
+        ],
+        // Verified 2026-08-14/15: downloaded all four files directly from
+        // onnx-community/opus-mt-en-es on Hugging Face and hashed them
+        // locally (docs/reference/mt-models.md has the CC-BY-4.0 license
+        // text, verbatim, with fetch date, plus the upstream Helsinki-NLP
+        // Apache-2.0 claim recorded alongside it).
+        'opus-mt-en-es': [
+          (
+            'https://huggingface.co/onnx-community/opus-mt-en-es/resolve/main/onnx/encoder_model_quantized.onnx',
+            '13ec84a3afebfe97cae004a5f39881ea38541308514ec26c18a0b807476d6fba',
+            52875078,
+          ),
+          (
+            'https://huggingface.co/onnx-community/opus-mt-en-es/resolve/main/onnx/decoder_model_merged_quantized.onnx',
+            '832c4e0c1630a401f3115f0fcb08922f473b7f4996a5371d02ff880dc55f9399',
+            193290224,
+          ),
+          (
+            'https://huggingface.co/onnx-community/opus-mt-en-es/resolve/main/source.spm',
+            '4dd547c24816a335e7b0b2e63376a8f1b3cbfc671eda5ab808dd44fdadaa8791',
+            801636,
+          ),
+          (
+            'https://huggingface.co/onnx-community/opus-mt-en-es/resolve/main/vocab.json',
+            'b074b4cca0036ade5a39ea97faabd534e1015482c480fc2cb02c6481983eb163',
+            1720044,
+          ),
+        ],
+        // Campaign 4 Phase 3: verified 2026-08-15 by downloading directly
+        // and hashing locally (docs/reference/dictionaries.md has the
+        // dual CC-BY-SA/GFDL license text, verbatim, with fetch date and
+        // a manual format/extension verification against a real StarDict
+        // random-access dictzip).
+        'wiktionary-en-en-stardict': [
+          (
+            'https://raw.githubusercontent.com/Vuizur/Wiktionary-Dictionaries/master/English-English%20Wiktionary%20dictionary%20stardict.tar.gz',
+            '2800f630d2975ea29a7b5763e7d79ed71dab9abcc6157534d75c7cd721e8b64b',
+            21839699,
           ),
         ],
       };

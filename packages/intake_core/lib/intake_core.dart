@@ -6,8 +6,10 @@
 library;
 
 export 'src/article_extractor.dart';
+export 'src/audiobook_ordering.dart';
 export 'src/blocks.dart';
 export 'src/charset.dart';
 export 'src/epub_parser.dart';
 export 'src/gutenberg_cleaner.dart';
 export 'src/gutendex.dart';
+export 'src/m4b_chapters.dart';

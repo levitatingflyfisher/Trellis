@@ -11,8 +11,11 @@
 /// to verified upstream facts (see [ModelRegistry.starter]).
 library;
 
-/// What a model does.
-enum ModelTask { asr, vad, tts, llm, translation }
+/// What a model does. [dictionary] is data, not inference (Campaign 4
+/// Phase 3: a StarDict set) — it rides the same pinned-file/archive-
+/// extraction/download-engine law as every other entry, so it earns a
+/// task rather than a parallel registry.
+enum ModelTask { asr, vad, tts, llm, translation, dictionary }
 
 /// The device-capability ladder (proposal-2 "ML plan"):
 ///
@@ -115,6 +118,49 @@ class SupertonicVoiceLayout {
   });
 }
 
+/// Which downloaded filename plays which role for a Marian (opus-mt)
+/// translation model (ADR-0008 "Babel") — the same "data, not code"
+/// precedent [SupertonicVoiceLayout] set: a new [ModelSpec] with a new
+/// [MarianModelLayout] is a complete translation pair, no engine change.
+/// All four files ship loose, each downloaded and sha256-verified on its
+/// own — nothing to extract. `target.spm` is deliberately absent: it
+/// only tokenizes text for the OTHER direction (es->en), and this
+/// engine's decode path reverses the joint `vocab.json` instead of
+/// running a second SentencePiece model — see docs/reference/mt-models.md.
+class MarianModelLayout {
+  final String encoderFileName;
+  final String decoderMergedFileName;
+  final String sourceSpmFileName;
+  final String vocabFileName;
+
+  const MarianModelLayout({
+    required this.encoderFileName,
+    required this.decoderMergedFileName,
+    required this.sourceSpmFileName,
+    required this.vocabFileName,
+  });
+}
+
+/// Which extracted filename plays which role for a StarDict dictionary
+/// archive (Campaign 4 Phase 3) — the "data, not code" surface for adding
+/// a dictionary, one level over from [VoiceArchiveLayout]: the pinned
+/// file is a `.tar.gz` (not `.tar.bz2` — a separate extraction path from
+/// the voice one, since the two archive formats differ), and the usable
+/// artifact is the `.ifo`/`.idx`/`.dict.dz` trio inside it.
+class DictionaryArchiveLayout {
+  final String topLevelDir;
+  final String ifoFileName;
+  final String idxFileName;
+  final String dictFileName;
+
+  const DictionaryArchiveLayout({
+    required this.topLevelDir,
+    required this.ifoFileName,
+    required this.idxFileName,
+    required this.dictFileName,
+  });
+}
+
 /// One model in the catalog.
 class ModelSpec {
   final String id;
@@ -145,6 +191,18 @@ class ModelSpec {
   /// for [archiveLayout] today.
   final SupertonicVoiceLayout? supertonicLayout;
 
+  /// Non-null for a Marian translation pair (ADR-0008) — see
+  /// [MarianModelLayout].
+  final MarianModelLayout? marianLayout;
+
+  /// Non-null for a StarDict dictionary archive (Campaign 4 Phase 3) —
+  /// see [DictionaryArchiveLayout]. A different extraction path from
+  /// [archiveLayout] (that one is a `.tar.bz2` voice bundle; this is a
+  /// `.tar.gz` dictionary set), so the two stay separate fields rather
+  /// than one generalized "any archive" shape — the model store's own
+  /// extraction code branches on which of these is set.
+  final DictionaryArchiveLayout? dictionaryArchiveLayout;
+
   ModelSpec({
     required this.id,
     required this.task,
@@ -154,6 +212,8 @@ class ModelSpec {
     Set<String>? langs,
     this.archiveLayout,
     this.supertonicLayout,
+    this.marianLayout,
+    this.dictionaryArchiveLayout,
   })  : files = List.unmodifiable(files),
         licenses = List.unmodifiable(licenses),
         langs = langs == null ? null : Set.unmodifiable(langs) {
@@ -385,6 +445,93 @@ class ModelRegistry {
             unicodeIndexerFileName: 'unicode_indexer.json',
             ttsConfigFileName: 'tts.json',
             voiceStyleFileName: 'M1.json',
+          ),
+        ),
+        // T2 translation — Babel's starter pair (ADR-0008): opus-mt-en-es,
+        // int8-quantized ONNX (onnx-community's conversion of
+        // Helsinki-NLP/opus-mt-en-es). `langs` names the TARGET language
+        // this entry produces ('es') — the only interpretation that lets
+        // `pickModel(ModelTask.translation, tier, langHint: 'es')` mean
+        // "give me something that can produce Spanish", which is the
+        // question the reader screen actually asks (a work's source
+        // language is a property of the work, not the model catalog).
+        // Verified 2026-08-14 by downloading every file directly and
+        // hashing it locally; full verbatim license text + fetch date:
+        // docs/reference/mt-models.md (the spec's own note that the HF
+        // card reads Apache-2.0 was backwards from what was actually
+        // found there — CC-BY-4.0 is what onnx-community's card carries;
+        // upstream Helsinki-NLP's own card is the one that says
+        // Apache-2.0. Both are recorded verbatim in that file).
+        ModelSpec(
+          id: 'opus-mt-en-es',
+          task: ModelTask.translation,
+          files: [
+            ModelFile(
+              url: 'https://huggingface.co/onnx-community/opus-mt-en-es/'
+                  'resolve/main/onnx/encoder_model_quantized.onnx',
+              sha256:
+                  '13ec84a3afebfe97cae004a5f39881ea38541308514ec26c18a0b807476d6fba',
+              bytes: 52875078,
+            ),
+            ModelFile(
+              url: 'https://huggingface.co/onnx-community/opus-mt-en-es/'
+                  'resolve/main/onnx/decoder_model_merged_quantized.onnx',
+              sha256:
+                  '832c4e0c1630a401f3115f0fcb08922f473b7f4996a5371d02ff880dc55f9399',
+              bytes: 193290224,
+            ),
+            ModelFile(
+              url: 'https://huggingface.co/onnx-community/opus-mt-en-es/'
+                  'resolve/main/source.spm',
+              sha256:
+                  '4dd547c24816a335e7b0b2e63376a8f1b3cbfc671eda5ab808dd44fdadaa8791',
+              bytes: 801636,
+            ),
+            ModelFile(
+              url: 'https://huggingface.co/onnx-community/opus-mt-en-es/'
+                  'resolve/main/vocab.json',
+              sha256:
+                  'b074b4cca0036ade5a39ea97faabd534e1015482c480fc2cb02c6481983eb163',
+              bytes: 1720044,
+            ),
+          ],
+          licenses: const ['CC-BY-4.0'],
+          minTier: DeviceTier.t2,
+          langs: const {'es'},
+          marianLayout: const MarianModelLayout(
+            encoderFileName: 'encoder_model_quantized.onnx',
+            decoderMergedFileName: 'decoder_model_merged_quantized.onnx',
+            sourceSpmFileName: 'source.spm',
+            vocabFileName: 'vocab.json',
+          ),
+        ),
+        // Campaign 4 Phase 3 — the StarDict door: an English-English
+        // Wiktionary dictionary (real StarDict .ifo/.idx/.dict.dz, a
+        // genuine random-access dictzip — verified, not assumed; see
+        // docs/reference/dictionaries.md). Not gated by [langs]: the
+        // dictionary itself only serves English headwords, but nothing in
+        // this door's own selection needs a langHint the way TTS/ASR do,
+        // so it's left unset rather than encoding a constraint nothing
+        // reads yet.
+        ModelSpec(
+          id: 'wiktionary-en-en-stardict',
+          task: ModelTask.dictionary,
+          files: [
+            ModelFile(
+              url:
+                  'https://raw.githubusercontent.com/Vuizur/Wiktionary-Dictionaries/master/English-English%20Wiktionary%20dictionary%20stardict.tar.gz',
+              sha256:
+                  '2800f630d2975ea29a7b5763e7d79ed71dab9abcc6157534d75c7cd721e8b64b',
+              bytes: 21839699,
+            ),
+          ],
+          licenses: const ['CC-BY-SA-3.0', 'GFDL-1.3'],
+          minTier: DeviceTier.t0,
+          dictionaryArchiveLayout: const DictionaryArchiveLayout(
+            topLevelDir: 'English-English Wiktionary dictionary stardict',
+            ifoFileName: 'English-English Wiktionary dictionary.ifo',
+            idxFileName: 'English-English Wiktionary dictionary.idx',
+            dictFileName: 'English-English Wiktionary dictionary.dict.dz',
           ),
         ),
       ]);

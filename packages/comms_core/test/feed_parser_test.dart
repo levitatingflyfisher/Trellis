@@ -241,6 +241,131 @@ void main() {
     });
   });
 
+  group('RFC 5005 paged-feed links', () {
+    test('rel=next at channel level is captured', () {
+      final feed = parseRssFeed('''
+<rss><channel>
+  <title>t</title>
+  <atom:link rel="next" href="https://x.test/feed?page=2"/>
+  <item><title>e</title></item>
+</channel></rss>
+''', 'https://x.test/feed');
+      expect(feed.nextPageUrl, 'https://x.test/feed?page=2');
+      expect(feed.nextPageRel, 'next');
+    });
+
+    test('rel=prev-archive is used when rel=next is absent', () {
+      final feed = parseRssFeed('''
+<rss><channel>
+  <title>t</title>
+  <atom:link rel="prev-archive" href="https://x.test/feed?page=old"/>
+</channel></rss>
+''', 'https://x.test/feed');
+      expect(feed.nextPageUrl, 'https://x.test/feed?page=old');
+      expect(feed.nextPageRel, 'prev-archive');
+    });
+
+    test('rel=next wins over a rel=prev-archive on the same channel', () {
+      final feed = parseRssFeed('''
+<rss><channel>
+  <title>t</title>
+  <atom:link rel="prev-archive" href="https://x.test/feed?page=old"/>
+  <atom:link rel="next" href="https://x.test/feed?page=2"/>
+</channel></rss>
+''', 'https://x.test/feed');
+      expect(feed.nextPageUrl, 'https://x.test/feed?page=2');
+      expect(feed.nextPageRel, 'next');
+    });
+
+    test('neither link present yields null/null', () {
+      final feed =
+          parseRssFeed('<rss><channel><title>t</title></channel></rss>', 'u');
+      expect(feed.nextPageUrl, isNull);
+      expect(feed.nextPageRel, isNull);
+    });
+
+    test('multiple unrelated link rels ignored (self/alternate), next found '
+        'among them', () {
+      final feed = parseRssFeed('''
+<rss><channel>
+  <title>t</title>
+  <atom:link rel="self" href="https://x.test/feed"/>
+  <atom:link rel="alternate" href="https://x.test/"/>
+  <atom:link rel="next" href="https://x.test/feed?page=2"/>
+</channel></rss>
+''', 'u');
+      expect(feed.nextPageUrl, 'https://x.test/feed?page=2');
+    });
+
+    test('garbage: rel=next with no href is ignored, not a crash', () {
+      final feed = parseRssFeed('''
+<rss><channel>
+  <title>t</title>
+  <atom:link rel="next"/>
+</channel></rss>
+''', 'u');
+      expect(feed.nextPageUrl, isNull);
+    });
+
+    test('garbage: rel=next with an empty href falls through to '
+        'prev-archive', () {
+      final feed = parseRssFeed('''
+<rss><channel>
+  <title>t</title>
+  <atom:link rel="next" href=""/>
+  <atom:link rel="prev-archive" href="https://x.test/feed?page=old"/>
+</channel></rss>
+''', 'u');
+      expect(feed.nextPageUrl, 'https://x.test/feed?page=old');
+      expect(feed.nextPageRel, 'prev-archive');
+    });
+
+    test('an item-level rel=next link does not leak to the feed level', () {
+      final feed = parseRssFeed('''
+<rss><channel>
+  <title>t</title>
+  <item>
+    <title>e</title>
+    <atom:link rel="next" href="https://x.test/not-a-feed-page"/>
+  </item>
+</channel></rss>
+''', 'u');
+      expect(feed.nextPageUrl, isNull);
+    });
+
+    test('Atom feed root (no separate channel element) is supported', () {
+      final feed = parseRssFeed('''
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>AF</title>
+  <link rel="next" href="https://x.test/feed?page=2"/>
+  <entry><title>E1</title></entry>
+</feed>
+''', 'u');
+      expect(feed.nextPageUrl, 'https://x.test/feed?page=2');
+      expect(feed.nextPageRel, 'next');
+    });
+
+    test('a relative href is resolved against the feed URL', () {
+      final feed = parseRssFeed('''
+<rss><channel>
+  <title>t</title>
+  <atom:link rel="next" href="/feed?page=2"/>
+</channel></rss>
+''', 'https://x.test/podcast/feed');
+      expect(feed.nextPageUrl, 'https://x.test/feed?page=2');
+    });
+
+    test('a query-only relative href resolves against the feed URL', () {
+      final feed = parseRssFeed('''
+<rss><channel>
+  <title>t</title>
+  <atom:link rel="next" href="?paged=2"/>
+</channel></rss>
+''', 'https://x.test/feed');
+      expect(feed.nextPageUrl, 'https://x.test/feed?paged=2');
+    });
+  });
+
   group('guards', () {
     test('invalid XML throws the donor message', () {
       expect(

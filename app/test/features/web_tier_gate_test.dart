@@ -16,9 +16,11 @@ import '../support/scripted_fetcher.dart';
 
 /// The web-tier honesty gates (proposal-2 §1): the PWA reads, studies,
 /// listens and backs up — local ML rides the installed app. Where that is
-/// true, the UI must not offer what must fail: no transcribe menu on
-/// river episodes, and the models door opens a calm explanation instead
-/// of a screen whose file operations throw under dart2js.
+/// true, the UI must not offer what must fail: no transcribe ITEMS in a
+/// river episode's menu (the menu itself stays — Play next/Play last are
+/// plain database writes, not an ML feature, and work on every tier), and
+/// the models door opens a calm explanation instead of a screen whose file
+/// operations throw under dart2js.
 void main() {
   late AppDatabase db;
   late Directory tmp;
@@ -67,23 +69,36 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('the web tier offers play but no transcribe menu', (t) async {
+  testWidgets(
+      'the web tier offers play and the queue verbs, but no transcribe '
+      'menu items', (t) async {
     final ids = await seedEpisode();
     await pumpApp(t, localMlAvailable: false);
     await t.tap(find.text('River'));
     await t.pumpAndSettle();
 
     expect(find.byKey(Key('play-${ids.workId}')), findsOneWidget);
-    expect(find.byKey(Key('menu-${ids.workId}')), findsNothing);
+    // The menu itself still shows — Play next/Play last are plain database
+    // writes, not an ML feature — but nothing inside it can fail on this
+    // tier.
+    await t.tap(find.byKey(Key('menu-${ids.workId}')));
+    await t.pumpAndSettle();
+    expect(find.byKey(Key('play-next-${ids.workId}')), findsOneWidget);
+    expect(find.byKey(Key('play-last-${ids.workId}')), findsOneWidget);
+    expect(find.byKey(Key('transcribe-${ids.workId}')), findsNothing);
+    expect(find.byKey(Key('translate-${ids.workId}')), findsNothing);
   });
 
-  testWidgets('the native tier still offers the transcribe menu', (t) async {
+  testWidgets('the native tier still offers the transcribe menu items',
+      (t) async {
     final ids = await seedEpisode();
     await pumpApp(t, localMlAvailable: true);
     await t.tap(find.text('River'));
     await t.pumpAndSettle();
 
-    expect(find.byKey(Key('menu-${ids.workId}')), findsOneWidget);
+    await t.tap(find.byKey(Key('menu-${ids.workId}')));
+    await t.pumpAndSettle();
+    expect(find.byKey(Key('transcribe-${ids.workId}')), findsOneWidget);
   });
 
   testWidgets('the models door explains itself instead of throwing',

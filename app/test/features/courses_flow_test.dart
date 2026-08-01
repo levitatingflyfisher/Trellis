@@ -88,6 +88,17 @@ void main() {
         reason: 'the starter course is an offer, not an import');
   });
 
+  testWidgets(
+      'Campaign 4 Phase 5: the Courses app bar opens Trellis Echo, the '
+      'reader\'s own private year-in-review (never PIN-gated -- that\'s '
+      'the parent dashboard\'s door)', (tester) async {
+    await pumpToCourses(tester);
+    await tester.tap(find.byKey(const Key('open-echo')));
+    await tester.pumpAndSettle();
+    expect(find.text('Trellis Echo'), findsOneWidget);
+    expect(find.textContaining('Nothing built yet'), findsOneWidget);
+  });
+
   testWidgets('a bad paste shows the parser error calmly and imports NOTHING',
       (tester) async {
     await pumpToCourses(tester);

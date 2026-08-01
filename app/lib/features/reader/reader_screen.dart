@@ -1,21 +1,35 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:loom_core/loom_core.dart' as core;
 import 'package:openhearth_design/openhearth_design.dart';
 
-import '../../db/database.dart';
+// `Alignment` here is drift's generated row class for the Alignments
+// table, which collides with Flutter's own painting Alignment used by
+// Campaign 4's parafoveal grid layout — hidden since this file never
+// references the row type by name (only through inferred DAO returns).
+import '../../db/database.dart' hide Alignment;
 import '../../services/device_services.dart';
 import '../brain/brain_store.dart';
 import '../brain/distill_screen.dart';
+import '../intake/paste_intake.dart' show epochDayUtcNow;
+import '../player/player_controller.dart';
+import 'dictionary_sheet.dart';
 import 'ledger_screen.dart';
 import 'reader_logic.dart';
+import 'reader_prefs.dart';
+import 'reader_typography_settings_screen.dart';
+import 'recap_sheet.dart';
 import 'speech/just_audio_speech_queue.dart';
 import 'speech/speech_audio_queue.dart';
 import 'speech/speech_engine.dart';
 import 'speech/speech_playback_pipeline.dart';
 import 'speech/speech_temp_files.dart';
+import 'translation/marian_engine.dart';
+import 'translation/sentence_units.dart';
+import 'translation/translation_job.dart';
 
 /// The hearth red — the heritage ORP pivot color carried from both donors,
 /// which is the fleet's own hearth500 (C1: from the tokens, not retyped).
@@ -62,6 +76,14 @@ class ReaderScreen extends StatefulWidget {
   final Future<SynthesisSpeechEngine?> Function({String? lang})?
       resolveSpeechEngine;
 
+  /// Campaign 4 Phase 3: the tap-hold definition sheet's on-device
+  /// dictionary lookup — the caller closes over
+  /// `DeviceServices.lookupDefinition` so this widget's own tests never
+  /// reach a device-services mock, the same shape [resolveSpeechEngine]
+  /// already uses. Null means the sheet always shows its honest empty
+  /// state (no dictionary door wired at this call site).
+  final Future<String?> Function(String word)? lookupDefinition;
+
   /// Builds the gapless audio queue behind [SpeechPlaybackPipeline]
   /// (just_audio, kept off this seam so tests inject a fake); null
   /// defaults to [JustAudioSpeechQueue.new]. A factory, not an instance,
@@ -75,6 +97,30 @@ class ReaderScreen extends StatefulWidget {
   /// start sweeps clean).
   final SpeechTempFiles Function()? createSpeechTempFiles;
 
+  /// The study crown's other half of the read<->listen handoff (the karaoke
+  /// screen's "Read from here" is the other): when this work has aligned
+  /// audio, "Listen from here" hands the reading cursor to this controller.
+  /// Null (the default at most call sites today) simply hides the button —
+  /// never a dead one dangled where playback can't actually start.
+  final PlayerController? player;
+
+  /// Resolves the Spanish translator (ADR-0008 "Babel" Phase 3) — the
+  /// shell closes over `DeviceServices.resolveTranslator`; null (or a call
+  /// that resolves to null, meaning opus-mt-en-es isn't downloaded) keeps
+  /// the "Translate to Spanish" action hidden. Called once, in [_load],
+  /// and cached for this screen's session — the same residency law
+  /// [resolveSpeechEngine] follows.
+  final Future<MarianTranslator?> Function()? resolveTranslator;
+
+  /// Campaign 4 Phase 4: true when this work was reopened untouched for
+  /// more than 3 UTC days with real progress already made
+  /// ([shouldOfferRecap], resolved by the caller from [Positions]/segment
+  /// count — the same "resolved before the push" shape [offerNeuralVoice]
+  /// already uses, so this widget's own tests stay a plain bool). Shows a
+  /// dismissible "Catch me up?" chip; false (every existing call site)
+  /// shows nothing.
+  final bool offerRecap;
+
   const ReaderScreen(
       {super.key,
       required this.db,
@@ -84,8 +130,12 @@ class ReaderScreen extends StatefulWidget {
       this.brain,
       this.offerNeuralVoice = false,
       this.resolveSpeechEngine,
+      this.lookupDefinition,
       this.createSpeechAudioQueue,
-      this.createSpeechTempFiles});
+      this.createSpeechTempFiles,
+      this.player,
+      this.resolveTranslator,
+      this.offerRecap = false});
 
   @override
   State<ReaderScreen> createState() => _ReaderScreenState();
@@ -98,9 +148,42 @@ class _ReaderScreenState extends State<ReaderScreen>
   int _wordIdx = 0;
   ReaderMode _mode = ReaderMode.rsvp;
   int _scrollAnchor = 0; // segment the scroll view opens around
+
+  /// Campaign 4 Phase 2 follow-along: one [GlobalKey] per built segment
+  /// tile, the same shape `karaoke_screen.dart`'s `_keys` map uses for its
+  /// own `_followPlayback` -- lazily populated by [_segmentTile] (only
+  /// tiles the sliver has actually built get an entry, same as karaoke).
+  final Map<int, GlobalKey> _segKeys = {};
+
+  /// Dedupes [_followAlongScroll] so it only calls `ensureVisible` once
+  /// per segment the cursor enters, not once per rebuild.
+  int _lastFollowedSegment = -1;
   bool _playing = false;
   double _wpm = 300;
   Timer? _timer;
+
+  /// Campaign 4 Phase 2: Parafoveal is an RSVP sub-toggle, not a third
+  /// [ReaderMode] -- [_toggleMode] cycles a strictly binary rsvp/scroll
+  /// state today, and both `reader_test.dart`'s and
+  /// `reader_ticker_test.dart`'s cursor-law tests only ever exercise those
+  /// two states. A sub-toggle restores the donor's third display
+  /// (index.html mode "ticker", but this app's own "ticker" vocabulary
+  /// already names the existing classic RSVP mode -- the public name here
+  /// is always Parafoveal) without touching that cycle or those tests, and
+  /// it shares the RSVP timer/cursor (`_step`, `_wordIdx`) wholesale, so
+  /// punctuation-pause lengthening comes free with no separate dwell path.
+  bool _parafoveal = false;
+
+  /// The neighbor-fade sigma (donor default 2.0, slider 0.8-4.0 step 0.2).
+  /// Session-scoped like [_wpm], not persisted -- Campaign 4's playback
+  /// controls follow the reader's existing wpm precedent ("holds for the
+  /// session"), not the typography prefs' cross-session precedent.
+  double _sigma = 2.0;
+
+  /// Donor default window: 5 neighbors either side of the focus word.
+  /// Not exposed as a control this pass -- the spec only asks for a sigma
+  /// slider.
+  static const int _parafovealWinSize = 5;
 
   /// Speak mode: [_speaking] is the run flag, [_speakGen] fences stale
   /// loops (each start/stop bumps it, so an utterance completing after a
@@ -114,6 +197,13 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// Whether the neural-voice hint has already shown this screen session
   /// (ADR-0006) — a quiet ONE-TIME line, not a nag.
   bool _offeredNeuralVoice = false;
+
+  /// Campaign 4 Phase 4: whether the "Catch me up?" chip has been
+  /// dismissed (tapped or closed with the X) THIS screen session — same
+  /// once-per-session shape as [_offeredNeuralVoice], session state, not
+  /// persisted (matches Phase 2's Parafoveal/follow-along precedent: this
+  /// reader has never carried playback-adjacent UI state across sessions).
+  bool _recapOfferDismissed = false;
 
   /// The resolved neural engine, primed once in [_load] and cached for the
   /// rest of this screen's session (the residency law). Null means either
@@ -139,7 +229,8 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// check is `_speakGen`'s own fencing law, carried one level lower
   /// (mirrors the utterance path's `gen == _speakGen` check in `live()`,
   /// on top of — not instead of — the pipeline's own internal fencing).
-  List<({int seg, int wordIdx, String text})> _synthUnits = const [];
+  List<({int seg, int wordIdx, String text, String? lang})> _synthUnits =
+      const [];
   int _synthGen = 0;
 
   /// The language toggle (ADR-0002: layers project onto the SAME cursor).
@@ -149,6 +240,39 @@ class _ReaderScreenState extends State<ReaderScreen>
   List<String> _mtLangs = const [];
   Map<String, Map<int, String>> _mtTexts = const {};
   String? _activeLang;
+
+  /// The study crown: true only when this work has BOTH an audio source
+  /// and alignments over it — the "Listen from here" button's honesty
+  /// check (see [ReaderScreen.player]'s doc comment on never dangling one).
+  bool _hasAlignedAudio = false;
+
+  /// The Spanish translation store overlay (ADR-0008 "Babel" Phase 3) —
+  /// deliberately separate from [_activeLang]'s whole-segment mt swap:
+  /// this pairs each original sentence with its translation rather than
+  /// replacing the text the cursor and every existing test key off. Both
+  /// the Translate action and the Show Spanish toggle are offered only
+  /// while [_activeLang] is null (guards against numbering under a
+  /// language-swapped projection, whose own `splitSentences` boundaries
+  /// can differ from the English original's).
+  MarianTranslator? _translatorHolder;
+  TranslationJobController? _translationJob;
+  bool _hasSpanish = false;
+  bool _showSpanish = false;
+  Map<(int, int), TranslationSentence> _spanishSentences = const {};
+
+  /// Speak-in-Spanish (ADR-0008 "Babel" Phase 4): offered only while
+  /// [_showSpanish] is on, session-only (never persisted — unlike
+  /// [_showSpanish], there is no natural "was this on last time" question
+  /// for a run-time speech choice). Reset to false whenever Show Spanish
+  /// itself is turned off, so a hidden menu item can never silently keep
+  /// affecting a later run.
+  bool _speakSpanish = false;
+
+  /// Campaign 4 Phase 1: this profile's print-reader typography, loaded
+  /// once in [_load] (the residency law — no re-fetch per rebuild). RSVP
+  /// and the ticker keep their own tuned displays; only the scroll body
+  /// reads this.
+  ReaderTypography _typography = const ReaderTypography();
 
   @override
   void initState() {
@@ -176,6 +300,8 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (queue != null) unawaited(queue.dispose().catchError((_) {}));
     final synthEngine = _synthEngineHolder;
     if (synthEngine != null) unawaited(synthEngine.dispose().catchError((_) {}));
+    final translator = _translatorHolder;
+    if (translator != null) unawaited(translator.dispose().catchError((_) {}));
     // Backstop save; the deterministic paths are pause/back/background. The
     // app may already be tearing this db down (tests do), hence best-effort.
     unawaited(_savePosition().catchError((_) {}));
@@ -235,6 +361,25 @@ class _ReaderScreenState extends State<ReaderScreen>
     final resolver = widget.resolveSpeechEngine;
     final synthEngine =
         resolver == null ? null : await resolver(lang: widget.work.lang);
+    // The study crown: only offer "Listen from here" where it can actually
+    // start something (an audio source) AND land somewhere meaningful (an
+    // alignment to project the cursor through).
+    final hasAlignedAudio = widget.work.sourceUrl != null &&
+        (await widget.db.spineDao.alignmentsOf(widget.work.id)).isNotEmpty;
+    // The Spanish translation store (ADR-0008 "Babel" Phase 3) — resolved
+    // once, the same residency law the neural voice follows above.
+    final translatorResolver = widget.resolveTranslator;
+    final translator =
+        translatorResolver == null ? null : await translatorResolver();
+    final hasSpanish = await widget.db.spineDao
+        .hasTranslationSentences(widget.work.id, lang: 'es');
+    final showSpanish =
+        await widget.db.spineDao.showTranslationLayer(widget.work.id);
+    final spanishSentences = hasSpanish
+        ? await widget.db.spineDao
+            .translationSentencesOf(widget.work.id, lang: 'es')
+        : const <(int, int), TranslationSentence>{};
+    final readerPrefs = await widget.db.profilesDao.readerPrefs(widget.profileId);
     if (!mounted) return;
     setState(() {
       _original = blocks;
@@ -247,6 +392,12 @@ class _ReaderScreenState extends State<ReaderScreen>
       _scrollAnchor = doc.words.isEmpty ? 0 : cursorAt(doc, wordIdx).segment;
       _preferSystemVoice = preferSystemVoice;
       _synthEngineHolder = synthEngine;
+      _hasAlignedAudio = hasAlignedAudio;
+      _translatorHolder = translator;
+      _hasSpanish = hasSpanish;
+      _showSpanish = showSpanish;
+      _spanishSentences = spanishSentences;
+      _typography = readerPrefs.typography;
     });
   }
 
@@ -300,6 +451,11 @@ class _ReaderScreenState extends State<ReaderScreen>
         segmentIdx: blocks[c.segment].idx,
         wordIdx: c.word,
         lastModality: modality);
+    // Campaign 4 Phase 5's write side: every position save is proof the
+    // cursor actually advanced today, so this is the one honest place to
+    // mark a reading day (idempotent — see ReadingDays' own doc comment).
+    await widget.db.profilesDao
+        .recordReadingDay(widget.profileId, epochDayUtcNow());
   }
 
   // ───── speak mode (the TtsSpeaker seam; cursor law ADR-0002) ─────
@@ -404,7 +560,8 @@ class _ReaderScreenState extends State<ReaderScreen>
       final units = sentences.isEmpty
           ? [core.Sentence(text: block.text, firstWordIdx: 0)]
           : sentences;
-      for (final sentence in units) {
+      for (var i = 0; i < units.length; i++) {
+        final sentence = units[i];
         if (!live()) return;
         if (!first) {
           setState(() => _wordIdx =
@@ -414,8 +571,22 @@ class _ReaderScreenState extends State<ReaderScreen>
         }
         first = false;
         if (speakable && sentence.text.trim().isNotEmpty) {
-          await engine.speak(sentence.text,
-              lang: _activeLang ?? widget.work.lang);
+          // Speak-in-Spanish (ADR-0008 Phase 4): `i` here is the RAW
+          // core.splitSentences index (this loop only reaches `units[i]`
+          // through the real `sentences` list — the empty-sentences
+          // whole-block fallback never has non-blank speakable text, so
+          // `i` never collides with a real sentenceIdx from a different
+          // numbering). A sentence with no stored translation falls back
+          // to English, spoken in its original language — no gap.
+          final translated = _speakSpanish
+              ? translatedTextFor(
+                  stored: _spanishSentences,
+                  segIdx: block.idx,
+                  sentenceIdx: i,
+                  currentSourceText: sentence.text)
+              : null;
+          await engine.speak(translated ?? sentence.text,
+              lang: translated != null ? 'es' : (_activeLang ?? widget.work.lang));
           if (!live()) return;
         }
       }
@@ -434,18 +605,40 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// without a cursor stop. A deliberate, tested behavior difference
   /// between the two engines (`reader_speak_synthesis_test.dart`), not a
   /// bug: synthesizing "[code]" aloud would be worse than skipping it.
-  List<({int seg, int wordIdx, String text})> _remainingSpeechUnits(
-      List<core.Segment> blocks, int fromSeg) {
-    final units = <({int seg, int wordIdx, String text})>[];
+  ///
+  /// Speak-in-Spanish (ADR-0008 Phase 4): [text] carries the STORED
+  /// translation in place of the original wherever one exists and
+  /// [_speakSpanish] is on — [lang] is that substitution's own tag ('es'),
+  /// null otherwise, so [SpeechPlaybackPipeline.start]'s `langOverrides`
+  /// can tag each sentence in the language it's ACTUALLY written in
+  /// rather than one language for the whole batch. [seg]/[wordIdx] always
+  /// point at the ORIGINAL sentence's position — the cursor never moves
+  /// to reflect which language is playing.
+  List<({int seg, int wordIdx, String text, String? lang})>
+      _remainingSpeechUnits(List<core.Segment> blocks, int fromSeg) {
+    final units = <({int seg, int wordIdx, String text, String? lang})>[];
     for (var seg = fromSeg; seg < blocks.length; seg++) {
       final block = blocks[seg];
       final speakable = block.kind == core.SegmentKind.prose ||
           block.kind == core.SegmentKind.heading;
       if (!speakable || block.text.trim().isEmpty) continue;
-      for (final sentence in core.splitSentences(block.text)) {
+      final sentences = core.splitSentences(block.text);
+      for (var i = 0; i < sentences.length; i++) {
+        final sentence = sentences[i];
         if (sentence.text.trim().isEmpty) continue;
-        units.add(
-            (seg: seg, wordIdx: sentence.firstWordIdx, text: sentence.text));
+        final translated = _speakSpanish
+            ? translatedTextFor(
+                stored: _spanishSentences,
+                segIdx: block.idx,
+                sentenceIdx: i,
+                currentSourceText: sentence.text)
+            : null;
+        units.add((
+          seg: seg,
+          wordIdx: sentence.firstWordIdx,
+          text: translated ?? sentence.text,
+          lang: translated != null ? 'es' : null,
+        ));
       }
     }
     return units;
@@ -478,7 +671,8 @@ class _ReaderScreenState extends State<ReaderScreen>
       onDone: _onSynthDone,
     );
     await pipeline.start([for (final u in units) u.text],
-        lang: _activeLang ?? widget.work.lang);
+        lang: _activeLang ?? widget.work.lang,
+        langOverrides: [for (final u in units) u.lang]);
   }
 
   /// The synthesis path's cursor advance: index 0 is the sentence the
@@ -526,6 +720,70 @@ class _ReaderScreenState extends State<ReaderScreen>
     await widget.db.profilesDao.setPreferSystemVoice(widget.profileId, next);
   }
 
+  // ───── translation (ADR-0008 "Babel" Phase 3) ─────
+
+  /// Runs the cancellable, resumable Translate-to-Spanish batch over
+  /// [_original] — never [_blocks], which under [_activeLang] is a
+  /// language-swapped projection whose own `splitSentences` boundaries
+  /// would disagree with the store's numbering. Already-stored sentences
+  /// are skipped inside [TranslationJobController] itself; this method
+  /// only needs to start it, listen for the progress card, and reload
+  /// this screen's Spanish state once the run lands (done or cancelled).
+  Future<void> _startTranslation() async {
+    final translator = _translatorHolder;
+    if (translator == null || _activeLang != null || _translationJob != null) {
+      return;
+    }
+    final controller = TranslationJobController(
+      dao: widget.db.spineDao,
+      workId: widget.work.id,
+      units: sentenceUnitsOf(_original),
+      translate: translator.translate,
+    );
+    controller.addListener(_onTranslationProgress);
+    setState(() => _translationJob = controller);
+    await controller.start();
+    controller.removeListener(_onTranslationProgress);
+    if (!mounted) return;
+    final hasSpanish = await widget.db.spineDao
+        .hasTranslationSentences(widget.work.id, lang: 'es');
+    final spanishSentences = await widget.db.spineDao
+        .translationSentencesOf(widget.work.id, lang: 'es');
+    if (!mounted) return;
+    setState(() {
+      _hasSpanish = hasSpanish;
+      _spanishSentences = spanishSentences;
+      _translationJob = null;
+    });
+  }
+
+  void _onTranslationProgress() {
+    if (!mounted) return;
+    setState(() {}); // the card reads _translationJob!.state directly
+  }
+
+  void _cancelTranslation() => _translationJob?.cancel();
+
+  /// The scroll-mode dual-display toggle: persisted through the DAO (not
+  /// local-only state), same law [_toggleVoicePreference] follows. Turning
+  /// it off also turns [_speakSpanish] off — its own menu item is about to
+  /// disappear, and a stale `true` behind a hidden control would keep
+  /// substituting Spanish into a run the user has no way to see, let alone
+  /// turn off again.
+  Future<void> _toggleShowSpanish() async {
+    final next = !_showSpanish;
+    setState(() {
+      _showSpanish = next;
+      if (!next) _speakSpanish = false;
+    });
+    await widget.db.spineDao.setShowTranslationLayer(widget.work.id, next);
+  }
+
+  /// Speak-in-Spanish (ADR-0008 "Babel" Phase 4): takes effect on the NEXT
+  /// speak run, the same law [_toggleVoicePreference] follows — a run
+  /// already under way keeps speaking whatever it started with.
+  void _toggleSpeakSpanish() => setState(() => _speakSpanish = !_speakSpanish);
+
   // ───── playback (donor step: 60000/wpm × pacing, then advance) ─────
 
   void _step() {
@@ -550,6 +808,10 @@ class _ReaderScreenState extends State<ReaderScreen>
     final doc = _doc;
     if (doc == null || doc.words.isEmpty) return;
     unawaited(_stopSpeak()); // one cursor-advancer at a time
+    // Every fresh play starts follow-along's own dedupe clean, so the
+    // segment the cursor is already on gets its ensureVisible call even
+    // if a previous follow-along session already visited it once.
+    _lastFollowedSegment = -1;
     setState(() {
       if (_wordIdx >= doc.words.length - 1) _wordIdx = 0; // donor toggle
       _playing = true;
@@ -622,10 +884,63 @@ class _ReaderScreenState extends State<ReaderScreen>
           SnackBar(content: Text('“$word” is in your word ledger.')));
   }
 
+  /// Campaign 4 Phase 3: what a long-pressed word does now — the
+  /// definition sheet ABSORBS the keep action (its own "Add to word
+  /// ledger" button calls [_keepWord] under the hood) rather than
+  /// stacking a second long-press on top of the reader's existing one.
+  /// Nothing wordy in [token] (edge punctuation only) opens nothing, the
+  /// same silent no-op [_keepWord] already had.
+  ///
+  /// Pauses first, matching [_openTypographySettings] and [_toggleMode]:
+  /// Phase 2's follow-along made scroll mode playable, which means a held
+  /// word can now be on a document that's still advancing underneath the
+  /// modal — an un-paused cursor would keep calling `_followAlongScroll`'s
+  /// `Scrollable.ensureVisible` on a scrollable sitting under the sheet's
+  /// route, racing the sheet for the user's attention.
+  void _openDefinitionSheet(String token) {
+    final cleaned = ledgerWord(token);
+    if (cleaned == null) return;
+    _pause();
+    unawaited(showDefinitionSheet(
+      context,
+      word: cleaned,
+      lookupDefinition: widget.lookupDefinition ?? (_) async => null,
+      onKeep: () => _keepWord(token),
+    ));
+  }
+
   void _openLedger() {
     Navigator.of(context).push(MaterialPageRoute<void>(
         builder: (_) =>
             LedgerScreen(db: widget.db, profileId: widget.profileId)));
+  }
+
+  // ───── the study crown: read -> listen handoff ─────
+
+  /// "Listen from here": hands the reading cursor's own segment/word to
+  /// [ReaderScreen.player], which projects it to an audio time via the SAME
+  /// alignments the karaoke view already reads (Spine.projectAudioTime) —
+  /// no second cursor, no new persisted state. `blocks[c.segment].idx` is
+  /// the translation `_savePosition` already does: [cursorAt] returns a
+  /// position in the `_blocks` LIST, not the database's `Segment.idx`.
+  Future<void> _listenFromHere() async {
+    final doc = _doc;
+    final blocks = _blocks;
+    final player = widget.player;
+    if (doc == null || blocks == null || player == null || doc.words.isEmpty) {
+      return;
+    }
+    final c = cursorAt(doc, _wordIdx);
+    await player.listenFrom(
+        widget.work,
+        core.Position(
+            segmentIdx: blocks[c.segment].idx,
+            wordIdx: c.word,
+            lastModality: core.Modality.read));
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(content: Text('Listening from here.')));
   }
 
   // ───── the overflow menu (distill, proposal-2 §7) ─────
@@ -641,6 +956,88 @@ class _ReaderScreenState extends State<ReaderScreen>
         profileId: widget.profileId,
         work: widget.work,
         store: widget.brain ?? BrainStore.production());
+  }
+
+  /// Campaign 4 Phase 1: the print-reader typography settings, reached the
+  /// same way distill is — an overflow-menu gesture, both cursor-advancers
+  /// stopped first.
+  Future<void> _openTypographySettings() async {
+    _pause();
+    unawaited(_stopSpeak());
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => ReaderTypographySettingsScreen(
+            db: widget.db, profileId: widget.profileId)));
+    // Prefs may have changed while the settings screen was open; reload
+    // rather than re-derive so the scroll body picks up the new values on
+    // return.
+    if (!mounted) return;
+    final prefs = await widget.db.profilesDao.readerPrefs(widget.profileId);
+    if (!mounted) return;
+    setState(() => _typography = prefs.typography);
+  }
+
+  // ───── Campaign 4 Phase 4: the "Catch me up?" recap ─────
+
+  /// The chip's tap handler — same order [_distill] already established:
+  /// both cursor-advancers stop first (this is a hand leaving the reading
+  /// surface for a moment, same as any other overflow action), then
+  /// [openRecapFlow] walks consent before any Brain call.
+  Future<void> _openRecap() async {
+    setState(() => _recapOfferDismissed = true);
+    _pause();
+    unawaited(_stopSpeak());
+    final doc = _doc;
+    final blocks = _blocks;
+    if (doc == null || blocks == null) return;
+    final c = cursorAt(doc, _wordIdx);
+    await openRecapFlow(context,
+        db: widget.db,
+        work: widget.work,
+        currentSegmentIdx: blocks[c.segment].idx,
+        store: widget.brain ?? BrainStore.production());
+  }
+
+  /// A quiet, dismissible offer — never re-shown once the reader decides
+  /// either way (tap it or close it), matching the once-per-session shape
+  /// [_offeredNeuralVoice] already uses for a different hint.
+  ///
+  /// Deliberately NOT an `AppBar.bottom` `PreferredSize` slot: that shape
+  /// needs a fixed height picked in advance, and a `Row`'s children
+  /// overflowing that height vertically clip silently rather than
+  /// throwing — a real regression a widget test could not catch by
+  /// watching for exceptions (found while writing the 320dp/2x sweep
+  /// below). Living as the body `Column`'s first child instead sizes
+  /// itself to whatever the chip and its label actually need at any text
+  /// scale, no magic constant to keep in sync with anything.
+  Widget _recapOfferBar(BuildContext context) {
+    final theme = Theme.of(context);
+    return ColoredBox(
+      color: theme.colorScheme.surfaceContainerHighest,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        child: Row(
+          children: [
+            Expanded(
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: ActionChip(
+                  key: const Key('recap-offer-chip'),
+                  avatar: const Icon(Icons.history_edu_outlined, size: 18),
+                  label: const Text('Catch me up?'),
+                  onPressed: () => unawaited(_openRecap()),
+                ),
+              ),
+            ),
+            IconButton(
+              key: const Key('recap-offer-dismiss'),
+              tooltip: 'Not now',
+              icon: const Icon(Icons.close, size: 18),
+              onPressed: () => setState(() => _recapOfferDismissed = true),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   // ───── build ─────
@@ -686,17 +1083,44 @@ class _ReaderScreenState extends State<ReaderScreen>
             icon: const Icon(Icons.bookmark_border),
             onPressed: _openLedger,
           ),
+          if (_hasAlignedAudio && widget.player != null)
+            IconButton(
+              key: const Key('listen-from-here'),
+              tooltip: 'Listen from here',
+              icon: const Icon(Icons.headphones_outlined),
+              onPressed: doc == null ? null : _listenFromHere,
+            ),
           PopupMenuButton<String>(
             key: const Key('reader-overflow'),
             tooltip: 'More',
             onSelected: (value) {
               if (value == 'distill') unawaited(_distill());
               if (value == 'system-voice') unawaited(_toggleVoicePreference());
+              if (value == 'translate-es') unawaited(_startTranslation());
+              if (value == 'show-spanish') unawaited(_toggleShowSpanish());
+              if (value == 'speak-spanish') _toggleSpeakSpanish();
+              if (value == 'reading-style') unawaited(_openTypographySettings());
+              if (value == 'follow-along') _playing ? _pause() : _play();
             },
             itemBuilder: (_) => [
               const PopupMenuItem(
                   value: 'distill',
                   child: Text('Distill into a course')),
+              const PopupMenuItem(
+                  value: 'reading-style',
+                  child: Text('Reading style')),
+              // Campaign 4 Phase 2: scroll mode only — RSVP already has its
+              // own dedicated play-toggle button; this shares the same
+              // _playing/_play/_pause the RSVP button drives, so switching
+              // modes (which already _pause()s first) can never leave a
+              // stray follow-along timer running behind RSVP.
+              if (_mode == ReaderMode.scroll)
+                PopupMenuItem(
+                  key: const Key('follow-along-toggle'),
+                  value: 'follow-along',
+                  child: Text(
+                      _playing ? 'Stop following along' : 'Follow along'),
+                ),
               // The settings escape (ADR-0006): only visible when there is
               // a neural voice to escape FROM — no dead settings.
               if (_synthEngineHolder != null)
@@ -706,22 +1130,105 @@ class _ReaderScreenState extends State<ReaderScreen>
                   checked: _preferSystemVoice,
                   child: const Text('Use the system voice'),
                 ),
+              // The model gate (ADR-0008): offered only once opus-mt-en-es
+              // is actually downloaded, and only over the canonical
+              // English text — hidden under the existing mt language swap.
+              if (_translatorHolder != null &&
+                  _activeLang == null &&
+                  _translationJob == null)
+                const PopupMenuItem(
+                    key: Key('translate-to-spanish'),
+                    value: 'translate-es',
+                    child: Text('Translate to Spanish')),
+              if (_hasSpanish && _activeLang == null)
+                CheckedPopupMenuItem<String>(
+                  key: const Key('show-spanish-toggle'),
+                  value: 'show-spanish',
+                  checked: _showSpanish,
+                  child: const Text('Show Spanish'),
+                ),
+              // Speak-in-Spanish (ADR-0008 Phase 4): only meaningful once
+              // Show Spanish is already on — the same stored sentences it
+              // displays are what this speaks.
+              if (_showSpanish && _activeLang == null)
+                CheckedPopupMenuItem<String>(
+                  key: const Key('speak-spanish-toggle'),
+                  value: 'speak-spanish',
+                  checked: _speakSpanish,
+                  child: const Text('Speak in Spanish'),
+                ),
             ],
           ),
         ],
       ),
-      body: switch (doc) {
-        null => const Center(child: CircularProgressIndicator()),
-        core.TokenizedDocument(words: []) => Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24),
-              child: Text('Nothing to read in this one yet.',
-                  style: Theme.of(context).textTheme.bodyLarge,
-                  textAlign: TextAlign.center),
-            ),
+      body: Column(
+        children: [
+          if (_translationJob != null) _translationProgressCard(),
+          // Natural-height, not an AppBar.bottom fixed slot — see
+          // _recapOfferBar's own doc comment for why. Only once there is
+          // real content to catch up on, matching the switch's own
+          // content branch below.
+          if (widget.offerRecap &&
+              !_recapOfferDismissed &&
+              doc != null &&
+              doc.words.isNotEmpty)
+            _recapOfferBar(context),
+          Expanded(
+            child: switch (doc) {
+              null => const Center(child: CircularProgressIndicator()),
+              core.TokenizedDocument(words: []) => Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(24),
+                    child: Text('Nothing to read in this one yet.',
+                        style: Theme.of(context).textTheme.bodyLarge,
+                        textAlign: TextAlign.center),
+                  ),
+                ),
+              _ => _mode == ReaderMode.rsvp ? _rsvpBody(doc) : _scrollBody(doc),
+            },
           ),
-        _ => _mode == ReaderMode.rsvp ? _rsvpBody(doc) : _scrollBody(doc),
-      },
+        ],
+      ),
+    );
+  }
+
+  /// The batch's own calm progress banner (ADR-0008 "Babel" Phase 3) — one
+  /// card while translating, mirroring `job_cards.dart`'s status/progress/
+  /// button shape without pulling in its river-level coordinator, since
+  /// this run is scoped to one work already open in front of the reader.
+  Widget _translationProgressCard() {
+    final s = _translationJob!.state;
+    final total = s.totalUnits;
+    return Card(
+      key: const Key('translation-progress'),
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+                total == 0
+                    ? 'Translating to Spanish…'
+                    : 'Translating to Spanish — ${s.doneUnits} of $total sentences',
+                key: const Key('translation-status'),
+                style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 8),
+            LinearProgressIndicator(
+                value: total == 0 ? null : s.doneUnits / total),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  key: const Key('translation-cancel'),
+                  onPressed: _cancelTranslation,
+                  child: const Text('Cancel'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
     );
   }
 
@@ -735,11 +1242,13 @@ class _ReaderScreenState extends State<ReaderScreen>
             child: GestureDetector(
               key: const Key('reader-tapzone'),
               behavior: HitTestBehavior.opaque,
-              // Holding the shown word keeps it (sentinels stand for whole
-              // segments — nothing wordy to collect there).
+              // Holding the shown word opens the definition sheet, which
+              // is also how it reaches the word ledger now (sentinels
+              // stand for whole segments — nothing wordy to look up
+              // there).
               onLongPress: doc.segments.containsKey(_wordIdx)
                   ? null
-                  : () => _keepWord(doc.words[_wordIdx]),
+                  : () => _openDefinitionSheet(doc.words[_wordIdx]),
               onTapUp: (details) {
                 final width = context.size?.width ?? 1;
                 final dx = details.localPosition.dx;
@@ -751,7 +1260,18 @@ class _ReaderScreenState extends State<ReaderScreen>
                   _playing ? _pause() : _play();
                 }
               },
-              child: Center(child: _rsvpWord(doc)),
+              child: Stack(
+                alignment: Alignment.center,
+                children: [
+                  // The guide + ticks are classic mode only (donor
+                  // index.html: `guide.style.display=isC?"":"none"`).
+                  if (!_parafoveal) ..._rsvpGuide(),
+                  Center(
+                      child: _parafoveal
+                          ? _parafovealRow(doc)
+                          : _rsvpWord(doc)),
+                ],
+              ),
             ),
           ),
           _rsvpControls(doc),
@@ -759,6 +1279,70 @@ class _ReaderScreenState extends State<ReaderScreen>
       ),
     );
   }
+
+  /// The classic-mode guide line + tick marks (donor index.html:177-179,
+  /// 811-812): a quiet vertical affordance at the display's horizontal
+  /// center, independent of the pivot's own (reserved, not perfectly
+  /// pinned — see [orpBeforeReserve]) position. Theme-aware via the
+  /// fleet's own hearth tokens, matching the donor's `--oh-hearth-300` /
+  /// `--oh-interactive` custom properties.
+  List<Widget> _rsvpGuide() => [
+        Positioned.fill(
+          child: IgnorePointer(
+            child: Center(
+              child: Container(
+                key: const Key('rsvp-guide'),
+                width: 1,
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    begin: Alignment.topCenter,
+                    end: Alignment.bottomCenter,
+                    colors: [
+                      Colors.transparent,
+                      OhColors.hearth300.withValues(alpha: 0.5),
+                      Colors.transparent,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          top: 12,
+          left: 0,
+          right: 0,
+          child: IgnorePointer(
+            child: Center(
+              child: Container(
+                key: const Key('rsvp-tick-top'),
+                width: 10,
+                height: 1.5,
+                decoration: BoxDecoration(
+                    color: kPivotColor,
+                    borderRadius: BorderRadius.circular(1)),
+              ),
+            ),
+          ),
+        ),
+        Positioned(
+          bottom: 12,
+          left: 0,
+          right: 0,
+          child: IgnorePointer(
+            child: Center(
+              child: Container(
+                key: const Key('rsvp-tick-bottom'),
+                width: 10,
+                height: 1.5,
+                decoration: BoxDecoration(
+                    color: kPivotColor,
+                    borderRadius: BorderRadius.circular(1)),
+              ),
+            ),
+          ),
+        ),
+      ];
 
   Widget _rsvpWord(core.TokenizedDocument doc) {
     final word = doc.words[_wordIdx];
@@ -776,6 +1360,16 @@ class _ReaderScreenState extends State<ReaderScreen>
     }
     final orp = orpIndex(word);
     final pivot = orp < word.length ? word[orp] : '';
+    final before = word.substring(0, orp);
+    final after = orp < word.length ? word.substring(orp + 1) : '';
+    // The ORP anchor fix (Campaign 4 Phase 2, donor index.html:2662-2666):
+    // the before-pivot span reserves a MINIMUM width (orpBeforeReserve) so
+    // two words sharing an ORP bucket (see orpIndex) render with the same
+    // before-span width regardless of their actual glyphs — the jitter
+    // fix [orpBeforeReserve]'s own doc comment is honest about, no more.
+    final fontSize = style?.fontSize ?? 34;
+    final charWidth = fontSize * 0.6;
+    final reserve = orpBeforeReserve(word, charWidth);
     // A roomy stage (proposal-2 §12): the word floats in generous
     // whitespace. The face is the theme's display Lora; the pivot keeps the
     // heritage hearth red (kPivotColor) — both pinned by reader_print_test.
@@ -786,16 +1380,113 @@ class _ReaderScreenState extends State<ReaderScreen>
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Text(word.substring(0, orp),
-                key: const Key('rsvp-bef'), style: style),
-            Text(pivot,
-                key: const Key('rsvp-piv'),
-                style: style?.copyWith(color: kPivotColor)),
-            Text(orp < word.length ? word.substring(orp + 1) : '',
-                key: const Key('rsvp-aft'), style: style),
+            ConstrainedBox(
+              constraints: BoxConstraints(minWidth: reserve),
+              child: Text(before,
+                  key: const Key('rsvp-bef'),
+                  textAlign: TextAlign.right,
+                  style: style),
+            ),
+            SizedBox(
+              width: charWidth,
+              child: Text(pivot,
+                  key: const Key('rsvp-piv'),
+                  textAlign: TextAlign.center,
+                  style: style?.copyWith(color: kPivotColor)),
+            ),
+            Text(after, key: const Key('rsvp-aft'), style: style),
           ],
         ),
       ),
+    );
+  }
+
+  /// Parafoveal mode (Campaign 4 Phase 2, donor "ticker" — renamed to
+  /// avoid colliding with this app's own RSVP test vocabulary): the focus
+  /// word's neighbors stay visible, faded by a Gaussian opacity falloff
+  /// (donor index.html:2674-2699). Reuses `_wordIdx`/`_step()` wholesale —
+  /// no separate cursor or dwell logic, so punctuation-pause lengthening
+  /// comes free.
+  Widget _parafovealRow(core.TokenizedDocument doc) {
+    final theme = Theme.of(context);
+    final style =
+        theme.textTheme.displaySmall?.copyWith(fontWeight: FontWeight.w600);
+    final focusSize = style?.fontSize ?? 34;
+
+    Widget side(List<Widget> children) => SingleChildScrollView(
+          scrollDirection: Axis.horizontal,
+          physics: const NeverScrollableScrollPhysics(),
+          child: Row(mainAxisSize: MainAxisSize.min, children: children),
+        );
+
+    Widget neighbor(int d) {
+      final wi = _wordIdx + d;
+      if (wi < 0 || wi >= doc.words.length) {
+        return const SizedBox.shrink();
+      }
+      final text = doc.words[wi];
+      final dist = d.abs();
+      final opacity = gaussianOpacity(dist, _sigma);
+      final scale = gaussianScale(dist, _sigma);
+      final blur = gaussianBlurRadius(dist, _sigma);
+      Widget word =
+          Text(text, style: style?.copyWith(fontSize: focusSize * 0.82));
+      if (blur > 0) {
+        word = ImageFiltered(
+            imageFilter: ui.ImageFilter.blur(sigmaX: blur, sigmaY: blur),
+            child: word);
+      }
+      return Opacity(
+        key: Key('parafoveal-neighbor-$d'),
+        opacity: opacity,
+        child: Transform.scale(
+          scale: scale,
+          child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 7),
+              child: word),
+        ),
+      );
+    }
+
+    final left = [
+      for (var d = -_parafovealWinSize; d < 0; d++) neighbor(d)
+    ];
+    final right = [
+      for (var d = 1; d <= _parafovealWinSize; d++) neighbor(d)
+    ];
+
+    final word = doc.words[_wordIdx];
+    Widget center;
+    if (doc.segments.containsKey(_wordIdx)) {
+      center = Text(word,
+          key: const Key('parafoveal-center'),
+          style: style?.copyWith(
+              fontStyle: FontStyle.italic, color: theme.colorScheme.secondary));
+    } else {
+      final orp = orpIndex(word);
+      final before = word.substring(0, orp);
+      final pivot = orp < word.length ? word[orp] : '';
+      final after = orp < word.length ? word.substring(orp + 1) : '';
+      center = Text.rich(
+        TextSpan(children: [
+          TextSpan(text: before, style: style),
+          TextSpan(text: pivot, style: style?.copyWith(color: kPivotColor)),
+          TextSpan(text: after, style: style),
+        ]),
+        key: const Key('parafoveal-center'),
+      );
+    }
+
+    // The donor's 1fr-auto-1fr grid (index.html:186): both sides get equal
+    // flexible space, right/left-aligned respectively, so the center
+    // word's position stays fixed regardless of how many neighbors fit.
+    return Row(
+      children: [
+        Expanded(child: Align(alignment: Alignment.centerRight, child: side(left))),
+        Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10), child: center),
+        Expanded(child: Align(alignment: Alignment.centerLeft, child: side(right))),
+      ],
     );
   }
 
@@ -816,13 +1507,43 @@ class _ReaderScreenState extends State<ReaderScreen>
           ),
           Text('${_wpm.round()} wpm',
               style: Theme.of(context).textTheme.labelMedium),
+          if (_parafoveal) ...[
+            const SizedBox(height: 4),
+            Slider(
+              key: const Key('sigma-slider'),
+              min: 0.8,
+              max: 4.0,
+              divisions: 16,
+              value: _sigma,
+              label: 'sigma ${_sigma.toStringAsFixed(1)}',
+              onChanged: (v) => setState(() => _sigma = v),
+            ),
+            // C7 (fleet_conformance_test.dart): the bundled Lora/Nunito
+            // cmaps don't cover σ, so this stays spelled out rather than
+            // tofu on a device without a system fallback for it.
+            Text('Focus sigma — higher = neighbors stay brighter',
+                style: Theme.of(context).textTheme.labelSmall),
+          ],
           const SizedBox(height: 4),
-          IconButton.filled(
-            key: const Key('play-toggle'),
-            iconSize: 36,
-            tooltip: _playing ? 'Pause' : 'Play',
-            onPressed: _playing ? _pause : _play,
-            icon: Icon(_playing ? Icons.pause : Icons.play_arrow),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton.filled(
+                key: const Key('play-toggle'),
+                iconSize: 36,
+                tooltip: _playing ? 'Pause' : 'Play',
+                onPressed: _playing ? _pause : _play,
+                icon: Icon(_playing ? Icons.pause : Icons.play_arrow),
+              ),
+              const SizedBox(width: 12),
+              IconButton.outlined(
+                key: const Key('parafoveal-toggle'),
+                iconSize: 28,
+                tooltip: _parafoveal ? 'Classic mode' : 'Parafoveal mode',
+                onPressed: () => setState(() => _parafoveal = !_parafoveal),
+                icon: Icon(_parafoveal ? Icons.blur_off : Icons.blur_on),
+              ),
+            ],
           ),
         ],
       ),
@@ -835,12 +1556,21 @@ class _ReaderScreenState extends State<ReaderScreen>
     const centerKey = ValueKey('scroll-center');
     final blocks = _blocks!;
     final anchor = _scrollAnchor.clamp(0, blocks.length - 1);
+    // Campaign 4 Phase 2 follow-along: the shared cursor (_wordIdx) is
+    // already advancing under _play()/_step() exactly as RSVP drives it —
+    // this is the only piece RSVP never needed: keeping the viewport
+    // following it. Reused from karaoke_screen.dart's own
+    // _followPlayback idiom (there was no auto-scroll anywhere in this
+    // file before this).
+    WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _followAlongScroll(cursorAt(doc, _wordIdx).segment));
     // The print measure (proposal-2 §12): on wide screens the page sets as
-    // a centered ~680dp column rather than sprawling wall to wall.
+    // a centered column rather than sprawling wall to wall — 680dp unless
+    // the profile's typography prefs (Campaign 4 Phase 1) say otherwise.
     return Center(
       child: ConstrainedBox(
         key: const Key('print-column'),
-        constraints: const BoxConstraints(maxWidth: 680),
+        constraints: BoxConstraints(maxWidth: _typography.maxTextWidth),
         child: CustomScrollView(
           center: centerKey,
           anchor: 0.15,
@@ -874,9 +1604,21 @@ class _ReaderScreenState extends State<ReaderScreen>
     final Widget child;
     switch (block.kind) {
       case core.SegmentKind.heading:
-        child = Text(block.text,
-            style: theme.textTheme.titleLarge
-                ?.copyWith(fontWeight: FontWeight.w700));
+        final translation =
+            _showSpanish ? _translationBelow(block, theme) : null;
+        child = translation == null
+            ? Text(block.text,
+                style: theme.textTheme.titleLarge
+                    ?.copyWith(fontWeight: FontWeight.w700))
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(block.text,
+                      style: theme.textTheme.titleLarge
+                          ?.copyWith(fontWeight: FontWeight.w700)),
+                  translation,
+                ],
+              );
       case core.SegmentKind.prose:
         child = _proseWrap(doc, blockPos);
       case core.SegmentKind.code:
@@ -901,26 +1643,103 @@ class _ReaderScreenState extends State<ReaderScreen>
         );
     }
 
-    return Container(
-      // Generous print margins (proposal-2 §12).
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-      color: isCurrent ? theme.colorScheme.surfaceContainerHighest : null,
-      child: child,
+    // Generous print margins (proposal-2 §12), widened vertically by the
+    // profile's paragraph-spacing preference (Campaign 4 Phase 1) on top
+    // of the reader's 8dp base.
+    //
+    // KeyedSubtree carries follow-along's GlobalKey WITHOUT displacing the
+    // Container's own pinned ValueKey (`segment-tile-$blockPos`, looked up
+    // by value in existing tests) — Scrollable.ensureVisible needs a
+    // GlobalKey's currentContext, and a widget can only own one Key.
+    return KeyedSubtree(
+      key: _segKeys.putIfAbsent(blockPos, GlobalKey.new),
+      child: Container(
+        key: Key('segment-tile-$blockPos'),
+        padding: EdgeInsets.symmetric(
+            horizontal: 24, vertical: 8 + _typography.paragraphSpacing),
+        color: isCurrent ? theme.colorScheme.surfaceContainerHighest : null,
+        child: child,
+      ),
     );
   }
 
+  /// Follow-along's own half of the shared cursor (see [_scrollBody]'s doc
+  /// comment): once per segment the cursor newly enters, while [_playing]
+  /// and in scroll mode, scroll it into view — karaoke_screen.dart's own
+  /// `_followPlayback` idiom (`ensureVisible`, alignment 0.3, 300ms).
+  void _followAlongScroll(int segment) {
+    if (!_playing || _mode != ReaderMode.scroll) return;
+    if (segment == _lastFollowedSegment) return;
+    _lastFollowedSegment = segment;
+    final ctx = _segKeys[segment]?.currentContext;
+    if (ctx == null) return;
+    Scrollable.ensureVisible(ctx,
+        alignment: 0.3, duration: const Duration(milliseconds: 300));
+  }
+
+  /// The untranslated path stays exactly what it always was — a single
+  /// [Wrap] of every word in the block — whether or not Show Spanish is
+  /// on for a block with nothing translated in it (reader_print_test.dart
+  /// pins this shape).
   Widget _proseWrap(core.TokenizedDocument doc, int blockPos) {
+    final blocks = _blocks!;
+    final block = blocks[blockPos];
     final start = doc.blockStartWordIdx[blockPos];
     final end = blockPos + 1 < doc.blockStartWordIdx.length
         ? doc.blockStartWordIdx[blockPos + 1]
         : doc.words.length;
     final theme = Theme.of(context);
-    // The print body (proposal-2 §12): Lora at a book line height.
-    final base =
-        theme.textTheme.bodyLarge?.copyWith(fontFamily: 'Lora', height: 1.6);
+    // The print body (proposal-2 §12): the profile's typeface (Lora by
+    // default) at its chosen line height and font scale.
+    final bodySize = theme.textTheme.bodyLarge?.fontSize;
+    final base = theme.textTheme.bodyLarge?.copyWith(
+        fontFamily: readerTypefaceFontFamily(_typography.typeface),
+        height: _typography.lineHeight,
+        fontSize: bodySize == null ? null : bodySize * _typography.fontScale);
+
+    if (!_showSpanish) return _wordWrap(doc, start, end, base, theme);
+
+    // Dual display (ADR-0008 "Babel"): one row per ENGLISH sentence — its
+    // own word range's [Wrap], unchanged, immediately followed by its
+    // Spanish line where the store actually has one. sentence boundaries
+    // come from the SAME `core.splitSentences(block.text)` call
+    // sentenceUnitsOf uses, so a row's index here always means the row
+    // TranslationJobController wrote.
+    final sentences = core.splitSentences(block.text);
+    if (sentences.isEmpty) return _wordWrap(doc, start, end, base, theme);
+    final rows = <Widget>[];
+    for (var i = 0; i < sentences.length; i++) {
+      final sStart = start + sentences[i].firstWordIdx;
+      final sEnd =
+          i + 1 < sentences.length ? start + sentences[i + 1].firstWordIdx : end;
+      rows.add(_wordWrap(doc, sStart, sEnd, base, theme));
+      final translated = translatedTextFor(
+          stored: _spanishSentences,
+          segIdx: block.idx,
+          sentenceIdx: i,
+          currentSourceText: sentences[i].text);
+      if (translated != null) {
+        rows.add(_translatedLine(translated, theme,
+            key: Key('spanish-${block.idx}-$i')));
+      }
+    }
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows);
+  }
+
+  /// One block's word range as a plain flowing [Wrap] — the ENTIRE
+  /// pre-Babel `_proseWrap` body, unchanged, so the untranslated path's
+  /// widget tree stays byte-identical.
+  Widget _wordWrap(core.TokenizedDocument doc, int start, int end,
+      TextStyle? base, ThemeData theme) {
     return Wrap(
       spacing: 6,
       runSpacing: 4,
+      // Ragged-right by default; justified distributes each line's words
+      // across the full measure INCLUDING the last line (this is a
+      // per-word Wrap, not Flutter's TextAlign.justify, which special-
+      // cases the last line — the honest ceiling ADR-0010 records).
+      alignment:
+          _typography.justified ? WrapAlignment.spaceBetween : WrapAlignment.start,
       // The drop-cap word stands taller than its run; bottom-aligning keeps
       // the rest of the line sitting on (near) its baseline.
       crossAxisAlignment: WrapCrossAlignment.end,
@@ -928,11 +1747,46 @@ class _ReaderScreenState extends State<ReaderScreen>
         for (var w = start; w < end; w++)
           GestureDetector(
             onTap: () => _seekToWord(w),
-            onLongPress: () => _keepWord(doc.words[w]),
+            onLongPress: () => _openDefinitionSheet(doc.words[w]),
             child: _flowWord(doc, w, base, theme),
           ),
       ],
     );
+  }
+
+  /// The Spanish line's own quiet style — subordinate to the original,
+  /// the same italic-body idiom [_segmentTile] already uses for a figure
+  /// caption (its own kind of secondary text under a primary element).
+  Widget _translatedLine(String text, ThemeData theme, {Key? key}) => Padding(
+        padding: const EdgeInsets.only(top: 2, bottom: 6),
+        child: Text(text,
+            key: key,
+            style: theme.textTheme.bodyMedium?.copyWith(
+                fontFamily: 'Lora',
+                fontStyle: FontStyle.italic,
+                color: theme.colorScheme.onSurfaceVariant)),
+      );
+
+  /// Every translated sentence in a HEADING block, one line each — headings
+  /// render as a single opaque [Text] (no per-word Wrap), so there is no
+  /// row to interleave into; the translation(s) sit below the whole title
+  /// instead. Null when nothing in this block is translated.
+  Widget? _translationBelow(core.Segment block, ThemeData theme) {
+    final sentences = core.splitSentences(block.text);
+    final lines = <Widget>[];
+    for (var i = 0; i < sentences.length; i++) {
+      final translated = translatedTextFor(
+          stored: _spanishSentences,
+          segIdx: block.idx,
+          sentenceIdx: i,
+          currentSourceText: sentences[i].text);
+      if (translated != null) {
+        lines.add(_translatedLine(translated, theme,
+            key: Key('spanish-${block.idx}-$i')));
+      }
+    }
+    if (lines.isEmpty) return null;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: lines);
   }
 
   /// One word of flowing text. The work's opening word (global index 0 — a

@@ -33,13 +33,20 @@ class SupertonicVoiceFiles {
   });
 }
 
-/// The languages this campaign's ONE voice embedding (M1, English) claims
-/// to speak honestly. The model architecture (Supertonic v2) covers five
-/// (en/ko/es/pt/fr — ADR-0007), but only an English speaker embedding has
-/// shipped and been reviewed here. Widening this set is a registry-and-
-/// voice-file addition, not an engine change — [SupertonicSpeechEngine]
-/// already refuses anything outside it rather than guess.
-const supertonicSupportedLangs = {'en'};
+/// The languages this campaign's ONE voice embedding (M1) claims to speak.
+/// The model architecture (Supertonic v2) covers five (en/ko/es/pt/fr —
+/// ADR-0007), and `lang` is a genuinely independent runtime parameter
+/// from voice-style selection (confirmed against upstream's own usage
+/// pattern and `voice_styles/` listing, ADR-0008 "Babel" Phase 4:
+/// F1-F5/M1-M5 are speaker timbres, not language pairs — there is no
+/// separate "Spanish voice" to download). Widened from `{'en'}` to
+/// `{'en', 'es'}` per ADR-0007's own recorded escape hatch ("the same M1
+/// embedding, if it turns out to generalize") — this M1 embedding has
+/// been reviewed for English; Spanish output through it has NOT been
+/// verified by ear on real hardware. See ADR-0008's amendment for the
+/// full honesty accounting. Widening further (ko/pt/fr) is the same
+/// move, still unverified, not done here.
+const supertonicSupportedLangs = {'en', 'es'};
 
 /// The thinnest boundary over flutter_onnxruntime's four ONNX sessions —
 /// narrow enough that a host test can fake it entirely, mirroring

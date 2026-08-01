@@ -107,6 +107,39 @@ String _nsText(XmlElement el, String local) {
   return (chapters: null, chaptersUrl: null);
 }
 
+/// The first direct-child `channel` or `feed` element in document order —
+/// RSS 2.0 nests items under `<channel>`; Atom's own root IS `<feed>`.
+XmlElement? _channelOrFeedRoot(XmlDocument d) {
+  for (final e in d.descendantElements) {
+    if (e.name.local == 'channel' || e.name.local == 'feed') return e;
+  }
+  return null;
+}
+
+/// RFC 5005 archive discovery: a channel/feed-level `<atom:link rel="next">`
+/// (or, absent that, `rel="prev-archive"`) among its DIRECT children only —
+/// an item/entry carrying the same rel must not leak into the feed level.
+/// A relative href is resolved against [feedUrl]; an unresolvable or empty
+/// href is treated as absent rather than thrown.
+({String? url, String? rel}) _findNextPage(XmlDocument d, String feedUrl) {
+  final container = _channelOrFeedRoot(d);
+  if (container == null) return (url: null, rel: null);
+  final links = _allLocal(container.childElements, 'link').toList();
+  for (final rel in const ['next', 'prev-archive']) {
+    for (final l in links) {
+      if (l.getAttribute('rel') != rel) continue;
+      final href = l.getAttribute('href');
+      if (href == null || href.isEmpty) continue;
+      try {
+        return (url: Uri.parse(feedUrl).resolve(href).toString(), rel: rel);
+      } catch (_) {
+        return (url: href, rel: rel);
+      }
+    }
+  }
+  return (url: null, rel: null);
+}
+
 Enclosure? _findAudio(XmlElement el) {
   // Standard RSS 2.0 enclosure
   for (final enc in _allLocal(el.descendantElements, 'enclosure')) {
@@ -228,7 +261,13 @@ ParsedFeed parseRssFeed(String xml, String feedUrl) {
   }
   if (feedTitle.isEmpty) feedTitle = feedUrl;
 
-  return ParsedFeed(title: feedTitle, items: items);
+  final nextPage = _findNextPage(d, feedUrl);
+
+  return ParsedFeed(
+      title: feedTitle,
+      items: items,
+      nextPageUrl: nextPage.url,
+      nextPageRel: nextPage.rel);
 }
 
 /// Common named HTML entities (the full HTML5 table has ~2200; feeds in the
