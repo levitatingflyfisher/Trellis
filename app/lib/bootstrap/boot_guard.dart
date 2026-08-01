@@ -22,6 +22,15 @@ import 'package:flutter/material.dart';
 /// [run] is invoked inside the try, so a synchronous throw before the
 /// function's first await is caught as well — which is the shape a platform
 /// channel actually fails in.
+///
+/// **[orElse] must not throw.** It is the floor; there is no T to invent if
+/// it fails, so its error propagates and boot is lost again — which is the
+/// very failure this function exists to prevent. That obligation is not a
+/// wish: the fallbacks actually used here are constructed in the bootstrap
+/// pair and pinned by tests on both tiers (the web one exists precisely
+/// because `DeviceServices.detached()` throws under dart2js). If it does
+/// throw anyway, BOTH causes are recorded before rethrowing — otherwise
+/// whoever reads logcat sees the fallback's error and never the real one.
 Future<T> bestEffort<T>({
   required String what,
   required Future<T> Function() run,
@@ -40,7 +49,18 @@ Future<T> bestEffort<T>({
       library: 'trellis boot',
       context: ErrorDescription('starting $what'),
     ));
-    return orElse();
+    try {
+      return orElse();
+    } catch (fallbackError, fallbackStack) {
+      notes.add('$what fallback also failed: $fallbackError');
+      FlutterError.reportError(FlutterErrorDetails(
+        exception: fallbackError,
+        stack: fallbackStack,
+        library: 'trellis boot',
+        context: ErrorDescription('falling back for $what after: $error'),
+      ));
+      rethrow;
+    }
   }
 }
 
