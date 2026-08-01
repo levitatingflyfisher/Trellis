@@ -1,0 +1,23 @@
+name: brain_wiring
+description: >-
+  The LLM seam, distillation, and discourse layer — domovoi Brain tiers with
+  explicit user-pinned selection, a BYOK Anthropic Brain over an injectable
+  HTTP seam, the transcript-to-.ohcourse Distiller (strict-parser invariant,
+  bounded repair loop), suggestion-only free-recall grading, and provenance
+  stamping. Pure Dart.
+version: 0.1.0
+publish_to: none
+environment:
+  sdk: ^3.5.0
+dependencies:
+  # The one seam between features and whatever thinks (Brain + AskException),
+  # shipped fleet-wide by DomovoiDiscernment. Path dep per the fleet layout.
+  domovoi:
+    path: ../../../DomovoiDiscernment
+  # The strict .ohcourse parser is the gate every generated course must pass
+  # before it may be saved (the Distiller invariant), and Grade is the shared
+  # self-rating vocabulary.
+  study_core:
+    path: ../study_core
+dev_dependencies:
+  test: ^1.25.0

@@ -1,0 +1,15 @@
+name: transcribe_core
+description: The transcription pipeline as a checkpointed jobs_core task — windowed ASR with VAD gating, overlap merge, sentence-ish segmentization into the loom_core spine. Pure Dart.
+version: 0.1.0
+publish_to: none
+environment:
+  sdk: ^3.5.0
+dependencies:
+  jobs_core:
+    path: ../jobs_core
+  loom_core:
+    path: ../loom_core
+  ml_runtime:
+    path: ../ml_runtime
+dev_dependencies:
+  test: ^1.25.0

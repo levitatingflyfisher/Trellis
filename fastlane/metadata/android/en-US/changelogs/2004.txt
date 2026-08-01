@@ -1,0 +1,8 @@
+Trellis 1.0 is a rebuild: everything the old app did, plus the whole intake side.
+
+• Read anything — EPUB, articles, pasted text, Gutenberg — four ways
+• Podcasts and RSS; episodes transcribe on your own device, in their own language
+• Courses and backups import as before; the study engine is unchanged
+• Encrypted backup, Anki export, household dashboard
+
+The app now asks for network permission: the feeds you add, the models you choose. Still no accounts, no ads, no tracking.

@@ -1,0 +1,8 @@
+name: ml_runtime
+description: ML seams (Transcriber/Synthesizer/Vad), scripted fakes, the overlap-merge law, the pinned model registry and residency policy. Pure Dart — FFI implementations live in the app.
+version: 0.1.0
+publish_to: none
+environment:
+  sdk: ^3.5.0
+dev_dependencies:
+  test: ^1.25.0

@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+    branches: ['**']
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze-and-test:
+    name: Analyze & Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Clone the sibling path-dep repos
+        # app/ and packages/ reach OUT of this repo by sibling path,
+        # matching the local monorepo layout: domovoi (the fleet download
+        # engine), ohStyle (design tokens), oh_fleet_conformance (posture
+        # tests), sanctuary_auth_core (backup_core's crypto). Cloned one
+        # level above $GITHUB_WORKSPACE, which the runner owns.
+        run: |
+          git clone --depth 1 https://github.com/levitatingflyfisher/DomovoiDiscernment ../DomovoiDiscernment
+          git clone --depth 1 https://github.com/levitatingflyfisher/ohStyle ../ohStyle
+          git clone --depth 1 https://github.com/levitatingflyfisher/ohFleetConformance ../packages/oh_fleet_conformance
+          git clone --depth 1 https://github.com/levitatingflyfisher/sanctuaryAuthCore ../packages/sanctuary_auth_core
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.38.7'
+          channel: stable
+          cache: true
+
+      - name: App — dependencies + codegen (drift)
+        working-directory: app
+        run: |
+          flutter pub get
+          dart run build_runner build --delete-conflicting-outputs
+
+      - name: App — analyze
+        working-directory: app
+        run: flutter analyze
+
+      - name: App — test
+        working-directory: app
+        run: flutter test
+
+      - name: Packages — every in-repo suite
+        # All ten are seam-tested and pass headless (whisper_ffi skips its
+        # native-lib case). No codegen anywhere under packages/ — the cores
+        # are hand-written by design.
+        run: |
+          set -e
+          for d in packages/*/; do
+            echo "== $d"
+            (cd "$d" && flutter pub get && flutter test)
+          done

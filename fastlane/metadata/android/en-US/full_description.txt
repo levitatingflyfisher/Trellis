@@ -1,0 +1,18 @@
+Read, listen, study, remember — one local-first app for a household's whole knowledge diet.
+
+Trellis is a speed-reader, a podcast player that transcribes episodes on your own device, and a study engine that drills what you keep into durable memory.
+
+• Read four ways: RSVP speed-reading, plain print, a ticker, or spoken aloud — your place is one position that survives switching between them
+• Bring anything in: EPUB, web articles, pasted text, Project Gutenberg, RSS and podcast feeds
+• Transcribe podcasts on the device, in the language they are spoken — including an English layer via Whisper's translate task
+• Feeds are reverse-chronological and episodes decay by default: no ranking, no streaks, no engagement tricks
+• Study concepts on a prerequisite lattice: a concept stays locked until the ones it builds on hold
+• Four kinds of recall item, scheduled by spaced repetition with a monotonic-interval guarantee
+• Export your cards to Anki whenever you want
+• Encrypted backup with a key only you hold — restores 0.x Trellis and ohPrimer backups too
+• Optional: bring your own API key to distill sources into courses; off by default, never required
+
+No accounts, no ads, no tracking. The network is used only for the feeds you add and the models you choose to download.
+
+Free and open source, MIT licensed.
+Source: https://github.com/levitatingflyfisher/Trellis

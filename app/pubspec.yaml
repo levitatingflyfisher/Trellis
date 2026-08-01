@@ -1,0 +1,188 @@
+name: trellis
+description: "Read, listen, study, remember — a local-first reader, river and recall ladder."
+# The following line prevents the package from being accidentally published to
+# pub.dev using `flutter pub publish`. This is preferred for private packages.
+publish_to: 'none' # Remove this line if you wish to publish to pub.dev
+
+# The following defines the version and build number for your application.
+# A version number is three numbers separated by dots, like 1.2.43
+# followed by an optional build number separated by a +.
+# Both the version and the builder number may be overridden in flutter
+# build by specifying --build-name and --build-number, respectively.
+# In Android, build-name is used as versionName while build-number used as versionCode.
+# Read more about Android versioning at https://developer.android.com/studio/publish/versioning
+# In iOS, build-name is used as CFBundleShortVersionString while build-number is used as CFBundleVersion.
+# Read more about iOS versioning at
+# https://developer.apple.com/library/archive/documentation/General/Reference/InfoPlistKeyReference/Articles/CoreFoundationKeys.html
+# In Windows, build-name is used as the major, minor, and patch parts
+# of the product and file versions while build-number is used as the build suffix.
+# Build number >2003: the fusion supersedes the original Trellis
+# (versionCode 2003 era) and must install over it as an upgrade.
+version: 1.2.0+2006
+
+environment:
+  sdk: ^3.10.7
+
+# Dependencies specify other packages that your package needs in order to work.
+# To automatically upgrade your package dependencies to the latest versions
+# consider running `flutter pub upgrade --major-versions`. Alternatively,
+# dependencies can be manually updated by changing the version numbers below to
+# the latest version available on pub.dev. To see which dependencies have newer
+# versions available, run `flutter pub outdated`.
+dependencies:
+  flutter:
+    sdk: flutter
+  loom_core:
+    path: ../packages/loom_core
+  study_core:
+    path: ../packages/study_core
+  intake_core:
+    path: ../packages/intake_core
+  comms_core:
+    path: ../packages/comms_core
+  jobs_core:
+    path: ../packages/jobs_core
+  ml_runtime:
+    path: ../packages/ml_runtime
+  transcribe_core:
+    path: ../packages/transcribe_core
+  whisper_ffi:
+    path: ../packages/whisper_ffi
+  # The fleet's one download engine (ResumableTransfer) — proposal-2 §9.
+  domovoi:
+    path: ../../DomovoiDiscernment
+  dio: ^5.9.0
+  crypto: ^3.0.6
+  # Audio → 16kHz mono PCM decode (PunctumTemporis precedent: the pinned
+  # community fork of the retired ffmpeg_kit_flutter).
+  ffmpeg_kit_flutter_new: ^4.1.0
+  # Notification-backed foreground service for transcription jobs
+  # (Android-only; guarded behind the JobForegroundGate seam).
+  flutter_foreground_task: ^9.1.0
+  drift: 2.28.2
+  drift_flutter: ^0.2.0
+  path_provider: ^2.1.0
+  path: ^1.9.0
+  file_picker: ^10.3.8
+  just_audio: ^0.10.5
+  # System TTS for the reader's speak mode — always behind the app's
+  # TtsSpeaker seam; widget tests never touch the plugin.
+  flutter_tts: ^4.2.0
+  # The Supertonic rung (ADR-0007): Supertone Inc.'s MIT engine, no
+  # phonemizer — the model consumes raw character indices, so there is
+  # nothing for a GPL dependency (espeak-ng) to hide in, the flaw that
+  # retired the sherpa rung. Android only for now — kept out of the web build by
+  # the app's own conditional-export trio
+  # (lib/features/reader/speech/src/supertonic_speech_engine.dart), the
+  # repo's established whisper_ffi pattern. >=1.5.1 for 16KB Android page
+  # support; the official Supertonic Flutter example pins ^1.6.0.
+  flutter_onnxruntime: ^1.8.3
+  # Backup files travel as zip-free single blobs, but .apkg export is a
+  # zip archive by format definition.
+  archive: ^4.0.0
+  # Encrypted .ohbk backup + both-donor migration, on the real
+  # sanctuary_auth_core (per-app HKDF domain + AAD).
+  backup_core:
+    path: ../packages/backup_core
+  # The Brain seam wiring (proposal-2 §7): tiers, BYOK Anthropic, the
+  # Distiller with its must-parse invariant, discourse study, provenance.
+  brain_wiring:
+    path: ../packages/brain_wiring
+  # The BYOK key never sits in plain prefs; already in the tree
+  # transitively, made direct for the brain settings door.
+  flutter_secure_storage: ^9.2.4
+  # Fleet design tokens (C1): the hearth palette comes from the canonical
+  # package, never retyped hex.
+  openhearth_design:
+    path: ../../ohStyle/openhearth_design
+
+  # The following adds the Cupertino Icons font to your application.
+  # Use with the CupertinoIcons class for iOS style icons.
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  sqlite3: ^2.9.0
+  drift_dev: 2.28.0
+  build_runner: 2.5.4
+  # Fleet posture as tests (C1–C7).
+  oh_fleet_conformance:
+    path: ../../packages/oh_fleet_conformance
+
+  # The "flutter_lints" package below contains a set of recommended lints to
+  # encourage good coding practices. The lint set provided by the package is
+  # activated in the `analysis_options.yaml` file located at the root of your
+  # package. See that file for information about deactivating specific lint
+  # rules and activating additional ones.
+  flutter_lints: ^6.0.0
+
+# For information on the generic Dart part of this file, see the
+# following page: https://dart.dev/tools/pub/pubspec
+
+# The following section is specific to Flutter packages.
+flutter:
+
+  # The following line ensures that the Material Icons font is
+  # included with your application, so that you can use the icons in
+  # the material Icons class.
+  uses-material-design: true
+
+  assets:
+    # The Trellis starter course, registered as an importable sample —
+    # never auto-imported (the user's hand does the importing, ADR-0003).
+    - assets/courses/kalman.ohcourse
+
+  # The fleet's type (proposal-2 §12): Lora for display, Nunito for body —
+  # bundled, so C7 checks every glyph the UI prints against our own cmaps
+  # (the ≤/≥ tofu law learned in Peckish).
+  fonts:
+    - family: Lora
+      fonts:
+        - asset: assets/fonts/Lora-Regular.ttf
+        - asset: assets/fonts/Lora-Italic.ttf
+          style: italic
+        - asset: assets/fonts/Lora-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Lora-Bold.ttf
+          weight: 700
+    - family: Nunito
+      fonts:
+        - asset: assets/fonts/Nunito-Regular.ttf
+        - asset: assets/fonts/Nunito-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Nunito-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Nunito-Bold.ttf
+          weight: 700
+
+  # To add assets to your application, add an assets section, like this:
+  # assets:
+  #   - images/a_dot_burr.jpeg
+  #   - images/a_dot_ham.jpeg
+
+  # An image asset can refer to one or more resolution-specific "variants", see
+  # https://flutter.dev/to/resolution-aware-images
+
+  # For details regarding adding assets from package dependencies, see
+  # https://flutter.dev/to/asset-from-package
+
+  # To add custom fonts to your application, add a fonts section here,
+  # in this "flutter" section. Each entry in this list should have a
+  # "family" key with the font family name, and a "fonts" key with a
+  # list giving the asset and other descriptors for the font. For
+  # example:
+  # fonts:
+  #   - family: Schyler
+  #     fonts:
+  #       - asset: fonts/Schyler-Regular.ttf
+  #       - asset: fonts/Schyler-Italic.ttf
+  #         style: italic
+  #   - family: Trajan Pro
+  #     fonts:
+  #       - asset: fonts/TrajanPro.ttf
+  #       - asset: fonts/TrajanPro_Bold.ttf
+  #         weight: 700
+  #
+  # For details regarding fonts from package dependencies,
+  # see https://flutter.dev/to/font-from-package

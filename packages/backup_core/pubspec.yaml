@@ -1,0 +1,23 @@
+name: backup_core
+description: >-
+  Encrypted .ohbk backup + both-donor migration (Trellis .ohbk, ohPrimer
+  plaintext JSON) into DB-agnostic row maps. The crypto is the real
+  sanctuary_auth_core (BIP39 -> HKDF appDomain -> ChaCha20-Poly1305 + AAD);
+  everything else is pure mapping logic.
+version: 0.1.0
+publish_to: none
+environment:
+  # sanctuary_auth_core's floor; the sibling *_core packages float at ^3.5.0
+  # but this package cannot go lower than its crypto dependency.
+  sdk: ^3.10.7
+dependencies:
+  # The fleet's auth/crypto core (OHBK envelope, HKDF domain separation).
+  # NOTE: sanctuary_auth_core is Flutter-BOUND (flutter/foundation,
+  # flutter_secure_storage, flutter_riverpod), so this package's tests run
+  # under `flutter test`, not `dart test`. lib/ itself imports no Flutter
+  # and no dart:io — the day sanctuary splits out a pure core, this package
+  # becomes `dart test`-able by changing only this dependency.
+  sanctuary_auth_core:
+    path: ../../../packages/sanctuary_auth_core
+dev_dependencies:
+  test: ^1.25.0

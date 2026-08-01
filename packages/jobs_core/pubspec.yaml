@@ -1,0 +1,8 @@
+name: jobs_core
+description: The checkpointed-job engine — job rows, the chunk protocol, resume laws, bounded backoff, honest ETA. Pure Dart.
+version: 0.1.0
+publish_to: none
+environment:
+  sdk: ^3.5.0
+dev_dependencies:
+  test: ^1.25.0

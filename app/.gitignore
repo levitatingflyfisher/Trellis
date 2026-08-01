@@ -1,0 +1,58 @@
+# Miscellaneous
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+migrate_working_dir/
+
+# IntelliJ related
+*.iml
+*.ipr
+*.iws
+.idea/
+
+# The .vscode folder contains launch configuration and tasks you configure in
+# VS Code which you may wish to be included in version control, so this line
+# is commented out by default.
+#.vscode/
+
+# Generated sources belong to the build, not to git (fleet C6): CI and
+# every local build run build_runner, so a committed .g.dart is only a
+# copy that can drift from its source.
+*.g.dart
+
+# Flutter/Dart/Pub related
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# Symbolication related
+app.*.symbols
+
+# Obfuscation related
+app.*.map.json
+
+# Android Studio will place build artifacts here
+/android/app/debug
+/android/app/profile
+/android/app/release
+
+# Visual-tour goldens are read-and-discard inspection artifacts, not a
+# cross-machine regression gate (font/AA drift makes them flaky in CI).
+test/visual/goldens/
+
+# Built by natives/build-android.sh (see natives/README.md) — a binary
+# the repo documents how to reproduce, never carries.
+android/app/src/main/jniLibs/

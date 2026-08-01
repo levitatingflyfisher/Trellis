@@ -1,0 +1,12 @@
+name: intake_core
+description: Document intake — EPUB parsing, article-by-URL extraction, Gutenberg text cleanup. Ported from ohPrimer. Pure Dart.
+version: 0.1.0
+publish_to: none
+environment:
+  sdk: ^3.5.0
+dependencies:
+  archive: ^4.0.7
+  html: ^0.15.6
+  xml: ^6.6.0
+dev_dependencies:
+  test: ^1.25.0

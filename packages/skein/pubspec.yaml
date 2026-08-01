@@ -1,0 +1,13 @@
+name: skein
+description: The household daemon — serves the Trellis web build and fetches
+  on the app's behalf, so the page and its fetcher share one origin and CORS
+  dissolves. Localhost-only in v1.
+version: 0.1.0
+publish_to: none
+environment:
+  sdk: ^3.5.0
+dependencies:
+  comms_core:
+    path: ../comms_core
+dev_dependencies:
+  test: ^1.25.0

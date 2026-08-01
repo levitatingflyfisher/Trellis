@@ -1,0 +1,10 @@
+name: comms_core
+description: The network-hygiene core — SSRF guard, proxy-consent gating, size-capped fetch, RSS/Atom parsing, conditional GET, refresh breaker, feed discovery, OPML. Pure Dart; all HTTP behind an injectable seam.
+version: 0.1.0
+publish_to: none
+environment:
+  sdk: ^3.5.0
+dependencies:
+  xml: ^6.5.0
+dev_dependencies:
+  test: ^1.25.0

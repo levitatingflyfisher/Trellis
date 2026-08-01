@@ -1,0 +1,9 @@
+CLAUDE.md
+docs/superpowers/
+.dart_tool/
+.flutter-plugins-dependencies
+build/
+*.g.dart
+pubspec.lock
+# Stray upstream clones live only under natives/third_party (gitignored)
+natives/whisper.cpp/

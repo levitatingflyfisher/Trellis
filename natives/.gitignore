@@ -1,0 +1,6 @@
+# Everything reproducible from README.md's recipes; the repo carries
+# recipes, never unauditable binaries.
+third_party/
+build/
+out/
+models/

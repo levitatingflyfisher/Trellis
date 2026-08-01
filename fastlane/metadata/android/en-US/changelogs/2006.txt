@@ -1,0 +1,8 @@
+Trellis 1.2 gives speak mode a real voice.
+
+• Speak mode now reads sentence by sentence — smoother, and your place is kept per sentence
+• Download the Supertonic voice in Models for natural, on-device reading (263 MB, optional)
+• No voice downloaded? The system voice keeps working, now on the same smoother pacing
+• Run the Skein on your computer to fetch articles and feeds for the web app
+
+Everything stays on your device: no accounts, no ads, no tracking. The voice download starts only when you ask for it.

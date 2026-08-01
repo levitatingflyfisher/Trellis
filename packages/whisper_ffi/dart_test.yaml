@@ -1,0 +1,14 @@
+# The 'native' tag marks integration tests that load the real native library
+# (natives/out/linux/libwhisper.so — see ../../natives/README.md for the build
+# recipe and model placement). They never execute in a plain `dart test`;
+# run them explicitly with:
+#
+#   dart test --tags native --run-skipped
+#
+# (Why skip rather than exclude_tags: package:test UNIONS config and CLI tag
+# selectors — verified empirically — so a config-level exclude_tags can never
+# be re-enabled from the command line at all.)
+tags:
+  native:
+    timeout: 5m
+    skip: "native integration — run: dart test --tags native --run-skipped"

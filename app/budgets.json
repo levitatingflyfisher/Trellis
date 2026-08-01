@@ -1,0 +1,6 @@
+{
+  "_recipe": "measured from the first v1.0 release artifacts, then +5% — the C3 ratchet only ever tightens against reality, never against invention",
+  "_measured": "2026-08-12: main.dart.js gzip 1239855 bytes; app-arm64-v8a-release.apk 71538950 bytes (whisper natives + ffmpeg aboard)",
+  "main_dart_js_gz_max_bytes": 1301847,
+  "apk_arm64_max_bytes": 75115897
+}
