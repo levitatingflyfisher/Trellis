@@ -207,6 +207,17 @@ void main() {
         WebFetchLane.skein);
   });
 
+  test('detachedServices on the web tier avoids Directory.systemTemp', () {
+    // main()'s fallback when createServices() throws. On this tier it must
+    // NOT be DeviceServices.detached(): its Directory.systemTemp getter
+    // throws under dart2js, which would turn the boot guard into a second
+    // way to never paint a frame.
+    final s = web.detachedServices();
+    expect(s.localMlAvailable, isFalse);
+    expect((s.modelStore as DiskModelStore).baseDir.path,
+        startsWith('/trellis'));
+  });
+
   test('createFetcher wires the given lane onto the DioHttpFetcher it builds',
       () {
     expect(

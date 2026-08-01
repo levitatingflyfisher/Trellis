@@ -79,6 +79,13 @@ DeviceServices webServices({WebFetchLane lane = WebFetchLane.direct}) =>
       webFetchLane: lane,
     );
 
+/// The last resort when [createServices] throws (here: the lane probe).
+/// Deliberately NOT [DeviceServices.detached] — its Directory.systemTemp
+/// getter throws under dart2js, so the fallback would itself become a way
+/// to never paint a frame. The direct lane is the safe assumption: it is
+/// what the probe defaults to when it cannot decide.
+DeviceServices detachedServices() => webServices();
+
 /// [lane] defaults to direct so existing call sites keep compiling; main()
 /// always passes the boot-resolved value from [createServices].
 HttpFetcher createFetcher({WebFetchLane lane = WebFetchLane.direct}) =>

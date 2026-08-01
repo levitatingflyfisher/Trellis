@@ -51,6 +51,14 @@ Future<DeviceServices> createServices() async {
 DeviceServices servicesFor(Directory supportDir, {File? databaseFile}) =>
     DeviceServices.real(supportDir, databaseFile: databaseFile);
 
+/// The last resort when [createServices] throws — a dead path_provider
+/// channel, a full disk. main() runs the app on this rather than not at
+/// all (boot_guard.dart): the P3 flows that need real paths will say so,
+/// which beats a launch logo that says nothing. Native platforms can use
+/// the placeholder stack directly; the web side overrides this because
+/// [DeviceServices.detached]'s Directory.systemTemp throws under dart2js.
+DeviceServices detachedServices() => DeviceServices.detached();
+
 /// The dart:io HTTP stack, redirect hops SSRF-re-checked (io_fetcher.dart).
 /// [lane] is a web-tier-only concept (Skein exists to dissolve the
 /// browser's CORS wall); native apps fetch directly regardless, so it is

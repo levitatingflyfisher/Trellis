@@ -48,4 +48,16 @@ void main() {
     expect(fetcher, isA<IoHttpFetcher>());
     (fetcher as IoHttpFetcher).close();
   });
+
+  test('detachedServices is a usable last resort that touches no channel',
+      () {
+    // main() falls back to this when createServices() throws (a dead
+    // path_provider channel, a full disk). It must not throw itself —
+    // a fallback that throws re-brands the launch-logo hang rather than
+    // fixing it.
+    final s = detachedServices();
+    expect(s.modelStore, isA<DiskModelStore>());
+    expect(s.executor, isA<InlineTranscribeExecutor>());
+    expect(s.foregroundGate, isA<NoopJobForegroundGate>());
+  });
 }

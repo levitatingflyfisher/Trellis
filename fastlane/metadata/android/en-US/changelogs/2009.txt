@@ -1,0 +1,4 @@
+Trellis 1.4.1 fixes a 1.4.0 release that would not start.
+
+• Fixed: the app hung on its logo and never opened. The new lock-screen player asked Android for something the app had not been set up to give it, and the error stopped the first screen from ever being drawn.
+• A failure while starting up can no longer take the whole app down with it — Trellis now opens anyway and says what is missing.

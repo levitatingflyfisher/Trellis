@@ -18,7 +18,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # of the product and file versions while build-number is used as the build suffix.
 # Build number >2003: the fusion supersedes the original Trellis
 # (versionCode 2003 era) and must install over it as an upgrade.
-version: 1.4.0+2008
+version: 1.4.1+2009
 
 environment:
   sdk: ^3.10.7

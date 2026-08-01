@@ -7,6 +7,43 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.4.1 — 2026-08-17
+
+A hotfix for a 1.4.0 that did not start. Reported from a real phone:
+the app showed its launch logo and never got past it.
+
+### Fixed
+
+- **The app never painted a frame.** Campaign 9 Phase 2e added the
+  lock-screen media session and landed only half of what
+  `just_audio_background` requires: the manifest's `<service>` and
+  `<receiver>` elements, but not the launcher activity's obligation to
+  hand audio_service its shared `FlutterEngine`. `AudioServicePlugin`
+  detects exactly that mismatch (`wrongEngineDetected`) and throws
+  `IllegalStateException` on the first method call it gets — which is the
+  `configure` that `JustAudioBackground.init()` sends, and which `main()`
+  awaits *before* `runApp()`. The throw escaped `main`, so there was no
+  first frame, no error UI and no crash dialog: Android simply kept
+  showing `@style/LaunchTheme`. `MainActivity` now extends
+  `AudioServiceActivity`. The PWA was never affected — the web tier's
+  `initAudioBackground()` is a no-op stub.
+- **A boot step can no longer take the boot with it.** Everything `main()`
+  awaits is on the critical path to the first frame, not just to its own
+  feature, and a pre-`runApp` throw is invisible by construction. Each
+  step now runs through `bestEffort` (`lib/bootstrap/boot_guard.dart`):
+  it falls back, reports to `FlutterError` so logcat keeps the stack, and
+  records a line shown in a dismissible banner over the app. Degraded and
+  honest beats a logo that explains nothing.
+
+### Added
+
+- `test/android_host_engine_test.dart` — the guard that would have caught
+  this. 1145 Dart tests could not see it, because nothing in the suite
+  had ever read the Android host configuration. It asserts the invariant
+  (the activity the manifest declares must provide audio_service's shared
+  engine) rather than one file path, and fails when its own inputs go
+  missing instead of passing on nothing-found.
+
 ## 1.4.0 — 2026-08-16
 
 Campaign 8 "Babel widens" (`docs/adr/0014-babel-widens.md`): the

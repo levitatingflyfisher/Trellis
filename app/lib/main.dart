@@ -2,6 +2,7 @@ import 'package:comms_core/comms_core.dart';
 import 'package:flutter/material.dart';
 import 'package:openhearth_design/openhearth_design.dart';
 
+import 'bootstrap/boot_guard.dart';
 import 'bootstrap/bootstrap.dart';
 import 'db/database.dart';
 import 'features/player/episode_player.dart';
@@ -12,22 +13,44 @@ import 'services/device_services.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // EVERY await below is on the critical path to the first frame, not just
+  // to its own feature. 1.4.0 proved what that costs: initAudioBackground()
+  // threw on a host-activity misconfiguration, the throw escaped main(),
+  // runApp() never ran, and the app sat on its launch logo forever with
+  // nothing on screen to say why. So each step is best-effort now — it may
+  // fail, loudly and visibly, but it may not take the boot with it
+  // (bootstrap/boot_guard.dart).
+  final bootNotes = <String>[];
+
   // Campaign 9 Phase 2e (ADR-0015 Decision 3): must run before the app's
   // single AudioPlayer is ever constructed — a real call on Android/iOS,
   // a no-op on the web tier (bootstrap_web.dart's own stub).
-  await initAudioBackground();
-  // All platform truth lives behind the bootstrap seam (bootstrap.dart):
+  await bestEffort<void>(
+    what: 'Lock-screen controls',
+    run: initAudioBackground,
+    orElse: () {},
+    notes: bootNotes,
+  );
+
+  // All platform truth lives behind the bootstrap boundary (bootstrap.dart):
   // native gets path_provider dirs + DeviceServices.real + drift's file db;
   // the web build gets drift-on-wasm and web-safe services. No dart:io here.
   //
   // services is awaited FIRST: on the web tier it carries the boot-time
   // Skein probe (webFetchLane), and the fetcher must be built knowing
   // that lane rather than always defaulting to direct.
-  final services = await createServices();
+  final services = await bestEffort<DeviceServices>(
+    what: 'Device storage',
+    run: createServices,
+    orElse: detachedServices,
+    notes: bootNotes,
+  );
+
   runApp(TrellisApp(
     db: createDb(),
     fetcher: createFetcher(lane: services.webFetchLane),
     services: services,
+    bootNotes: bootNotes,
   ));
 }
 
@@ -42,12 +65,18 @@ class TrellisApp extends StatelessWidget {
   final HttpFetcher fetcher;
   final EpisodePlayer Function() createPlayer;
   final DeviceServices services;
+
+  /// What the boot could not bring up, surfaced above the app rather than
+  /// swallowed. Empty on an ordinary start.
+  final List<String> bootNotes;
+
   TrellisApp(
       {super.key,
       required this.db,
       HttpFetcher? fetcher,
       EpisodePlayer Function()? createPlayer,
-      DeviceServices? services})
+      DeviceServices? services,
+      this.bootNotes = const []})
       : fetcher = fetcher ?? IoHttpFetcher(),
         createPlayer = createPlayer ?? (() => JustAudioEpisodePlayer()),
         services = services ?? DeviceServices.detached();
@@ -62,11 +91,14 @@ class TrellisApp extends StatelessWidget {
       // hearth terracotta on warm linen, from the canonical tokens (C1).
       theme: OhTheme.light(),
       darkTheme: OhTheme.hearthDark(),
-      home: HomeFlow(
-          db: db,
-          fetcher: fetcher,
-          createPlayer: createPlayer,
-          services: services),
+      home: BootNotice(
+        notes: bootNotes,
+        child: HomeFlow(
+            db: db,
+            fetcher: fetcher,
+            createPlayer: createPlayer,
+            services: services),
+      ),
     );
   }
 }
