@@ -783,4 +783,158 @@ void main() {
       );
     });
   });
+
+  group('channel artwork (Campaign 9 Phase 5, "the river gets faces")', () {
+    // A minimal, real, decodable 1x1 PNG — Image.file must actually decode
+    // it for the thumbnail to render, unlike FakeAudioFetcher's placeholder
+    // bytes elsewhere in this suite, which are never handed to a real
+    // image decoder.
+    const onePixelPng = [
+      0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, //
+      0x00, 0x00, 0x00, 0x0D, 0x49, 0x48, 0x44, 0x52, //
+      0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, //
+      0x08, 0x06, 0x00, 0x00, 0x00, 0x1F, 0x15, 0xC4, //
+      0x89, 0x00, 0x00, 0x00, 0x0D, 0x49, 0x44, 0x41, //
+      0x54, 0x78, 0x9C, 0x62, 0x60, 0x60, 0x60, 0x00, //
+      0x00, 0x00, 0x05, 0x00, 0x01, 0x5A, 0x27, 0xEA, //
+      0x04, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4E, //
+      0x44, 0xAE, 0x42, 0x60, 0x82,
+    ];
+
+    late Directory dir;
+    setUp(() => dir = Directory.systemTemp.createTempSync('trellis-artwork'));
+    tearDown(() => dir.deleteSync(recursive: true));
+
+    testWidgets('a feed with downloaded artwork shows a thumbnail; one '
+        'without keeps the plain dot-only layout', (tester) async {
+      final services = testServices(dir);
+      final profileId = await seedProfile();
+      final withArtFeed = await db.feedsDao
+          .insertFeed(profileId: profileId, url: 'https://a/f');
+      final noArtFeed = await db.feedsDao
+          .insertFeed(profileId: profileId, url: 'https://b/f');
+      services.artworkFileFor(withArtFeed)
+        ..parent.createSync(recursive: true)
+        ..writeAsBytesSync(onePixelPng);
+      final withArtId = await seedRiverItem(
+          profileId: profileId,
+          feedId: withArtFeed,
+          title: 'Has a face',
+          publishedAtMs: 2000);
+      final noArtId = await seedRiverItem(
+          profileId: profileId,
+          feedId: noArtFeed,
+          title: 'No face yet',
+          publishedAtMs: 1000);
+
+      await pumpApp(tester, ScriptedFetcher((u, h) => textResponse(_rssOne)),
+          services: services);
+      await openRiver(tester);
+
+      expect(find.byKey(Key('artwork-$withArtId')), findsOneWidget);
+      expect(find.byKey(Key('artwork-$noArtId')), findsNothing,
+          reason: 'no downloaded file — the row keeps today\'s plain layout');
+      // The unread dot survives either layout — an artwork thumbnail never
+      // hides the one signal the river's own tests already pin.
+      expect(find.byKey(Key('unread-dot-$withArtId')), findsOneWidget);
+      expect(find.byKey(Key('unread-dot-$noArtId')), findsOneWidget);
+    });
+
+    testWidgets('on a tier with localMlAvailable false (the web tier), '
+        'artwork never renders even when a file exists on disk — a real '
+        'existsSync() there would throw under dart2js', (tester) async {
+      final services = testServices(dir, localMlAvailable: false);
+      final profileId = await seedProfile();
+      final feedId = await db.feedsDao
+          .insertFeed(profileId: profileId, url: 'https://a/f');
+      services.artworkFileFor(feedId)
+        ..parent.createSync(recursive: true)
+        ..writeAsBytesSync(onePixelPng);
+      final workId = await seedRiverItem(
+          profileId: profileId,
+          feedId: feedId,
+          title: 'An item',
+          publishedAtMs: 1000);
+
+      await pumpApp(tester, ScriptedFetcher((u, h) => textResponse(_rssOne)),
+          services: services);
+      await openRiver(tester);
+
+      expect(find.byKey(Key('artwork-$workId')), findsNothing);
+      expect(find.byKey(Key('unread-dot-$workId')), findsOneWidget);
+    });
+
+    testWidgets("TrellisApp's own default services (no artwork ever "
+        'downloaded) never crashes — it just has no thumbnail', (tester) async {
+      final profileId = await seedProfile();
+      final feedId = await db.feedsDao
+          .insertFeed(profileId: profileId, url: 'https://a/f');
+      final workId = await seedRiverItem(
+          profileId: profileId,
+          feedId: feedId,
+          title: 'An item',
+          publishedAtMs: 1000);
+
+      // No `services:` at all — TrellisApp falls back to its own
+      // DeviceServices.detached(), same as any widget test elsewhere in
+      // this suite that doesn't care about storage.
+      await pumpApp(tester, ScriptedFetcher((u, h) => textResponse(_rssOne)));
+      await openRiver(tester);
+
+      expect(find.byKey(Key('artwork-$workId')), findsNothing);
+      expect(find.text('An item'), findsOneWidget);
+    });
+  });
+
+  group('Up Next reachability (Campaign 9 Phase 2)', () {
+    // User: "hiding the queue as only accessible in the playing bar is
+    // odd" — Play next/Play last (river_screen.dart) already WRITE to the
+    // queue from every row's menu, but nothing plays, the mini bar never
+    // appears, and the queue stays unreachable.
+    testWidgets("River's AppBar carries an Up Next door that opens the "
+        'queue even when nothing is playing', (tester) async {
+      await seedProfile();
+      await pumpApp(tester, ScriptedFetcher((u, h) => textResponse(_rssOne)));
+      await openRiver(tester);
+
+      expect(find.byKey(const Key('mini-player')), findsNothing,
+          reason: 'the door must work with nothing playing, not just '
+              "riding the bar's own entry");
+      expect(find.text('Up Next'), findsNothing,
+          reason: "not navigated yet — the queue screen's own title isn't "
+              'on screen until the door is tapped');
+
+      await tester.tap(find.byKey(const Key('river-open-queue')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Up Next'), findsOneWidget);
+    });
+
+    testWidgets('a Played-next item is reachable through that same door',
+        (tester) async {
+      final profileId = await seedProfile();
+      final feedId = await db.feedsDao.insertFeed(
+        profileId: profileId,
+        url: 'https://a/f',
+      );
+      final workId = await seedRiverItem(
+          profileId: profileId,
+          feedId: feedId,
+          title: 'Queued item',
+          publishedAtMs: 1000,
+          enclosureUrl: 'https://a/1.mp3');
+
+      await pumpApp(tester, ScriptedFetcher((u, h) => textResponse(_rssOne)));
+      await openRiver(tester);
+      await tester.tap(find.byKey(Key('menu-$workId')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Play next'));
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.byKey(const Key('river-open-queue')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Queued item'), findsOneWidget);
+    });
+  });
 }

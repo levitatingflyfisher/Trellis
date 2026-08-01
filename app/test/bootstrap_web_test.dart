@@ -82,6 +82,12 @@ void main() {
     expect(await web.databaseFile(), isNull);
   });
 
+  test(
+      'web initAudioBackground is a no-op that resolves cleanly (Campaign '
+      '9 Phase 2e) — just_audio_background is Android/iOS only', () async {
+    await web.initAudioBackground();
+  });
+
   test('web fetcher returns non-2xx as a FetchResponse, headers lowercased',
       () async {
     final dio = Dio()

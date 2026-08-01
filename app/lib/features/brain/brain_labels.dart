@@ -9,7 +9,11 @@ String tierDisplayName(BrainTier tier) => switch (tier) {
       BrainTier.none => 'no brain',
       BrainTier.byokAnthropic => 'your Anthropic key',
       BrainTier.byokOpenAiCompatible => 'an OpenAI-compatible endpoint',
-      BrainTier.stove => 'the household stove',
+      // Plain words, not the internal jargon (the identifier stays
+      // BrainTier.stove) — a real device tester read "household stove" as
+      // insane. "Home desktop" is what a family actually calls the
+      // machine this tier reaches (Campaign 8 "Babel widens" Addendum 2).
+      BrainTier.stove => 'the home desktop',
       BrainTier.localStub => 'a local model',
     };
 

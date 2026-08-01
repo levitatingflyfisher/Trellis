@@ -11,6 +11,7 @@ void main() {
     DeviceTier minTier, {
     int bytes = 1000,
     Set<String>? langs,
+    String? sourceLang,
   }) =>
       ModelSpec(
         id: id,
@@ -22,6 +23,7 @@ void main() {
         licenses: const ['MIT'],
         minTier: minTier,
         langs: langs,
+        sourceLang: sourceLang,
       );
 
   group('ModelFile', () {
@@ -261,6 +263,113 @@ void main() {
         expect(r.pickModel(ModelTask.tts, DeviceTier.t1, langHint: 'ko')?.id,
             'tts-multilingual');
       });
+    });
+  });
+
+  group('pickTranslationPair — (source, target) selection (Campaign 8 '
+      '"Babel widens")', () {
+    // Three reverse pairs sharing the SAME target language ('en') — the
+    // exact shape that breaks `pickModel`'s single langHint: three specs
+    // would all carry `langs: {'en'}` and `pickModel` could not tell them
+    // apart. `sourceLang` is the second axis `pickTranslationPair` adds.
+    final reg = ModelRegistry([
+      spec('opus-mt-en-es', ModelTask.translation, DeviceTier.t2,
+          bytes: 248686982, langs: {'es'}, sourceLang: 'en'),
+      spec('opus-mt-de-en', ModelTask.translation, DeviceTier.t2,
+          bytes: 175000000, langs: {'en'}, sourceLang: 'de'),
+      spec('opus-mt-ru-en', ModelTask.translation, DeviceTier.t2,
+          bytes: 186000000, langs: {'en'}, sourceLang: 'ru'),
+      spec('opus-mt-zh-en', ModelTask.translation, DeviceTier.t2,
+          bytes: 193000000, langs: {'en'}, sourceLang: 'zh'),
+    ]);
+
+    test('three pairs producing the same target language are '
+        'disambiguated by source language — the exact case pickModel '
+        'cannot express', () {
+      expect(
+        reg.pickTranslationPair(DeviceTier.t2,
+            sourceLang: 'de', targetLang: 'en')?.id,
+        'opus-mt-de-en',
+      );
+      expect(
+        reg.pickTranslationPair(DeviceTier.t2,
+            sourceLang: 'ru', targetLang: 'en')?.id,
+        'opus-mt-ru-en',
+      );
+      expect(
+        reg.pickTranslationPair(DeviceTier.t2,
+            sourceLang: 'zh', targetLang: 'en')?.id,
+        'opus-mt-zh-en',
+      );
+    });
+
+    test('the forward pair is found by its own (source, target)', () {
+      expect(
+        reg.pickTranslationPair(DeviceTier.t2,
+            sourceLang: 'en', targetLang: 'es')?.id,
+        'opus-mt-en-es',
+      );
+    });
+
+    test('a (source, target) with no registered pair is null, never a '
+        'guess', () {
+      expect(
+        reg.pickTranslationPair(DeviceTier.t2,
+            sourceLang: 'en', targetLang: 'de'),
+        isNull,
+        reason: 'only de-en (reverse) is registered in this fixture, not '
+            'en-de (forward)',
+      );
+      expect(
+        reg.pickTranslationPair(DeviceTier.t2,
+            sourceLang: 'fr', targetLang: 'en'),
+        isNull,
+      );
+    });
+
+    test('below the pair\'s tier finds nothing — T0 by design gets '
+        'nothing', () {
+      expect(
+        reg.pickTranslationPair(DeviceTier.t1,
+            sourceLang: 'de', targetLang: 'en'),
+        isNull,
+      );
+    });
+
+    test('a spec with no sourceLang never matches a real source '
+        'language — half-populated data fails closed, not open', () {
+      final r = ModelRegistry([
+        spec('legacy-no-source', ModelTask.translation, DeviceTier.t2,
+            langs: {'en'}),
+      ]);
+      expect(
+        r.pickTranslationPair(DeviceTier.t2,
+            sourceLang: 'de', targetLang: 'en'),
+        isNull,
+      );
+    });
+  });
+
+  group('translationPairsAt — the picker\'s data source (Campaign 8)', () {
+    test('lists only translation-task specs runnable at the tier, in no '
+        'particular guaranteed order beyond registration', () {
+      final reg = ModelRegistry([
+        spec('opus-mt-en-es', ModelTask.translation, DeviceTier.t2,
+            langs: {'es'}, sourceLang: 'en'),
+        spec('opus-mt-en-de', ModelTask.translation, DeviceTier.t2,
+            langs: {'de'}, sourceLang: 'en'),
+        spec('whisper-tiny', ModelTask.asr, DeviceTier.t1),
+        spec('t3-only-pair', ModelTask.translation, DeviceTier.t3,
+            langs: {'ja'}, sourceLang: 'en'),
+      ]);
+      final at2 = reg.translationPairsAt(DeviceTier.t2);
+      expect(at2.map((s) => s.id),
+          containsAll(['opus-mt-en-es', 'opus-mt-en-de']));
+      expect(at2.map((s) => s.id), isNot(contains('whisper-tiny')));
+      expect(at2.map((s) => s.id), isNot(contains('t3-only-pair')),
+          reason: 't3-only-pair needs a higher tier than t2 can run');
+      expect(reg.translationPairsAt(DeviceTier.t3).map((s) => s.id),
+          contains('t3-only-pair'));
     });
   });
 
@@ -519,6 +628,129 @@ void main() {
             'https://huggingface.co/onnx-community/opus-mt-en-es/resolve/main/vocab.json',
             'b074b4cca0036ade5a39ea97faabd534e1015482c480fc2cb02c6481983eb163',
             1720044,
+          ),
+        ],
+        // Campaign 8 "Babel widens" Phase 0: verified 2026-08-15 —
+        // encoder/decoder hashes cross-checked THREE ways (a real local
+        // download's sha256sum, Hugging Face's tree API `lfs.oid`, and
+        // the already-shipped es entry's own ground truth used to
+        // validate that API in the first place); source.spm/vocab.json
+        // (below Hugging Face's LFS threshold) downloaded directly and
+        // hashed locally. Full record, real-inference quality check per
+        // pair, and why en-pt/pt-en and en-jap/jap-en are NOT here:
+        // docs/reference/mt-models.md.
+        'opus-mt-en-de': [
+          (
+            'https://huggingface.co/onnx-community/opus-mt-en-de/resolve/main/onnx/encoder_model_quantized.onnx',
+            '94ae6a9149aca29ef31a58bb8ccc1c3df3720840caef890ccc6cde73c94cb0f4',
+            49342278,
+          ),
+          (
+            'https://huggingface.co/onnx-community/opus-mt-en-de/resolve/main/onnx/decoder_model_merged_quantized.onnx',
+            '492004d70327f4552fbddba033f8d8ce946edb87b66cbf8f9a7b41d14fe683cc',
+            175598624,
+          ),
+          (
+            'https://huggingface.co/onnx-community/opus-mt-en-de/resolve/main/source.spm',
+            '678f2a1177d8389f67b66299762dcc4fc567e89b07e212ba91b0c56daecf47ce',
+            768489,
+          ),
+          (
+            'https://huggingface.co/onnx-community/opus-mt-en-de/resolve/main/vocab.json',
+            'd5acea957b265a78554999144459c5e391e0df525864edc8287bc090290baa44',
+            1389436,
+          ),
+        ],
+        'opus-mt-de-en': [
+          (
+            'https://huggingface.co/onnx-community/opus-mt-de-en/resolve/main/onnx/encoder_model_quantized.onnx',
+            '3e7b95246cf1885b5c6c123a36818a417c3ef6f500d4c17e030fef427fff7a74',
+            49342278,
+          ),
+          (
+            'https://huggingface.co/onnx-community/opus-mt-de-en/resolve/main/onnx/decoder_model_merged_quantized.onnx',
+            'd789d6a132d540fa40d6fa5901c3ba1e6209c69bf201ffef54f73833fa9b5a6c',
+            175598624,
+          ),
+          (
+            'https://huggingface.co/onnx-community/opus-mt-de-en/resolve/main/source.spm',
+            'bbd1f495eea99c8e21ae086d9146e0fa7b096c3dfdd9ba07ab8b631889df5c9b',
+            796845,
+          ),
+          (
+            'https://huggingface.co/onnx-community/opus-mt-de-en/resolve/main/vocab.json',
+            'd5acea957b265a78554999144459c5e391e0df525864edc8287bc090290baa44',
+            1389436,
+          ),
+        ],
+        'opus-mt-en-ru': [
+          (
+            'https://huggingface.co/onnx-community/opus-mt-en-ru/resolve/main/onnx/encoder_model_quantized.onnx',
+            'b8b4f72528c0da92e579af8a739f97fa2f792d73527ba2fee786fa7286c4055b',
+            51603782,
+          ),
+          (
+            'https://huggingface.co/onnx-community/opus-mt-en-ru/resolve/main/onnx/decoder_model_merged_quantized.onnx',
+            '5d15c48566e60dcaa5af7422bcceca24ccc8f3eaa8f1b3aedc5d6170e6c232f3',
+            186923812,
+          ),
+          (
+            'https://huggingface.co/onnx-community/opus-mt-en-ru/resolve/main/source.spm',
+            '16bebef1389a0b8ab452772c4e35b9e605e5713f8ac7baa71ca701394eaa086d',
+            802781,
+          ),
+          (
+            'https://huggingface.co/onnx-community/opus-mt-en-ru/resolve/main/vocab.json',
+            '5cf0d95d930d8d3e783c9e2f46a72f08b43a18060dab4ddefbcb66a733efedcb',
+            2726796,
+          ),
+        ],
+        'opus-mt-ru-en': [
+          (
+            'https://huggingface.co/onnx-community/opus-mt-ru-en/resolve/main/onnx/encoder_model_quantized.onnx',
+            'fdd4d1de9cb02feaae8bc892e0e21b1bfd1741fa43a2895d471ee5f53ae260c4',
+            51603782,
+          ),
+          (
+            'https://huggingface.co/onnx-community/opus-mt-ru-en/resolve/main/onnx/decoder_model_merged_quantized.onnx',
+            '0fef11505dc0564d0d6d54e37529d7ba949826fe19fd7193052610989fccbf28',
+            186923812,
+          ),
+          (
+            'https://huggingface.co/onnx-community/opus-mt-ru-en/resolve/main/source.spm',
+            '745998e51ba5b058e38b7ac7765c25c43ed5c1c39cc92b27163b9b2e323c9d7c',
+            1080169,
+          ),
+          (
+            'https://huggingface.co/onnx-community/opus-mt-ru-en/resolve/main/vocab.json',
+            '5cf0d95d930d8d3e783c9e2f46a72f08b43a18060dab4ddefbcb66a733efedcb',
+            2726796,
+          ),
+        ],
+        // opus-mt-en-zh is deliberately NOT in this closed-world table —
+        // it is not registered (demoted: no verified way to display the
+        // Chinese output; see registry.dart's own comment and
+        // mt-models.md). zh-en (below) stays; it outputs English.
+        'opus-mt-zh-en': [
+          (
+            'https://huggingface.co/onnx-community/opus-mt-zh-en/resolve/main/onnx/encoder_model_quantized.onnx',
+            '86b0dc5a1d5d8062583800654864aae1311fce2172bba80910d02020d3693577',
+            52875078,
+          ),
+          (
+            'https://huggingface.co/onnx-community/opus-mt-zh-en/resolve/main/onnx/decoder_model_merged_quantized.onnx',
+            '714881fafd326c8cb56bc6e3e542d1d106a5acf90e6abb71e20423ebf1b47875',
+            193290224,
+          ),
+          (
+            'https://huggingface.co/onnx-community/opus-mt-zh-en/resolve/main/source.spm',
+            'e27a3a1b539f4959ec72ea60e453f49156289f95d4e6000b29332efc45616203',
+            804677,
+          ),
+          (
+            'https://huggingface.co/onnx-community/opus-mt-zh-en/resolve/main/vocab.json',
+            '08a119a1defd522fa047cb5e3bfe3e89633e96caa38ced0dc9cee7ef1021a011',
+            1747906,
           ),
         ],
         // Campaign 4 Phase 3: verified 2026-08-15 by downloading directly

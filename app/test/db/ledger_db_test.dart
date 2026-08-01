@@ -151,6 +151,7 @@ void main() {
       await seed.close();
       final v4 = raw.sqlite3.open(file.path);
       v4.execute('''
+        ALTER TABLE feeds DROP COLUMN image_url;
         DROP TABLE word_ledger;
         ALTER TABLE profiles DROP COLUMN prefer_system_voice;
         ALTER TABLE profiles DROP COLUMN scheduler;
@@ -165,6 +166,7 @@ void main() {
         ALTER TABLE episodes DROP COLUMN archived_at_ms;
         DROP TABLE queue;
         ALTER TABLE works DROP COLUMN show_translation_layer;
+        ALTER TABLE works DROP COLUMN active_translation_lang;
         ALTER TABLE feeds DROP COLUMN rules_json;
         ALTER TABLE episodes DROP COLUMN dedup_reason;
         ALTER TABLE episodes DROP COLUMN duplicate_of_work_id;

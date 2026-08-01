@@ -10,11 +10,13 @@ import 'package:trellis/main.dart';
 ///
 /// - the classic-mode ORP anchor fix (a reserved before-pivot width) plus
 ///   its guide line and tick marks (index.html:177-179, 2659-2666);
-/// - Parafoveal mode, an RSVP sub-toggle (not a third [ReaderMode] -- the
-///   mode-toggle button cycles a strictly binary rsvp/scroll state today,
-///   and both `reader_test.dart`'s and `reader_ticker_test.dart`'s cursor-
-///   law tests only exercise those two states; a sub-toggle restores the
-///   donor's third display without touching that cycle or those tests).
+/// - Parafoveal mode, an RSVP sub-toggle, not a [ReaderMode] of its own --
+///   a sub-toggle restores the donor's third display without adding a
+///   fourth top-level mode. (Campaign 9 Phase 6 later gives the reader a
+///   genuine third [ReaderMode], Lines -- `mode-toggle` now opens a
+///   labeled three-way picker rather than cycling on its own tap; see
+///   `reader_test.dart`'s and `reader_ticker_test.dart`'s cursor-law
+///   tests for the mode-switch invariant itself.)
 void main() {
   late AppDatabase db;
   setUp(() => db = AppDatabase.forTesting(NativeDatabase.memory()));

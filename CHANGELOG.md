@@ -7,6 +7,145 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.4.0 — 2026-08-16
+
+Campaign 8 "Babel widens" (`docs/adr/0014-babel-widens.md`): the
+translation organ ADR-0008 shipped for Spanish only generalizes to any
+language pair — the hub-and-spoke law is 2N models for N target
+languages, never N², and every registry entry, test, and picker now
+reflects it rather than hardcoding Spanish.
+
+### Added
+
+- Four new Marian pairs, verified with real inference before
+  registration: German, Russian, and Chinese, each shipped both
+  directions except English->Chinese (see Fixed, below, for why).
+  Portuguese and Japanese were evaluated and NOT shipped — Portuguese
+  has no clean-licensed ONNX conversion on the trust ladder; Japanese's
+  base model collapses to a pure `<pad>` token at decode step one and
+  stays incoherent even past that, needing a Brain rather than the
+  offline floor. Full accounting in `docs/reference/mt-models.md`.
+- The reader's "Translate…" action is a real picker over whichever
+  target languages are actually downloaded for a work's own declared
+  source language, replacing the fixed "Translate to Spanish" menu
+  item. A new per-work language selector lets a reader correct a work's
+  declared source language (no auto-detection — declared, not guessed).
+- A CJK segmentation baseline in `loom_core` (the UAX #29 default
+  absent a dictionary: one Han ideograph per unit, Katakana runs kept
+  together, Hiragana one character at a time) replaces the old
+  behavior, where a long space-less CJK run collapsed to a single `…`
+  placeholder and a whole CJK paragraph spoke as one long utterance.
+- `BrainTranslator`: a second Translator rung sitting on domovoi's
+  Brain interface instead of an on-device ONNX session, chunking 10-20
+  sentences per request with strict JSON-array parsing and per-sentence
+  fail-closed behavior. Built and fully tested, including the specific
+  degraded state a stove tier with nothing real behind it produces —
+  but not yet wired into the live app (no tier ladder, no consent
+  routing, no UI picker rung reach it). `docs/adr/0014-babel-widens.md`'s
+  Phase 5 section has the full accounting of what's left.
+
+### Fixed
+
+- The shipped app offered to translate an English work into English —
+  the generalized picker now excludes a work's own declared source
+  language from its target list, with a second, defensive refusal at
+  the point a translation would actually start.
+- Two real regressions an adversarial review caught before release:
+  picking a translation target could offer a "Show ⟨language⟩" toggle
+  with zero stored sentences behind it (setActiveTranslationLang runs
+  before a batch produces its first row, so a fresh pick mid-run or a
+  cancel-at-zero left a dead control); and a pre-campaign work with
+  stored Spanish, but its display toggled off, lost the "Show Spanish"
+  toggle entirely on reopen — indistinguishable from never having
+  translated anything.
+- Speaking a German, Russian, or Chinese translation with a neural
+  voice primed and preferred would have thrown an uncaught
+  `SupertonicUnsupportedLangException` mid-utterance — Supertonic's own
+  language gate covers only English and Spanish. Engine selection now
+  checks the active translation's language before choosing a voice,
+  never reaching Supertonic's gate for a script it can't encode.
+- "Household stove" — internal jargon that read as insane to a real
+  device tester — is "Home desktop" everywhere it was user-visible
+  (the brain settings tile, its own error message, and the provenance
+  line a generated course/critique/recap carries). The internal
+  `BrainTier.stove` identifier is unchanged; this is copy only.
+
+### Not shipped, on the record
+
+- `opus-mt-en-zh` (English -> Chinese): translation quality is real and
+  usable, but a golden-test render of the scroll-mode display showed
+  Chinese glyphs as tofu boxes, and bundling a CJK font to fix it
+  (measured: 8.3MB for a single region/weight) doesn't fit the app's
+  remaining APK size budget. `opus-mt-zh-en` (the reverse direction,
+  English output, no glyph risk) ships unaffected.
+- Background/lock-screen playback for the speak-in-X loop, a real
+  TinySegmenter-quality Japanese word segmenter, and a bundled CJK font
+  are all named as follow-ups, not built this pass.
+
+---
+
+**Campaign 9 ("the shakedown")**: the first real device test of 1.3.0
+came back and this campaign fixes what it surfaced. Every item below
+traces to a specific device-test observation, not a feature checklist.
+No version bump here (the release finale happens once every in-flight
+campaign merges).
+
+### Added
+
+- **A visible play/pause glyph, everywhere it was missing.** Device
+  report: "the play/pause circles don't have symbols in them." Root
+  cause: `OhTheme`'s app-wide `iconTheme` color collided with
+  `IconButton.filled`'s own fill token. Fixed at the theme, not
+  per-callsite.
+- **Discoverable controls.** Two bookmark icons now read differently
+  (capture vs. the captures list, with a "View" snackbar action to the
+  list); tooltip gaps closed (library/feeds/river popup menus, the
+  speed button); the Echo door gained a word, the daily-review chip its
+  own icon; sleep-timer duration buttons size to their own text instead
+  of clipping "Custom…"; the library filter is a live modal sheet, not
+  a separate pushed screen.
+- **The mini player survives a restart.** It used to render nothing at
+  all once the app restarted (`current == null` → blank); it now
+  rehydrates PAUSED at the last-played work's saved position, no
+  autoplay ever. The river's "Up Next" queue gained its own AppBar
+  door, reachable with nothing currently playing.
+- **The daily-review screen shows what a grade actually did.** A
+  progress counter, distinct capture-card fronts (title + timestamp,
+  transcript resolved at render time rather than backfilled), grade
+  labels that state their consequence instead of bare "Soon"/
+  "Eventually".
+- **Full-content feeds, and an honest library** (ADR-0015). A
+  Substack-shaped feed's full post is recovered from `content:encoded`
+  through the same HTML→segments path URL intake already uses, instead
+  of a 300-char stub. The library now shows only promoted works — river
+  ephemera stay in the river — and every row gained a date subtitle.
+- **River artwork.** Channel-level images, fetched once, shown as a
+  ~40dp rounded thumbnail leading each row (schema v20).
+- **Lines: a third way to read.** A scroll-family mode highlighting one
+  visual line at a time, paced on the same word-level clock RSVP
+  already uses. The mode switcher is now a labeled three-way picker
+  (Scroll / Words / Lines).
+- **The reader follows the player.** When audio for the open work is
+  playing, the reading cursor now moves with it — a "Following audio" /
+  "Resume following" chip shows and controls the state; any manual
+  interaction detaches.
+- **The lattice logo replaces Flutter's stock template.** Every Android
+  mipmap and PWA icon now derives from `assets/brand/trellis-logo.svg`
+  via `tool/generate_brand_icons.py` — legacy + adaptive launcher icons,
+  a notification small icon (generated ahead of the work that will use
+  it), and the PWA's maskable variants + favicon.
+- **Lock-screen/pull-down-tray playback controls** (ADR-0015 Decision
+  3). Deferred mid-campaign, then built at review — this is the user's
+  #1 device finding, the one the campaign is named after.
+  `JustAudioBackground.init()` runs once at startup, Android/iOS only;
+  every episode, audiobook and rehydrated play now tags its audio with
+  the work's id/title, the feed's title as album, and its downloaded
+  artwork when one exists. The Android manifest gained the package's
+  own required service + media-button receiver, using Phase 8's
+  notification icon (an orphan until now). Lock-screen RENDERING itself
+  stays device-only and unclaimed — everything above is proven up to
+  the tag that reaches the player, not past it.
+
 ## 1.3.0 (2026-08-15) — build 2007
 
 The gap-map release: eight campaigns landed here, one per gap the honest

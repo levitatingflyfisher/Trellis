@@ -181,6 +181,84 @@ void main() {
       expect(await db.spineDao.segmentsOf(work.id), isEmpty);
     });
 
+    group('full-content feeds (Campaign 9 Phase 4, "the feed becomes '
+        'honest reading")', () {
+      test('a text item whose contentHtml is meaningfully longer than its '
+          'desc becomes a MULTI-paragraph work, not a 300-char stub',
+          () async {
+        final longBody = List.generate(
+                5, (i) => '<p>Paragraph number $i, plenty of words here.</p>')
+            .join();
+        await ingestFeedItems(
+            db: db,
+            profileId: profileId,
+            feedId: feedId,
+            items: [
+              FeedItem(
+                  title: 'The whole post',
+                  link: 'https://cast.test/post',
+                  date: '',
+                  desc: 'A short excerpt for the list.',
+                  contentHtml: longBody),
+            ],
+            nowMs: nowMs);
+        final work = (await db.spineDao.worksOf(profileId)).single;
+        final segs = await db.spineDao.segmentsOf(work.id);
+        expect(segs.length, 5,
+            reason: 'one segment per extracted paragraph, not one stub');
+        expect(segs.first.body, contains('Paragraph number 0'));
+        expect(segs.first.body, isNot(contains('A short excerpt')),
+            reason: 'the full content replaces the excerpt, not append to it');
+      });
+
+      test('a text item whose contentHtml is NOT meaningfully longer than '
+          'its desc (a feed that just repeats the excerpt) falls back to '
+          'the plain desc segment', () async {
+        await ingestFeedItems(
+            db: db,
+            profileId: profileId,
+            feedId: feedId,
+            items: [
+              FeedItem(
+                  title: 'Short post',
+                  link: 'https://cast.test/short',
+                  date: '',
+                  desc: 'The whole short post, all of it.',
+                  contentHtml: '<p>The whole short post, all of it.</p>'),
+            ],
+            nowMs: nowMs);
+        final work = (await db.spineDao.worksOf(profileId)).single;
+        final segs = await db.spineDao.segmentsOf(work.id);
+        expect(segs.single.body, 'The whole short post, all of it.');
+      });
+
+      test('a podcast episode (enclosure present) keeps show-notes as its '
+          'body even when contentHtml is present — that is what '
+          'show-notes are', () async {
+        final longBody = List.generate(
+                5, (i) => '<p>Paragraph number $i, plenty of words here.</p>')
+            .join();
+        await ingestFeedItems(
+            db: db,
+            profileId: profileId,
+            feedId: feedId,
+            items: [
+              FeedItem(
+                  title: 'Episode with notes',
+                  link: 'https://cast.test/ep',
+                  date: '',
+                  desc: 'Show notes for this episode.',
+                  enclosure:
+                      const Enclosure(url: 'https://cast.test/ep.mp3'),
+                  contentHtml: longBody),
+            ],
+            nowMs: nowMs);
+        final work = (await db.spineDao.worksOf(profileId)).single;
+        final segs = await db.spineDao.segmentsOf(work.id);
+        expect(segs.single.body, 'Show notes for this episode.');
+      });
+    });
+
     group('tracker stripping on outbound article links (Campaign 5 Phase 4, '
         'the Miniflux lesson)', () {
       test('an article link with tracking params is stored clean', () async {
@@ -743,6 +821,73 @@ void main() {
       expect(await db.spineDao.workById(older), isNotNull,
           reason: 'the row survives — only the file went');
     });
+
+    test('a refresh whose channel artwork changed re-downloads once and '
+        'updates the stored URL', () async {
+      final dir = Directory.systemTemp.createTempSync('trellis-refresh-art');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final services = testServices(dir);
+      final feed = await seedFeed();
+      await db.feedsDao.updateRefreshState(feed.id,
+          title: feed.title,
+          etag: null,
+          lastModified: null,
+          breakerJson: '{}',
+          imageUrl: 'https://cast.test/old.jpg',
+          updateImageUrl: true);
+      final seeded = (await db.feedsDao.feedsOf(profileId)).single;
+
+      final fetcher = ScriptedFetcher((url, headers) => textResponse('''
+<rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+<channel><title>The Night Sky Cast</title>
+  <itunes:image href="https://cast.test/new.jpg"/>
+</channel></rss>
+'''));
+      final repository = FeedsRepository(
+          db: db,
+          fetcher: fetcher,
+          services: services,
+          now: () => DateTime.fromMillisecondsSinceEpoch(nowMs));
+      await repository.refreshFeed(seeded);
+
+      final updated = (await db.feedsDao.feedsOf(profileId)).single;
+      expect(updated.imageUrl, 'https://cast.test/new.jpg');
+      expect(services.artworkFileFor(feed.id).existsSync(), isTrue);
+      expect((services.audioFetcher as FakeAudioFetcher).fetched,
+          ['https://cast.test/new.jpg']);
+    });
+
+    test('a refresh whose channel artwork is unchanged never re-fetches it '
+        '(fetch-once, offline-first)', () async {
+      final dir =
+          Directory.systemTemp.createTempSync('trellis-refresh-art-same');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final services = testServices(dir);
+      final feed = await seedFeed();
+      await db.feedsDao.updateRefreshState(feed.id,
+          title: feed.title,
+          etag: null,
+          lastModified: null,
+          breakerJson: '{}',
+          imageUrl: 'https://cast.test/art.jpg',
+          updateImageUrl: true);
+      final seeded = (await db.feedsDao.feedsOf(profileId)).single;
+
+      final fetcher = ScriptedFetcher((url, headers) => textResponse('''
+<rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+<channel><title>The Night Sky Cast</title>
+  <itunes:image href="https://cast.test/art.jpg"/>
+</channel></rss>
+'''));
+      final repository = FeedsRepository(
+          db: db,
+          fetcher: fetcher,
+          services: services,
+          now: () => DateTime.fromMillisecondsSinceEpoch(nowMs));
+      await repository.refreshFeed(seeded);
+
+      expect((services.audioFetcher as FakeAudioFetcher).fetched, isEmpty);
+    });
   });
 
   group('FeedsRepository subscribe', () {
@@ -837,6 +982,45 @@ void main() {
 
       expect((await db.feedsDao.feedsOf(profileId)).single.nextPageUrl,
           'https://cast.test/feed?page=2');
+    });
+
+    test('subscribing downloads channel artwork once, to a deterministic '
+        'local file (P6 "the river gets faces")', () async {
+      final dir =
+          Directory.systemTemp.createTempSync('trellis-subscribe-art');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final services = testServices(dir);
+      final fetcher = ScriptedFetcher((url, headers) => textResponse('''
+<rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+<channel><title>The Night Sky Cast</title>
+  <itunes:image href="https://cast.test/art.jpg"/>
+  <item><title>Aurora season</title><link>https://cast.test/aurora</link></item>
+</channel></rss>
+'''));
+      final repository =
+          FeedsRepository(db: db, fetcher: fetcher, services: services);
+      final result = await repository.subscribe(
+          profileId: profileId, rawUrl: 'https://cast.test/feed');
+      expect(result, isA<SubscribeSuccess>());
+      final feed = (await db.feedsDao.feedsOf(profileId)).single;
+      expect(feed.imageUrl, 'https://cast.test/art.jpg');
+      expect(services.artworkFileFor(feed.id).existsSync(), isTrue);
+      expect((services.audioFetcher as FakeAudioFetcher).fetched,
+          ['https://cast.test/art.jpg']);
+    });
+
+    test('subscribing to a feed with no channel artwork downloads nothing',
+        () async {
+      final dir =
+          Directory.systemTemp.createTempSync('trellis-subscribe-noart');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final services = testServices(dir);
+      final fetcher = ScriptedFetcher((url, headers) => textResponse(_rssTwo));
+      final repository =
+          FeedsRepository(db: db, fetcher: fetcher, services: services);
+      await repository.subscribe(
+          profileId: profileId, rawUrl: 'https://cast.test/feed');
+      expect((services.audioFetcher as FakeAudioFetcher).fetched, isEmpty);
     });
   });
 

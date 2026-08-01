@@ -108,4 +108,55 @@ void main() {
       expect(doc.words[idx], 'Four');
     });
   });
+
+  group('splitSentences: CJK terminators (Campaign 8 "Babel widens" Phase '
+      '3) — a real gap, not hypothetical: without this, a whole CJK '
+      'paragraph would speak as ONE long utterance, exactly the '
+      '"long-utterance stall" ADR-0006 built this splitter to fix', () {
+    test('the ideographic full stop ends a sentence with no trailing '
+        'whitespace required — CJK prose has none between sentences', () {
+      final s = splitSentences('你好。再见。');
+      expect(s.map((x) => x.text).toList(), ['你好。', '再见。']);
+    });
+
+    test('fullwidth exclamation and question marks also end a sentence',
+        () {
+      final s = splitSentences('今日は！天気がいいですね？');
+      expect(s.map((x) => x.text).toList(),
+          ['今日は！', '天気がいいですね？']);
+    });
+
+    test('a ONE-CHARACTER sentence before the terminator still splits — '
+        'the ASCII single-letter-initial heuristic ("J.") must not '
+        'misfire on CJK, where a one-character clause is an ordinary '
+        'short sentence, never an abbreviation', () {
+      final s = splitSentences('好。坏。');
+      expect(s.map((x) => x.text).toList(), ['好。', '坏。']);
+    });
+
+    test('CJK and ASCII sentences in the same text both split correctly '
+        '— the CJK rule does not disturb the ASCII one', () {
+      final s = splitSentences('Hello. 你好。');
+      expect(s.map((x) => x.text).toList(), ['Hello.', '你好。']);
+    });
+
+    test('an ASCII decimal point is unaffected by the CJK addition '
+        '(regression: still one sentence, no trailing-whitespace boundary '
+        'inside the number)', () {
+      final s = splitSentences('It costs \$3.50 today.');
+      expect(s, hasLength(1));
+      expect(s.single.text, 'It costs \$3.50 today.');
+    });
+
+    test('firstWordIdx for a CJK sentence composes with the SAME '
+        'tokenizeDocument authority the ASCII case uses', () {
+      final block = _prose('你好。再见。');
+      final doc = tokenizeDocument([block]);
+      final sentences = splitSentences(block.text);
+      expect(sentences, hasLength(2));
+      expect(sentences[0].firstWordIdx, 0);
+      final idx = sentences[1].firstWordIdx;
+      expect(doc.words[idx], '再');
+    });
+  });
 }

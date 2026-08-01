@@ -59,6 +59,17 @@ void main() {
     await tester.pump();
   }
 
+  /// Campaign 9 Phase 6: `mode-toggle` now opens a labeled three-way
+  /// picker (Scroll / Words / Lines) rather than cycling on its own tap —
+  /// [itemKey] names the destination explicitly (`mode-item-words`,
+  /// `mode-item-scroll`, `mode-item-lines`).
+  Future<void> switchMode(WidgetTester tester, String itemKey) async {
+    await tester.tap(find.byKey(const Key('mode-toggle')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(Key(itemKey)));
+    await tester.pumpAndSettle();
+  }
+
   testWidgets(
       'THE cursor law: ticker → read → ticker → speak → read all project '
       'one Position row', (tester) async {
@@ -71,14 +82,14 @@ void main() {
     expect(rsvpWord(tester), 'five');
 
     // → read (scroll): the same word is the cursor.
-    await tester.tap(find.byKey(const Key('mode-toggle')));
-    await tester.pumpAndSettle();
+    await switchMode(tester, 'mode-item-scroll');
     expect(tester.widget<Text>(find.byKey(const Key('cursor-word'))).data,
         'five');
 
-    // → ticker again: still 'five'.
-    await tester.tap(find.byKey(const Key('mode-toggle')));
-    await tester.pumpAndSettle();
+    // → ticker (Words) again, named explicitly rather than "toggled
+    // back" — the picker is a labeled three-way choice, not a binary
+    // cycle (Campaign 9 Phase 6): still 'five'.
+    await switchMode(tester, 'mode-item-words');
     expect(rsvpWord(tester), 'five');
 
     // → speak: the voice starts at the CURSOR's segment, not the top.
@@ -96,8 +107,7 @@ void main() {
     // resumes, and the persisted row is that same (segmentIdx, wordIdx).
     await tester.tap(find.byKey(const Key('speak-toggle')));
     await tester.pump();
-    await tester.tap(find.byKey(const Key('mode-toggle')));
-    await tester.pumpAndSettle();
+    await switchMode(tester, 'mode-item-scroll');
     expect(tester.widget<Text>(find.byKey(const Key('cursor-word'))).data,
         'Seven');
 
@@ -127,11 +137,11 @@ void main() {
     await tester.pump();
 
     // The choice survives a mode round-trip (in-memory by design — the
-    // schema has no settings row to persist it into).
-    await tester.tap(find.byKey(const Key('mode-toggle')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('mode-toggle')));
-    await tester.pumpAndSettle();
+    // schema has no settings row to persist it into). Named explicitly
+    // both directions rather than "toggled back" — the picker is a
+    // labeled three-way choice, not a binary cycle (Campaign 9 Phase 6).
+    await switchMode(tester, 'mode-item-scroll');
+    await switchMode(tester, 'mode-item-words');
     expect(find.text('1500 wpm'), findsOneWidget);
   });
 }

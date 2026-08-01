@@ -214,6 +214,7 @@ void main() {
       // was written — those columns are stripped too, or a v9 snapshot
       // would silently carry them from the future.
       v9.execute('''
+        ALTER TABLE feeds DROP COLUMN image_url;
         DROP TABLE captures;
         ALTER TABLE profiles DROP COLUMN keep_finished_in_queue;
         ALTER TABLE feeds DROP COLUMN speed_override;
@@ -222,6 +223,7 @@ void main() {
         ALTER TABLE feeds DROP COLUMN keep_latest_audio;
         ALTER TABLE episodes DROP COLUMN archived_at_ms;
         ALTER TABLE works DROP COLUMN show_translation_layer;
+        ALTER TABLE works DROP COLUMN active_translation_lang;
         ALTER TABLE feeds DROP COLUMN rules_json;
         ALTER TABLE episodes DROP COLUMN dedup_reason;
         ALTER TABLE episodes DROP COLUMN duplicate_of_work_id;

@@ -67,6 +67,28 @@ docs/research/  The design panel's full output. Treat as provenance, not law.
 
 ## Building
 
-Pure packages: `dart test` inside the package. App/FFI phases are not
-scaffolded yet; the natives plan (whisper.cpp via the Android SDK's own
-cmake/NDK) is in `docs/research/proposal-2.md`.
+Pure packages: `dart test` inside the package. The app: `flutter test`
+in `app/` (the full suite serialized with `--concurrency=2`). The
+whisper.cpp natives are long since built and shipping (`whisper_ffi`,
+compiled via the Android SDK's own cmake/NDK); their original plan
+survives as provenance in `docs/research/proposal-2.md`.
+
+- **Icon tree-shaking is safe and must stay default-on.** Campaign 9
+  Phase 0 chased a device report of "blank" play/pause circles all the way
+  to a real cause (`OhTheme`'s app-wide `iconTheme` color colliding with
+  `IconButton.filled`'s own fill — see mini_player_bar.dart and
+  reader_screen.dart's `play-toggle`) and confirmed along the way that
+  every icon in the app is a const `Icons.*` reference, so Flutter's
+  release-build font tree-shaking never had anything to do with it. Do not
+  re-litigate tree-shaking as a suspect for an icon-rendering report;
+  reproduce visually first (the visual-loop skill's Flutter golden
+  pillar).
+- **The brand logo has one source, and one regeneration command.**
+  `assets/brand/trellis-logo.svg` (the lattice — Campaign 9 Phase 8;
+  verified byte-for-byte against the live landing page's own Trellis
+  card before it was committed) is the ONLY place the app's identity is
+  authored. Every Android mipmap (legacy + adaptive foreground/
+  background/monochrome), the notification small icon, and the PWA's
+  icons/favicon are DERIVED, never hand-edited — change the SVG, then
+  run `python3 tool/generate_brand_icons.py` from `app/` to regenerate
+  every one of them the same way. Requires `cairosvg` + `Pillow`.

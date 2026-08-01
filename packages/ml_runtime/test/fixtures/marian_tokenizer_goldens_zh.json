@@ -1,0 +1,173 @@
+{
+  "provenance": {
+    "sourceRepo": "https://huggingface.co/onnx-community/opus-mt-zh-en",
+    "sourceFile": "source.spm",
+    "sourceFileSha256": "e27a3a1b539f4959ec72ea60e453f49156289f95d4e6000b29332efc45616203",
+    "vocabFile": "vocab.json",
+    "vocabFileSha256": "08a119a1defd522fa047cb5e3bfe3e89633e96caa38ced0dc9cee7ef1021a011",
+    "generatedWith": "sentencepiece==0.2.2 (python)",
+    "fetchDate": "2026-08-15",
+    "note": "Phase 0 CJK coverage check (Campaign 8 'Babel widens'): zh source-language pieces (no whitespace to split on) confirm the pure-Dart Viterbi encoder's script-agnostic design generalizes. pieces = sp.encode(text, out_type=str) against the real downloaded source.spm; vocabIds = each piece looked up in vocab.json, falling back to vocab['<unk>'] when a piece is not a vocab entry. The model files themselves are never committed -- only these golden pieces/ids are."
+  },
+  "vectors": [
+    {
+      "text": "",
+      "pieces": [],
+      "vocabIds": [],
+      "spmIds": []
+    },
+    {
+      "text": " ",
+      "pieces": [],
+      "vocabIds": [],
+      "spmIds": []
+    },
+    {
+      "text": "你好，世界！",
+      "pieces": [
+        "▁你好",
+        ",",
+        "世界",
+        "!"
+      ],
+      "vocabIds": [
+        5349,
+        2,
+        907,
+        48
+      ],
+      "spmIds": [
+        2554,
+        3,
+        365,
+        47
+      ]
+    },
+    {
+      "text": "我爱你。",
+      "pieces": [
+        "▁我爱你",
+        "。"
+      ],
+      "vocabIds": [
+        19962,
+        9
+      ],
+      "spmIds": [
+        11946,
+        5
+      ]
+    },
+    {
+      "text": "今天天气怎么样？",
+      "pieces": [
+        "▁今天",
+        "天气",
+        "怎么样",
+        "?"
+      ],
+      "vocabIds": [
+        4394,
+        17559,
+        6002,
+        23
+      ],
+      "spmIds": [
+        2246,
+        9952,
+        2956,
+        16
+      ]
+    },
+    {
+      "text": "我愿意付费购买一个能自动把节目翻译成其他语言的播客播放器。",
+      "pieces": [
+        "▁我",
+        "愿意",
+        "付费",
+        "购买",
+        "一个",
+        "能",
+        "自动",
+        "把",
+        "节目",
+        "翻译成",
+        "其他",
+        "语言",
+        "的",
+        "播",
+        "客",
+        "播放",
+        "器",
+        "。"
+      ],
+      "vocabIds": [
+        103,
+        3017,
+        36927,
+        5370,
+        309,
+        533,
+        7180,
+        514,
+        9052,
+        32589,
+        628,
+        3415,
+        11,
+        14980,
+        7390,
+        15836,
+        2923,
+        9
+      ],
+      "spmIds": [
+        38,
+        1333,
+        22550,
+        2705,
+        100,
+        197,
+        3532,
+        191,
+        4666,
+        21085,
+        214,
+        1549,
+        6,
+        9875,
+        3679,
+        9099,
+        1412,
+        5
+      ]
+    },
+    {
+      "text": "早上好。你今天怎么样？",
+      "pieces": [
+        "▁早上好",
+        "。",
+        "你",
+        "今天",
+        "怎么样",
+        "?"
+      ],
+      "vocabIds": [
+        24606,
+        9,
+        146,
+        2847,
+        6002,
+        23
+      ],
+      "spmIds": [
+        14639,
+        5,
+        49,
+        1188,
+        2956,
+        16
+      ]
+    }
+  ]
+}

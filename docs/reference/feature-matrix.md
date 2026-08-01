@@ -9,7 +9,7 @@ Statuses: **covered** (parity or better) · **degraded** (kept, worse — how is
 stated) · **dropped** (gone, with the reason and the roadmap cure). As phases
 land, entries gain a `✅ shipped` mark; until then this is the plan of record.
 
-## Covered (60)
+## Covered (61)
 
 - RSVP classic mode: ORP red pivot, guide ticks, punctuation dwell, long-word shrink (both donors merged into one reader core)
 - Parafoveal ticker mode with Gaussian fade + sigma/window settings (CustomPainter port)
@@ -37,11 +37,12 @@ land, entries gain a `✅ shipped` mark; until then this is the plan of record.
 - Sentinel segments (tables/code/figures pause + show modal + always-skip pref)
 - Chapter cards + TOC drawer (EPUB nav/NCX or synthesized from headings)
 - Page panel + minimap on wide layouts; context strip
-- Translation strip per-segment with persisted per-language layers. Mechanism v1, whisper's own built-in translate task (X->EN, timestamp-projected onto the transcript's segments) — this entry previously claimed an LLM-translation mechanism through the Brain boundary; that was never actually built for translation and the claim was wrong (caught auditing ADR-0008). Mechanism v2, ADR-0008 "Babel": a real on-device Marian engine (en->es, `opus-mt-en-es`) — a per-work sentence-indexed store (schema v13), a cancellable/resumable "Translate to Spanish" batch action gated on the model actually being downloaded, and a scroll-mode "Show Spanish" dual display pairing each original sentence with its stored translation, subordinate in style — see degraded for what's still open.
+- Translation strip per-segment with persisted per-language layers. Mechanism v1, whisper's own built-in translate task (X->EN, timestamp-projected onto the transcript's segments) — this entry previously claimed an LLM-translation mechanism through the Brain boundary; that was never actually built for translation and the claim was wrong (caught auditing ADR-0008). Mechanism v2, ADR-0008 "Babel": a real on-device Marian engine, en->es only at first (`opus-mt-en-es`) — a per-work sentence-indexed store, a cancellable/resumable batch action gated on the model actually being downloaded, and a scroll-mode dual display pairing each original sentence with its stored translation. Campaign 8 "Babel widens" (ADR-0014) generalized ALL of it: a language-parameterized picker over whatever the work's own declared source language and downloaded pairs allow (en<->de, en<->ru, both directions; en<->zh reverse only — see degraded), a per-work source-language selector, and speak-in-⟨language⟩ verified per script family (Latin/Cyrillic/CJK), each correctly forced onto the system voice where Supertonic's own coverage (`{'en','es'}`) doesn't reach. A CJK segmentation baseline (`loom_core/src/cjk.dart`) replaces the old single-`…`-placeholder collapse for space-less scripts. See degraded for what's still open.
 - Whisper transcription UPGRADED: multilingual tiny/base/small + built-in translate task + language picker + detected-language on the work — the language-learner-via-podcast case works for the first time. ADR-0008 shipped the organ the FOUNDING DREAM actually needs (real on-device en->es MT) AND wired it through: the reader can translate a work, show the pairing, and — see below — speak it. See degraded for the honesty caveats that come with that.
 - Speak-in-Spanish (ADR-0008 "Babel" Phase 4): with Show Spanish on, a session-only toggle makes the speak loop substitute each STORED translated sentence for whichever voice is speaking (system TTS or the downloaded Supertonic voice) while the karaoke cursor keeps advancing through the ORIGINAL sentences — a sentence with no stored translation (or a stale one) speaks English from the original, no gap. `supertonicSupportedLangs` widened from English-only to include Spanish — see degraded for the verdict behind that and what remains unverified.
 - Word-timing audio sync: token-level timestamps -> Alignment rows; RSVP cursor follows audio; tap word seeks audio; both directions
-- Podcast audio bar: ±15/+30, 6 speeds, sleep timer (durations or end-of-episode, fade, shake-to-extend — Campaign 1 ✅ shipped), smart resume (Campaign 1 ✅ shipped), per-podcast speed/skip-intro/skip-outro (Campaign 1 ✅ shipped), Up Next queue with auto-advance (Campaign 1 ✅ shipped). Corrected (Campaign 7): this row previously also claimed podcast chapters ("podcast:chapters JSON + PSC") — `comms_core`'s feed parser DOES parse `<podcast:chapters>`/`<psc:chapters>` into `FeedItem.chapters`/`chaptersUrl`, but `feed_ingest.dart`'s `ingestFeedItems` never reads either field; the parse exists, nothing downstream consumes it, and no chapters UI for feed episodes exists. Wiring that is out of scope for the campaign that found it (`docs/adr/0013-audiobooks-are-a-door.md`). Corrected earlier: this row previously also claimed background playback via audio_service and lock-screen controls; that was never wired (`just_audio_player.dart` names it explicitly deferred) — see Degraded.
+- Podcast audio bar: ±15/+30, 6 speeds, sleep timer (durations or end-of-episode, fade, shake-to-extend — Campaign 1 ✅ shipped), smart resume (Campaign 1 ✅ shipped), per-podcast speed/skip-intro/skip-outro (Campaign 1 ✅ shipped), Up Next queue with auto-advance (Campaign 1 ✅ shipped). Corrected (Campaign 7): this row previously also claimed podcast chapters ("podcast:chapters JSON + PSC") — `comms_core`'s feed parser DOES parse `<podcast:chapters>`/`<psc:chapters>` into `FeedItem.chapters`/`chaptersUrl`, but `feed_ingest.dart`'s `ingestFeedItems` never reads either field; the parse exists, nothing downstream consumes it, and no chapters UI for feed episodes exists. Wiring that is out of scope for the campaign that found it (`docs/adr/0013-audiobooks-are-a-door.md`). Corrected earlier: this row previously also claimed background playback via audio_service and lock-screen controls; that was never wired (`just_audio_player.dart` named it explicitly deferred) — see the next row, shipped Campaign 9 Phase 2e. Corrected (Campaign 9 "the shakedown," Phase 2a–d): the mini bar used to render nothing at all after an app restart (`current == null` → `SizedBox.shrink`, no thread back to what was playing); it now rehydrates PAUSED at the last-played work's saved position (`Profiles.readerPrefsJson`'s `lastPlayedWorkId`, no schema hop, no autoplay ever), and a first Play tap correctly dispatches to `playWork`/`playAudiobook` depending on which kind was rehydrated. The river's "Up Next" queue — previously writable but reachable ONLY from inside the mini player bar — now has its own AppBar door, reachable with nothing currently playing.
+- Background podcast playback: lock-screen and pull-down-tray transport controls (Campaign 9 Phase 2e, ADR-0015 Decision 3) — `just_audio_background`'s `JustAudioBackground.init()` runs once at startup (Android/iOS; a no-op stub keeps the web build unchanged), and every episode/audiobook/rehydrated play tags its audio with the work's id/title, the feed's title as album, and its downloaded artwork when one exists (`lockScreenTagFor`, unit-tested pure). The Android manifest gained the package's own required service + media-button receiver; `FOREGROUND_SERVICE_MEDIA_PLAYBACK`, already declared and unused, is now true. **Honesty note**: everything above is proven up to the tag reaching the player — lock-screen RENDERING itself is device-only and this row does not claim it verified; it awaits the user's next device test.
 - Episode offline caching to real files, profile-stamped, works never deleted by storage reclaim — only the audio FILE, per a feed's own keep-latest-N setting, archived rows dimmed with a re-download affordance (Campaign 1 Phase 4, "archive, never forget" ✅ shipped). Corrected: this row previously claimed the file-level eviction already existed "in the eviction cascade"; the pre-existing cascade (`deleteWork`/`deleteFeedCascade`) only ever removed database rows, never an audio file — Campaign 1 is what actually adds file-level eviction. Corrected again (Campaign 6): through 8a1af19 the cached file was never actually PLAYED from — `playWork` called `setUrl(work.sourceUrl)` unconditionally, so the local copy existed only to feed transcription and streaming happened regardless of what was on disk. `PlayerController.playWork` now prefers the local file over the network URL whenever one exists (`docs/adr/0012-offline-dsp.md`), so eviction/re-download now compose with playback for real: the file's presence or absence actually changes what plays. The download itself no longer requires requesting a transcript either — a standalone "Download" item on each audio row's menu (through the same one consent dialog transcribe uses) fetches the audio for offline listening on its own; a quiet indicator marks a row already on disk, and the item is not offered once one is.
 - Feed subscriptions RSS2/Atom/Media-RSS + auto-discovery (Substack/Medium/YouTube/WP guesses) — direct fetch on native, zero proxies
 - Feed hygiene: conditional GET ETag/Last-Modified, 429/503 Retry-After, failure breaker, pull-to-refresh. UPGRADED beyond both donors: RFC 5005 paged-feed archive following — an explicit, capped, per-feed "Fetch older episodes" action recovers episodes a host's RSS truncation hid, with an honest note when the feed offers no archive at all (see `docs/reference/feed-archives.md`)
@@ -122,7 +123,7 @@ land, entries gain a `✅ shipped` mark; until then this is the plan of record.
   `Alignments`, recorded precisely in the ADR's own Phase 3 section rather
   than forced.
 
-## Degraded (12)
+## Degraded (11)
 
 - Web-surface fetching is CORS-bound (measured from the deployed origin,
   2026-08-12): the PWA fetches directly from the browser with **no proxy
@@ -142,7 +143,7 @@ land, entries gain a `✅ shipped` mark; until then this is the plan of record.
   same-origin, same as the installed app. LAN/phone access to that same
   daemon is an open problem (docs/adr/0005), not shipped.
 - Web-surface local ML at v1.0: NO in-browser Whisper/translation/Kokoro at launch — browser users get the full T0 app + BYOK cloud LLM + SpeechSynthesis system TTS; the transformers.js-v4 interop tier (whisper-tiny int8 ~41MB, WASM/WebGPU) is Phase 6. Until then a browser-only user cannot transcribe locally, which the donor could do (slowly, unreliably, English-only).
-- Translation: v1's whisper-transcript mechanism is unchanged (X->EN only, timestamp-projected onto the transcript's segments) — a prior version of this entry claimed a Brain-routed LLM-translation mechanism (Qwen2.5 local / stove / BYOK); that was never built and the claim was wrong (caught auditing ADR-0008, corrected there). ADR-0008 "Babel" shipped a SECOND mechanism end to end: opus-mt-en-es (int8, ~246MB, not the ~110MB first guessed) behind a per-work sentence store, a downloaded-model gate, a resumable batch action, a scroll-mode dual display, and speak-in-Spanish through both voices. Two things remain genuinely unverified, not just "not built": (1) the ONNX Runtime sessions — Marian's AND Supertonic's — have never opened on a real device, only proven against faked session boundaries and, for Marian specifically, against the real model in Python; (2) Supertonic speaking Spanish is an UNTESTED capability, not a confirmed one — the M1 voice embedding was reviewed for English only, `supertonicSupportedLangs` was widened to `{'en','es'}` on the strength of an architectural finding (the model and engine already support all 5 of Supertonic v2's languages; there is no separate Spanish voice file upstream to gate on instead), and nobody has heard the result. NLLB's 200-language long tail remains unavailable. The UI names the translating model so quality expectations stay honest.
+- Translation: v1's whisper-transcript mechanism is unchanged (X->EN only, timestamp-projected onto the transcript's segments) — a prior version of this entry claimed a Brain-routed LLM-translation mechanism (Qwen2.5 local / stove / BYOK); that was never built and the claim was wrong (caught auditing ADR-0008, corrected there). ADR-0008 "Babel" shipped a SECOND mechanism, en->es only; Campaign 8 "Babel widens" (ADR-0014) generalized it to any registered pair. Shipped pairs: en<->de, en<->ru (both directions, verified excellent), zh->en (verified excellent), en->zh (verified usable but demoted — see below). Evaluated and NOT shipped: en<->pt (no clean-licensed ONNX conversion clears the trust ladder), en<->jap (pure `<pad>`-token collapse at decode step one; incoherent even past that — Japanese needs a Brain, not the offline floor). Three things remain genuinely unverified or deliberately withheld, not just "not built": (1) the ONNX Runtime sessions — Marian's AND Supertonic's — have never opened on a real device, only proven against faked session boundaries and, for Marian specifically, against the real models in Python; (2) Supertonic speaking Spanish (or any of the five languages `supertonicSupportedLangs` architecturally claims) is UNTESTED, not confirmed — nobody has heard the result, and de/ru/zh route through the system voice entirely regardless, since Supertonic's own coverage never reached them; (3) `opus-mt-en-zh` (English->Chinese) is registered nowhere — a golden-test render of the scroll-mode display showed the translated Chinese text as tofu boxes (the app's bundled fonts carry no CJK glyphs, and a measured 8.3MB single-region font subset doesn't fit the remaining APK size budget), so the pair is withheld until either is fixed; `opus-mt-zh-en` (English output) is unaffected. A `BrainTranslator` rung (chunked Brain requests, strict JSON parsing, per-sentence fail-closed) is built and fully tested but has zero call sites in the live app — no tier ladder, consent routing, or UI picker reaches it yet (ADR-0014 Phase 5). NLLB's 200-language long tail remains unavailable. The UI names the translating model so quality expectations stay honest.
 - Voice-clone read-aloud: the donor's 4 SpeechT5/CMU-ARCTIC preset voice
   identities do not carry over — v1's Supertonic voice is one English
   voice, not a clone gallery (ADR-0007). Whole-doc synthesize+cache,
@@ -159,7 +160,6 @@ land, entries gain a `✅ shipped` mark; until then this is the plan of record.
 - Stove household tier on the web surface: impossible today (stove server has no CORS; https PWA cannot fetch http LAN — packet finding); household brain is native-only until the server grows CORS + a serving-context answer.
 - Word-level timestamps on non-English audio: shipped with a documented drift caveat + VAD mitigation (the donor was English-only and never faced this; forced alignment a la WhisperX is out of scope).
 - 32-bit (armeabi-v7a) potato phones: full T0 app + whisper-tiny (slow); LiteRT local LLM is arm64-only, so their Brain tiers are stove/BYOK.
-- Background podcast playback (audio_service, lock-screen controls): not wired — `just_audio_player.dart` names it deferred by design, and `audio_service` isn't a pubspec dependency. Foreground playback (the mini player bar, sleep timer, per-podcast settings, Up Next) is unaffected; what's missing is continuing audio and transport controls when the app is backgrounded or the screen is locked.
 - Auto-download queue: not wired (Campaign 5, ADR-0011 §5 — corrected from a prior "Covered" claim of "metered + disk-space guards, re-checked between downloads", none of which was ever built). `Feeds.autoDownload` is a column with a DAO setter and zero callers; no filter UI exists to set it from; no episode-audio-download path exists anywhere outside the transcription pipeline, which is itself gated behind `confirmDownload`'s consent screen. Left unwired deliberately, not for lack of time: an automatic refresh-time download would bypass ADR-0003 law 6's one egress consent gate silently, a sovereignty-law violation independent of whether metered/disk guards are also added.
 
 ## Dropped (4)
@@ -333,6 +333,86 @@ the study crown above. Statuses follow the same convention.
   works"/"top feeds" — no already-reviewed cheap aggregation exists for
   either; left for a future pass rather than building one unverified
   this pass.
+
+## Beyond both donors — the shakedown (Campaign 9, ADR-0015)
+
+Neither donor had these; the first real device test of 1.3.0 surfaced
+them instead. Listed here rather than folded into Covered/Degraded
+above because every item traces to a specific user observation, not a
+donor-parity checklist.
+
+- ✅ shipped — **Full-content feeds** (ADR-0015 Decision 1). A feed
+  item's body now comes from `content:encoded`/`content` (a NEW,
+  uncapped `FeedItem.contentHtml` field) through the SAME
+  `extractArticle` path URL intake already uses, whenever that's
+  meaningfully longer than the existing 300-char `desc` — a
+  Substack-shaped feed reads as the actual post, not a stub. Podcast
+  episodes keep show-notes as their body (that's what show-notes are).
+  **Honesty note**: only recovers what a feed actually ships in RSS — a
+  paywalled/truncated feed still yields an excerpt.
+- ✅ shipped — **Library/river honesty** (ADR-0015 Decision 2). The
+  library query now excludes `persistence: 'ephemeron'` works by
+  exclusion (`isNotValue`, not an allow-list of one) — the river owns
+  ephemera, the library only ever shows promoted works, and every
+  library row gained a date subtitle (published date for a kept
+  episode, added date otherwise) matching a pattern the river already
+  had.
+- ✅ shipped — **River artwork.** Channel-level `<itunes:image href>` /
+  `<image><url>` parsed into `Feeds.imageUrl` (schema v20), fetched ONCE
+  per feed (never at render) to `artwork/{feedId}.img` via the app's
+  existing resumable-download engine, and shown as a ~40dp rounded
+  thumbnail leading each river row with the unread dot moved to a
+  corner badge — the device report was "excluding the podcast image...
+  makes it hard to scroll the river and find something." Rows without
+  artwork keep the prior layout. Gated on `localMlAvailable`, not on a
+  services object merely being non-null, so the web tier never attempts
+  a file read it can't make. `MediaItem.artUri`/`LockScreenTag.artUri`
+  now points at this same file, gated on the SAME `existsSync()` check
+  (ADR-0015 Decision 3, shipped as Phase 2e) — see below.
+- ✅ shipped — **Lines: a third reading mode.** "there's still no
+  line-by-line option... just line by line, audio NOT playing." A new
+  scroll-family `ReaderMode` highlighting one VISUAL LINE at a time
+  (`TextPainter.getBoxesForSelection`-grouped, `reader/
+  line_paced_view.dart`), advancing on the SAME word-level clock RSVP
+  and Scroll's follow-along already share — a line's dwell time is the
+  SUM of its own words' `msPerWord`, never a separate `wordCount/wpm`
+  formula that would discard the tokenizer's punctuation-dwell weights.
+  The mode switcher (`mode-toggle`) is now a labeled three-way picker
+  (Scroll / Words / Lines) rather than a binary cycling toggle.
+- ✅ shipped — **The reader follows the player.** "the highlighted
+  section didn't update as the audio moved; it just sat there." When
+  audio for the OPEN work is playing — already under way, or started
+  via "Listen from here" — the reader now attaches to `PlayerController`
+  and advances its own cursor on every position tick, through the same
+  `Spine.positionAtAudioTime` mapping the karaoke view already proved.
+  A "Following audio" / "Resume following" chip shows and controls the
+  state; a manual seek (tap a word, drag-scroll) or playback moving to
+  a different work both detach — the user's hand always wins.
+- ✅ shipped — **Identity: the lattice logo.** Every Android mipmap and
+  PWA icon was byte-identical to Flutter's stock template; no logo
+  asset existed in the repo. `assets/brand/trellis-logo.svg` (verified
+  byte-for-byte against the live landing page before anything was
+  generated) now backs the legacy launcher icons, a full adaptive icon
+  (foreground/background/monochrome layers, Android's own safe-zone
+  fraction), the PWA's maskable variants, and the favicon — regenerable
+  any time the logo changes via `tool/generate_brand_icons.py`.
+- ✅ shipped, pending device confirmation — **The media-session
+  package.** ADR-0015 Decision 3: first deferred mid-campaign
+  (`just_audio_background` researched, then removed again), then
+  implemented as Phase 2e once orchestrator review overruled that
+  deferral — the user's #1 device finding, the one this campaign is
+  named after. `JustAudioBackground.init()` runs once at startup
+  (Android/iOS only; a no-op stub on the web tier, verified with
+  `flutter build web` after wiring). Every `AudioSource` the player
+  loads — episode, audiobook, the Phase 2c rehydration path — now
+  carries a `LockScreenTag` (id/title/album/artUri), built by a pure,
+  unit-tested function (`lockScreenTagFor`). The Android manifest
+  gained the package's own required service + media-button receiver,
+  no new permission (`FOREGROUND_SERVICE_MEDIA_PLAYBACK` was already
+  declared and unused). **Honesty note**: proven up to the tag reaching
+  the player; lock-screen RENDERING itself is device-only and stays
+  unverified by any test — see the "Background podcast playback" row
+  above, moved from Degraded to Covered and worded the same way.
 
 ## Donor inventories (the checklist this ledger must satisfy)
 

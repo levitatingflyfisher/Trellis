@@ -52,9 +52,13 @@ void main() {
   }
 
   /// Scroll mode, tap the word unique to segment 2 — lands the cursor
-  /// there so pre-cursor text is exactly segments 0 and 1.
+  /// there so pre-cursor text is exactly segments 0 and 1. Campaign 9
+  /// Phase 6: `mode-toggle` opens a labeled three-way picker rather than
+  /// cycling on its own tap.
   Future<void> seekIntoSegmentTwo(WidgetTester tester) async {
     await tester.tap(find.byKey(const Key('mode-toggle')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('mode-item-scroll')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('spy.'));
     await tester.pumpAndSettle();

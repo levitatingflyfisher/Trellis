@@ -10,6 +10,7 @@ import '../intake/epub_intake.dart';
 import '../intake/gutenberg_screen.dart';
 import '../intake/paste_intake.dart';
 import '../intake/url_intake.dart';
+import '../models/format.dart' show formatDay, formatEpochDay;
 import '../player/player_controller.dart';
 import '../reader/reader_logic.dart' show shouldOfferRecap;
 import '../reader/reader_screen.dart';
@@ -17,6 +18,7 @@ import '../reader/speech/speech_engine.dart';
 import '../reader/speech/speech_temp_files.dart';
 import '../reader/translation/marian_engine.dart';
 import 'library_filter_screen.dart';
+import 'library_filter_sheet.dart';
 import 'library_query.dart';
 
 typedef _Entry = ({
@@ -87,11 +89,20 @@ class LibraryScreen extends StatefulWidget {
   /// (existing call sites) just hides the button.
   final PlayerController? player;
 
-  /// Resolves the Spanish translator (ADR-0008 "Babel" Phase 3) — the
-  /// shell closes over `DeviceServices.resolveTranslator`; null keeps
-  /// every reader this screen opens without a "Translate to Spanish"
-  /// action, the same shape as [resolveSpeechEngine].
-  final Future<MarianTranslator?> Function()? resolveTranslator;
+  /// Resolves a translator for a specific (source, target) pair (Campaign
+  /// 8 "Babel widens" Phase 1, generalizing ADR-0008 "Babel" Phase 3) —
+  /// the shell closes over `DeviceServices.resolveTranslator`; null keeps
+  /// every reader this screen opens without a "Translate…" action, the
+  /// same shape as [resolveSpeechEngine].
+  final Future<MarianTranslator?> Function(
+      {required String sourceLang, required String targetLang})?
+      resolveTranslator;
+
+  /// The picker's own data source (Campaign 8 "Babel widens" Phase 1) —
+  /// the shell closes over `DeviceServices.availableTranslationTargets`;
+  /// null (or an empty result) keeps the "Translate…" action hidden.
+  final Future<List<String>> Function({required String sourceLang})?
+      availableTranslationTargets;
 
   /// The audiobook door (Campaign 7, ADR-0013): pick, confirm a title,
   /// copy. Null hides the "Audiobook" option — the shell only wires this
@@ -122,6 +133,7 @@ class LibraryScreen extends StatefulWidget {
       this.createSpeechTempFiles,
       this.player,
       this.resolveTranslator,
+      this.availableTranslationTargets,
       this.onImportAudiobook,
       this.onDeleteAudiobookFiles});
 
@@ -200,25 +212,42 @@ class _LibraryScreenState extends State<LibraryScreen> {
     ];
   }
 
-  /// The filter icon (Campaign 5 Phase 2): no active filter opens the
-  /// builder; an active one clears in one tap without a screen at all —
-  /// the reachable, low-friction path (ergonomic-ux: state is a design
-  /// surface, not an afterthought).
+  /// The filter icon (Campaign 5 Phase 2; modernized to a live modal sheet
+  /// in Campaign 9 Phase 1 — the user called the old pushed-screen-with-
+  /// an-Apply-button flow "dated"): no active filter opens the sheet,
+  /// live-applying to [_visibleEntries] as it's edited; an active one
+  /// clears in one tap without any screen at all — the reachable, low-
+  /// friction path (ergonomic-ux: state is a design surface, not an
+  /// afterthought). Saved-view management stays a pushed screen, reached
+  /// from a door inside the sheet.
   Future<void> _openFilter() async {
     final active = _activeQuery;
     if (active != null && !active.isEmpty) {
       setState(() => _activeQuery = null);
       return;
     }
+    final action = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      builder: (_) => LibraryFilterSheet(
+        db: widget.db,
+        profileId: widget.profile.id,
+        initial: active ?? const LibraryQuery(),
+        onChanged: (q) =>
+            setState(() => _activeQuery = q.isEmpty ? null : q),
+      ),
+    );
+    if (action != openSavedViewsManagement || !mounted) return;
     final result = await Navigator.of(context).push<LibraryQuery>(
         MaterialPageRoute(
             builder: (_) => LibraryFilterScreen(
                 db: widget.db,
                 profileId: widget.profile.id,
-                initial: active ?? const LibraryQuery())));
+                currentQuery: _activeQuery ?? const LibraryQuery())));
     if (!mounted) return;
-    setState(() => _activeQuery =
-        (result == null || result.isEmpty) ? null : result);
+    if (result != null) {
+      setState(() => _activeQuery = result.isEmpty ? null : result);
+    }
     await _load(); // a view may have been created/deleted/reordered too
   }
 
@@ -408,6 +437,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
           createSpeechTempFiles: widget.createSpeechTempFiles,
           player: widget.player,
           resolveTranslator: widget.resolveTranslator,
+          availableTranslationTargets: widget.availableTranslationTargets,
           offerRecap: offerRecap),
     ));
     await _load(); // progress may have moved
@@ -530,6 +560,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return (fileIdx / count).clamp(0.0, 1.0);
   }
 
+  /// Campaign 9 Phase 4: user: "library rows have no dates." An episode's
+  /// date is when the HOST published it (what a listener actually cares
+  /// about, independent of whenever it happened to be kept); every other
+  /// kind falls back to when it was first added — the same distinction
+  /// the river already draws between an episode row's own date and
+  /// anything else.
+  String _dateLabel(_Entry e) {
+    final episode = e.episode;
+    return episode != null
+        ? formatDay(episode.publishedAtMs)
+        : formatEpochDay(e.work.firstSeenEpochDay);
+  }
+
   Widget _workTile(_Entry e) {
     final progress = e.work.finishedEpochDay != null
         ? 1.0
@@ -548,10 +591,25 @@ class _LibraryScreenState extends State<LibraryScreen> {
         _ => Icons.notes_outlined,
       }),
       title: Text(e.work.title, overflow: TextOverflow.ellipsis, maxLines: 2),
-      subtitle: Padding(
-        padding: const EdgeInsets.only(top: 6),
-        child: LinearProgressIndicator(
-            value: progress, borderRadius: BorderRadius.circular(2)),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(_dateLabel(e),
+                key: Key('date-${e.work.id}'),
+                style: Theme.of(context)
+                    .textTheme
+                    .bodySmall
+                    ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          ),
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: LinearProgressIndicator(
+                value: progress, borderRadius: BorderRadius.circular(2)),
+          ),
+        ],
       ),
       trailing: Row(
         mainAxisSize: MainAxisSize.min,
@@ -563,6 +621,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             ),
           PopupMenuButton<String>(
             key: Key('work-menu-${e.work.id}'),
+            tooltip: 'More',
             onSelected: (v) => switch (v) {
               'pin' => _togglePin(e),
               _ => _remove(e),

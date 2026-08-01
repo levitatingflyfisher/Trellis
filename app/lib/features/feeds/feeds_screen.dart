@@ -222,6 +222,7 @@ class _FeedsScreenState extends State<FeedsScreen> {
         actions: [
           PopupMenuButton<String>(
             key: const Key('opml-menu'),
+            tooltip: 'More',
             onSelected: (v) => switch (v) {
               'import' => _importOpml(),
               'export' => _exportOpml(),
@@ -292,6 +293,7 @@ class _FeedsScreenState extends State<FeedsScreen> {
       ),
       trailing: PopupMenuButton<String>(
         key: Key('feed-menu-${feed.id}'),
+        tooltip: 'More',
         onSelected: (v) =>
             v == 'settings' ? _openSettings(feed) : _unfollow(feed),
         itemBuilder: (_) => const [

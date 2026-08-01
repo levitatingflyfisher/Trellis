@@ -19,6 +19,7 @@ import 'package:loom_core/loom_core.dart' as core;
 
 import '../../db/database.dart';
 import 'episode_player.dart';
+import 'media_item_mapping.dart';
 import 'shake_detector.dart';
 import 'sleep_timer.dart';
 import 'smart_resume.dart';
@@ -32,11 +33,13 @@ class PlayerController extends ChangeNotifier {
     Future<void> Function()? haptic,
     Stream<AccelerationSample> Function()? accelerometerSamples,
     File Function(int workId, String url)? localAudioFileFor,
+    File Function(int feedId)? artworkFileFor,
   }) : _createPlayer = createPlayer,
        _now = now ?? DateTime.now,
        _haptic = haptic ?? HapticFeedback.mediumImpact,
        _accelerometerSamples = accelerometerSamples,
-       _localAudioFileFor = localAudioFileFor;
+       _localAudioFileFor = localAudioFileFor,
+       _artworkFileFor = artworkFileFor;
 
   final AppDatabase db;
   final int profileId;
@@ -50,6 +53,14 @@ class PlayerController extends ChangeNotifier {
   /// eviction deletes from and the DSP pipeline promotes into — whichever
   /// of those wrote there last IS what plays.
   final File Function(int workId, String url)? _localAudioFileFor;
+
+  /// Campaign 9 Phase 2e (ADR-0015 Decision 3): resolves a feed's own
+  /// downloaded artwork file, mirroring [_localAudioFileFor]'s injection
+  /// shape exactly — null (the web tier, and every test that doesn't ask
+  /// for it) means "no artwork source," never a dart:io call where none
+  /// works. Wired callers pass `services.artworkFileFor`, the SAME
+  /// deterministic path Phase 5c's river thumbnail already reads.
+  final File Function(int feedId)? _artworkFileFor;
 
   /// The sleep timer's "shortly before stop" mercy — Flutter's own SDK
   /// call, not a plugin, so it needs no platform channel a bare unit test
@@ -115,6 +126,22 @@ class PlayerController extends ChangeNotifier {
   /// or when nothing has been paused this session. Cleared on a fresh
   /// [playWork] so a stale value from a previous episode never leaks in.
   int? _pausedAtMs;
+
+  /// Campaign 9 Phase 2 ("resume after restart"): the saved position for
+  /// [_current], read cheaply from disk by [rehydrateLastPlayed] BEFORE any
+  /// real audio has loaded — [position]/[duration] stay at their ordinary
+  /// no-player defaults on purpose (a misleading full-width slider is worse
+  /// than a bar the mini player renders as a plain "Paused at mm:ss" line
+  /// instead). Cleared the moment a real [EpisodePlayer] is created (see
+  /// [_ensurePlayer]), since the live player's own position takes over
+  /// from there.
+  int? _rehydratedPositionMs;
+
+  /// Non-null only while [_current] is a rehydrated-but-not-yet-loaded work
+  /// — see [_rehydratedPositionMs]'s own doc for why this stays separate
+  /// from [position].
+  int? get rehydratedPositionMs =>
+      _player == null ? _rehydratedPositionMs : null;
 
   // ── sleep timer ──
   //
@@ -265,6 +292,9 @@ class PlayerController extends ChangeNotifier {
     if (existing != null) return existing;
     final p = _createPlayer();
     _player = p;
+    // A real player now owns position/duration — the rehydrated snapshot
+    // (Campaign 9 Phase 2) has served its purpose.
+    _rehydratedPositionMs = null;
     _subs.add(
       p.positionStream.listen((_) {
         unawaited(_tickSleepTimer());
@@ -297,9 +327,66 @@ class PlayerController extends ChangeNotifier {
     if (p.position >= cutoff) await _finish();
   }
 
-  /// Play an episode work; called on the current one it toggles.
+  /// Campaign 9 Phase 2 ("resume after restart"): user: "when I pause or
+  /// close the play bar it's hard to find what I was playing." Reads
+  /// [ReaderPrefs.lastPlayedWorkId] and, if it still names a real work,
+  /// makes the mini bar show it PAUSED at the saved position — never
+  /// creates a real [EpisodePlayer], never touches the network or a local
+  /// file, and never calls play(). The actual load happens lazily, the
+  /// first time [toggle] is tapped, so a cold boot alone never starts a
+  /// download or a stream on its own.
+  ///
+  /// A pref naming a work that no longer exists is the ORDINARY case, not
+  /// an edge one — this app deletes ephemera on a decay timer — so it is
+  /// cleared rather than left to dangle and re-fail every future boot.
+  ///
+  /// A no-op if something is already current (a normal play already
+  /// happened this session; there is nothing stale to rehydrate over).
+  Future<void> rehydrateLastPlayed() async {
+    if (_current != null) return;
+    final prefs = await db.profilesDao.readerPrefs(profileId);
+    final workId = prefs.lastPlayedWorkId;
+    if (workId == null) return;
+    final work = await db.spineDao.workById(workId);
+    if (work == null) {
+      await db.profilesDao.setReaderPrefs(
+          profileId, prefs.copyWith(clearLastPlayedWorkId: true));
+      return;
+    }
+    _current = work;
+    _pausedAtMs = null;
+    _finishHandled = false;
+    _alignments = [
+      for (final a in await db.spineDao.alignmentsOf(work.id))
+        core.Alignment(
+            segmentIdx: a.segmentIdx, tStartMs: a.tStartMs, tEndMs: a.tEndMs),
+    ];
+    final episode = await db.feedsDao.episodeOf(work.id);
+    _currentFeed =
+        episode == null ? null : await db.feedsDao.feedById(episode.feedId);
+    final audiobookFiles = await db.audiobooksDao.filesOf(work.id);
+    if (audiobookFiles.isNotEmpty) {
+      _currentAudiobookFiles = audiobookFiles;
+      _currentAudiobookSettings = await db.audiobooksDao.audiobookOf(work.id);
+      final resume = await db.feedsDao
+          .playerPosition(profileId: profileId, workId: work.id);
+      _currentFileIdx =
+          (resume?.fileIdx ?? 0).clamp(0, audiobookFiles.length - 1);
+      _rehydratedPositionMs = resume?.tMs ?? 0;
+    } else {
+      _rehydratedPositionMs = await _resumeMs(work.id);
+    }
+    notifyListeners();
+  }
+
+  /// Play an episode work; called on the current one it toggles. The
+  /// `_player != null` half of the guard (Campaign 9 Phase 2) is what lets
+  /// [toggle]'s own rehydrated-work fallback reach this body instead of
+  /// bouncing back into itself: [rehydrateLastPlayed] can set [_current]
+  /// without ever creating a player, so `_current?.id == work.id` alone is
+  /// no longer proof that toggling (rather than loading) is the right verb.
   Future<void> playWork(Work work) async {
-    if (_current?.id == work.id) return toggle();
+    if (_current?.id == work.id && _player != null) return toggle();
     final url = work.sourceUrl;
     if (url == null || url.isEmpty) return;
 
@@ -307,6 +394,7 @@ class PlayerController extends ChangeNotifier {
     final p = _ensurePlayer();
     _current = work;
     _pausedAtMs = null;
+    await db.profilesDao.recordLastPlayed(profileId, work.id);
     _finishHandled = false;
     // Campaign 7 (ADR-0013): a previous audiobook load's state must never
     // leak into an episode/text-work load — this IS the mode switch every
@@ -327,6 +415,14 @@ class PlayerController extends ChangeNotifier {
     _currentFeed = episode == null
         ? null
         : await db.feedsDao.feedById(episode.feedId);
+    // Campaign 9 Phase 2e (ADR-0015 Decision 3): the lock-screen/tray tag
+    // for whichever loader runs below — built once, from the SAME feed
+    // row just resolved, so the album name and the per-podcast settings
+    // above it never disagree about which feed this episode belongs to.
+    final artFile =
+        episode == null ? null : _artworkFileFor?.call(episode.feedId);
+    final trackInfo =
+        lockScreenTagFor(work, album: _currentFeed?.title, artworkFile: artFile);
     // The local file IS the episode once one exists on disk; stream
     // otherwise. `existsSync` on purpose (never `exists`): a real-IO await
     // here would never resolve under a widget test's fake-async zone (the
@@ -334,9 +430,9 @@ class PlayerController extends ChangeNotifier {
     // coordinator).
     final local = _localAudioFileFor?.call(work.id, url);
     if (local != null && local.existsSync()) {
-      await p.setFilePath(local.path);
+      await p.setFilePath(local.path, mediaItem: trackInfo);
     } else {
-      await p.setUrl(url);
+      await p.setUrl(url, mediaItem: trackInfo);
     }
     final resumeMs = await _resumeMs(work.id);
     final introSeconds = _currentFeed?.skipIntroSeconds;
@@ -361,7 +457,7 @@ class PlayerController extends ChangeNotifier {
   /// [duration]/[completedStream]. Resumes from the stored (fileIdx, tMs)
   /// position, or file 0 offset 0 for a book never opened before.
   Future<void> playAudiobook(Work work) async {
-    if (_current?.id == work.id) return toggle();
+    if (_current?.id == work.id && _player != null) return toggle();
     final files = await db.audiobooksDao.filesOf(work.id);
     if (files.isEmpty) return;
     if (_current != null) await saveProgress();
@@ -414,6 +510,7 @@ class PlayerController extends ChangeNotifier {
     _currentFeed = null;
     _pausedAtMs = null;
     _finishHandled = false;
+    await db.profilesDao.recordLastPlayed(profileId, work.id);
     await p.setVolume(1.0); // a prior sleep-timer fade never leaks in
     // Phase 3 (ADR-0013) note: a transcribed audiobook's alignments would
     // need a cross-file axis the reader's single-file cursor law doesn't
@@ -421,10 +518,18 @@ class PlayerController extends ChangeNotifier {
     _alignments = const [];
     _currentAudiobookSettings = await db.audiobooksDao.audiobookOf(work.id);
     final clampedIdx = startFileIdx.clamp(0, files.length - 1);
+    // Campaign 9 Phase 2e (ADR-0015 Decision 3): no album — an audiobook
+    // has no feed to name one from — and no artwork source this pass
+    // (Phase 5's artworkFileFor is feed-keyed; audiobooks carry none
+    // today). Honest, not overclaiming: id/title alone still beat the
+    // player's own generic "no title" fallback the lock screen would
+    // otherwise show.
+    final trackInfo = lockScreenTagFor(work);
     await p.setFilePaths(
       [for (final f in files) f.path],
       initialIndex: clampedIdx,
       initialPosition: Duration(milliseconds: startMs),
+      mediaItem: trackInfo,
     );
     // Set synchronously too — the engine's own currentIndexStream tick
     // may not have fired yet by the time a caller reads currentFileIdx
@@ -483,7 +588,21 @@ class PlayerController extends ChangeNotifier {
 
   Future<void> toggle() async {
     final p = _player;
-    if (p == null) return;
+    if (p == null) {
+      // Campaign 9 Phase 2: a rehydrated-but-not-yet-loaded work (see
+      // [rehydrateLastPlayed]) has no live player yet — the FIRST tap of
+      // Play is what actually loads it, from the position already on
+      // disk. Nothing to do if [_current] is null too (the ordinary
+      // "nothing has ever played" case this method always handled).
+      final work = _current;
+      if (work == null) return;
+      if (_currentAudiobookFiles != null) {
+        await playAudiobook(work);
+      } else {
+        await playWork(work);
+      }
+      return;
+    }
     if (p.playing) {
       await p.pause();
       await saveProgress();

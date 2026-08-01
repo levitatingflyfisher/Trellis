@@ -58,7 +58,8 @@ void main() {
   Future<Work> seedEpisode(
       {String title = 'Ep 1',
       String enclosure = 'https://cast.test/1.mp3',
-      bool withAlignments = false}) async {
+      bool withAlignments = false,
+      int? feedIdOverride}) async {
     final workId = await db.spineDao.insertWork(
         profileId: profileId,
         kind: 'episode',
@@ -68,7 +69,7 @@ void main() {
         sourceUrl: enclosure);
     await db.feedsDao.insertEpisode(
         workId: workId,
-        feedId: feedId,
+        feedId: feedIdOverride ?? feedId,
         guid: 'guid-$title',
         enclosureUrl: enclosure,
         publishedAtMs: 1000);
@@ -847,6 +848,99 @@ void main() {
     });
   });
 
+  group('resume after restart (Campaign 9 Phase 2)', () {
+    // User: "when I pause or close the play bar it's hard to find what I
+    // was playing." A fresh PlayerController (createPlayer never called
+    // yet, same db) models a real app restart honestly — the old
+    // controller's in-memory `_current` is gone the same way it would be
+    // after a process kill; only what's on disk survives.
+    PlayerController freshController() {
+      final c = PlayerController(
+          db: db,
+          profileId: profileId,
+          createPlayer: () => FakeEpisodePlayer(),
+          now: () => DateTime.fromMillisecondsSinceEpoch(clockMs));
+      addTearDown(c.dispose);
+      return c;
+    }
+
+    test('playing a work records it as last-played', () async {
+      final work = await seedEpisode();
+      await controller.playWork(work);
+      expect((await db.profilesDao.readerPrefs(profileId)).lastPlayedWorkId,
+          work.id);
+    });
+
+    test('a fresh controller with nothing ever played rehydrates to nothing',
+        () async {
+      final fresh = freshController();
+      await fresh.rehydrateLastPlayed();
+      expect(fresh.current, isNull);
+    });
+
+    test('rehydrateLastPlayed shows the work PAUSED at the saved position '
+        'without loading real audio — no autoplay, no eager network',
+        () async {
+      final work = await seedEpisode();
+      await controller.playWork(work);
+      player.emitPosition(const Duration(seconds: 90));
+      await controller.toggle(); // pause -> saveProgress persists tMs
+
+      final fresh = freshController();
+      await fresh.rehydrateLastPlayed();
+
+      expect(fresh.current?.id, work.id);
+      expect(fresh.playing, isFalse);
+      expect(fresh.rehydratedPositionMs, 90000);
+    });
+
+    test('a stale lastPlayedWorkId (the work was swept, the ordinary '
+        'ephemeron fate) clears itself and rehydrates to nothing', () async {
+      final work = await seedEpisode();
+      await controller.playWork(work);
+      await db.spineDao.deleteWork(work.id);
+
+      final fresh = freshController();
+      await fresh.rehydrateLastPlayed();
+
+      expect(fresh.current, isNull);
+      expect((await db.profilesDao.readerPrefs(profileId)).lastPlayedWorkId,
+          isNull,
+          reason: 'a dangling pref must not linger forever, re-tried on '
+              'every future rehydrate');
+    });
+
+    test('tapping play on a rehydrated-but-not-loaded work performs the '
+        'real load, from the saved position, then plays', () async {
+      final work = await seedEpisode();
+      await controller.playWork(work);
+      player.emitPosition(const Duration(seconds: 90));
+      await controller.toggle();
+
+      final fresh = freshController();
+      await fresh.rehydrateLastPlayed();
+      await fresh.toggle();
+
+      expect(fresh.current?.id, work.id);
+      expect(fresh.playing, isTrue);
+      expect(fresh.rehydratedPositionMs, isNull,
+          reason: 'a live player has taken over — the snapshot caption '
+              'must not linger beside a real, moving slider');
+    });
+
+    test('rehydrating a work WITH alignments still offers the karaoke '
+        'door (hasAlignments) on the rehydrated bar', () async {
+      final work = await seedEpisode(withAlignments: true);
+      await controller.playWork(work);
+      await controller.toggle();
+
+      final fresh = freshController();
+      await fresh.rehydrateLastPlayed();
+
+      expect(fresh.hasAlignments, isTrue);
+    });
+  });
+
   group('MiniPlayerBar', () {
     Future<void> pumpBar(WidgetTester tester) async {
       await tester.pumpWidget(MaterialApp(
@@ -869,6 +963,41 @@ void main() {
 
       expect(find.byKey(const Key('mini-player')), findsOneWidget);
       expect(find.text('Aurora season'), findsOneWidget);
+    });
+
+    testWidgets('a rehydrated (not-yet-loaded) work shows a plain '
+        '"Paused at mm:ss" caption instead of a misleading full slider — '
+        'duration is genuinely unknown, so the slider must not pin near '
+        'full (Campaign 9 Phase 2)', (tester) async {
+      final work = await seedEpisode(title: 'Aurora season');
+      await controller.playWork(work);
+      player.emitPosition(const Duration(minutes: 12, seconds: 34));
+      await controller.toggle(); // pause, saves tMs
+
+      final freshPlayer = FakeEpisodePlayer();
+      final fresh = PlayerController(
+          db: db,
+          profileId: profileId,
+          createPlayer: () => freshPlayer,
+          now: () => DateTime.fromMillisecondsSinceEpoch(clockMs));
+      addTearDown(fresh.dispose);
+      await fresh.rehydrateLastPlayed();
+
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: const SizedBox.expand(),
+          bottomNavigationBar: MiniPlayerBar(controller: fresh),
+        ),
+      ));
+      await tester.pump();
+
+      expect(find.text('Aurora season'), findsOneWidget);
+      expect(find.text('Paused at 12:34'), findsOneWidget);
+      final slider =
+          tester.widget<Slider>(find.byKey(const Key('player-slider')));
+      expect(slider.value, 0,
+          reason: 'no live duration exists yet — showing any progress on '
+              'the slider itself would misrepresent how far in this is');
     });
 
     testWidgets('transport controls drive the seam', (tester) async {
@@ -960,6 +1089,31 @@ void main() {
       await tester.tap(find.byKey(const Key('open-captures')));
       await tester.pump();
       expect(opened, isTrue);
+    });
+
+    testWidgets(
+        'the two bookmark doors carry visibly different icons — capture vs '
+        'the captures list', (tester) async {
+      final work = await seedEpisode();
+      await controller.playWork(work);
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          bottomNavigationBar: MiniPlayerBar(
+              controller: controller, onCapture: () {}, onOpenCaptures: () {}),
+        ),
+      ));
+      await tester.pump();
+
+      final captureIcon = tester
+          .widget<IconButton>(find.byKey(const Key('player-capture')))
+          .icon as Icon;
+      final capturesListIcon = tester
+          .widget<IconButton>(find.byKey(const Key('open-captures')))
+          .icon as Icon;
+      expect(captureIcon.icon, Icons.bookmark_add_outlined);
+      expect(capturesListIcon.icon, Icons.collections_bookmark_outlined,
+          reason: 'the captures-list door must read as a LIST, distinct '
+              'from the single-capture bookmark');
     });
 
     testWidgets(
@@ -1061,6 +1215,79 @@ void main() {
       await pumpBar(tester);
 
       expect(find.byKey(const Key('open-queue')), findsNothing);
+    });
+  });
+
+  group('MediaItem tagging (Campaign 9 Phase 2e, ADR-0015 Decision 3)', () {
+    test('playWork tags the loaded audio with the work id/title and the '
+        "feed's title as album", () async {
+      final namedFeedId = await db.feedsDao.insertFeed(
+        profileId: profileId,
+        url: 'https://cast.test/named-feed',
+        title: 'The Daily Something Podcast',
+      );
+      final work = await seedEpisode(
+          title: 'Episode Nine', feedIdOverride: namedFeedId);
+
+      await controller.playWork(work);
+
+      final tag = player.loadedMediaItem;
+      expect(tag, isNotNull);
+      expect(tag!.id, work.id.toString());
+      expect(tag.title, 'Episode Nine');
+      expect(tag.album, 'The Daily Something Podcast');
+    });
+
+    test('no artworkFileFor wired (the ordinary case, and the whole web '
+        'tier): the tag still carries id/title, artUri stays null',
+        () async {
+      final work = await seedEpisode();
+
+      await controller.playWork(work);
+
+      expect(player.loadedMediaItem?.artUri, isNull);
+    });
+
+    test('an artwork file that exists on disk becomes the tag artUri',
+        () async {
+      final dir =
+          Directory.systemTemp.createTempSync('trellis-player-artwork');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final art = File('${dir.path}/$feedId.img')
+        ..writeAsBytesSync([1, 2, 3]);
+      final withArt = PlayerController(
+        db: db,
+        profileId: profileId,
+        createPlayer: () => player,
+        now: () => DateTime.fromMillisecondsSinceEpoch(nowMs),
+        artworkFileFor: (id) => File('${dir.path}/$id.img'),
+      );
+      addTearDown(withArt.dispose);
+      final work = await seedEpisode();
+
+      await withArt.playWork(work);
+
+      expect(player.loadedMediaItem?.artUri, Uri.file(art.path));
+    });
+
+    test('artworkFileFor wired but nothing was ever downloaded: the '
+        'deterministic path is not proof, so artUri stays null', () async {
+      final dir = Directory.systemTemp
+          .createTempSync('trellis-player-artwork-missing');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final withArt = PlayerController(
+        db: db,
+        profileId: profileId,
+        createPlayer: () => player,
+        now: () => DateTime.fromMillisecondsSinceEpoch(nowMs),
+        artworkFileFor: (id) => File('${dir.path}/$id.img'),
+      );
+      addTearDown(withArt.dispose);
+      final work = await seedEpisode();
+
+      await withArt.playWork(work);
+
+      expect(player.loadedMediaItem?.artUri, isNull);
     });
   });
 }

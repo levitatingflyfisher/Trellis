@@ -47,6 +47,29 @@
         <meta-data
             android:name="flutterEmbedding"
             android:value="2" />
+        <!-- Campaign 9 Phase 2e (ADR-0015 Decision 3): just_audio_background's
+             own required manifest shape — the background media session and
+             the hardware/lock-screen media-button receiver. Verbatim from
+             the package's README; FOREGROUND_SERVICE_MEDIA_PLAYBACK above
+             was already declared and unused before this, this is the work
+             that makes it true. -->
+        <service
+            android:name="com.ryanheise.audioservice.AudioService"
+            android:foregroundServiceType="mediaPlayback"
+            android:exported="true"
+            tools:ignore="Instantiatable">
+            <intent-filter>
+                <action android:name="android.media.browse.MediaBrowserService" />
+            </intent-filter>
+        </service>
+        <receiver
+            android:name="com.ryanheise.audioservice.MediaButtonReceiver"
+            android:exported="true"
+            tools:ignore="Instantiatable">
+            <intent-filter>
+                <action android:name="android.intent.action.MEDIA_BUTTON" />
+            </intent-filter>
+        </receiver>
     </application>
     <!-- Required to query activities that can process text, see:
          https://developer.android.com/training/package-visibility and

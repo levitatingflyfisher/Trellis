@@ -11,13 +11,20 @@
 /// `segment`→[SegmentKind.code]/[SegmentKind.table]/[SegmentKind.figure]
 /// (one `[kind]` sentinel word).
 ///
-/// KNOWN DONOR LIMITATION M8 (kept, regression-marked in tests): the
-/// [maxTokenChars] long-token skip mangles space-less scripts (CJK/Thai) —
-/// a long run collapses to a single `…` placeholder.
+/// DONOR LIMITATION M8, FIXED for CJK (Campaign 8 "Babel widens" Phase 3):
+/// the [maxTokenChars] long-token skip used to mangle space-less scripts —
+/// a long run collapsed to a single `…` placeholder. A whitespace-
+/// delimited chunk containing any CJK codepoint is now routed through
+/// [segmentCjkRun] (`cjk.dart`) before reaching the length check, so it
+/// never gets there as one giant token in the first place. Thai and other
+/// space-less non-CJK scripts are NOT covered by this fix and keep the
+/// original donor behavior — a narrower, honestly-scoped ceiling than the
+/// donor's blanket one.
 library;
 
 import 'dart:math' as math;
 
+import 'cjk.dart';
 import 'spine.dart';
 
 /// Tokens longer than this collapse to a `…` placeholder (donor
@@ -38,6 +45,8 @@ final _whitespaceRe = RegExp(r'\s+');
 /// trailing dash 1.0, then long words (>10 chars) 1.1, else 1.0.
 double getPunctuationDelay(String w) {
   if (RegExp(r'[.!?]$').hasMatch(w)) return 1.7;
+  final lastCp = w.isEmpty ? null : w.runes.last;
+  if (lastCp != null && isCjkSentenceTerminator(lastCp)) return 1.7;
   if (RegExp(r'[;:]$').hasMatch(w)) return 1.2;
   if (RegExp(r',$').hasMatch(w)) return 1.0;
   if (RegExp(r'[-–—]$').hasMatch(w)) return 1.0;
@@ -161,7 +170,19 @@ void _emitToken(String raw, _TokenizerState st) {
 void _tokenizeText(String text, _TokenizerState st) {
   final clean = text.replaceAll(_invisibleRe, '');
   for (final w in clean.split(_whitespaceRe)) {
-    if (w.isNotEmpty) _emitToken(w, st);
+    if (w.isEmpty) continue;
+    // CJK prose carries no inter-word whitespace, so a whitespace-
+    // delimited chunk containing it is not one token — it is a whole
+    // run this campaign's segmenter (cjk.dart) knows how to break up.
+    // Routed here rather than in _emitToken so the URL/length/hyphen
+    // checks above never see a raw, unsegmented CJK run at all.
+    if (containsCjk(w)) {
+      for (final unit in segmentCjkRun(w)) {
+        _emitToken(unit, st);
+      }
+    } else {
+      _emitToken(w, st);
+    }
   }
 }
 

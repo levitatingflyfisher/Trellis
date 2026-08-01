@@ -12,6 +12,10 @@ import 'services/device_services.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // Campaign 9 Phase 2e (ADR-0015 Decision 3): must run before the app's
+  // single AudioPlayer is ever constructed — a real call on Android/iOS,
+  // a no-op on the web tier (bootstrap_web.dart's own stub).
+  await initAudioBackground();
   // All platform truth lives behind the bootstrap seam (bootstrap.dart):
   // native gets path_provider dirs + DeviceServices.real + drift's file db;
   // the web build gets drift-on-wasm and web-safe services. No dart:io here.

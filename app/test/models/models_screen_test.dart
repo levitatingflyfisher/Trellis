@@ -14,14 +14,14 @@ void main() {
     WidgetTester tester, {
     FakeModelStore? store,
   }) async {
-    // A tall surface so the whole model list (7 starter entries as of
-    // Campaign 4's dictionary, after ADR-0008's Babel pair) lays out
-    // without scroll churn — a plain ListView still virtualizes its
-    // Elements by viewport, so a tile scrolled out of the default test
-    // window's cacheExtent is genuinely absent from the tree, not
-    // merely off-screen (storage_panel_test.dart's established fix for
-    // the same screen).
-    tester.view.physicalSize = const Size(800, 3300);
+    // A tall surface so the whole model list (13 starter entries as of
+    // Campaign 8's six new Babel pairs, up from 7 after Campaign 4's
+    // dictionary) lays out without scroll churn — a plain ListView still
+    // virtualizes its Elements by viewport, so a tile scrolled out of
+    // the default test window's cacheExtent is genuinely absent from the
+    // tree, not merely off-screen (storage_panel_test.dart's established
+    // fix for the same screen).
+    tester.view.physicalSize = const Size(800, 5600);
     tester.view.devicePixelRatio = 1.0;
     addTearDown(tester.view.reset);
     final s = store ?? FakeModelStore();
@@ -53,8 +53,11 @@ void main() {
           .widgetList(find.byType(Text))
           .map((w) => (w as Text).data)
           .where((t) => t == 'Not downloaded'),
-      hasLength(6),
-      reason: 'six of the seven starter models are absent',
+      hasLength(registry.specs.length - 1),
+      reason: 'every starter model but the one downloaded id is absent — '
+          'derived from the registry itself (Campaign 8 "Babel widens" '
+          'added six more entries) rather than a count that goes stale '
+          'every time the starter catalog grows',
     );
   });
 

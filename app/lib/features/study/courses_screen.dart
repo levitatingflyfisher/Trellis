@@ -239,12 +239,17 @@ class _CoursesScreenState extends State<CoursesScreen> {
               icon: const Icon(Icons.settings_backup_restore),
               onPressed: widget.onOpenBackup,
             ),
+          // Campaign 9 Phase 1: a bare sparkles icon with no word read as
+          // meaningless ("the sparkles meaning echo? what's an echo?").
+          // Measured at 320dp/2x textScale with every other AppBar action
+          // wired (the worst case) before choosing this over the
+          // icon-only fallback — it fits.
           if (widget.onOpenEcho != null)
-            IconButton(
+            TextButton.icon(
               key: const Key('open-echo'),
-              tooltip: 'Trellis Echo',
-              icon: const Icon(Icons.auto_awesome_outlined),
               onPressed: widget.onOpenEcho,
+              icon: const Icon(Icons.auto_awesome_outlined),
+              label: const Text('Echo'),
             ),
           PopupMenuButton<String>(
             key: const Key('study-settings'),
@@ -297,7 +302,10 @@ class _CoursesScreenState extends State<CoursesScreen> {
         clipBehavior: Clip.antiAlias,
         child: ListTile(
           onTap: _openDailyReview,
-          leading: const Icon(Icons.auto_awesome_outlined),
+          // Campaign 9 Phase 1: distinct from the Echo door's
+          // auto_awesome_outlined — the two shared a glyph and neither
+          // meaning was legible for it.
+          leading: const Icon(Icons.today_outlined),
           title: const Text('Daily review'),
           subtitle: Text('$_dailyReviewDue due'),
           trailing: const Icon(Icons.chevron_right),

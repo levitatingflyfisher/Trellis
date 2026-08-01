@@ -35,7 +35,11 @@ void main() {
     await tester.pumpWidget(MaterialApp(
         home: ReaderScreen(db: db, profileId: profileId, work: work)));
     await tester.pumpAndSettle();
+    // Campaign 9 Phase 6: `mode-toggle` opens a labeled three-way picker
+    // rather than cycling on its own tap.
     await tester.tap(find.byKey(const Key('mode-toggle')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('mode-item-scroll')));
     await tester.pumpAndSettle();
   }
 

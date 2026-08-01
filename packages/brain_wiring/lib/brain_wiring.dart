@@ -27,5 +27,6 @@ export 'src/distiller.dart';
 export 'src/grader.dart';
 export 'src/provenance.dart';
 export 'src/recap.dart';
+export 'src/reply_json.dart';
 export 'src/tier.dart';
 export 'src/user_gesture.dart';

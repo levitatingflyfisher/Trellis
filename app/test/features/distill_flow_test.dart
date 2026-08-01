@@ -151,7 +151,7 @@ void main() {
 
     expect(find.byKey(const Key('consent-dialog')), findsNothing,
         reason: 'LAN tiers are exempt from the egress chokepoint');
-    expect(find.textContaining('household stove'), findsOneWidget);
+    expect(find.textContaining('home desktop'), findsOneWidget);
     expect(await db.studyDao.coursesOf(profileId), isEmpty);
   });
 }

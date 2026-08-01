@@ -33,6 +33,18 @@ const Map<String, String> kModelLabels = {
   'qwen2.5-0.5b-instruct-litert': 'Qwen 2.5 0.5B — small local assistant',
   'supertonic-en-m1': 'Supertonic voice (English) — read aloud, offline',
   'opus-mt-en-es': 'Spanish translation — English to Spanish, offline',
+  // Campaign 8 "Babel widens": one label per shipped direction — a
+  // pair's two directions are separate downloads (separate registry
+  // ids), so each gets its own line rather than one combined label.
+  'opus-mt-en-de': 'German translation — English to German, offline',
+  'opus-mt-de-en': 'German translation — German to English, offline',
+  'opus-mt-en-ru': 'Russian translation — English to Russian, offline',
+  'opus-mt-ru-en': 'Russian translation — Russian to English, offline',
+  // en-zh (English to Chinese) is not offered here — registry.dart's own
+  // comment has the full reasoning: real translation quality, but no
+  // verified way to display the Chinese output (a golden-test render
+  // showed tofu; bundling a CJK font blows the C3 APK budget).
+  'opus-mt-zh-en': 'Chinese translation — Chinese to English, offline',
   'wiktionary-en-en-stardict': 'Wiktionary dictionary (English) — word lookups, offline',
 };
 

@@ -12,6 +12,7 @@ import 'dart:io';
 
 import 'package:comms_core/comms_core.dart';
 import 'package:drift_flutter/drift_flutter.dart';
+import 'package:just_audio_background/just_audio_background.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
@@ -56,3 +57,22 @@ DeviceServices servicesFor(Directory supportDir, {File? databaseFile}) =>
 /// accepted only to keep this signature identical to the web side's.
 HttpFetcher createFetcher({WebFetchLane lane = WebFetchLane.direct}) =>
     IoHttpFetcher();
+
+/// Campaign 9 Phase 2e (ADR-0015 Decision 3): the lock-screen/pull-down-
+/// tray media session — must run before the app's own single AudioPlayer
+/// is ever constructed (just_audio_background's own documented ordering;
+/// [PlayerController] never builds one until playback first starts, well
+/// after this call, so `main()` calling this ahead of `runApp` is early
+/// enough). `androidNotificationIcon` names Phase 8's own asset
+/// (`drawable-*dpi/ic_notification.png`) — generated ahead of this work
+/// landing, an orphan until now.
+///
+/// Android/iOS only; the web side's own [createServices]-adjacent stub
+/// (bootstrap_web.dart) is a no-op, so `main()` can call this name
+/// unconditionally on every platform without a check of its own.
+Future<void> initAudioBackground() => JustAudioBackground.init(
+      androidNotificationChannelId: 'com.openhearth.trellis.channel.audio',
+      androidNotificationChannelName: 'Trellis playback',
+      androidNotificationIcon: 'drawable/ic_notification',
+      androidNotificationOngoing: true,
+    );

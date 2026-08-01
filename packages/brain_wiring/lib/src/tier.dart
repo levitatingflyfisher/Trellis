@@ -113,8 +113,12 @@ class UnavailableTierBrain implements Brain {
   @override
   Future<String> complete(String prompt) async {
     throw AskException(switch (tier) {
+      // Plain words, not internal jargon — a real device tester read
+      // "household stove" as insane (Campaign 8 "Babel widens" Addendum 2).
+      // The BrainTier.stove identifier itself is unchanged; this is copy
+      // only.
       BrainTier.stove =>
-        'The household stove is not connected yet — that tier is on the '
+        'Your home desktop is not connected yet — that tier is on the '
             'roadmap. Pick another Brain in Settings for now.',
       _ =>
         'No local model is installed on this device yet. Pick another '

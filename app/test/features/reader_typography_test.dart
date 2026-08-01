@@ -34,7 +34,11 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text(title));
     await tester.pumpAndSettle();
+    // Campaign 9 Phase 6: `mode-toggle` opens a labeled three-way picker
+    // rather than cycling on its own tap.
     await tester.tap(find.byKey(const Key('mode-toggle')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('mode-item-scroll')));
     await tester.pumpAndSettle();
   }
 
@@ -114,6 +118,8 @@ void main() {
     await tester.tap(find.text('Typography'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('mode-toggle')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('mode-item-scroll')));
     await tester.pumpAndSettle();
     wrap = tester.widget<Wrap>(find.byType(Wrap).first);
     expect(wrap.alignment, WrapAlignment.spaceBetween);

@@ -139,4 +139,56 @@ void main() {
     expect(find.text("Who's reading?"), findsOneWidget);
     expect(find.text('Ada'), findsOneWidget);
   });
+
+  group('Campaign 9 Phase 4: library rows gain a date subtitle', () {
+    testWidgets('a book (non-episode work) shows its added date, from '
+        'firstSeenEpochDay', (tester) async {
+      final profileId = await db.profilesDao.create('Ada');
+      final epochDay =
+          DateTime(2026, 8, 5).millisecondsSinceEpoch ~/
+              Duration.millisecondsPerDay;
+      await db.spineDao.insertWork(
+          profileId: profileId,
+          kind: 'book',
+          title: 'A Book',
+          persistence: 'work',
+          firstSeenEpochDay: epochDay);
+
+      await pumpApp(tester);
+      await tester.tap(find.text('Ada'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('5 Aug'), findsOneWidget);
+    });
+
+    testWidgets('a kept episode shows its PUBLISHED date, not the day it '
+        'was kept', (tester) async {
+      final profileId = await db.profilesDao.create('Ada');
+      final feedId = await db.feedsDao
+          .insertFeed(profileId: profileId, url: 'https://a/f');
+      final workId = await db.spineDao.insertWork(
+          profileId: profileId,
+          kind: 'episode',
+          title: 'An episode',
+          persistence: 'work',
+          // Added to the library today (or whenever) — the published date
+          // below must win, since that is what a listener actually cares
+          // about for an episode.
+          firstSeenEpochDay:
+              DateTime.now().millisecondsSinceEpoch ~/
+                  Duration.millisecondsPerDay);
+      await db.feedsDao.insertEpisode(
+          workId: workId,
+          feedId: feedId,
+          guid: 'g',
+          enclosureUrl: 'https://a/1.mp3',
+          publishedAtMs: DateTime(2026, 1, 1).millisecondsSinceEpoch);
+
+      await pumpApp(tester);
+      await tester.tap(find.text('Ada'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('1 Jan'), findsOneWidget);
+    });
+  });
 }

@@ -134,6 +134,49 @@ void main() {
           isNull);
     });
 
+    test('imageUrl defaults to null and round-trips when set (P6 "the '
+        'river gets faces")', () async {
+      final profileId = await seedProfile();
+      final feedId = await db.feedsDao
+          .insertFeed(profileId: profileId, url: 'https://x.test/feed');
+      expect(
+          (await db.feedsDao.feedsOf(profileId)).single.imageUrl, isNull);
+
+      await db.feedsDao.updateRefreshState(feedId,
+          title: 'The X Cast',
+          etag: null,
+          lastModified: null,
+          breakerJson: '{}',
+          imageUrl: 'https://x.test/art.jpg',
+          updateImageUrl: true);
+
+      expect((await db.feedsDao.feedsOf(profileId)).single.imageUrl,
+          'https://x.test/art.jpg');
+    });
+
+    test('updateRefreshState without updateImageUrl leaves the column '
+        'untouched (a non-fresh refresh has nothing new to say)', () async {
+      final profileId = await seedProfile();
+      final feedId = await db.feedsDao
+          .insertFeed(profileId: profileId, url: 'https://x.test/feed');
+      await db.feedsDao.updateRefreshState(feedId,
+          title: 'The X Cast',
+          etag: null,
+          lastModified: null,
+          breakerJson: '{}',
+          imageUrl: 'https://x.test/art.jpg',
+          updateImageUrl: true);
+
+      await db.feedsDao.updateRefreshState(feedId,
+          title: 'The X Cast',
+          etag: null,
+          lastModified: null,
+          breakerJson: '{"consecutiveFailures":1}');
+
+      expect((await db.feedsDao.feedsOf(profileId)).single.imageUrl,
+          'https://x.test/art.jpg');
+    });
+
     test('feedByUrl finds the subscription; autoDownload flips', () async {
       final profileId = await seedProfile();
       final feedId = await db.feedsDao
@@ -723,6 +766,7 @@ void main() {
       await seed.close();
       final v11 = raw.sqlite3.open(file.path);
       v11.execute('''
+        ALTER TABLE feeds DROP COLUMN image_url;
         ALTER TABLE feeds DROP COLUMN speed_override;
         ALTER TABLE feeds DROP COLUMN skip_intro_seconds;
         ALTER TABLE feeds DROP COLUMN skip_outro_seconds;
@@ -731,6 +775,7 @@ void main() {
         ALTER TABLE profiles DROP COLUMN keep_finished_in_queue;
         DROP TABLE queue;
         ALTER TABLE works DROP COLUMN show_translation_layer;
+        ALTER TABLE works DROP COLUMN active_translation_lang;
         ALTER TABLE feeds DROP COLUMN rules_json;
         ALTER TABLE episodes DROP COLUMN dedup_reason;
         ALTER TABLE episodes DROP COLUMN duplicate_of_work_id;
@@ -825,9 +870,11 @@ void main() {
         await seed.close();
         final v12 = raw.sqlite3.open(file.path);
         v12.execute('''
+        ALTER TABLE feeds DROP COLUMN image_url;
         DROP TABLE translation_sentences;
         DROP TABLE saved_views;
         ALTER TABLE works DROP COLUMN show_translation_layer;
+        ALTER TABLE works DROP COLUMN active_translation_lang;
         ALTER TABLE feeds DROP COLUMN rules_json;
         ALTER TABLE episodes DROP COLUMN dedup_reason;
         ALTER TABLE episodes DROP COLUMN duplicate_of_work_id;
@@ -877,6 +924,149 @@ void main() {
           (await migrated.profilesDao.all()).single.dspGlobalDefault,
           isTrue,
         );
+      },
+    );
+  });
+
+  group('schema migration v18 -> v20', () {
+    test(
+      'a v18 database gains feeds.imageUrl and keeps its data '
+      '(P6 "the river gets faces"; strips both v19 columns too, so this '
+      'exercises the full v18->v19->v20 hop in one pass)',
+      () async {
+        final dir = Directory.systemTemp.createTempSync(
+          'trellis-migration-v20',
+        );
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final file = File('${dir.path}/v18.sqlite');
+
+        // Seed at the CURRENT schema, then strip everything later than
+        // v18 and stamp user_version 18 — v20's own imageUrl column plus
+        // Campaign 8's v19 additions (works.activeTranslationLang,
+        // translation_sentences.engine), which a database claiming to be
+        // v18 must not silently carry.
+        final seed = AppDatabase.forTesting(NativeDatabase(file));
+        final profileId = await seed.profilesDao.create('Ada');
+        final feedId = await seed.feedsDao.insertFeed(
+          profileId: profileId,
+          url: 'https://a.test/f',
+        );
+        final workId = await seed.spineDao.insertWork(
+          profileId: profileId,
+          kind: 'episode',
+          title: 'Kept',
+          persistence: 'work',
+          firstSeenEpochDay: 100,
+        );
+        await seed.feedsDao.insertEpisode(
+          workId: workId,
+          feedId: feedId,
+          guid: 'g',
+          publishedAtMs: 1,
+        );
+        await seed.close();
+        final v18 = raw.sqlite3.open(file.path);
+        v18.execute('''
+        ALTER TABLE feeds DROP COLUMN image_url;
+        ALTER TABLE translation_sentences DROP COLUMN engine;
+        ALTER TABLE works DROP COLUMN active_translation_lang;
+        PRAGMA user_version = 18;
+      ''');
+        v18.dispose();
+
+        final migrated = AppDatabase.forTesting(NativeDatabase(file));
+        addTearDown(migrated.close);
+
+        // Old data survives…
+        final feed = (await migrated.feedsDao.feedsOf(profileId)).single;
+        expect(feed.url, 'https://a.test/f');
+        expect((await migrated.feedsDao.episodeOf(workId))!.guid, 'g');
+        expect(feed.imageUrl, isNull, reason: 'a fresh column starts null');
+
+        // …and the new column exists and works.
+        await migrated
+            .update(migrated.feeds)
+            .write(const FeedsCompanion(
+                imageUrl: Value('https://a.test/art.jpg')));
+        final updatedFeed = (await migrated.feedsDao.feedsOf(profileId)).single;
+        expect(updatedFeed.imageUrl, 'https://a.test/art.jpg');
+      },
+    );
+  });
+
+  group('schema migration v19 -> v20 (Campaign 9 Phase 5, on a Babel-only '
+      'build)', () {
+    test(
+      'a v19 database (Campaign 8 already merged, Campaign 9 not yet) '
+      'gains feeds.imageUrl and keeps its v19 data',
+      () async {
+        final dir = Directory.systemTemp.createTempSync(
+          'trellis-migration-v19-to-v20',
+        );
+        addTearDown(() => dir.deleteSync(recursive: true));
+        final file = File('${dir.path}/v19.sqlite');
+
+        // Seed at the CURRENT schema, use the v19 columns Babel shipped
+        // (a real upgrader on that build has this data), then strip only
+        // v20's own addition and stamp user_version 19 — the path a user
+        // who already upgraded through Babel, but not yet through this
+        // campaign, actually takes.
+        final seed = AppDatabase.forTesting(NativeDatabase(file));
+        final profileId = await seed.profilesDao.create('Ada');
+        final feedId = await seed.feedsDao.insertFeed(
+          profileId: profileId,
+          url: 'https://a.test/f',
+        );
+        final workId = await seed.spineDao.insertWork(
+          profileId: profileId,
+          kind: 'episode',
+          title: 'Kept',
+          persistence: 'work',
+          firstSeenEpochDay: 100,
+        );
+        await seed.feedsDao.insertEpisode(
+          workId: workId,
+          feedId: feedId,
+          guid: 'g',
+          publishedAtMs: 1,
+        );
+        await seed.spineDao.setActiveTranslationLang(workId, 'es');
+        await seed.spineDao.upsertTranslationSentence(
+          workId: workId,
+          segmentIdx: 0,
+          sentenceIdx: 0,
+          lang: 'es',
+          sourceText: 'Hi.',
+          body: 'Hola.',
+          engine: 'marian',
+        );
+        await seed.close();
+        final v19 = raw.sqlite3.open(file.path);
+        v19.execute('''
+        ALTER TABLE feeds DROP COLUMN image_url;
+        PRAGMA user_version = 19;
+      ''');
+        v19.dispose();
+
+        final migrated = AppDatabase.forTesting(NativeDatabase(file));
+        addTearDown(migrated.close);
+
+        // v19 data survives the v20 hop…
+        final feed = (await migrated.feedsDao.feedsOf(profileId)).single;
+        expect(feed.url, 'https://a.test/f');
+        expect(await migrated.spineDao.activeTranslationLang(workId), 'es');
+        final sentences =
+            await migrated.spineDao.translationSentencesOf(workId, lang: 'es');
+        expect(sentences[(0, 0)]!.engine, 'marian');
+        expect(feed.imageUrl, isNull, reason: 'a fresh column starts null');
+
+        // …and the new column exists and works.
+        await migrated
+            .update(migrated.feeds)
+            .write(const FeedsCompanion(
+                imageUrl: Value('https://a.test/art.jpg')));
+        final updatedFeed = (await migrated.feedsDao.feedsOf(profileId)).single;
+        expect(updatedFeed.imageUrl, 'https://a.test/art.jpg');
       },
     );
   });

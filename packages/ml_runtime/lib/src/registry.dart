@@ -174,8 +174,23 @@ class ModelSpec {
   final DeviceTier minTier;
 
   /// Languages this model serves, or `null` for language-agnostic /
-  /// multilingual models.
+  /// multilingual models. For [ModelTask.translation] this names the
+  /// TARGET language a pair PRODUCES (ADR-0008) — [sourceLang] is the
+  /// other half.
   final Set<String>? langs;
+
+  /// [ModelTask.translation] ONLY: the language a pair translates FROM.
+  /// `null` for every other task (meaningless there) and for a
+  /// translation spec that hasn't named one — [ModelRegistry
+  /// .pickTranslationPair] treats an unset [sourceLang] as never
+  /// matching a real source language (fails closed on half-populated
+  /// data, never guesses). Exists because [langs] alone cannot
+  /// disambiguate multiple pairs that share a target language — `de-en`,
+  /// `ru-en`, and `zh-en` all produce `en` (Campaign 8 "Babel widens";
+  /// see docs/reference/mt-models.md). Deliberately NOT read by
+  /// [pickModel]/[supportsLang] — those stay exactly as ASR/TTS need
+  /// them; only [pickTranslationPair] looks at this field.
+  final String? sourceLang;
 
   /// Non-null for a downloaded file that is an ARCHIVE needing extraction
   /// before use (a TTS voice bundle, currently the only case) — the
@@ -210,6 +225,7 @@ class ModelSpec {
     required List<String> licenses,
     required this.minTier,
     Set<String>? langs,
+    this.sourceLang,
     this.archiveLayout,
     this.supertonicLayout,
     this.marianLayout,
@@ -278,6 +294,48 @@ class ModelRegistry {
     }
     return best;
   }
+
+  /// The (source, target) selection law for translation pairs (Campaign 8
+  /// "Babel widens"): [pickModel]'s single `langHint` cannot disambiguate
+  /// two pairs that produce the same target language (`de-en`/`ru-en`/
+  /// `zh-en` all carry `langs: {'en'}`) — this method matches BOTH
+  /// [ModelSpec.sourceLang] and [ModelSpec.langs] and leaves [pickModel]
+  /// itself untouched for ASR/TTS. Same tie-break as [pickModel]: highest
+  /// [ModelSpec.minTier] first, then largest [ModelSpec.sizeBytes], then
+  /// registration order. A spec with `sourceLang == null` never matches —
+  /// half-populated data fails closed.
+  ModelSpec? pickTranslationPair(
+    DeviceTier tier, {
+    required String sourceLang,
+    required String targetLang,
+  }) {
+    ModelSpec? best;
+    for (final s in specs) {
+      if (s.task != ModelTask.translation) continue;
+      if (!tier.atLeast(s.minTier)) continue;
+      if (s.sourceLang != sourceLang) continue;
+      if (!s.supportsLang(targetLang)) continue;
+      if (best == null) {
+        best = s;
+        continue;
+      }
+      final tierCmp = s.minTier.index.compareTo(best.minTier.index);
+      if (tierCmp > 0 || (tierCmp == 0 && s.sizeBytes > best.sizeBytes)) {
+        best = s;
+      }
+    }
+    return best;
+  }
+
+  /// Every translation pair runnable at [tier] — the target-language
+  /// picker's data source (Campaign 8 "Babel widens" Phase 1): "list
+  /// ONLY downloaded+openable pairs" is a caller-side concern (an
+  /// `isDownloaded` check per spec), this just enumerates what the
+  /// registry itself knows how to run at all.
+  List<ModelSpec> translationPairsAt(DeviceTier tier) => specs
+      .where((s) =>
+          s.task == ModelTask.translation && tier.atLeast(s.minTier))
+      .toList(growable: false);
 
   /// The pinned v1 starter catalog (proposal-2 "ML plan").
   ///
@@ -498,6 +556,266 @@ class ModelRegistry {
           licenses: const ['CC-BY-4.0'],
           minTier: DeviceTier.t2,
           langs: const {'es'},
+          // Campaign 8 "Babel widens" Phase 1: added so this field is
+          // never half-populated now that pickTranslationPair exists —
+          // additive, changes no prior behavior (pickModel never reads
+          // it).
+          sourceLang: 'en',
+          marianLayout: const MarianModelLayout(
+            encoderFileName: 'encoder_model_quantized.onnx',
+            decoderMergedFileName: 'decoder_model_merged_quantized.onnx',
+            sourceSpmFileName: 'source.spm',
+            vocabFileName: 'vocab.json',
+          ),
+        ),
+        // Campaign 8 "Babel widens" Phase 0/1 — de/ru/zh, both
+        // directions each: verified 2026-08-15 by downloading every
+        // ONNX/tokenizer file directly and hashing it locally (plus
+        // cross-checked against Hugging Face's tree API `lfs.oid`/`size`
+        // fields, themselves validated against this exact es entry's own
+        // pinned hashes above — see docs/reference/mt-models.md for the
+        // full record, the real-inference quality check per pair, and
+        // why `en-pt`/`pt-en` (no trusted-org bilingual ONNX conversion)
+        // and `en-jap`/`jap-en` (Japanese — real inference produces
+        // incoherent output even after fixing a pad-token decode
+        // collapse the model's own config admits to) are NOT registered
+        // here despite being in the spec's priority list — both are
+        // Phase 5 Brain-lane languages instead, not silently dropped.
+        ModelSpec(
+          id: 'opus-mt-en-de',
+          task: ModelTask.translation,
+          files: [
+            ModelFile(
+              url: 'https://huggingface.co/onnx-community/opus-mt-en-de/'
+                  'resolve/main/onnx/encoder_model_quantized.onnx',
+              sha256:
+                  '94ae6a9149aca29ef31a58bb8ccc1c3df3720840caef890ccc6cde73c94cb0f4',
+              bytes: 49342278,
+            ),
+            ModelFile(
+              url: 'https://huggingface.co/onnx-community/opus-mt-en-de/'
+                  'resolve/main/onnx/decoder_model_merged_quantized.onnx',
+              sha256:
+                  '492004d70327f4552fbddba033f8d8ce946edb87b66cbf8f9a7b41d14fe683cc',
+              bytes: 175598624,
+            ),
+            ModelFile(
+              url: 'https://huggingface.co/onnx-community/opus-mt-en-de/'
+                  'resolve/main/source.spm',
+              sha256:
+                  '678f2a1177d8389f67b66299762dcc4fc567e89b07e212ba91b0c56daecf47ce',
+              bytes: 768489,
+            ),
+            ModelFile(
+              url: 'https://huggingface.co/onnx-community/opus-mt-en-de/'
+                  'resolve/main/vocab.json',
+              sha256:
+                  'd5acea957b265a78554999144459c5e391e0df525864edc8287bc090290baa44',
+              bytes: 1389436,
+            ),
+          ],
+          licenses: const ['CC-BY-4.0'],
+          minTier: DeviceTier.t2,
+          langs: const {'de'},
+          sourceLang: 'en',
+          marianLayout: const MarianModelLayout(
+            encoderFileName: 'encoder_model_quantized.onnx',
+            decoderMergedFileName: 'decoder_model_merged_quantized.onnx',
+            sourceSpmFileName: 'source.spm',
+            vocabFileName: 'vocab.json',
+          ),
+        ),
+        ModelSpec(
+          id: 'opus-mt-de-en',
+          task: ModelTask.translation,
+          files: [
+            ModelFile(
+              url: 'https://huggingface.co/onnx-community/opus-mt-de-en/'
+                  'resolve/main/onnx/encoder_model_quantized.onnx',
+              sha256:
+                  '3e7b95246cf1885b5c6c123a36818a417c3ef6f500d4c17e030fef427fff7a74',
+              bytes: 49342278,
+            ),
+            ModelFile(
+              url: 'https://huggingface.co/onnx-community/opus-mt-de-en/'
+                  'resolve/main/onnx/decoder_model_merged_quantized.onnx',
+              sha256:
+                  'd789d6a132d540fa40d6fa5901c3ba1e6209c69bf201ffef54f73833fa9b5a6c',
+              bytes: 175598624,
+            ),
+            ModelFile(
+              url: 'https://huggingface.co/onnx-community/opus-mt-de-en/'
+                  'resolve/main/source.spm',
+              sha256:
+                  'bbd1f495eea99c8e21ae086d9146e0fa7b096c3dfdd9ba07ab8b631889df5c9b',
+              bytes: 796845,
+            ),
+            ModelFile(
+              url: 'https://huggingface.co/onnx-community/opus-mt-de-en/'
+                  'resolve/main/vocab.json',
+              sha256:
+                  'd5acea957b265a78554999144459c5e391e0df525864edc8287bc090290baa44',
+              bytes: 1389436,
+            ),
+          ],
+          licenses: const ['CC-BY-4.0'],
+          minTier: DeviceTier.t2,
+          langs: const {'en'},
+          sourceLang: 'de',
+          marianLayout: const MarianModelLayout(
+            encoderFileName: 'encoder_model_quantized.onnx',
+            decoderMergedFileName: 'decoder_model_merged_quantized.onnx',
+            sourceSpmFileName: 'source.spm',
+            vocabFileName: 'vocab.json',
+          ),
+        ),
+        ModelSpec(
+          id: 'opus-mt-en-ru',
+          task: ModelTask.translation,
+          files: [
+            ModelFile(
+              url: 'https://huggingface.co/onnx-community/opus-mt-en-ru/'
+                  'resolve/main/onnx/encoder_model_quantized.onnx',
+              sha256:
+                  'b8b4f72528c0da92e579af8a739f97fa2f792d73527ba2fee786fa7286c4055b',
+              bytes: 51603782,
+            ),
+            ModelFile(
+              url: 'https://huggingface.co/onnx-community/opus-mt-en-ru/'
+                  'resolve/main/onnx/decoder_model_merged_quantized.onnx',
+              sha256:
+                  '5d15c48566e60dcaa5af7422bcceca24ccc8f3eaa8f1b3aedc5d6170e6c232f3',
+              bytes: 186923812,
+            ),
+            ModelFile(
+              url: 'https://huggingface.co/onnx-community/opus-mt-en-ru/'
+                  'resolve/main/source.spm',
+              sha256:
+                  '16bebef1389a0b8ab452772c4e35b9e605e5713f8ac7baa71ca701394eaa086d',
+              bytes: 802781,
+            ),
+            ModelFile(
+              url: 'https://huggingface.co/onnx-community/opus-mt-en-ru/'
+                  'resolve/main/vocab.json',
+              sha256:
+                  '5cf0d95d930d8d3e783c9e2f46a72f08b43a18060dab4ddefbcb66a733efedcb',
+              bytes: 2726796,
+            ),
+          ],
+          licenses: const ['CC-BY-4.0'],
+          minTier: DeviceTier.t2,
+          langs: const {'ru'},
+          sourceLang: 'en',
+          marianLayout: const MarianModelLayout(
+            encoderFileName: 'encoder_model_quantized.onnx',
+            decoderMergedFileName: 'decoder_model_merged_quantized.onnx',
+            sourceSpmFileName: 'source.spm',
+            vocabFileName: 'vocab.json',
+          ),
+        ),
+        ModelSpec(
+          id: 'opus-mt-ru-en',
+          task: ModelTask.translation,
+          files: [
+            ModelFile(
+              url: 'https://huggingface.co/onnx-community/opus-mt-ru-en/'
+                  'resolve/main/onnx/encoder_model_quantized.onnx',
+              sha256:
+                  'fdd4d1de9cb02feaae8bc892e0e21b1bfd1741fa43a2895d471ee5f53ae260c4',
+              bytes: 51603782,
+            ),
+            ModelFile(
+              url: 'https://huggingface.co/onnx-community/opus-mt-ru-en/'
+                  'resolve/main/onnx/decoder_model_merged_quantized.onnx',
+              sha256:
+                  '0fef11505dc0564d0d6d54e37529d7ba949826fe19fd7193052610989fccbf28',
+              bytes: 186923812,
+            ),
+            ModelFile(
+              url: 'https://huggingface.co/onnx-community/opus-mt-ru-en/'
+                  'resolve/main/source.spm',
+              sha256:
+                  '745998e51ba5b058e38b7ac7765c25c43ed5c1c39cc92b27163b9b2e323c9d7c',
+              bytes: 1080169,
+            ),
+            ModelFile(
+              url: 'https://huggingface.co/onnx-community/opus-mt-ru-en/'
+                  'resolve/main/vocab.json',
+              sha256:
+                  '5cf0d95d930d8d3e783c9e2f46a72f08b43a18060dab4ddefbcb66a733efedcb',
+              bytes: 2726796,
+            ),
+          ],
+          licenses: const ['CC-BY-4.0'],
+          minTier: DeviceTier.t2,
+          langs: const {'en'},
+          sourceLang: 'ru',
+          marianLayout: const MarianModelLayout(
+            encoderFileName: 'encoder_model_quantized.onnx',
+            decoderMergedFileName: 'decoder_model_merged_quantized.onnx',
+            sourceSpmFileName: 'source.spm',
+            vocabFileName: 'vocab.json',
+          ),
+        ),
+        // en-zh (English source -> Chinese output) is NOT registered —
+        // evaluated, not shipped, same "record what doesn't ship" law
+        // Phase 0 already applied to ja/pt, but for a DIFFERENT reason:
+        // translation quality is real (usable, if less fluent than es/
+        // de/ru), but the app has no verified way to DISPLAY the Chinese
+        // output. A golden-test render of the scroll-mode dual display
+        // (app/test/visual/cjk_font_golden_test.dart) showed tofu boxes;
+        // the app's bundled fonts (Lora/Nunito) carry zero CJK glyphs,
+        // and this app's own C7 conformance law (`fleet_conformance_test
+        // .dart`) already establishes the fleet's answer to a missing
+        // glyph as "never depend on an unverified system font" — Lora/
+        // Nunito are BUNDLED for exactly this reason. Bundling a CJK
+        // font to close the gap the honest way was costed, not assumed:
+        // Noto Sans SC's own single-weight, single-region subset OTF is
+        // 8,331,336 bytes (verified by downloading and measuring
+        // notofonts/noto-cjk's Sans2.004 release,
+        // SubsetOTF/SC/NotoSansSC-Regular.otf, OFL-1.1) against
+        // `app/budgets.json`'s ~3.3MB of remaining C3 APK headroom
+        // (71,888,630 max vs. 68,465,362 measured) — it does not fit.
+        // See docs/reference/mt-models.md for the full writeup.
+        // zh-en: excellent quality, on par with es/de/ru (verified with
+        // real inference — see docs/reference/mt-models.md).
+        ModelSpec(
+          id: 'opus-mt-zh-en',
+          task: ModelTask.translation,
+          files: [
+            ModelFile(
+              url: 'https://huggingface.co/onnx-community/opus-mt-zh-en/'
+                  'resolve/main/onnx/encoder_model_quantized.onnx',
+              sha256:
+                  '86b0dc5a1d5d8062583800654864aae1311fce2172bba80910d02020d3693577',
+              bytes: 52875078,
+            ),
+            ModelFile(
+              url: 'https://huggingface.co/onnx-community/opus-mt-zh-en/'
+                  'resolve/main/onnx/decoder_model_merged_quantized.onnx',
+              sha256:
+                  '714881fafd326c8cb56bc6e3e542d1d106a5acf90e6abb71e20423ebf1b47875',
+              bytes: 193290224,
+            ),
+            ModelFile(
+              url: 'https://huggingface.co/onnx-community/opus-mt-zh-en/'
+                  'resolve/main/source.spm',
+              sha256:
+                  'e27a3a1b539f4959ec72ea60e453f49156289f95d4e6000b29332efc45616203',
+              bytes: 804677,
+            ),
+            ModelFile(
+              url: 'https://huggingface.co/onnx-community/opus-mt-zh-en/'
+                  'resolve/main/vocab.json',
+              sha256:
+                  '08a119a1defd522fa047cb5e3bfe3e89633e96caa38ced0dc9cee7ef1021a011',
+              bytes: 1747906,
+            ),
+          ],
+          licenses: const ['CC-BY-4.0'],
+          minTier: DeviceTier.t2,
+          langs: const {'en'},
+          sourceLang: 'zh',
           marianLayout: const MarianModelLayout(
             encoderFileName: 'encoder_model_quantized.onnx',
             decoderMergedFileName: 'decoder_model_merged_quantized.onnx',

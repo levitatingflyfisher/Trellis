@@ -102,13 +102,47 @@ void main() {
     });
   });
 
-  group('tokenizer: KNOWN LIMITATION M8 (space-less CJK)', () {
-    // Documents current (donor-faithful, buggy) behavior: a long space-less
-    // run collapses to "…". When M8 is fixed (grapheme-aware splitting),
-    // update this assertion.
-    test('M8: long CJK run is currently skipped (regression marker)', () {
+  group('tokenizer: M8 FIXED (Campaign 8 "Babel widens" Phase 3) — '
+      'space-less CJK now segments per the UAX #29 baseline instead of '
+      'collapsing to a single "…" placeholder', () {
+    test('a long CJK run no longer collapses — each Han ideograph is its '
+        'own word, so a 40-character run produces 40 words, never the '
+        'maxTokenChars skip', () {
       final st = tokenizeDocument([_prose(0, '想' * 40)]);
-      expect(st.words, ['…']);
+      expect(st.words, List.filled(40, '想'));
+      expect(st.skipped, 0);
+    });
+
+    test('a real Chinese sentence tokenizes character-by-character, '
+        'terminal punctuation folded onto the last character', () {
+      final st = tokenizeDocument([_prose(0, '你好，世界。')]);
+      expect(st.words, ['你', '好，', '世', '界。']);
+    });
+
+    test('a real Japanese sentence keeps its Katakana run whole and '
+        'gives Hiragana one word per character (the documented ceiling)',
+        () {
+      final st = tokenizeDocument([_prose(0, '私はアメリカに行く。')]);
+      expect(st.words, ['私', 'は', 'アメリカ', 'に', '行', 'く。']);
+    });
+
+    test('CJK terminal punctuation carries the same 1.7 sentence-end '
+        'pacing weight ASCII .!? does', () {
+      final st = tokenizeDocument([_prose(0, '你好。')]);
+      expect(st.pacing.last, 1.7);
+    });
+
+    test('CJK text mixed with plain ASCII in the same document tokenizes '
+        'each block by its own script, undisturbed by the other', () {
+      final st = tokenizeDocument(
+          [_prose(0, 'Hello there.'), _prose(1, '你好。')]);
+      expect(st.words, ['Hello', 'there.', '你', '好。']);
+    });
+
+    test('a mixed-script token (a product name inside CJK prose) keeps '
+        'its Latin/digit run whole', () {
+      final st = tokenizeDocument([_prose(0, 'iPhone15発売。')]);
+      expect(st.words, ['iPhone15', '発', '売。']);
     });
   });
 }

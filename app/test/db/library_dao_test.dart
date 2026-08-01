@@ -120,6 +120,45 @@ void main() {
       final entries = await db.libraryDao.libraryQueryEntriesOf(ada);
       expect(entries, isEmpty);
     });
+
+    test('an ephemeron work never appears — river-only, not library-noise '
+        '(Campaign 9 Phase 4, "the feed becomes honest reading")', () async {
+      final profileId = await db.profilesDao.create('Ada');
+      final ephemeronId = await db.spineDao.insertWork(
+          profileId: profileId,
+          kind: 'article',
+          title: 'An unread feed stub',
+          persistence: 'ephemeron',
+          firstSeenEpochDay: 100);
+      final keptId = await db.spineDao.insertWork(
+          profileId: profileId,
+          kind: 'article',
+          title: 'A kept article',
+          persistence: 'work',
+          firstSeenEpochDay: 100);
+
+      final entries = await db.libraryDao.libraryQueryEntriesOf(profileId);
+      expect(entries.map((e) => e.work.id), [keptId]);
+      expect(entries.map((e) => e.work.id), isNot(contains(ephemeronId)));
+    });
+
+    test('promoting an ephemeron work (the river\'s Keep gesture) makes it '
+        'appear — the SAME query, no separate refresh path needed',
+        () async {
+      final profileId = await db.profilesDao.create('Ada');
+      final workId = await db.spineDao.insertWork(
+          profileId: profileId,
+          kind: 'article',
+          title: 'Not yet kept',
+          persistence: 'ephemeron',
+          firstSeenEpochDay: 100);
+      expect(await db.libraryDao.libraryQueryEntriesOf(profileId), isEmpty);
+
+      await db.spineDao.promoteWork(workId);
+
+      final entries = await db.libraryDao.libraryQueryEntriesOf(profileId);
+      expect(entries.map((e) => e.work.id), [workId]);
+    });
   });
 
   group('saved views — CRUD, ordered, deletable (Campaign 5 Phase 2)', () {
@@ -197,12 +236,14 @@ void main() {
       await seed.close();
       final v12 = raw.sqlite3.open(file.path);
       v12.execute('''
+        ALTER TABLE feeds DROP COLUMN image_url;
         DROP TABLE saved_views;
         DROP TABLE translation_sentences;
         ALTER TABLE feeds DROP COLUMN rules_json;
         ALTER TABLE episodes DROP COLUMN dedup_reason;
         ALTER TABLE episodes DROP COLUMN duplicate_of_work_id;
         ALTER TABLE works DROP COLUMN show_translation_layer;
+        ALTER TABLE works DROP COLUMN active_translation_lang;
         ALTER TABLE feeds DROP COLUMN dsp_enabled;
         ALTER TABLE episodes DROP COLUMN dsp_original_duration_ms;
         ALTER TABLE episodes DROP COLUMN dsp_processed_duration_ms;

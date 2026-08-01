@@ -120,11 +120,17 @@ class _BrainSettingsScreenState extends State<BrainSettingsScreen> {
                         subtitle: 'Cloud (api.anthropic.com). Nothing '
                             'leaves this device without asking you first.',
                       ),
+                      // Plain words, not internal jargon (Campaign 8
+                      // "Babel widens" Addendum 2 — a real device tester
+                      // read "Household stove" as insane). BrainTier.stove
+                      // itself is unchanged; this is copy only. The
+                      // subtitle stays honestly "on the roadmap" until a
+                      // real feature wires this tier — see Phase 5.
                       _tierTile(
                         BrainTier.stove,
-                        title: 'Household stove',
-                        subtitle: 'Your family desktop over the LAN — on '
-                            'the roadmap.',
+                        title: 'Home desktop',
+                        subtitle: "Your family's computer, over your home "
+                            'network — on the roadmap.',
                       ),
                       if (widget.localMlAvailable)
                         _tierTile(

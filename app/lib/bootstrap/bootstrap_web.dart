@@ -84,6 +84,13 @@ DeviceServices webServices({WebFetchLane lane = WebFetchLane.direct}) =>
 HttpFetcher createFetcher({WebFetchLane lane = WebFetchLane.direct}) =>
     DioHttpFetcher(lane: lane);
 
+/// Campaign 9 Phase 2e (ADR-0015 Decision 3): a no-op on this tier —
+/// just_audio_background's native media-session service is Android/iOS
+/// only. This stub exists so `main()` can call `initAudioBackground()`
+/// unconditionally, the same conditional-export shape every other name
+/// in this file already follows.
+Future<void> initAudioBackground() async {}
+
 /// The daemon's own marker for a response IT originated (refused URL, cap
 /// trip, unreachable upstream) as opposed to one proxied byte-for-byte
 /// from the real upstream site. Mirrors `skeinErrorHeader` in

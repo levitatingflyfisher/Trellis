@@ -32,12 +32,23 @@ class Sentence {
   String toString() => 'Sentence("$text", @$firstWordIdx)';
 }
 
-/// Terminal punctuation (one or more of `.!?`) followed by whitespace or
-/// end-of-string. Deliberately does NOT match punctuation immediately
-/// followed by a closing quote/paren — an embedded "quoted!" exclamation
-/// stays inside its sentence rather than risking a mid-quote clip; the
-/// safe failure mode is one long pause over the whole quote.
-final _sentenceEndRe = RegExp(r'[.!?]+(?=\s|$)');
+/// Terminal punctuation: group 1 is one or more of ASCII `.!?`, followed
+/// by whitespace or end-of-string (deliberately does NOT match punctuation
+/// immediately followed by a closing quote/paren — an embedded "quoted!"
+/// exclamation stays inside its sentence rather than risking a mid-quote
+/// clip; the safe failure mode is one long pause over the whole quote).
+/// Group 2 is one or more CJK sentence terminators (Campaign 8 "Babel
+/// widens" Phase 3, `cjk.dart`) — matched with NO trailing-whitespace
+/// requirement, since CJK prose carries none between sentences; these
+/// codepoints are unambiguously sentence-final on their own, so there is
+/// no decimal-point-style ambiguity to guard against the way the ASCII
+/// branch's lookahead does.
+/// The three codepoints [isCjkSentenceTerminator] recognizes (。！？),
+/// spelled out literally here because RegExp needs a character class, not
+/// a predicate — kept next to that function so the two can be reviewed
+/// together; `sentence_splitter_test.dart`'s CJK group is what actually
+/// guards them from drifting apart.
+final _sentenceEndRe = RegExp(r'([.!?]+)(?=\s|$)|([。！？]+)');
 final _whitespaceRe = RegExp(r'\s+');
 
 /// Common abbreviations whose trailing period is not a sentence end.
@@ -79,9 +90,19 @@ List<Sentence> splitSentences(String text) {
   }
 
   for (final m in _sentenceEndRe.allMatches(trimmed)) {
-    final beforePunct = trimmed.substring(start, m.start);
-    final lastWord = beforePunct.trim().split(_whitespaceRe).lastOrNull ?? '';
-    if (_isAbbreviation(lastWord)) continue; // not a real boundary
+    // Group 1 = the ASCII branch, where the abbreviation check applies
+    // ("Dr." / "J."). Group 2 = a CJK terminator, always a real boundary
+    // — CJK scripts use distinct sentence-final punctuation precisely so
+    // there is no period-vs-abbreviation ambiguity to resolve, so the
+    // single-letter/abbreviation heuristic (built for ASCII initials)
+    // must never run against a CJK clause, where a one-character
+    // sentence is ordinary, not an abbreviation.
+    if (m.group(1) != null) {
+      final beforePunct = trimmed.substring(start, m.start);
+      final lastWord =
+          beforePunct.trim().split(_whitespaceRe).lastOrNull ?? '';
+      if (_isAbbreviation(lastWord)) continue; // not a real boundary
+    }
     addSentence(m.end);
     start = m.end;
   }

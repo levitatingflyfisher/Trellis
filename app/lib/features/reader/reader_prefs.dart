@@ -128,20 +128,47 @@ class ReaderTypography {
       fontScale, lineHeight, maxTextWidth, paragraphSpacing, typeface, justified);
 }
 
-/// The whole [Profiles.readerPrefsJson] blob, decoded. Holds typography
-/// only -- Phase 2's Parafoveal/follow-along controls are session-scoped
-/// (the reader's existing wpm precedent) and Phase 5's lifetime totals
-/// read [ReadingDays], not this blob -- but the shape stays open to a
-/// sibling key landing here later without a further schema hop.
+/// The whole [Profiles.readerPrefsJson] blob, decoded. Started as typography
+/// only (Phase 2's Parafoveal/follow-along controls are session-scoped, the
+/// reader's existing wpm precedent, and Phase 5's lifetime totals read
+/// [ReadingDays], not this blob) — but its own doc always called the shape
+/// open to "a sibling key landing here later without a further schema hop."
+/// [lastPlayedWorkId] (Campaign 9 Phase 2, "resume after restart") is that
+/// sibling key: this app has no SharedPreferences usage anywhere (see
+/// [SavedViews]'s own doc) and no new table/column is warranted for one
+/// nullable int, so it rides the SAME per-profile JSON blob the reader
+/// already owns. This is now genuinely a shared app-prefs blob, not a
+/// reader-only one, even though the class name and column predate that.
 class ReaderPrefs {
-  const ReaderPrefs({this.typography = const ReaderTypography()});
+  const ReaderPrefs({this.typography = const ReaderTypography(), this.lastPlayedWorkId});
 
   final ReaderTypography typography;
 
-  ReaderPrefs copyWith({ReaderTypography? typography}) =>
-      ReaderPrefs(typography: typography ?? this.typography);
+  /// The most recently played work's id, for the mini bar to rehydrate a
+  /// paused thread back to it after an app restart — null means nothing
+  /// has ever played, or the player has never recorded one yet.
+  final int? lastPlayedWorkId;
 
-  String encode() => json.encode({'typography': typography.toJson()});
+  /// [clearLastPlayedWorkId] is a separate flag (not "pass null") because
+  /// null already means "leave the field as is" for every other optional
+  /// param here — the same shape [FeedsDao.updateRefreshState]'s own
+  /// update-flag pair uses for exactly this reason.
+  ReaderPrefs copyWith({
+    ReaderTypography? typography,
+    int? lastPlayedWorkId,
+    bool clearLastPlayedWorkId = false,
+  }) =>
+      ReaderPrefs(
+        typography: typography ?? this.typography,
+        lastPlayedWorkId: clearLastPlayedWorkId
+            ? null
+            : (lastPlayedWorkId ?? this.lastPlayedWorkId),
+      );
+
+  String encode() => json.encode({
+        'typography': typography.toJson(),
+        if (lastPlayedWorkId != null) 'lastPlayedWorkId': lastPlayedWorkId,
+      });
 
   /// Never throws: an empty column (a brand-new profile), a non-JSON
   /// string, or a JSON value that isn't an object all decode to the
@@ -151,9 +178,11 @@ class ReaderPrefs {
     try {
       final decoded = json.decode(raw);
       if (decoded is! Map<String, dynamic>) return const ReaderPrefs();
+      final rawId = decoded['lastPlayedWorkId'];
       return ReaderPrefs(
           typography: ReaderTypography.fromJson(
-              decoded['typography'] as Map<String, dynamic>?));
+              decoded['typography'] as Map<String, dynamic>?),
+          lastPlayedWorkId: rawId is int ? rawId : null);
     } on FormatException {
       return const ReaderPrefs();
     }

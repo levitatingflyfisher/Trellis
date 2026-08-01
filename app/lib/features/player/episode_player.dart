@@ -3,14 +3,21 @@
 /// channel is ever reachable from a widget test.
 library;
 
+import 'media_item_mapping.dart';
+
 abstract class EpisodePlayer {
-  Future<void> setUrl(String url);
+  /// [mediaItem] (Campaign 9 Phase 2e, ADR-0015 Decision 3) is what the
+  /// lock screen and pull-down tray show once background playback is
+  /// wired — optional so no existing caller (or [FakeEpisodePlayer]'s own
+  /// test steering) is forced to supply one; the app's own callers always
+  /// do, built once by [lockScreenTagFor] and passed straight through.
+  Future<void> setUrl(String url, {LockScreenTag? mediaItem});
 
   /// Loads audio from a local file rather than the network (Campaign 6):
   /// the downloaded/processed copy at [path] IS the episode once one
   /// exists — the caller decides when to prefer this over [setUrl], this
   /// method only ever loads what it's told.
-  Future<void> setFilePath(String path);
+  Future<void> setFilePath(String path, {LockScreenTag? mediaItem});
 
   /// Loads a GAPLESS playlist of local files (Campaign 7, ADR-0013) — an
   /// audiobook's files, in playback order. [initialIndex]/[initialPosition]
@@ -18,11 +25,14 @@ abstract class EpisodePlayer {
   /// engine (not this app) is what makes file-to-file advance gapless and
   /// silent: [completedStream] only fires once, after the LAST file, and
   /// [position]/[duration] are relative to whichever file is current, not
-  /// the playlist as a whole — see [currentIndexStream].
+  /// the playlist as a whole — see [currentIndexStream]. [mediaItem], when
+  /// given, tags every file in the playlist identically — the book is one
+  /// listening session with one identity, not one per chapter.
   Future<void> setFilePaths(
     List<String> paths, {
     int initialIndex = 0,
     Duration initialPosition = Duration.zero,
+    LockScreenTag? mediaItem,
   });
 
   /// Which playlist entry is current, 0-based — meaningless (and never

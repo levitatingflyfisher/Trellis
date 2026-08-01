@@ -50,6 +50,18 @@ String _cleanDesc(String s) {
   return t.length > 300 ? t.substring(0, 300) : t;
 }
 
+/// [FeedItem.contentHtml] (Campaign 9 Phase 4): the SAME entity-decode
+/// [_cleanDesc] applies (a feed that double-escapes its markup —
+/// `&amp;lt;p&amp;gt;` instead of raw `<p>` — must not leave the extractor
+/// seeing literal angle brackets as text) but NO tag stripping and NO
+/// 300-char cap: the whole point is the full, structured HTML body for
+/// ingestion to run through `extractArticle`. Null (never '') for an
+/// empty/absent element.
+String? _cleanContentHtml(String s) {
+  final t = decodeHtmlEntities(s).trim();
+  return t.isEmpty ? null : t;
+}
+
 /// Donor parseTs: `HH:MM:SS(.ms)`, `MM:SS(.ms)` or bare seconds. Keeps the
 /// donor's JS-number quirks: empty parts count as 0, unparseable multi-part
 /// timestamps propagate NaN, a bare unparseable value collapses to 0.
@@ -140,6 +152,38 @@ XmlElement? _channelOrFeedRoot(XmlDocument d) {
   return (url: null, rel: null);
 }
 
+/// Channel-level artwork (P6 "the river gets faces"): the first direct-child
+/// `<itunes:image href="…">` (matched by local name, like everything else
+/// here), else the first direct-child RSS `<image><url>…</url></image>`.
+/// Only the channel/feed root's OWN direct children are considered — an
+/// item/entry's own `itunes:image` (episode-specific artwork) must never
+/// leak into the feed's image the way [_findNextPage] already guards
+/// against an item-level `rel="next"` leaking into the archive link. A
+/// relative href resolves against [feedUrl], the same law as
+/// [_findNextPage]'s own href resolution.
+String? _findChannelImageUrl(XmlDocument d, String feedUrl) {
+  final container = _channelOrFeedRoot(d);
+  if (container == null) return null;
+  final imageEls = _allLocal(container.childElements, 'image').toList();
+  String? resolve(String href) {
+    try {
+      return Uri.parse(feedUrl).resolve(href).toString();
+    } catch (_) {
+      return href;
+    }
+  }
+
+  for (final img in imageEls) {
+    final href = img.getAttribute('href');
+    if (href != null && href.isNotEmpty) return resolve(href);
+  }
+  for (final img in imageEls) {
+    final url = _firstLocal(img.childElements, 'url')?.innerText.trim();
+    if (url != null && url.isNotEmpty) return resolve(url);
+  }
+  return null;
+}
+
 Enclosure? _findAudio(XmlElement el) {
   // Standard RSS 2.0 enclosure
   for (final enc in _allLocal(el.descendantElements, 'enclosure')) {
@@ -194,7 +238,11 @@ ParsedFeed parseRssFeed(String xml, String feedUrl) {
     if (link.isEmpty) link = linkEl?.getAttribute('href') ?? '';
     var rawDesc =
         _firstLocal(item.descendantElements, 'description')?.innerText ?? '';
-    if (rawDesc.isEmpty) rawDesc = _nsText(item, 'encoded');
+    // content:encoded read unconditionally (Campaign 9 Phase 4) —
+    // independent of whether description was present, so a Substack-shaped
+    // item (a short excerpt AND a full content:encoded body) keeps both.
+    final encoded = _nsText(item, 'encoded');
+    if (rawDesc.isEmpty) rawDesc = encoded;
     if (rawDesc.isEmpty) rawDesc = _nsText(item, 'summary');
     final ch = _findChapters(item);
     items.add(FeedItem(
@@ -207,6 +255,7 @@ ParsedFeed parseRssFeed(String xml, String feedUrl) {
       enclosure: _findAudio(item),
       chapters: ch.chapters,
       chaptersUrl: ch.chaptersUrl,
+      contentHtml: _cleanContentHtml(encoded),
     ));
   }
 
@@ -230,10 +279,12 @@ ParsedFeed parseRssFeed(String xml, String feedUrl) {
       }
       var rawDesc =
           _firstLocal(entry.descendantElements, 'summary')?.innerText ?? '';
-      if (rawDesc.isEmpty) {
-        rawDesc =
-            _firstLocal(entry.descendantElements, 'content')?.innerText ?? '';
-      }
+      // <content> read unconditionally too (Campaign 9 Phase 4) — same
+      // independence from summary as content:encoded's from description
+      // above.
+      final content =
+          _firstLocal(entry.descendantElements, 'content')?.innerText ?? '';
+      if (rawDesc.isEmpty) rawDesc = content;
       final ch = _findChapters(entry);
       items.add(FeedItem(
         title: decodeHtmlEntities(
@@ -245,6 +296,7 @@ ParsedFeed parseRssFeed(String xml, String feedUrl) {
         enclosure: _findAudio(entry),
         chapters: ch.chapters,
         chaptersUrl: ch.chaptersUrl,
+        contentHtml: _cleanContentHtml(content),
       ));
     }
   }
@@ -267,7 +319,8 @@ ParsedFeed parseRssFeed(String xml, String feedUrl) {
       title: feedTitle,
       items: items,
       nextPageUrl: nextPage.url,
-      nextPageRel: nextPage.rel);
+      nextPageRel: nextPage.rel,
+      imageUrl: _findChannelImageUrl(d, feedUrl));
 }
 
 /// Common named HTML entities (the full HTML5 table has ~2200; feeds in the

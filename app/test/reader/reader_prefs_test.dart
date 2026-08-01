@@ -76,4 +76,47 @@ void main() {
       expect(next.typography.justified, true);
     });
   });
+
+  group('lastPlayedWorkId (Campaign 9 Phase 2, "resume after restart") — '
+      'a sibling key in the SAME blob, no new column', () {
+    test('defaults to null and round-trips through encode/decode', () {
+      expect(const ReaderPrefs().lastPlayedWorkId, isNull);
+      const prefs = ReaderPrefs(lastPlayedWorkId: 42);
+      final back = ReaderPrefs.decode(prefs.encode());
+      expect(back.lastPlayedWorkId, 42);
+    });
+
+    test('copyWith(lastPlayedWorkId: …) never touches typography, and vice '
+        'versa — the settings screen bug this key would otherwise reproduce',
+        () {
+      const withBoth = ReaderPrefs(
+          typography: ReaderTypography(fontScale: 1.4),
+          lastPlayedWorkId: 7);
+      final typographyOnlyEdit =
+          withBoth.copyWith(typography: const ReaderTypography(fontScale: 1.6));
+      expect(typographyOnlyEdit.lastPlayedWorkId, 7,
+          reason: 'editing typography must never clobber the player\'s own '
+              'key in the shared blob');
+      expect(typographyOnlyEdit.typography.fontScale, 1.6);
+
+      final playerOnlyEdit = withBoth.copyWith(lastPlayedWorkId: 9);
+      expect(playerOnlyEdit.typography.fontScale, 1.4,
+          reason: 'and the reverse: recording a play must never clobber '
+              'typography');
+      expect(playerOnlyEdit.lastPlayedWorkId, 9);
+    });
+
+    test('clearLastPlayedWorkId() removes it even though 0 is falsy-ish', () {
+      const prefs = ReaderPrefs(lastPlayedWorkId: 5);
+      final cleared = prefs.copyWith(clearLastPlayedWorkId: true);
+      expect(cleared.lastPlayedWorkId, isNull);
+      final back = ReaderPrefs.decode(cleared.encode());
+      expect(back.lastPlayedWorkId, isNull);
+    });
+
+    test('a corrupt/non-int value decodes to null, never throws', () {
+      expect(ReaderPrefs.decode('{"lastPlayedWorkId":"not an id"}')
+          .lastPlayedWorkId, isNull);
+    });
+  });
 }

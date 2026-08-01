@@ -97,8 +97,12 @@ void main() {
               db: db, profileId: profileId, work: work, player: controller)));
       await tester.pumpAndSettle();
 
-      // Move the cursor into segment 1 (scroll mode, tap the second word).
+      // Move the cursor into segment 1 (scroll mode, tap the second
+      // word). Campaign 9 Phase 6: `mode-toggle` opens a labeled
+      // three-way picker rather than cycling on its own tap.
       await tester.tap(find.byKey(const Key('mode-toggle')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('mode-item-scroll')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Second'));
       await tester.pump();
@@ -162,7 +166,12 @@ void main() {
           null;
       SpeechTempFiles createSpeechTempFiles() =>
           DiskSpeechTempFiles(dir: Directory.systemTemp);
-      Future<MarianTranslator?> resolveTranslator() async => null;
+      Future<MarianTranslator?> resolveTranslator(
+              {required String sourceLang, required String targetLang}) async =>
+          null;
+      Future<List<String>> availableTranslationTargets(
+              {required String sourceLang}) async =>
+          const [];
 
       await tester.pumpWidget(MaterialApp(
           home: KaraokeScreen(
@@ -172,7 +181,8 @@ void main() {
               tts: tts,
               resolveSpeechEngine: resolveSpeechEngine,
               createSpeechTempFiles: createSpeechTempFiles,
-              resolveTranslator: resolveTranslator)));
+              resolveTranslator: resolveTranslator,
+              availableTranslationTargets: availableTranslationTargets)));
       await tester.pumpAndSettle();
 
       await tester.tap(find.byKey(const Key('read-from-here')));
@@ -183,6 +193,8 @@ void main() {
       expect(reader.resolveSpeechEngine, same(resolveSpeechEngine));
       expect(reader.createSpeechTempFiles, same(createSpeechTempFiles));
       expect(reader.resolveTranslator, same(resolveTranslator));
+      expect(reader.availableTranslationTargets,
+          same(availableTranslationTargets));
     });
   });
 }

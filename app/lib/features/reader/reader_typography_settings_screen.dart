@@ -26,6 +26,13 @@ class ReaderTypographySettingsScreen extends StatefulWidget {
 class _ReaderTypographySettingsScreenState
     extends State<ReaderTypographySettingsScreen> {
   ReaderTypography _t = const ReaderTypography();
+  // The full blob, not just its typography — this screen only ever meant
+  // to edit typography, but the blob now also carries lastPlayedWorkId
+  // (Campaign 9 Phase 2). Writing a bare `ReaderPrefs(typography: next)`
+  // on every change would silently drop that sibling key on the floor the
+  // next time a slider moves; round-tripping through `_prefs.copyWith`
+  // keeps whatever else lives in the blob untouched.
+  ReaderPrefs _prefs = const ReaderPrefs();
   bool _loaded = false;
 
   @override
@@ -38,6 +45,7 @@ class _ReaderTypographySettingsScreenState
     final prefs = await widget.db.profilesDao.readerPrefs(widget.profileId);
     if (!mounted) return;
     setState(() {
+      _prefs = prefs;
       _t = prefs.typography;
       _loaded = true;
     });
@@ -45,8 +53,8 @@ class _ReaderTypographySettingsScreenState
 
   Future<void> _apply(ReaderTypography next) async {
     setState(() => _t = next);
-    await widget.db.profilesDao
-        .setReaderPrefs(widget.profileId, ReaderPrefs(typography: next));
+    _prefs = _prefs.copyWith(typography: next);
+    await widget.db.profilesDao.setReaderPrefs(widget.profileId, _prefs);
   }
 
   @override

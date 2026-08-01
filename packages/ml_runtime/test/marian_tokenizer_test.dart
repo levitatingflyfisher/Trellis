@@ -107,6 +107,35 @@ void main() {
     test('tabs and newlines count as whitespace', () {
       expect(MarianUnigramTokenizer.normalize('a\tb\nc'), '▁a▁b▁c');
     });
+
+    // Campaign 8 "Babel widens", Phase 0: real sentencepiece encoding of
+    // the zh-en/jap-en source.spm models showed the model's own NFKC
+    // normalizer folds Halfwidth-and-Fullwidth-Forms punctuation
+    // (U+FF01-U+FF5E, e.g. the fullwidth '！'/'？' every CJK IME emits) to
+    // its plain-ASCII counterpart BEFORE tokenizing — verified against
+    // three real golden sentences where this was the only divergence
+    // (docs/reference/mt-models.md). Unlike the general 237KB NFKC
+    // charsmap (still out of scope), this one Unicode block is a fixed
+    // arithmetic offset (`codepoint - 0xFEE0== the ASCII codepoint`) —
+    // narrow enough to port exactly without a charsmap, and load-bearing
+    // for CJK specifically: fullwidth ASCII-range punctuation is common
+    // in real Japanese/Chinese text, not a rare edge case the way a
+    // decomposed Latin accent is.
+    test('folds fullwidth ASCII-range punctuation to halfwidth (CJK IME '
+        'punctuation) before escaping spaces', () {
+      expect(MarianUnigramTokenizer.normalize('！'), '▁!');
+      expect(MarianUnigramTokenizer.normalize('？'), '▁?');
+      expect(MarianUnigramTokenizer.normalize('こんにちは！'), '▁こんにちは!');
+    });
+
+    test(
+        'leaves ideographic punctuation (、。 U+3001/U+3002) and the '
+        'ideographic space (U+3000) untouched — the real model\'s '
+        'normalizer does not fold those, verified against the same '
+        'golden sentences', () {
+      expect(MarianUnigramTokenizer.normalize('。'), '▁。');
+      expect(MarianUnigramTokenizer.normalize('、'), '▁、');
+    });
   });
 
   group(
@@ -199,25 +228,30 @@ void main() {
   // downloaded once by hand for verification and never committed to the
   // repo (they are runtime-downloaded model assets, same as the ONNX
   // weights — see docs/reference/mt-models.md). This suite SKIPS cleanly
-  // when the files are not present at the fixed /tmp path a developer
-  // downloaded them to; it is not part of the always-green baseline, but
-  // it is what was actually watched RED then GREEN against the real model
-  // during development (see the campaign report).
+  // when $BABEL_ES_DIR is unset; it is not part of the always-green
+  // baseline, but it is what was actually watched RED then GREEN against
+  // the real model during development (see the campaign report).
+  // Deliberately an env var, not a fixed path under /tmp (Campaign 8
+  // "Babel widens" moved this off /tmp — that path is RAM on the dev box
+  // these fixtures were generated on, and filling it has taken down the
+  // whole machine before; every developer verifying this locally now
+  // chooses any real directory).
   // ---------------------------------------------------------------------
   group('golden vectors against the real opus-mt-en-es source.spm', () {
-    final spmFile = File('/tmp/babel_dl/source.spm');
-    final vocabFile = File('/tmp/babel_dl/vocab.json');
+    final esDir = Platform.environment['BABEL_ES_DIR'];
+    final spmFile = File('${esDir ?? '.'}/source.spm');
+    final vocabFile = File('${esDir ?? '.'}/vocab.json');
     final fixtureFile = File(
         '${Directory.current.path}/test/fixtures/marian_tokenizer_goldens.json');
 
     test(
         'the Dart encoder matches sentencepiece\'s real output exactly, '
         'except the one documented NFKC-unstable vector', () {
-      if (!spmFile.existsSync() || !vocabFile.existsSync()) {
+      if (esDir == null || !spmFile.existsSync() || !vocabFile.existsSync()) {
         markTestSkipped(
-            'real source.spm/vocab.json not present at /tmp/babel_dl — '
-            'download them (see docs/reference/mt-models.md) to run this '
-            'fidelity check locally');
+            'set \$BABEL_ES_DIR to a directory holding a real '
+            'source.spm/vocab.json (see docs/reference/mt-models.md) to '
+            'run this fidelity check locally');
         return;
       }
       final pieces = parseSpmPieceTable(spmFile.readAsBytesSync());
@@ -258,5 +292,82 @@ void main() {
       expect(checked, greaterThanOrEqualTo(24));
       expect(knownDivergent, 1);
     });
+  });
+
+  // ---------------------------------------------------------------------
+  // Campaign 8 "Babel widens" Phase 0 — the CJK coverage check the spec
+  // asked for: the SentencePiece tokenizer's Viterbi encoder has no
+  // whitespace assumption baked into its design, but that only proves
+  // itself out against a script that actually has no whitespace to lean
+  // on. Same skip-when-absent shape as the es suite above (deliberately
+  // NOT /tmp — that path is RAM on the dev box these fixtures were
+  // generated on and is never where a developer following this comment
+  // should put a download); a developer verifying this locally chooses
+  // any real directory.
+  // ---------------------------------------------------------------------
+  group('golden vectors against the real zh-en / jap-en source.spm '
+      '(CJK, no whitespace to split on)', () {
+    void runCjkGoldenCheck({
+      required String label,
+      required String dirEnvVar,
+      required String fixtureName,
+    }) {
+      test('the Dart encoder matches sentencepiece\'s real $label output '
+          'exactly (fullwidth-punctuation folding verified — see '
+          'docs/reference/mt-models.md)', () {
+        final dir = Platform.environment[dirEnvVar];
+        if (dir == null) {
+          markTestSkipped(
+              'set \$$dirEnvVar to a directory holding a real '
+              'source.spm/vocab.json (see docs/reference/mt-models.md) to '
+              'run this fidelity check locally');
+          return;
+        }
+        final spmFile = File('$dir/source.spm');
+        final vocabFile = File('$dir/vocab.json');
+        if (!spmFile.existsSync() || !vocabFile.existsSync()) {
+          markTestSkipped('$dir has no source.spm/vocab.json');
+          return;
+        }
+        final pieces = parseSpmPieceTable(spmFile.readAsBytesSync());
+        final tokenizer = MarianUnigramTokenizer(pieces);
+        final vocab =
+            MarianVocabulary.fromJsonBytes(vocabFile.readAsBytesSync());
+
+        final fixtureFile = File('${Directory.current.path}/test/fixtures/'
+            'marian_tokenizer_goldens_$fixtureName.json');
+        final fixture =
+            jsonDecode(fixtureFile.readAsStringSync()) as Map<String, dynamic>;
+        final vectors = fixture['vectors'] as List;
+
+        var checked = 0;
+        for (final raw in vectors) {
+          final v = raw as Map<String, dynamic>;
+          final text = v['text'] as String;
+          final expectedPieces = (v['pieces'] as List).cast<String>();
+          final expectedIds = (v['vocabIds'] as List).cast<int>();
+          final gotPieces = tokenizer.encodeToPieces(text);
+          final gotIds = gotPieces.map(vocab.idOf).toList();
+          expect(gotPieces, expectedPieces, reason: 'pieces for "$text"');
+          expect(gotIds, expectedIds, reason: 'vocab ids for "$text"');
+          checked++;
+        }
+        // Every CJK golden vector matches exactly (0 documented
+        // divergences) — the fullwidth-ASCII fold in `normalize()` closed
+        // the one real gap found (docs/reference/mt-models.md).
+        expect(checked, greaterThanOrEqualTo(6));
+      });
+    }
+
+    runCjkGoldenCheck(
+      label: 'zh-en',
+      dirEnvVar: 'BABEL_ZH_DIR',
+      fixtureName: 'zh',
+    );
+    runCjkGoldenCheck(
+      label: 'jap-en',
+      dirEnvVar: 'BABEL_JA_DIR',
+      fixtureName: 'ja',
+    );
   });
 }

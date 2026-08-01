@@ -43,13 +43,21 @@ class KaraokeScreen extends StatefulWidget {
   /// `LibraryScreen.createSpeechTempFiles`.
   final SpeechTempFiles Function()? createSpeechTempFiles;
 
-  /// Resolves the Spanish translator (ADR-0008 "Babel" Phase 3) for the
-  /// reader "Read from here" opens — see `LibraryScreen.resolveTranslator`.
-  /// Null keeps that reader without a "Translate to Spanish" action, the
-  /// same built-but-unreachable gap library/river-opened readers had
-  /// before that threading landed; this closes the SAME gap for this
-  /// third entry point.
-  final Future<MarianTranslator?> Function()? resolveTranslator;
+  /// Resolves a translator for a specific (source, target) pair (Campaign
+  /// 8 "Babel widens" Phase 1, generalizing ADR-0008 "Babel" Phase 3) for
+  /// the reader "Read from here" opens — see
+  /// `LibraryScreen.resolveTranslator`. Null keeps that reader without a
+  /// "Translate…" action, the same built-but-unreachable gap library/
+  /// river-opened readers had before that threading landed; this closes
+  /// the SAME gap for this third entry point.
+  final Future<MarianTranslator?> Function(
+      {required String sourceLang, required String targetLang})?
+      resolveTranslator;
+
+  /// The picker's own data source, threaded the same way — see
+  /// `LibraryScreen.availableTranslationTargets`.
+  final Future<List<String>> Function({required String sourceLang})?
+      availableTranslationTargets;
 
   const KaraokeScreen(
       {super.key,
@@ -59,7 +67,8 @@ class KaraokeScreen extends StatefulWidget {
       this.tts,
       this.resolveSpeechEngine,
       this.createSpeechTempFiles,
-      this.resolveTranslator});
+      this.resolveTranslator,
+      this.availableTranslationTargets});
 
   @override
   State<KaraokeScreen> createState() => _KaraokeScreenState();
@@ -157,7 +166,8 @@ class _KaraokeScreenState extends State<KaraokeScreen> {
             tts: widget.tts,
             resolveSpeechEngine: widget.resolveSpeechEngine,
             createSpeechTempFiles: widget.createSpeechTempFiles,
-            resolveTranslator: widget.resolveTranslator)));
+            resolveTranslator: widget.resolveTranslator,
+            availableTranslationTargets: widget.availableTranslationTargets)));
   }
 
   @override

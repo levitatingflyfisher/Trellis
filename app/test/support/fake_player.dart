@@ -17,6 +17,7 @@ library;
 import 'dart:async';
 
 import 'package:trellis/features/player/episode_player.dart';
+import 'package:trellis/features/player/media_item_mapping.dart';
 
 class FakeEpisodePlayer implements EpisodePlayer {
   final List<String> log = [];
@@ -26,6 +27,11 @@ class FakeEpisodePlayer implements EpisodePlayer {
   List<String>? loadedFilePaths;
   int? loadedInitialIndex;
   Duration? loadedInitialPosition;
+
+  /// Campaign 9 Phase 2e: whatever [LockScreenTag] the last `setUrl`/
+  /// `setFilePath`/`setFilePaths` call was given — null on a call that
+  /// passed none, exactly like a real un-tagged just_audio load.
+  LockScreenTag? loadedMediaItem;
   int? _currentIndex;
   bool _playing = false;
   Duration _position = Duration.zero;
@@ -67,14 +73,16 @@ class FakeEpisodePlayer implements EpisodePlayer {
 
   // ── seam ──
   @override
-  Future<void> setUrl(String url) async {
+  Future<void> setUrl(String url, {LockScreenTag? mediaItem}) async {
     loadedUrl = url;
+    loadedMediaItem = mediaItem;
     log.add('setUrl:$url');
   }
 
   @override
-  Future<void> setFilePath(String path) async {
+  Future<void> setFilePath(String path, {LockScreenTag? mediaItem}) async {
     loadedFilePath = path;
+    loadedMediaItem = mediaItem;
     log.add('setFilePath:$path');
   }
 
@@ -83,10 +91,12 @@ class FakeEpisodePlayer implements EpisodePlayer {
     List<String> paths, {
     int initialIndex = 0,
     Duration initialPosition = Duration.zero,
+    LockScreenTag? mediaItem,
   }) async {
     loadedFilePaths = paths;
     loadedInitialIndex = initialIndex;
     loadedInitialPosition = initialPosition;
+    loadedMediaItem = mediaItem;
     _currentIndex = initialIndex;
     _position = initialPosition;
     log.add(

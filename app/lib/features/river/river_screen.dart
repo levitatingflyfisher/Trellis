@@ -15,6 +15,7 @@ import '../models/consent.dart';
 import '../models/format.dart';
 import '../models/models_screen.dart' show modelLabel;
 import '../player/player_controller.dart';
+import '../player/queue_screen.dart';
 import '../reader/reader_screen.dart';
 import '../reader/speech/speech_engine.dart';
 import '../reader/speech/speech_temp_files.dart';
@@ -65,9 +66,16 @@ class RiverScreen extends StatefulWidget {
   /// See `LibraryScreen.createSpeechTempFiles`.
   final SpeechTempFiles Function()? createSpeechTempFiles;
 
-  /// Resolves the Spanish translator (ADR-0008 "Babel" Phase 3) — see
-  /// `LibraryScreen.resolveTranslator`.
-  final Future<MarianTranslator?> Function()? resolveTranslator;
+  /// Resolves a translator for a specific (source, target) pair (Campaign
+  /// 8 "Babel widens" Phase 1, generalizing ADR-0008 "Babel" Phase 3) —
+  /// see `LibraryScreen.resolveTranslator`.
+  final Future<MarianTranslator?> Function(
+      {required String sourceLang, required String targetLang})?
+      resolveTranslator;
+
+  /// See `LibraryScreen.availableTranslationTargets`.
+  final Future<List<String>> Function({required String sourceLang})?
+      availableTranslationTargets;
 
   const RiverScreen(
       {super.key,
@@ -82,7 +90,8 @@ class RiverScreen extends StatefulWidget {
       this.resolveSpeechEngine,
       this.lookupDefinition,
       this.createSpeechTempFiles,
-      this.resolveTranslator});
+      this.resolveTranslator,
+      this.availableTranslationTargets});
 
   @override
   State<RiverScreen> createState() => _RiverScreenState();
@@ -138,6 +147,19 @@ class _RiverScreenState extends State<RiverScreen> {
     await _load();
   }
 
+  /// Campaign 9 Phase 2: user: "hiding the queue as only accessible in
+  /// the playing bar is odd." Play next/Play last already WRITE to the
+  /// queue from every row's menu regardless of whether anything is
+  /// playing — this is the same [QueueScreen] the mini bar's own door
+  /// opens, just reachable without something already playing first.
+  void _openQueue() {
+    Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => QueueScreen(db: widget.db, profile: widget.profile),
+      ),
+    );
+  }
+
   Future<void> _openItem(RiverEntry e) async {
     await widget.db.feedsDao.markRead(
       e.work.id,
@@ -161,7 +183,8 @@ class _RiverScreenState extends State<RiverScreen> {
           lookupDefinition: widget.lookupDefinition,
           createSpeechTempFiles: widget.createSpeechTempFiles,
           player: widget.playerController,
-          resolveTranslator: widget.resolveTranslator),
+          resolveTranslator: widget.resolveTranslator,
+          availableTranslationTargets: widget.availableTranslationTargets),
     ));
     await _load();
   }
@@ -349,6 +372,12 @@ class _RiverScreenState extends State<RiverScreen> {
         title: const Text('River'),
         actions: [
           IconButton(
+            key: const Key('river-open-queue'),
+            tooltip: 'Up Next',
+            icon: const Icon(Icons.queue_music_outlined),
+            onPressed: _openQueue,
+          ),
+          IconButton(
             key: const Key('manage-feeds'),
             tooltip: 'Manage feeds',
             icon: const Icon(Icons.rss_feed),
@@ -483,6 +512,80 @@ class _RiverScreenState extends State<RiverScreen> {
     );
   }
 
+  /// The row's leading slot (Campaign 9 Phase 5, "the river gets faces"):
+  /// a ~40dp rounded artwork thumbnail when the feed's channel image was
+  /// already downloaded to its deterministic local file — never fetched
+  /// here, only read — with the unread dot riding as a small corner badge
+  /// instead of the dot's own dedicated 12dp column. A feed with no
+  /// downloaded artwork keeps today's plain dot-only layout unchanged.
+  Widget _leading(RiverEntry e, ThemeData theme, bool unread) {
+    final dot = Container(
+      key: Key('unread-dot-${e.work.id}'),
+      width: 9,
+      height: 9,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.primary,
+        shape: BoxShape.circle,
+      ),
+    );
+    // The web-tier law (see this file's own class doc + `_isDownloaded`
+    // above): never call a real dart:io op where none works. `existsSync()`
+    // throws under dart2js, so the artwork lookup is gated on
+    // localMlAvailable exactly like the download door is, rather than on
+    // services being present — a detached/real DeviceServices is non-null
+    // on every tier, web included.
+    final services = widget.localMlAvailable ? widget.repository.services : null;
+    final artFile = services?.artworkFileFor(e.episode.feedId);
+    if (artFile == null || !artFile.existsSync()) {
+      return SizedBox(
+        width: 12,
+        child: unread ? Center(child: dot) : null,
+      );
+    }
+    return SizedBox(
+      width: 40,
+      height: 40,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          ClipRRect(
+            borderRadius: BorderRadius.circular(8),
+            child: Opacity(
+              // Calm: full presence while unread, quietly muted once read —
+              // the same "read fades, nothing vanishes" law the ephemeron
+              // leaf already applies elsewhere in this row.
+              opacity: unread ? 1.0 : 0.7,
+              child: Image.file(
+                artFile,
+                key: Key('artwork-${e.work.id}'),
+                width: 40,
+                height: 40,
+                fit: BoxFit.cover,
+                // A partial/corrupt download must never crash a row — it
+                // just reads as "no thumbnail yet", same as a file that
+                // was never downloaded at all.
+                errorBuilder: (_, _, _) => const SizedBox.shrink(),
+              ),
+            ),
+          ),
+          if (unread)
+            Positioned(
+              top: -3,
+              right: -3,
+              child: Container(
+                padding: const EdgeInsets.all(1.5),
+                decoration: BoxDecoration(
+                  color: theme.colorScheme.surface,
+                  shape: BoxShape.circle,
+                ),
+                child: dot,
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   Widget _tile(
     RiverEntry e,
     ThemeData theme,
@@ -494,22 +597,7 @@ class _RiverScreenState extends State<RiverScreen> {
   ) {
     return ListTile(
       onTap: () => _openItem(e),
-      leading: SizedBox(
-        width: 12,
-        child: unread
-            ? Center(
-                child: Container(
-                  key: Key('unread-dot-${e.work.id}'),
-                  width: 9,
-                  height: 9,
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.primary,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-              )
-            : null,
-      ),
+      leading: _leading(e, theme, unread),
       title: Text(
         e.work.title,
         overflow: TextOverflow.ellipsis,
@@ -540,7 +628,7 @@ class _RiverScreenState extends State<RiverScreen> {
               Expanded(
                 child: Text(
                   '${e.feedTitle.isEmpty ? 'Feed' : e.feedTitle} · '
-                  '${_formatDay(e.episode.publishedAtMs)}',
+                  '${formatDay(e.episode.publishedAtMs)}',
                   overflow: TextOverflow.ellipsis,
                   maxLines: 1,
                 ),
@@ -637,15 +725,6 @@ class _RiverScreenState extends State<RiverScreen> {
     );
   }
 
-  static const _months = [
-    'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', //
-    'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
-  ];
-
-  String _formatDay(int ms) {
-    final d = DateTime.fromMillisecondsSinceEpoch(ms);
-    return '${d.day} ${_months[d.month - 1]}';
-  }
 }
 
 class _EmptyRiver extends StatelessWidget {

@@ -58,7 +58,11 @@ void main() {
     final (profileId, workId) = await seed('One two three four five.');
     await openReader(tester);
 
+    // Campaign 9 Phase 6: `mode-toggle` opens a labeled three-way picker
+    // rather than cycling on its own tap.
     await tester.tap(find.byKey(const Key('mode-toggle')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('mode-item-scroll')));
     await tester.pumpAndSettle();
 
     await tester.longPress(find.text('five.'));

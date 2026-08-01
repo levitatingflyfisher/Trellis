@@ -194,6 +194,58 @@ void main() {
     expect(await db.jobsDao.unfinished(), isEmpty);
   });
 
+  testWidgets('Campaign 8 "Babel widens" Phase 4: whisper\'s own '
+      'translate-while-transcribing lane (this file, pre-existing) and '
+      'the Marian "Translate…" picker (Campaign 8, TranslationSentences) '
+      'write to entirely separate artifacts for the SAME work — the '
+      'artifact-separation law holds because they were never sharing a '
+      'store to begin with, not because either was taught about the '
+      'other', (tester) async {
+    final seeded = await seedEpisode();
+    final store = FakeModelStore(downloadedIds: {'whisper-tiny-ggml'});
+    final services = testServices(tmp, modelStore: store);
+    services.audioFileFor(seeded.workId, enclosure)
+      ..parent.createSync(recursive: true)
+      ..writeAsStringSync('cached audio');
+
+    await openRiver(tester, services);
+    await chooseTranscribe(tester, seeded.workId, translate: true);
+
+    // Whisper's own lane: an 'en' Layer row, kind 'mt', keyed by segment.
+    final whisperMt = await db.spineDao.layersOf(seeded.workId, lang: 'en');
+    expect(whisperMt, isNotEmpty);
+    expect(whisperMt.first.kind, 'mt');
+
+    // The SAME work, now also run through the Marian pipeline
+    // (Campaign 8 Phase 1's TranslationSentences store) — a
+    // completely different table, keyed by (workId, segmentIdx,
+    // sentenceIdx, lang), that a user could plausibly reach separately
+    // (open the reader, tap "Translate…") without either lane knowing
+    // the other exists.
+    final segments = await db.spineDao.segmentsOf(seeded.workId);
+    await db.spineDao.upsertTranslationSentence(
+        workId: seeded.workId,
+        segmentIdx: segments.first.idx,
+        sentenceIdx: 0,
+        lang: 'en',
+        sourceText: segments.first.body,
+        body: 'Marian: ${segments.first.body}');
+    await db.spineDao.setActiveTranslationLang(seeded.workId, 'en');
+
+    // Neither write touched the other's artifact.
+    final whisperMtAfter =
+        await db.spineDao.layersOf(seeded.workId, lang: 'en');
+    expect(whisperMtAfter.length, whisperMt.length,
+        reason: 'the Marian write never touched the Layers table');
+    final marian = await db.spineDao
+        .translationSentencesOf(seeded.workId, lang: 'en');
+    expect(marian.values.first.body,
+        'Marian: ${segments.first.body}',
+        reason: 'and the whisper write never touched TranslationSentences '
+            '— confirmed by the "mt" kind check above never having seen '
+            'this row either');
+  });
+
   testWidgets('pause mid-download keeps a resumable card; resume finishes '
       'the job', (tester) async {
     final seeded = await seedEpisode();

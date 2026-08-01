@@ -69,6 +69,49 @@ void main() {
       expect(feed.items.single.desc, 'Body text');
     });
 
+    test('a Substack-shaped item (short description-excerpt AND a full '
+        'content:encoded) carries BOTH: desc stays the capped excerpt, '
+        'contentHtml carries the full post uncapped (Campaign 9 Phase 4)',
+        () {
+      final longBody = 'Paragraph. ' * 60; // well past the 300-char cap
+      final feed = parseRssFeed('''
+<rss xmlns:content="http://purl.org/rss/1.0/modules/content/"><channel><item>
+  <title>The whole post</title>
+  <description>A short excerpt for the list.</description>
+  <content:encoded><![CDATA[<p>$longBody</p>]]></content:encoded>
+</item></channel></rss>
+''', 'u');
+      final item = feed.items.single;
+      expect(item.desc, 'A short excerpt for the list.',
+          reason: 'the capped excerpt is untouched — still what list rows '
+              'display');
+      expect(item.contentHtml, contains(longBody.trim()));
+      expect(item.contentHtml!.length, greaterThan(300));
+    });
+
+    test('no content:encoded at all: contentHtml is null, not empty-string',
+        () {
+      final feed = parseRssFeed('''
+<rss><channel><item>
+  <title>e</title>
+  <description>Just a description.</description>
+</item></channel></rss>
+''', 'u');
+      expect(feed.items.single.contentHtml, isNull);
+    });
+
+    test('content:encoded still fills contentHtml even when it is ALSO the '
+        'desc fallback (description absent)', () {
+      final feed = parseRssFeed('''
+<rss xmlns:content="http://purl.org/rss/1.0/modules/content/"><channel><item>
+  <content:encoded><![CDATA[Body text]]></content:encoded>
+</item></channel></rss>
+''', 'u');
+      final item = feed.items.single;
+      expect(item.desc, 'Body text');
+      expect(item.contentHtml, 'Body text');
+    });
+
     test('itunes:summary fallback', () {
       final feed = parseRssFeed('''
 <rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"><channel><item>
@@ -172,6 +215,14 @@ void main() {
       expect(e2.date, '2024-02-02T00:00:00Z', reason: 'updated fallback');
       expect(e2.desc, 'Full body here', reason: 'content fallback');
       expect(e2.audio, '');
+    });
+
+    test('Atom entries: contentHtml comes from <content>, independent of '
+        'summary (Campaign 9 Phase 4)', () {
+      final feed = parseRssFeed(atom, 'u');
+      expect(feed.items[0].contentHtml, isNull,
+          reason: 'only a <summary>, no <content> element at all');
+      expect(feed.items[1].contentHtml, 'Full body here');
     });
 
     test('RSS items win over Atom entries (donor: entries only when no items)',
@@ -363,6 +414,69 @@ void main() {
 </channel></rss>
 ''', 'https://x.test/feed');
       expect(feed.nextPageUrl, 'https://x.test/feed?paged=2');
+    });
+  });
+
+  group('channel artwork (P6 river faces)', () {
+    test('itunes:image href is read as the feed image', () {
+      final feed = parseRssFeed('''
+<rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"><channel>
+  <title>t</title>
+  <itunes:image href="https://x.test/art.jpg"/>
+</channel></rss>
+''', 'https://x.test/feed');
+      expect(feed.imageUrl, 'https://x.test/art.jpg');
+    });
+
+    test('RSS <image><url> is read when there is no itunes:image', () {
+      final feed = parseRssFeed('''
+<rss><channel>
+  <title>t</title>
+  <image><url>https://x.test/rss-art.jpg</url><title>t</title></image>
+</channel></rss>
+''', 'https://x.test/feed');
+      expect(feed.imageUrl, 'https://x.test/rss-art.jpg');
+    });
+
+    test('itunes:image takes priority when both are present', () {
+      final feed = parseRssFeed('''
+<rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"><channel>
+  <title>t</title>
+  <image><url>https://x.test/rss-art.jpg</url></image>
+  <itunes:image href="https://x.test/itunes-art.jpg"/>
+</channel></rss>
+''', 'https://x.test/feed');
+      expect(feed.imageUrl, 'https://x.test/itunes-art.jpg');
+    });
+
+    test('no artwork at all reads as null, not an error', () {
+      final feed = parseRssFeed('''
+<rss><channel><title>t</title></channel></rss>
+''', 'https://x.test/feed');
+      expect(feed.imageUrl, isNull);
+    });
+
+    test('a relative itunes:image href resolves against the feed URL', () {
+      final feed = parseRssFeed('''
+<rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"><channel>
+  <title>t</title>
+  <itunes:image href="/art.jpg"/>
+</channel></rss>
+''', 'https://x.test/podcast/feed');
+      expect(feed.imageUrl, 'https://x.test/art.jpg');
+    });
+
+    test('an item-level image never leaks into the channel image', () {
+      final feed = parseRssFeed('''
+<rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"><channel>
+  <title>t</title>
+  <item>
+    <title>e</title>
+    <itunes:image href="https://x.test/episode-art.jpg"/>
+  </item>
+</channel></rss>
+''', 'https://x.test/feed');
+      expect(feed.imageUrl, isNull);
     });
   });
 

@@ -18,6 +18,7 @@ import '../intake/paste_intake.dart' show epochDayUtcNow;
 import '../player/player_controller.dart';
 import 'dictionary_sheet.dart';
 import 'ledger_screen.dart';
+import 'line_paced_view.dart';
 import 'reader_logic.dart';
 import 'reader_prefs.dart';
 import 'reader_typography_settings_screen.dart';
@@ -27,6 +28,8 @@ import 'speech/speech_audio_queue.dart';
 import 'speech/speech_engine.dart';
 import 'speech/speech_playback_pipeline.dart';
 import 'speech/speech_temp_files.dart';
+import 'speech/supertonic_voice_handle.dart' show supertonicSupportedLangs;
+import 'translation/language_names.dart';
 import 'translation/marian_engine.dart';
 import 'translation/sentence_units.dart';
 import 'translation/translation_job.dart';
@@ -35,7 +38,27 @@ import 'translation/translation_job.dart';
 /// which is the fleet's own hearth500 (C1: from the tokens, not retyped).
 const Color kPivotColor = OhColors.hearth500;
 
-enum ReaderMode { rsvp, scroll }
+/// Campaign 9 Phase 6 ("a third way to read") adds [lines] as a genuine
+/// third top-level mode alongside the original two — a scroll-family view
+/// (see [_linesBody]) highlighting one VISUAL LINE at a time rather than
+/// one word ([rsvp]) or nothing beyond the current segment ([scroll]).
+enum ReaderMode { rsvp, scroll, lines }
+
+/// The mode picker's own public label — distinct from the internal
+/// [ReaderMode] names the same way "Parafoveal" is the public name for
+/// what this file's own tests call "ticker" (see [_parafoveal]'s doc
+/// comment): [ReaderMode.rsvp] reads "Words" to a reader, never "RSVP".
+String readerModeLabel(ReaderMode m) => switch (m) {
+      ReaderMode.rsvp => 'Words',
+      ReaderMode.scroll => 'Scroll',
+      ReaderMode.lines => 'Lines',
+    };
+
+IconData readerModeIcon(ReaderMode m) => switch (m) {
+      ReaderMode.rsvp => Icons.center_focus_strong,
+      ReaderMode.scroll => Icons.notes,
+      ReaderMode.lines => Icons.view_stream_outlined,
+    };
 
 /// The alpha reader: RSVP (donor pacing + ORP pivot) and Scroll (flowing
 /// text, tap a word to move the cursor). Both modes project ONE cursor — a
@@ -104,13 +127,31 @@ class ReaderScreen extends StatefulWidget {
   /// never a dead one dangled where playback can't actually start.
   final PlayerController? player;
 
-  /// Resolves the Spanish translator (ADR-0008 "Babel" Phase 3) — the
-  /// shell closes over `DeviceServices.resolveTranslator`; null (or a call
-  /// that resolves to null, meaning opus-mt-en-es isn't downloaded) keeps
-  /// the "Translate to Spanish" action hidden. Called once, in [_load],
-  /// and cached for this screen's session — the same residency law
-  /// [resolveSpeechEngine] follows.
-  final Future<MarianTranslator?> Function()? resolveTranslator;
+  /// Resolves a translator for a specific (source, target) pair (Campaign
+  /// 8 "Babel widens" Phase 1, generalizing ADR-0008 "Babel" Phase 3's
+  /// fixed-Spanish version) — the shell closes over
+  /// `DeviceServices.resolveTranslator`. Null (or a call that resolves to
+  /// null, meaning that pair isn't downloaded) keeps the "Translate…"
+  /// action hidden for a work whose declared language has NO downloaded
+  /// pair, and keeps the specific target refused if picked anyway. Called
+  /// once per target chosen, not once per screen session — unlike
+  /// [resolveSpeechEngine], a work can pick a NEW target at any time, so
+  /// there is nothing to cache until a target is actually chosen (see
+  /// [ReaderScreen.availableTranslationTargets] for the picker's own,
+  /// once-per-session resolution).
+  final Future<MarianTranslator?> Function(
+      {required String sourceLang, required String targetLang})?
+      resolveTranslator;
+
+  /// Every target language this device can actually translate a work's
+  /// declared source language into RIGHT NOW — a downloaded pair, never
+  /// merely a registered one (Campaign 8 "Babel widens" Phase 1). Null
+  /// (or an empty list) keeps the "Translate…" action hidden entirely.
+  /// Resolved once, in [_load], the same residency law
+  /// [resolveSpeechEngine] follows — the picker's OPTIONS don't change
+  /// mid-session even though which one is ACTIVE can.
+  final Future<List<String>> Function({required String sourceLang})?
+      availableTranslationTargets;
 
   /// Campaign 4 Phase 4: true when this work was reopened untouched for
   /// more than 3 UTC days with real progress already made
@@ -135,6 +176,7 @@ class ReaderScreen extends StatefulWidget {
       this.createSpeechTempFiles,
       this.player,
       this.resolveTranslator,
+      this.availableTranslationTargets,
       this.offerRecap = false});
 
   @override
@@ -162,16 +204,18 @@ class _ReaderScreenState extends State<ReaderScreen>
   double _wpm = 300;
   Timer? _timer;
 
-  /// Campaign 4 Phase 2: Parafoveal is an RSVP sub-toggle, not a third
-  /// [ReaderMode] -- [_toggleMode] cycles a strictly binary rsvp/scroll
-  /// state today, and both `reader_test.dart`'s and
-  /// `reader_ticker_test.dart`'s cursor-law tests only ever exercise those
-  /// two states. A sub-toggle restores the donor's third display
-  /// (index.html mode "ticker", but this app's own "ticker" vocabulary
-  /// already names the existing classic RSVP mode -- the public name here
-  /// is always Parafoveal) without touching that cycle or those tests, and
-  /// it shares the RSVP timer/cursor (`_step`, `_wordIdx`) wholesale, so
-  /// punctuation-pause lengthening comes free with no separate dwell path.
+  /// Campaign 4 Phase 2: Parafoveal is an RSVP sub-toggle, not a
+  /// [ReaderMode] of its own -- a sub-toggle restores the donor's third
+  /// display (index.html mode "ticker", but this app's own "ticker"
+  /// vocabulary already names the existing classic RSVP mode -- the
+  /// public name here is always Parafoveal) without adding a fourth
+  /// top-level mode, and it shares the RSVP timer/cursor (`_step`,
+  /// `_wordIdx`) wholesale, so punctuation-pause lengthening comes free
+  /// with no separate dwell path. (Campaign 9 Phase 6 later gives the
+  /// reader a genuine third [ReaderMode], Lines -- [_setMode] now opens a
+  /// labeled three-way picker rather than cycling a binary toggle; see
+  /// `reader_test.dart`'s and `reader_ticker_test.dart`'s cursor-law
+  /// tests for the mode-switch invariant Parafoveal never touches.)
   bool _parafoveal = false;
 
   /// The neighbor-fade sigma (donor default 2.0, slider 0.8-4.0 step 0.2).
@@ -246,33 +290,91 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// check (see [ReaderScreen.player]'s doc comment on never dangling one).
   bool _hasAlignedAudio = false;
 
-  /// The Spanish translation store overlay (ADR-0008 "Babel" Phase 3) —
+  /// Campaign 9 Phase 7 ("the reader follows the player"): this work's own
+  /// alignments, wrapped the same way [KaraokeScreen] wraps them, resolved
+  /// once in [_load] alongside [_hasAlignedAudio] rather than re-fetched
+  /// per tick. Null exactly when [_hasAlignedAudio] is false — there is
+  /// nothing to project audio time through.
+  core.Spine? _spine;
+
+  /// True while [widget.player]'s position ticks are moving this reader's
+  /// own cursor — set by [_attachAudioFollow], cleared by
+  /// [_detachAudioFollow] (a manual seek, a manual scroll, or playback
+  /// moving to a different work). This is independent of
+  /// [PlayerController.playing]: a listener stays attached across a pause
+  /// (a paused player's position ticks stop arriving, not the attachment
+  /// itself — the chip should still read "Following audio" through a
+  /// pause, the same way a paused karaoke view stays lit on its segment).
+  bool _followingAudio = false;
+
+  /// The translation store overlay (Campaign 8 "Babel widens" Phase 1,
+  /// generalizing ADR-0008 "Babel" Phase 3's fixed-Spanish version) —
   /// deliberately separate from [_activeLang]'s whole-segment mt swap:
   /// this pairs each original sentence with its translation rather than
   /// replacing the text the cursor and every existing test key off. Both
-  /// the Translate action and the Show Spanish toggle are offered only
-  /// while [_activeLang] is null (guards against numbering under a
+  /// the Translate action and the Show ⟨language⟩ toggle are offered
+  /// only while [_activeLang] is null (guards against numbering under a
   /// language-swapped projection, whose own `splitSentences` boundaries
   /// can differ from the English original's).
   MarianTranslator? _translatorHolder;
   TranslationJobController? _translationJob;
-  bool _hasSpanish = false;
-  bool _showSpanish = false;
-  Map<(int, int), TranslationSentence> _spanishSentences = const {};
 
-  /// Speak-in-Spanish (ADR-0008 "Babel" Phase 4): offered only while
-  /// [_showSpanish] is on, session-only (never persisted — unlike
-  /// [_showSpanish], there is no natural "was this on last time" question
-  /// for a run-time speech choice). Reset to false whenever Show Spanish
-  /// itself is turned off, so a hidden menu item can never silently keep
-  /// affecting a later run.
-  bool _speakSpanish = false;
+  /// Every target this work's declared source language can actually
+  /// translate into right now (a downloaded pair) — the "Translate…"
+  /// picker's own options, resolved once in [_load]. Empty hides the
+  /// action entirely.
+  List<String> _availableTargets = const [];
+
+  /// The one active translation target for this work (`null` = none
+  /// chosen yet), mirroring [Works.activeTranslationLang] — "one active
+  /// translation layer per work at a time" made literal: picking a new
+  /// target REPLACES this, never adds to a set. A LEGACY fallback: a work
+  /// translated before this campaign has `showTranslationLayer=true` and
+  /// `activeTranslationLang=null` (the column didn't exist yet) — 'es'
+  /// was the only language that could have written it, so [_load] reads
+  /// that case as an implicit 'es' rather than showing nothing for data
+  /// that was genuinely there.
+  String? _activeTranslationLang;
+  bool _showTranslation = false;
+  Map<(int, int), TranslationSentence> _translatedSentences = const {};
+
+  /// A target has been chosen AND there is at least one row behind it —
+  /// the two are not the same moment. [_startTranslation] sets the active
+  /// lang before its batch has produced a single sentence (so the
+  /// progress card can appear immediately); a batch cancelled at zero
+  /// rows leaves the lang set with nothing to show or speak. Gate the
+  /// Show/Speak controls on this, not on [_activeTranslationLang] alone.
+  bool get _hasStoredTranslation =>
+      _activeTranslationLang != null && _translatedSentences.isNotEmpty;
+
+  /// Speak-in-⟨language⟩ (ADR-0008 "Babel" Phase 4, generalized): offered
+  /// only while [_showTranslation] is on, session-only (never persisted —
+  /// unlike [_showTranslation], there is no natural "was this on last
+  /// time" question for a run-time speech choice). Reset to false
+  /// whenever Show ⟨language⟩ itself is turned off, so a hidden menu item
+  /// can never silently keep affecting a later run.
+  bool _speakTranslation = false;
 
   /// Campaign 4 Phase 1: this profile's print-reader typography, loaded
   /// once in [_load] (the residency law — no re-fetch per rebuild). RSVP
   /// and the ticker keep their own tuned displays; only the scroll body
   /// reads this.
   ReaderTypography _typography = const ReaderTypography();
+
+  /// The work's declared source language, re-read from the DB by [_load]
+  /// rather than trusted from [ReaderScreen.work] (which the PARENT set
+  /// once and never updates) — [_openWorkLanguagePicker] writes through
+  /// [SpineDao.setWorkLang] then calls [_load] again, and only a fresh DB
+  /// read picks that up. `null` until the first [_load] completes.
+  String? _workLang;
+
+  /// The work's declared source language (Campaign 8 "Babel widens" Phase
+  /// 1) — defaults to 'en' when nothing was declared at intake time
+  /// (most intake paths never populate [Work.lang]; see
+  /// docs/reference/mt-models.md). A UI-layer convention, not a DB-layer
+  /// one: the row itself stays honestly null until a reader corrects it
+  /// through the calm per-work selector.
+  String get _sourceLang => _workLang ?? widget.work.lang ?? 'en';
 
   @override
   void initState() {
@@ -284,6 +386,10 @@ class _ReaderScreenState extends State<ReaderScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    // Campaign 9 Phase 7: safe even if never attached (removeListener
+    // no-ops on an unheld listener) — every listener this screen ever
+    // adds gets exactly one matching removal on its way out.
+    widget.player?.removeListener(_onPlayerTick);
     _timer?.cancel();
     // Silence the voice without creating one: only an already-used speaker
     // needs stopping (fake-async law 1: fire-and-forget, never await here).
@@ -320,6 +426,12 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   Future<void> _load() async {
+    // Re-read the work row's OWN lang rather than trusting
+    // [ReaderScreen.work] (set once by the parent, never updated) —
+    // [_openWorkLanguagePicker] calls [_load] again after writing a new
+    // one through the DAO, and only a fresh read picks that up.
+    final freshWork = await widget.db.spineDao.workById(widget.work.id);
+    final workLang = freshWork?.lang ?? widget.work.lang;
     final rows = await widget.db.spineDao.segmentsOf(widget.work.id);
     final kinds = core.SegmentKind.values.asNameMap();
     final blocks = [
@@ -360,25 +472,59 @@ class _ReaderScreenState extends State<ReaderScreen>
         await widget.db.profilesDao.preferSystemVoice(widget.profileId);
     final resolver = widget.resolveSpeechEngine;
     final synthEngine =
-        resolver == null ? null : await resolver(lang: widget.work.lang);
+        resolver == null ? null : await resolver(lang: workLang);
     // The study crown: only offer "Listen from here" where it can actually
     // start something (an audio source) AND land somewhere meaningful (an
-    // alignment to project the cursor through).
-    final hasAlignedAudio = widget.work.sourceUrl != null &&
-        (await widget.db.spineDao.alignmentsOf(widget.work.id)).isNotEmpty;
-    // The Spanish translation store (ADR-0008 "Babel" Phase 3) — resolved
-    // once, the same residency law the neural voice follows above.
-    final translatorResolver = widget.resolveTranslator;
-    final translator =
-        translatorResolver == null ? null : await translatorResolver();
-    final hasSpanish = await widget.db.spineDao
-        .hasTranslationSentences(widget.work.id, lang: 'es');
-    final showSpanish =
+    // alignment to project the cursor through). The same rows also feed
+    // Phase 7's [_spine] — [KaraokeScreen]'s own construction, wrapped
+    // here so [_onPlayerTick] never re-fetches per tick.
+    final alignmentRows =
+        await widget.db.spineDao.alignmentsOf(widget.work.id);
+    final hasAlignedAudio =
+        widget.work.sourceUrl != null && alignmentRows.isNotEmpty;
+    final spine = alignmentRows.isEmpty
+        ? null
+        : core.Spine(segments: const [], layers: const [], alignments: [
+            for (final a in alignmentRows)
+              core.Alignment(
+                  segmentIdx: a.segmentIdx,
+                  tStartMs: a.tStartMs,
+                  tEndMs: a.tEndMs),
+          ]);
+    // The translation store (Campaign 8 "Babel widens" Phase 1,
+    // generalizing ADR-0008 "Babel" Phase 3): the picker's OPTIONS,
+    // resolved once, the same residency law the neural voice follows
+    // above; WHICH ONE is active, and its translator/stored sentences.
+    final sourceLang = workLang ?? 'en';
+    final targetsResolver = widget.availableTranslationTargets;
+    final availableTargets = targetsResolver == null
+        ? const <String>[]
+        : await targetsResolver(sourceLang: sourceLang);
+    var activeLang =
+        await widget.db.spineDao.activeTranslationLang(widget.work.id);
+    final showTranslation =
         await widget.db.spineDao.showTranslationLayer(widget.work.id);
-    final spanishSentences = hasSpanish
-        ? await widget.db.spineDao
-            .translationSentencesOf(widget.work.id, lang: 'es')
-        : const <(int, int), TranslationSentence>{};
+    // Legacy fallback: a work translated before this campaign has
+    // activeTranslationLang=null (the column didn't exist yet) — 'es' was
+    // the only language that could have written it. This probe is
+    // independent of showTranslation's current value: a 1.3.0 user who
+    // had stored Spanish but had toggled the display OFF must still see
+    // the "Show Spanish" control on reopen, not lose it because the bool
+    // that gates DISPLAY got conflated with the probe for EXISTENCE.
+    if (activeLang == null) {
+      final hasEs = await widget.db.spineDao
+          .hasTranslationSentences(widget.work.id, lang: 'es');
+      if (hasEs) activeLang = 'es';
+    }
+    final translatorResolver = widget.resolveTranslator;
+    final translator = translatorResolver == null || activeLang == null
+        ? null
+        : await translatorResolver(
+            sourceLang: sourceLang, targetLang: activeLang);
+    final translatedSentences = activeLang == null
+        ? const <(int, int), TranslationSentence>{}
+        : await widget.db.spineDao
+            .translationSentencesOf(widget.work.id, lang: activeLang);
     final readerPrefs = await widget.db.profilesDao.readerPrefs(widget.profileId);
     if (!mounted) return;
     setState(() {
@@ -393,12 +539,25 @@ class _ReaderScreenState extends State<ReaderScreen>
       _preferSystemVoice = preferSystemVoice;
       _synthEngineHolder = synthEngine;
       _hasAlignedAudio = hasAlignedAudio;
+      _workLang = workLang;
+      _availableTargets = availableTargets;
+      _spine = spine;
       _translatorHolder = translator;
-      _hasSpanish = hasSpanish;
-      _showSpanish = showSpanish;
-      _spanishSentences = spanishSentences;
+      _activeTranslationLang = activeLang;
+      _showTranslation = showTranslation;
+      _translatedSentences = translatedSentences;
       _typography = readerPrefs.typography;
     });
+    // Campaign 9 Phase 7: audio for THIS work already playing when the
+    // reader opens is one of the two attach triggers (the other is
+    // [_listenFromHere] itself, below) — a listener already mid-episode
+    // should not have to re-trigger playback just to be followed.
+    final player = widget.player;
+    if (player != null &&
+        player.current?.id == widget.work.id &&
+        player.playing) {
+      _attachAudioFollow();
+    }
   }
 
   /// Projects [_original] through the [lang] mt layer — same segment, other
@@ -505,9 +664,29 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// resolved. A profile with no neural voice ever downloaded is
   /// unaffected by [_preferSystemVoice]'s value: there is nothing to
   /// prefer away from.
+  ///
+  /// Campaign 8 "Babel widens" discovery: the neural voice's own language
+  /// gate (`supertonicSupportedLangs`, currently `{'en', 'es'}`) throws
+  /// `SupertonicUnsupportedLangException` — UNCAUGHT — the instant a
+  /// per-utterance `lang` tag it doesn't cover reaches it
+  /// (`_preprocessText`, called from every `synthesize`/`speak`). The
+  /// neural engine is primed for the WORK's source language (always
+  /// covered, since it primed successfully), but Speak-in-⟨language⟩
+  /// substitutes a DIFFERENT tag per translated sentence — so a target
+  /// this campaign ships (de/ru/zh: none in `supertonicSupportedLangs`)
+  /// would crash the run the instant a translated sentence's turn came
+  /// up. This is engine-SELECTION-level, not per-utterance: forcing the
+  /// system voice for the WHOLE run when Speak-in-⟨language⟩ is on for
+  /// an uncovered target sidesteps ever needing to catch the exception
+  /// mid-run.
   SpeechEngine _resolveEngine() {
     final synth = _synthEngineHolder;
-    if (!_preferSystemVoice && synth != null) return synth;
+    final speakingUncoveredTarget = _speakTranslation &&
+        _activeTranslationLang != null &&
+        !supertonicSupportedLangs.contains(_activeTranslationLang);
+    if (!_preferSystemVoice && synth != null && !speakingUncoveredTarget) {
+      return synth;
+    }
     return UtteranceSpeechEngine(_tts);
   }
 
@@ -571,22 +750,25 @@ class _ReaderScreenState extends State<ReaderScreen>
         }
         first = false;
         if (speakable && sentence.text.trim().isNotEmpty) {
-          // Speak-in-Spanish (ADR-0008 Phase 4): `i` here is the RAW
-          // core.splitSentences index (this loop only reaches `units[i]`
-          // through the real `sentences` list — the empty-sentences
-          // whole-block fallback never has non-blank speakable text, so
-          // `i` never collides with a real sentenceIdx from a different
-          // numbering). A sentence with no stored translation falls back
-          // to English, spoken in its original language — no gap.
-          final translated = _speakSpanish
+          // Speak-in-⟨language⟩ (ADR-0008 Phase 4, generalized Campaign
+          // 8): `i` here is the RAW core.splitSentences index (this loop
+          // only reaches `units[i]` through the real `sentences` list —
+          // the empty-sentences whole-block fallback never has non-blank
+          // speakable text, so `i` never collides with a real
+          // sentenceIdx from a different numbering). A sentence with no
+          // stored translation falls back to English, spoken in its
+          // original language — no gap.
+          final translated = _speakTranslation && _activeTranslationLang != null
               ? translatedTextFor(
-                  stored: _spanishSentences,
+                  stored: _translatedSentences,
                   segIdx: block.idx,
                   sentenceIdx: i,
                   currentSourceText: sentence.text)
               : null;
           await engine.speak(translated ?? sentence.text,
-              lang: translated != null ? 'es' : (_activeLang ?? widget.work.lang));
+              lang: translated != null
+                  ? _activeTranslationLang
+                  : (_activeLang ?? _workLang ?? widget.work.lang));
           if (!live()) return;
         }
       }
@@ -606,14 +788,15 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// between the two engines (`reader_speak_synthesis_test.dart`), not a
   /// bug: synthesizing "[code]" aloud would be worse than skipping it.
   ///
-  /// Speak-in-Spanish (ADR-0008 Phase 4): [text] carries the STORED
-  /// translation in place of the original wherever one exists and
-  /// [_speakSpanish] is on — [lang] is that substitution's own tag ('es'),
-  /// null otherwise, so [SpeechPlaybackPipeline.start]'s `langOverrides`
-  /// can tag each sentence in the language it's ACTUALLY written in
-  /// rather than one language for the whole batch. [seg]/[wordIdx] always
-  /// point at the ORIGINAL sentence's position — the cursor never moves
-  /// to reflect which language is playing.
+  /// Speak-in-⟨language⟩ (ADR-0008 Phase 4, generalized Campaign 8):
+  /// [text] carries the STORED translation in place of the original
+  /// wherever one exists and [_speakTranslation] is on — [lang] is that
+  /// substitution's own tag ([_activeTranslationLang]), null otherwise,
+  /// so [SpeechPlaybackPipeline.start]'s `langOverrides` can tag each
+  /// sentence in the language it's ACTUALLY written in rather than one
+  /// language for the whole batch. [seg]/[wordIdx] always point at the
+  /// ORIGINAL sentence's position — the cursor never moves to reflect
+  /// which language is playing.
   List<({int seg, int wordIdx, String text, String? lang})>
       _remainingSpeechUnits(List<core.Segment> blocks, int fromSeg) {
     final units = <({int seg, int wordIdx, String text, String? lang})>[];
@@ -626,9 +809,9 @@ class _ReaderScreenState extends State<ReaderScreen>
       for (var i = 0; i < sentences.length; i++) {
         final sentence = sentences[i];
         if (sentence.text.trim().isEmpty) continue;
-        final translated = _speakSpanish
+        final translated = _speakTranslation && _activeTranslationLang != null
             ? translatedTextFor(
-                stored: _spanishSentences,
+                stored: _translatedSentences,
                 segIdx: block.idx,
                 sentenceIdx: i,
                 currentSourceText: sentence.text)
@@ -637,7 +820,7 @@ class _ReaderScreenState extends State<ReaderScreen>
           seg: seg,
           wordIdx: sentence.firstWordIdx,
           text: translated ?? sentence.text,
-          lang: translated != null ? 'es' : null,
+          lang: translated != null ? _activeTranslationLang : null,
         ));
       }
     }
@@ -671,7 +854,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       onDone: _onSynthDone,
     );
     await pipeline.start([for (final u in units) u.text],
-        lang: _activeLang ?? widget.work.lang,
+        lang: _activeLang ?? _workLang ?? widget.work.lang,
         langOverrides: [for (final u in units) u.lang]);
   }
 
@@ -720,39 +903,112 @@ class _ReaderScreenState extends State<ReaderScreen>
     await widget.db.profilesDao.setPreferSystemVoice(widget.profileId, next);
   }
 
-  // ───── translation (ADR-0008 "Babel" Phase 3) ─────
+  // ───── translation (ADR-0008 "Babel" Phase 3; Campaign 8 "Babel
+  // widens" Phase 1 generalizes it to any registered, downloaded pair) ─────
 
-  /// Runs the cancellable, resumable Translate-to-Spanish batch over
+  /// Opens the "Translate…" picker and, if the reader picks a target,
+  /// starts translating into it. A no-op if there is nothing to offer —
+  /// the menu item itself is hidden in that case (see the overflow menu's
+  /// `itemBuilder`), so this is a second, defensive gate, not the only
+  /// one.
+  /// The calm per-work source-language selector (Campaign 8 "Babel
+  /// widens" Phase 1) — most intake paths never populate [Work.lang] at
+  /// import time (see docs/reference/mt-models.md), so a reader who knows
+  /// better corrects it here. No auto-detection — a curated list, never a
+  /// guess. Reloads the whole screen afterward: a language change can
+  /// change [_availableTargets], which voice [_synthEngineHolder] should
+  /// even be, and whether an already-active translation still makes
+  /// sense — simplest and safest to re-derive all of it through the same
+  /// [_load] every other state field already trusts, rather than
+  /// hand-patching each one here.
+  Future<void> _openWorkLanguagePicker() async {
+    final chosen = await showDialog<String>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        key: const Key('work-language-picker'),
+        title: const Text('This work is in…'),
+        children: [
+          for (final lang in selectableWorkLanguages)
+            SimpleDialogOption(
+              key: Key('work-language-$lang'),
+              onPressed: () => Navigator.of(ctx).pop(lang),
+              child: Text(languageDisplayName(lang)),
+            ),
+        ],
+      ),
+    );
+    if (chosen == null || chosen == _sourceLang) return;
+    await widget.db.spineDao.setWorkLang(widget.work.id, chosen);
+    if (!mounted) return;
+    await _load();
+  }
+
+  Future<void> _openTranslatePicker() async {
+    if (_availableTargets.isEmpty || _activeLang != null) return;
+    final chosen = await showDialog<String>(
+      context: context,
+      builder: (ctx) => SimpleDialog(
+        key: const Key('translate-picker'),
+        title: const Text('Translate to…'),
+        children: [
+          for (final lang in _availableTargets)
+            SimpleDialogOption(
+              key: Key('translate-target-$lang'),
+              onPressed: () => Navigator.of(ctx).pop(lang),
+              child: Text(languageDisplayName(lang)),
+            ),
+        ],
+      ),
+    );
+    if (chosen != null) await _startTranslation(chosen);
+  }
+
+  /// Runs the cancellable, resumable Translate-to-[targetLang] batch over
   /// [_original] — never [_blocks], which under [_activeLang] is a
   /// language-swapped projection whose own `splitSentences` boundaries
   /// would disagree with the store's numbering. Already-stored sentences
   /// are skipped inside [TranslationJobController] itself; this method
-  /// only needs to start it, listen for the progress card, and reload
-  /// this screen's Spanish state once the run lands (done or cancelled).
-  Future<void> _startTranslation() async {
-    final translator = _translatorHolder;
-    if (translator == null || _activeLang != null || _translationJob != null) {
-      return;
-    }
+  /// resolves the translator for [targetLang] (never cached across
+  /// targets — a work can pick a NEW one at any time), starts the batch,
+  /// listens for the progress card, and reloads this screen's translation
+  /// state once the run lands (done or cancelled). Refuses [targetLang]
+  /// == the work's own declared source language even if somehow reached
+  /// (the picker itself never offers it — [DeviceServices
+  /// .availableTranslationTargets] excludes it at the source) — a second,
+  /// defensive gate, the same "never trust a single chokepoint" shape
+  /// [_openTranslatePicker]'s own emptiness check follows.
+  Future<void> _startTranslation(String targetLang) async {
+    if (targetLang == _sourceLang) return;
+    if (_activeLang != null || _translationJob != null) return;
+    final resolver = widget.resolveTranslator;
+    if (resolver == null) return;
+    final translator = await resolver(
+        sourceLang: _sourceLang, targetLang: targetLang);
+    if (translator == null || !mounted) return;
+    await widget.db.spineDao
+        .setActiveTranslationLang(widget.work.id, targetLang);
+    setState(() {
+      _translatorHolder = translator;
+      _activeTranslationLang = targetLang;
+      _showTranslation = true;
+    });
     final controller = TranslationJobController(
       dao: widget.db.spineDao,
       workId: widget.work.id,
       units: sentenceUnitsOf(_original),
       translate: translator.translate,
+      lang: targetLang,
     );
     controller.addListener(_onTranslationProgress);
     setState(() => _translationJob = controller);
     await controller.start();
     controller.removeListener(_onTranslationProgress);
     if (!mounted) return;
-    final hasSpanish = await widget.db.spineDao
-        .hasTranslationSentences(widget.work.id, lang: 'es');
-    final spanishSentences = await widget.db.spineDao
-        .translationSentencesOf(widget.work.id, lang: 'es');
+    final translatedSentences = await widget.db.spineDao
+        .translationSentencesOf(widget.work.id, lang: targetLang);
     if (!mounted) return;
     setState(() {
-      _hasSpanish = hasSpanish;
-      _spanishSentences = spanishSentences;
+      _translatedSentences = translatedSentences;
       _translationJob = null;
     });
   }
@@ -766,23 +1022,25 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   /// The scroll-mode dual-display toggle: persisted through the DAO (not
   /// local-only state), same law [_toggleVoicePreference] follows. Turning
-  /// it off also turns [_speakSpanish] off — its own menu item is about to
-  /// disappear, and a stale `true` behind a hidden control would keep
-  /// substituting Spanish into a run the user has no way to see, let alone
-  /// turn off again.
-  Future<void> _toggleShowSpanish() async {
-    final next = !_showSpanish;
+  /// it off also turns [_speakTranslation] off — its own menu item is
+  /// about to disappear, and a stale `true` behind a hidden control would
+  /// keep substituting the translation into a run the user has no way to
+  /// see, let alone turn off again.
+  Future<void> _toggleShowTranslation() async {
+    final next = !_showTranslation;
     setState(() {
-      _showSpanish = next;
-      if (!next) _speakSpanish = false;
+      _showTranslation = next;
+      if (!next) _speakTranslation = false;
     });
     await widget.db.spineDao.setShowTranslationLayer(widget.work.id, next);
   }
 
-  /// Speak-in-Spanish (ADR-0008 "Babel" Phase 4): takes effect on the NEXT
-  /// speak run, the same law [_toggleVoicePreference] follows — a run
-  /// already under way keeps speaking whatever it started with.
-  void _toggleSpeakSpanish() => setState(() => _speakSpanish = !_speakSpanish);
+  /// Speak-in-⟨language⟩ (ADR-0008 "Babel" Phase 4, generalized): takes
+  /// effect on the NEXT speak run, the same law [_toggleVoicePreference]
+  /// follows — a run already under way keeps speaking whatever it
+  /// started with.
+  void _toggleSpeakTranslation() =>
+      setState(() => _speakTranslation = !_speakTranslation);
 
   // ───── playback (donor step: 60000/wpm × pacing, then advance) ─────
 
@@ -831,6 +1089,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (doc == null || doc.words.isEmpty) return;
     _timer?.cancel();
     unawaited(_stopSpeak()); // a manual seek takes the cursor back by hand
+    _detachAudioFollow(); // Campaign 9 Phase 7: the user's hand always wins
     setState(() =>
         _wordIdx = (_wordIdx + delta).clamp(0, doc.words.length - 1));
     if (_playing) _step();
@@ -841,17 +1100,26 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (doc == null || doc.words.isEmpty) return;
     _timer?.cancel();
     unawaited(_stopSpeak());
+    _detachAudioFollow(); // Campaign 9 Phase 7: the user's hand always wins
     setState(() => _wordIdx = globalIdx.clamp(0, doc.words.length - 1));
     if (_playing) _step();
   }
 
-  void _toggleMode() {
+  /// Campaign 9 Phase 6: the mode picker's own handler, replacing the old
+  /// binary [_toggleMode] now that there are three named choices, not
+  /// two. The cursor itself (`_wordIdx`) is untouched by a mode switch in
+  /// EITHER direction — that is ADR-0002's cursor law and the whole point
+  /// of every mode reading the same word stream — only the scroll-family
+  /// modes' own viewport anchor needs re-deriving from it, so a switch
+  /// INTO Scroll or Lines from anywhere opens on the segment the cursor
+  /// is actually in rather than the top of the document.
+  void _setMode(ReaderMode next) {
+    if (next == _mode) return;
     _pause();
     setState(() {
-      // The cursor itself is untouched — that is the law under test.
-      _mode = _mode == ReaderMode.rsvp ? ReaderMode.scroll : ReaderMode.rsvp;
+      _mode = next;
       final doc = _doc;
-      if (_mode == ReaderMode.scroll && doc != null && doc.words.isNotEmpty) {
+      if (_mode != ReaderMode.rsvp && doc != null && doc.words.isNotEmpty) {
         _scrollAnchor = cursorAt(doc, _wordIdx).segment;
       }
     });
@@ -874,7 +1142,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     await widget.db.ledgerDao.add(
         profileId: widget.profileId,
         word: word,
-        lang: _activeLang ?? widget.work.lang,
+        lang: _activeLang ?? _workLang ?? widget.work.lang,
         sourceWorkId: widget.work.id,
         nowMs: DateTime.now().millisecondsSinceEpoch);
     if (!mounted) return;
@@ -891,7 +1159,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// Nothing wordy in [token] (edge punctuation only) opens nothing, the
   /// same silent no-op [_keepWord] already had.
   ///
-  /// Pauses first, matching [_openTypographySettings] and [_toggleMode]:
+  /// Pauses first, matching [_openTypographySettings] and [_setMode]:
   /// Phase 2's follow-along made scroll mode playable, which means a held
   /// word can now be on a document that's still advancing underneath the
   /// modal — an un-paused cursor would keep calling `_followAlongScroll`'s
@@ -941,6 +1209,64 @@ class _ReaderScreenState extends State<ReaderScreen>
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(const SnackBar(content: Text('Listening from here.')));
+    // Campaign 9 Phase 7: the second of the two attach triggers — the
+    // first is [_load] finding audio for this work already under way.
+    _attachAudioFollow();
+  }
+
+  // ───── Campaign 9 Phase 7: the reader follows the player ─────
+
+  /// True whenever there is ANYTHING to follow, whether or not this
+  /// screen is currently doing so — gates the chip's very presence
+  /// (never shown for a work with no player, no aligned audio, or where
+  /// playback has moved on to something else entirely).
+  bool get _audioFollowable =>
+      widget.player != null &&
+      _spine != null &&
+      widget.player!.current?.id == widget.work.id;
+
+  /// Subscribes [_onPlayerTick] to [ReaderScreen.player] — a no-op if
+  /// there is nothing to follow ([_audioFollowable] false) or a listener
+  /// is already attached (`ChangeNotifier.addListener` would otherwise
+  /// register the same callback twice, double-firing every tick).
+  void _attachAudioFollow() {
+    if (_followingAudio || !_audioFollowable) return;
+    widget.player!.addListener(_onPlayerTick);
+    setState(() => _followingAudio = true);
+  }
+
+  /// The user's hand always wins (house law): a manual seek, a manual
+  /// scroll, or playback moving on to a different work all call this.
+  /// Safe to call when nothing is attached — `ChangeNotifier
+  /// .removeListener` no-ops on a listener it never held.
+  void _detachAudioFollow() {
+    widget.player?.removeListener(_onPlayerTick);
+    if (_followingAudio && mounted) setState(() => _followingAudio = false);
+  }
+
+  /// The listener itself — [PlayerController] notifies on every position
+  /// tick (house stream-lifecycle laws: this is added exactly once, in
+  /// [_attachAudioFollow], and removed in [_detachAudioFollow]/[dispose],
+  /// never left dangling). Detaches quietly, without altering the reader
+  /// otherwise, the moment playback is no longer THIS work's — following
+  /// a different work's audio through this screen would be a silent lie.
+  void _onPlayerTick() {
+    final player = widget.player;
+    final spine = _spine;
+    final doc = _doc;
+    final blocks = _blocks;
+    if (player == null || player.current?.id != widget.work.id) {
+      _detachAudioFollow();
+      return;
+    }
+    if (spine == null || doc == null || blocks == null) return;
+    final newIdx = wordIndexAtAudioTime(
+        spine: spine,
+        doc: doc,
+        blocks: blocks,
+        audioTimeMs: player.position.inMilliseconds);
+    if (newIdx == null || newIdx == _wordIdx || !mounted) return;
+    setState(() => _wordIdx = newIdx);
   }
 
   // ───── the overflow menu (distill, proposal-2 §7) ─────
@@ -1069,13 +1395,26 @@ class _ReaderScreenState extends State<ReaderScreen>
                 : Icons.volume_up_outlined),
             onPressed: doc == null ? null : _toggleSpeak,
           ),
-          IconButton(
+          // Campaign 9 Phase 6: a labeled three-way choice (Scroll / Words
+          // / Lines), not a binary cycle — [readerModeLabel] names the
+          // CURRENT mode rather than "what tapping does" (a menu shows
+          // every destination by name, so there is no next-state to
+          // hint at the way the old two-state toggle's icon/tooltip did).
+          PopupMenuButton<ReaderMode>(
             key: const Key('mode-toggle'),
-            tooltip: _mode == ReaderMode.rsvp ? 'Scroll mode' : 'RSVP mode',
-            icon: Icon(_mode == ReaderMode.rsvp
-                ? Icons.notes
-                : Icons.center_focus_strong),
-            onPressed: doc == null ? null : _toggleMode,
+            tooltip: 'Reading mode: ${readerModeLabel(_mode)}',
+            enabled: doc != null,
+            icon: Icon(readerModeIcon(_mode)),
+            onSelected: _setMode,
+            itemBuilder: (_) => [
+              for (final m in ReaderMode.values)
+                CheckedPopupMenuItem<ReaderMode>(
+                  key: Key('mode-item-${readerModeLabel(m).toLowerCase()}'),
+                  value: m,
+                  checked: m == _mode,
+                  child: Text(readerModeLabel(m)),
+                ),
+            ],
           ),
           IconButton(
             key: const Key('open-ledger'),
@@ -1096,10 +1435,13 @@ class _ReaderScreenState extends State<ReaderScreen>
             onSelected: (value) {
               if (value == 'distill') unawaited(_distill());
               if (value == 'system-voice') unawaited(_toggleVoicePreference());
-              if (value == 'translate-es') unawaited(_startTranslation());
-              if (value == 'show-spanish') unawaited(_toggleShowSpanish());
-              if (value == 'speak-spanish') _toggleSpeakSpanish();
+              if (value == 'translate') unawaited(_openTranslatePicker());
+              if (value == 'show-translation') {
+                unawaited(_toggleShowTranslation());
+              }
+              if (value == 'speak-translation') _toggleSpeakTranslation();
               if (value == 'reading-style') unawaited(_openTypographySettings());
+              if (value == 'work-language') unawaited(_openWorkLanguagePicker());
               if (value == 'follow-along') _playing ? _pause() : _play();
             },
             itemBuilder: (_) => [
@@ -1109,12 +1451,23 @@ class _ReaderScreenState extends State<ReaderScreen>
               const PopupMenuItem(
                   value: 'reading-style',
                   child: Text('Reading style')),
-              // Campaign 4 Phase 2: scroll mode only — RSVP already has its
-              // own dedicated play-toggle button; this shares the same
+              // Campaign 8 "Babel widens" Phase 1: the calm per-work
+              // source-language selector — always offered (unlike the
+              // translate/show/speak items below, which gate on there
+              // being something to offer), since correcting a work's
+              // declared language is meaningful even with nothing
+              // downloaded to translate it with yet.
+              PopupMenuItem(
+                  key: const Key('work-language-action'),
+                  value: 'work-language',
+                  child: Text('Language: ${languageDisplayName(_sourceLang)}')),
+              // Campaign 4 Phase 2: scroll-family modes only (Scroll, and
+              // Lines as of Campaign 9 Phase 6) — RSVP already has its own
+              // dedicated play-toggle button; this shares the same
               // _playing/_play/_pause the RSVP button drives, so switching
               // modes (which already _pause()s first) can never leave a
               // stray follow-along timer running behind RSVP.
-              if (_mode == ReaderMode.scroll)
+              if (_mode != ReaderMode.rsvp)
                 PopupMenuItem(
                   key: const Key('follow-along-toggle'),
                   value: 'follow-along',
@@ -1130,32 +1483,47 @@ class _ReaderScreenState extends State<ReaderScreen>
                   checked: _preferSystemVoice,
                   child: const Text('Use the system voice'),
                 ),
-              // The model gate (ADR-0008): offered only once opus-mt-en-es
-              // is actually downloaded, and only over the canonical
-              // English text — hidden under the existing mt language swap.
-              if (_translatorHolder != null &&
+              // The model gate (ADR-0008; generalized to any pair,
+              // Campaign 8 "Babel widens"): offered only once at least
+              // one target pair for this work's source language is
+              // actually downloaded, and only over the canonical
+              // English text — hidden under the existing mt language
+              // swap. "Translate…" opens a picker (there is no longer a
+              // SINGLE fixed target — see [_openTranslatePicker]).
+              if (_availableTargets.isNotEmpty &&
                   _activeLang == null &&
                   _translationJob == null)
                 const PopupMenuItem(
-                    key: Key('translate-to-spanish'),
-                    value: 'translate-es',
-                    child: Text('Translate to Spanish')),
-              if (_hasSpanish && _activeLang == null)
+                    key: Key('translate-action'),
+                    value: 'translate',
+                    child: Text('Translate…')),
+              // Gated on stored rows actually existing, not just on a
+              // target having been chosen: setActiveTranslationLang runs
+              // BEFORE the batch completes (so the progress card can show
+              // immediately), so an active lang with zero translated rows
+              // — a fresh pick mid-run, or a batch cancelled at zero — must
+              // not offer a control with nothing behind it (no dead
+              // settings).
+              if (_hasStoredTranslation && _activeLang == null)
                 CheckedPopupMenuItem<String>(
-                  key: const Key('show-spanish-toggle'),
-                  value: 'show-spanish',
-                  checked: _showSpanish,
-                  child: const Text('Show Spanish'),
+                  key: const Key('show-translation-toggle'),
+                  value: 'show-translation',
+                  checked: _showTranslation,
+                  child: Text(
+                      'Show ${languageDisplayName(_activeTranslationLang!)}'),
                 ),
-              // Speak-in-Spanish (ADR-0008 Phase 4): only meaningful once
-              // Show Spanish is already on — the same stored sentences it
-              // displays are what this speaks.
-              if (_showSpanish && _activeLang == null)
+              // Speak-in-⟨language⟩ (ADR-0008 Phase 4, generalized): only
+              // meaningful once Show ⟨language⟩ is already on — the same
+              // stored sentences it displays are what this speaks.
+              if (_showTranslation &&
+                  _hasStoredTranslation &&
+                  _activeLang == null)
                 CheckedPopupMenuItem<String>(
-                  key: const Key('speak-spanish-toggle'),
-                  value: 'speak-spanish',
-                  checked: _speakSpanish,
-                  child: const Text('Speak in Spanish'),
+                  key: const Key('speak-translation-toggle'),
+                  value: 'speak-translation',
+                  checked: _speakTranslation,
+                  child: Text(
+                      'Speak in ${languageDisplayName(_activeTranslationLang!)}'),
                 ),
             ],
           ),
@@ -1173,24 +1541,62 @@ class _ReaderScreenState extends State<ReaderScreen>
               doc != null &&
               doc.words.isNotEmpty)
             _recapOfferBar(context),
+          if (_audioFollowable) _followAudioChip(),
           Expanded(
-            child: switch (doc) {
-              null => const Center(child: CircularProgressIndicator()),
-              core.TokenizedDocument(words: []) => Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text('Nothing to read in this one yet.',
-                        style: Theme.of(context).textTheme.bodyLarge,
-                        textAlign: TextAlign.center),
+            // Campaign 9 Phase 7: a user-DRAG scroll detaches following —
+            // `dragDetails` is non-null only on an update the user's own
+            // finger produced, never on a programmatic call (this
+            // screen's own `ensureVisible`, or the sliver settling after
+            // a mode switch), so [_followAlongScroll]'s own scrolling
+            // never fights this listener.
+            child: NotificationListener<ScrollUpdateNotification>(
+              onNotification: (n) {
+                if (n.dragDetails != null) _detachAudioFollow();
+                return false;
+              },
+              child: switch (doc) {
+                null => const Center(child: CircularProgressIndicator()),
+                core.TokenizedDocument(words: []) => Center(
+                    child: Padding(
+                      padding: const EdgeInsets.all(24),
+                      child: Text('Nothing to read in this one yet.',
+                          style: Theme.of(context).textTheme.bodyLarge,
+                          textAlign: TextAlign.center),
+                    ),
                   ),
-                ),
-              _ => _mode == ReaderMode.rsvp ? _rsvpBody(doc) : _scrollBody(doc),
-            },
+                _ => switch (_mode) {
+                    ReaderMode.rsvp => _rsvpBody(doc),
+                    ReaderMode.scroll => _scrollBody(doc),
+                    ReaderMode.lines => _linesBody(doc),
+                  },
+              },
+            ),
           ),
         ],
       ),
     );
   }
+
+  /// "Following audio" / "Resume following" — visible exactly while there
+  /// is something to follow ([_audioFollowable]), tappable in both
+  /// states: on, it detaches by the same hand a manual seek would; off
+  /// (a manual interaction already won), it reattaches.
+  Widget _followAudioChip() => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: ActionChip(
+            key: const Key('follow-audio-chip'),
+            avatar: Icon(_followingAudio
+                ? Icons.graphic_eq
+                : Icons.headphones_outlined),
+            label:
+                Text(_followingAudio ? 'Following audio' : 'Resume following'),
+            onPressed:
+                _followingAudio ? _detachAudioFollow : _attachAudioFollow,
+          ),
+        ),
+      );
 
   /// The batch's own calm progress banner (ADR-0008 "Babel" Phase 3) — one
   /// card while translating, mirroring `job_cards.dart`'s status/progress/
@@ -1208,9 +1614,13 @@ class _ReaderScreenState extends State<ReaderScreen>
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-                total == 0
-                    ? 'Translating to Spanish…'
-                    : 'Translating to Spanish — ${s.doneUnits} of $total sentences',
+                (() {
+                  final label = languageDisplayName(
+                      _activeTranslationLang ?? '');
+                  return total == 0
+                      ? 'Translating to $label…'
+                      : 'Translating to $label — ${s.doneUnits} of $total sentences';
+                })(),
                 key: const Key('translation-status'),
                 style: Theme.of(context).textTheme.bodySmall),
             const SizedBox(height: 8),
@@ -1532,6 +1942,16 @@ class _ReaderScreenState extends State<ReaderScreen>
                 key: const Key('play-toggle'),
                 iconSize: 36,
                 tooltip: _playing ? 'Pause' : 'Play',
+                // Campaign 9 Phase 0: OhTheme's app-wide
+                // `ThemeData.iconTheme` sets color: primary — the same
+                // color this button fills its own background with — so
+                // an unstyled IconButton.filled paints its glyph
+                // invisibly on top of itself (the device report's "blank
+                // circles"). Pin the high-contrast onPrimary token
+                // explicitly rather than let it fall through to the
+                // ambient theme.
+                style: IconButton.styleFrom(
+                    foregroundColor: Theme.of(context).colorScheme.onPrimary),
                 onPressed: _playing ? _pause : _play,
                 icon: Icon(_playing ? Icons.pause : Icons.play_arrow),
               ),
@@ -1605,7 +2025,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     switch (block.kind) {
       case core.SegmentKind.heading:
         final translation =
-            _showSpanish ? _translationBelow(block, theme) : null;
+            _showTranslation ? _translationBelow(block, theme) : null;
         child = translation == null
             ? Text(block.text,
                 style: theme.textTheme.titleLarge
@@ -1665,10 +2085,12 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   /// Follow-along's own half of the shared cursor (see [_scrollBody]'s doc
   /// comment): once per segment the cursor newly enters, while [_playing]
-  /// and in scroll mode, scroll it into view — karaoke_screen.dart's own
+  /// and in a scroll-family mode (Scroll, or Lines as of Campaign 9 Phase
+  /// 6 — RSVP has its own dedicated full-screen display, nothing to
+  /// scroll), scroll it into view — karaoke_screen.dart's own
   /// `_followPlayback` idiom (`ensureVisible`, alignment 0.3, 300ms).
   void _followAlongScroll(int segment) {
-    if (!_playing || _mode != ReaderMode.scroll) return;
+    if (!_playing || _mode == ReaderMode.rsvp) return;
     if (segment == _lastFollowedSegment) return;
     _lastFollowedSegment = segment;
     final ctx = _segKeys[segment]?.currentContext;
@@ -1677,10 +2099,95 @@ class _ReaderScreenState extends State<ReaderScreen>
         alignment: 0.3, duration: const Duration(milliseconds: 300));
   }
 
+  // ───── Lines (Campaign 9 Phase 6: "a third way to read") ─────
+
+  /// Same shape as [_scrollBody] (the print column, the split-around-an-
+  /// anchor [CustomScrollView], follow-along's post-frame callback) — a
+  /// deliberate near-duplicate rather than a parameterized shared method:
+  /// [_scrollBody] sits inside Babel's own heavily-edited region of this
+  /// file, and a new top-level mode is exactly the kind of change the
+  /// dispatch note asks to land as a new method rather than an in-place
+  /// rewrite of a rebase hotspot.
+  Widget _linesBody(core.TokenizedDocument doc) {
+    const centerKey = ValueKey('lines-center');
+    final blocks = _blocks!;
+    final anchor = _scrollAnchor.clamp(0, blocks.length - 1);
+    WidgetsBinding.instance.addPostFrameCallback(
+        (_) => _followAlongScroll(cursorAt(doc, _wordIdx).segment));
+    return Center(
+      child: ConstrainedBox(
+        key: const Key('lines-print-column'),
+        constraints: BoxConstraints(maxWidth: _typography.maxTextWidth),
+        child: CustomScrollView(
+          center: centerKey,
+          anchor: 0.15,
+          slivers: [
+            SliverList(
+              delegate: SliverChildBuilderDelegate(
+                (_, i) => _linePacedTile(doc, anchor - 1 - i),
+                childCount: anchor,
+              ),
+            ),
+            SliverList(
+              key: centerKey,
+              delegate: SliverChildBuilderDelegate(
+                (_, i) => _linePacedTile(doc, anchor + i),
+                childCount: blocks.length - anchor,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// A prose block renders through [LinePacedBlock] (the one-visual-line
+  /// highlight, no clock of its own — see that file's doc comment); every
+  /// other block kind (heading, code, table, figure) reuses [_segmentTile]
+  /// completely unchanged, since Lines mode has nothing new to say about
+  /// them. [_segKeys] is the SAME map [_segmentTile] populates — one
+  /// follow-along GlobalKey per block position regardless of which mode
+  /// built the tile, so [_followAlongScroll] never needs to know which
+  /// mode is currently active to find it.
+  Widget _linePacedTile(core.TokenizedDocument doc, int blockPos) {
+    final blocks = _blocks!;
+    final block = blocks[blockPos];
+    if (block.kind != core.SegmentKind.prose) {
+      return _segmentTile(doc, blockPos);
+    }
+
+    final start = doc.blockStartWordIdx[blockPos];
+    final end = blockPos + 1 < doc.blockStartWordIdx.length
+        ? doc.blockStartWordIdx[blockPos + 1]
+        : doc.words.length;
+    final theme = Theme.of(context);
+    final bodySize = theme.textTheme.bodyLarge?.fontSize;
+    final style = theme.textTheme.bodyLarge!.copyWith(
+        fontFamily: readerTypefaceFontFamily(_typography.typeface),
+        height: _typography.lineHeight,
+        fontSize: bodySize == null ? null : bodySize * _typography.fontScale);
+    final cursor = cursorAt(doc, _wordIdx);
+    final localIdx = cursor.segment == blockPos ? cursor.word : -1;
+
+    return KeyedSubtree(
+      key: _segKeys.putIfAbsent(blockPos, GlobalKey.new),
+      child: Container(
+        key: Key('segment-tile-$blockPos'),
+        padding: EdgeInsets.symmetric(
+            horizontal: 24, vertical: 8 + _typography.paragraphSpacing),
+        child: LinePacedBlock(
+          words: doc.words.sublist(start, end),
+          style: style,
+          currentLocalWordIdx: localIdx,
+        ),
+      ),
+    );
+  }
+
   /// The untranslated path stays exactly what it always was — a single
-  /// [Wrap] of every word in the block — whether or not Show Spanish is
-  /// on for a block with nothing translated in it (reader_print_test.dart
-  /// pins this shape).
+  /// [Wrap] of every word in the block — whether or not Show ⟨language⟩
+  /// is on for a block with nothing translated in it
+  /// (reader_print_test.dart pins this shape).
   Widget _proseWrap(core.TokenizedDocument doc, int blockPos) {
     final blocks = _blocks!;
     final block = blocks[blockPos];
@@ -1697,14 +2204,15 @@ class _ReaderScreenState extends State<ReaderScreen>
         height: _typography.lineHeight,
         fontSize: bodySize == null ? null : bodySize * _typography.fontScale);
 
-    if (!_showSpanish) return _wordWrap(doc, start, end, base, theme);
+    if (!_showTranslation) return _wordWrap(doc, start, end, base, theme);
 
-    // Dual display (ADR-0008 "Babel"): one row per ENGLISH sentence — its
-    // own word range's [Wrap], unchanged, immediately followed by its
-    // Spanish line where the store actually has one. sentence boundaries
-    // come from the SAME `core.splitSentences(block.text)` call
-    // sentenceUnitsOf uses, so a row's index here always means the row
-    // TranslationJobController wrote.
+    // Dual display (ADR-0008 "Babel"; generalized Campaign 8): one row
+    // per ENGLISH sentence — its own word range's [Wrap], unchanged,
+    // immediately followed by its translated line where the store
+    // actually has one. sentence boundaries come from the SAME
+    // `core.splitSentences(block.text)` call sentenceUnitsOf uses, so a
+    // row's index here always means the row TranslationJobController
+    // wrote.
     final sentences = core.splitSentences(block.text);
     if (sentences.isEmpty) return _wordWrap(doc, start, end, base, theme);
     final rows = <Widget>[];
@@ -1714,13 +2222,13 @@ class _ReaderScreenState extends State<ReaderScreen>
           i + 1 < sentences.length ? start + sentences[i + 1].firstWordIdx : end;
       rows.add(_wordWrap(doc, sStart, sEnd, base, theme));
       final translated = translatedTextFor(
-          stored: _spanishSentences,
+          stored: _translatedSentences,
           segIdx: block.idx,
           sentenceIdx: i,
           currentSourceText: sentences[i].text);
       if (translated != null) {
         rows.add(_translatedLine(translated, theme,
-            key: Key('spanish-${block.idx}-$i')));
+            key: Key('translation-${block.idx}-$i')));
       }
     }
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows);
@@ -1754,9 +2262,10 @@ class _ReaderScreenState extends State<ReaderScreen>
     );
   }
 
-  /// The Spanish line's own quiet style — subordinate to the original,
-  /// the same italic-body idiom [_segmentTile] already uses for a figure
-  /// caption (its own kind of secondary text under a primary element).
+  /// The translated line's own quiet style — subordinate to the
+  /// original, the same italic-body idiom [_segmentTile] already uses
+  /// for a figure caption (its own kind of secondary text under a
+  /// primary element).
   Widget _translatedLine(String text, ThemeData theme, {Key? key}) => Padding(
         padding: const EdgeInsets.only(top: 2, bottom: 6),
         child: Text(text,
@@ -1776,13 +2285,13 @@ class _ReaderScreenState extends State<ReaderScreen>
     final lines = <Widget>[];
     for (var i = 0; i < sentences.length; i++) {
       final translated = translatedTextFor(
-          stored: _spanishSentences,
+          stored: _translatedSentences,
           segIdx: block.idx,
           sentenceIdx: i,
           currentSourceText: sentences[i].text);
       if (translated != null) {
         lines.add(_translatedLine(translated, theme,
-            key: Key('spanish-${block.idx}-$i')));
+            key: Key('translation-${block.idx}-$i')));
       }
     }
     if (lines.isEmpty) return null;

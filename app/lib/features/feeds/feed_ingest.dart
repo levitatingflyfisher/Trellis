@@ -11,8 +11,10 @@ library;
 import 'dart:convert';
 
 import 'package:comms_core/comms_core.dart';
+import 'package:intake_core/intake_core.dart';
 
 import '../../db/database.dart';
+import '../intake/epub_flatten.dart' show SegmentRow;
 import 'feed_rules.dart';
 
 /// RFC-822/1123 (`Wed, 05 Aug 2026 12:00:00 +0200`, seconds and weekday
@@ -119,6 +121,41 @@ FeedRefreshState stateOfFeed(Feed feed) => decodeBreakerState(
     lastModified: feed.lastModified,
     json: feed.breakerJson);
 
+/// The work's body, as spine segments (Campaign 9 Phase 4, "the feed
+/// becomes honest reading"). A podcast episode (an enclosure present)
+/// ALWAYS keeps its show-notes as [item.desc] — that is what show-notes
+/// are, and the library-noise complaint about them is a persistence
+/// concern (see the library query), not a content one. A text item whose
+/// [FeedItem.contentHtml] is present and meaningfully longer than [desc]
+/// (the excerpt actually has more to it — a Substack-shaped feed) gets its
+/// segments from the FULL post instead, through intake_core's OWN
+/// `extractArticle` — the exact function URL intake already runs HTML
+/// through (`article_fetch.dart`); writing a second HTML-to-segments path
+/// is exactly what the fleet's "no second copy" law forbids. A feed whose
+/// content:encoded merely repeats the excerpt (some hosts do) falls back
+/// to the plain desc segment, same as before this phase.
+List<SegmentRow> _segmentsFor(FeedItem item) {
+  final html = item.contentHtml;
+  if (item.enclosure == null && html != null) {
+    final article = extractArticle(html);
+    final paragraphs = [
+      for (final block in article.blocks)
+        if (block is TextBlock) block.text,
+    ];
+    final fullText = paragraphs.join('\n\n');
+    if (fullText.length > item.desc.length) {
+      return [
+        for (var i = 0; i < paragraphs.length; i++)
+          (idx: i, kind: 'prose', text: paragraphs[i]),
+      ];
+    }
+  }
+  if (item.desc.isNotEmpty) {
+    return [(idx: 0, kind: 'prose', text: item.desc)];
+  }
+  return const [];
+}
+
 /// Item identity for dedupe: link, else enclosure URL, else title#date.
 String guidOf(FeedItem item) {
   if (item.link.isNotEmpty) return item.link;
@@ -172,9 +209,9 @@ Future<int> ingestFeedItems(
           persistence: 'ephemeron',
           firstSeenEpochDay: nowMs ~/ Duration.millisecondsPerDay,
           sourceUrl: sourceUrl);
-      if (item.desc.isNotEmpty) {
-        await db.spineDao.insertSegments(
-            workId, [(idx: 0, kind: 'prose', text: item.desc)]);
+      final segments = _segmentsFor(item);
+      if (segments.isNotEmpty) {
+        await db.spineDao.insertSegments(workId, segments);
       }
       await db.feedsDao.insertEpisode(
           workId: workId,

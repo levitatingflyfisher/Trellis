@@ -47,6 +47,7 @@ class FeedItem {
     this.enclosure,
     this.chapters,
     this.chaptersUrl,
+    this.contentHtml,
   });
 
   final String title;
@@ -56,8 +57,18 @@ class FeedItem {
   /// the donor never parsed it at this layer.
   final String date;
 
-  /// Entity-decoded, tag-stripped, 300-char-capped description.
+  /// Entity-decoded, tag-stripped, 300-char-capped description — always
+  /// this length or shorter, list-display material only.
   final String desc;
+
+  /// The item's own full HTML body — RSS `content:encoded` or Atom
+  /// `content` — raw and UNCAPPED (Campaign 9 Phase 4, "the feed becomes
+  /// honest reading"). Null when the feed offers no such element, which
+  /// most podcast feeds don't; never the empty string. Read regardless of
+  /// whether [desc] already came from the SAME element (a feed with no
+  /// `description` at all) — ingestion decides what to do with each
+  /// independently.
+  final String? contentHtml;
 
   final Enclosure? enclosure;
 
@@ -76,7 +87,8 @@ class ParsedFeed {
       {required this.title,
       required this.items,
       this.nextPageUrl,
-      this.nextPageRel});
+      this.nextPageRel,
+      this.imageUrl});
 
   /// Channel/feed title, falling back to the feed URL.
   final String title;
@@ -91,4 +103,11 @@ class ParsedFeed {
   /// Which relation produced [nextPageUrl] — `'next'` or `'prev-archive'`
   /// — or null when there is none.
   final String? nextPageRel;
+
+  /// Channel-level artwork (P6 "the river gets faces"): `itunes:image
+  /// href`, falling back to RSS's own `<image><url>`. Resolved against the
+  /// feed's URL the same way [nextPageUrl] is. Null when the host publishes
+  /// neither, which the calm river layout treats as "no thumbnail" rather
+  /// than an error.
+  final String? imageUrl;
 }

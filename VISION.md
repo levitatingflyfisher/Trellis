@@ -61,7 +61,7 @@ English-only. This app is judged against her, end to end.
 | Study engine with prereq DAG + monotonic SM-2 | ✅ ported, donor tests green |
 | Content spine with cross-modality position law | ✅ the cursor law is pinned across read/ticker/speak/play |
 | Reader (4 modes), intake, library | ✅ RSVP·print·ticker·speak; EPUB/URL/paste + Gutenberg browser. URL/Gutenberg *fetching* is native-first: browsers refuse most cross-site reads (no proxy, by design) — the web doors say so and paste/import always work — or serve the PWA from Skein on the family desktop and fetching works same-origin |
-| Feeds, podcasts, background player | ✅ reverse-chron river, visible decay, iTunes search, OPML |
+| Feeds, podcasts, background player | ◐ reverse-chron river, visible decay, iTunes search, OPML, channel artwork; the mini player rehydrates paused (not blank) after a restart and an Up Next door reaches the queue with nothing playing (Campaign 9); lock-screen/pull-down-tray transport controls are wired end-to-end (`just_audio_background`, `ADR-0015` Decision 3, Campaign 9 Phase 2e — every play tags its MediaItem with id/title/album/artwork, unit-tested) but lock-screen RENDERING itself is device-only and still awaits the user's next device test, which is the only reason this stays ◐ rather than ✅ |
 | Multilingual transcription, checkpointed, resumable | ✅ whisper.cpp natives aboard the APK; native lane green on the pinned model; not yet exercised on a phone |
 | Brain + distillation + discourse study | ✅ BYOK cloud tier wired end to end; local/stove tiers are honest refusals, not engines |
 | Backup/migration, .apkg, storage panel, wall, dashboard+PIN | ✅ |

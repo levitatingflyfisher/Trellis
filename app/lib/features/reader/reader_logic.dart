@@ -62,6 +62,32 @@ int globalWordIndex(TokenizedDocument doc, int segment, int word) {
 /// tokenizer's per-word pacing weight (sentence end 1.7, clause 1.2, …).
 int msPerWord(double wpm, double pacing) => (60000 / wpm * pacing).round();
 
+/// Campaign 9 Phase 7 ("the reader follows the player"): an audio time →
+/// this reader's own global word cursor, through the SAME
+/// `Spine.positionAtAudioTime` mapping `karaoke_screen.dart` already uses.
+/// [positionAtAudioTime] answers in the DATABASE's own segment idx — never
+/// the [blocks] LIST position [cursorAt]/[globalWordIndex] work in
+/// (`_load`'s own restore-a-saved-Position code performs the identical
+/// `blocks.indexWhere` translation, not `blocks[idx]`) — so this repeats
+/// that lookup rather than assuming the two coincide.
+///
+/// Null means there is nothing to follow onto: no alignments at all, an
+/// empty document, or a projected segment [blocks] has no entry for (the
+/// work's alignments outrun what this reader currently has tokenized —
+/// should not happen in practice, but a caller must never crash on it).
+int? wordIndexAtAudioTime({
+  required Spine spine,
+  required TokenizedDocument doc,
+  required List<Segment> blocks,
+  required int audioTimeMs,
+}) {
+  if (spine.alignments.isEmpty || doc.words.isEmpty) return null;
+  final pos = spine.positionAtAudioTime(audioTimeMs);
+  final blockPos = blocks.indexWhere((b) => b.idx == pos.segmentIdx);
+  if (blockPos < 0) return null;
+  return globalWordIndex(doc, blockPos, pos.wordIdx);
+}
+
 // ───── Campaign 4 Phase 2: the lost priming visuals ─────
 //
 // Donor: OpenHearth/ohPrimer index.html. Parafoveal mode is the donor's

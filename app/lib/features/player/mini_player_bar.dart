@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../models/format.dart' show formatClock;
 import 'player_controller.dart';
 import 'sleep_timer_sheet.dart';
 
@@ -96,7 +97,12 @@ class MiniPlayerBar extends StatelessWidget {
                         IconButton(
                           key: const Key('open-captures'),
                           tooltip: 'Captures',
-                          icon: const Icon(Icons.bookmark_outlined),
+                          // Campaign 9 Phase 1: distinct from the capture
+                          // door's bookmark_add_outlined above — this one
+                          // reads as a LIST, not a second "add" bookmark
+                          // (user: "two bookmark symbols… unclear which is
+                          // doing what").
+                          icon: const Icon(Icons.collections_bookmark_outlined),
                           onPressed: onOpenCaptures,
                         ),
                       if (onOpenQueue != null)
@@ -132,6 +138,23 @@ class MiniPlayerBar extends StatelessWidget {
                       ),
                     ],
                   ),
+                  // Campaign 9 Phase 2 ("resume after restart"): a
+                  // rehydrated-but-not-yet-loaded work has no live
+                  // duration to show on the slider below — a full-width
+                  // bar with position/(position+1) as its max would read
+                  // as "basically finished" regardless of how far in this
+                  // actually is. A plain sentence carries the real number
+                  // honestly instead; it disappears the instant a real
+                  // load starts (rehydratedPositionMs goes null).
+                  if (controller.rehydratedPositionMs != null)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text(
+                        'Paused at ${formatClock(controller.rehydratedPositionMs!)}',
+                        key: const Key('rehydrated-position'),
+                        style: theme.textTheme.bodySmall,
+                      ),
+                    ),
                   SliderTheme(
                     data: SliderTheme.of(context).copyWith(
                         trackHeight: 2,
@@ -161,6 +184,16 @@ class MiniPlayerBar extends StatelessWidget {
                       IconButton.filled(
                         key: const Key('player-toggle'),
                         tooltip: controller.playing ? 'Pause' : 'Play',
+                        // Campaign 9 Phase 0: OhTheme's app-wide
+                        // `ThemeData.iconTheme` sets color: primary — the
+                        // same color this button fills its own background
+                        // with — so an unstyled IconButton.filled paints
+                        // its glyph invisibly on top of itself (the
+                        // device report's "blank circles"). Pin the
+                        // high-contrast onPrimary token explicitly rather
+                        // than let it fall through to the ambient theme.
+                        style: IconButton.styleFrom(
+                            foregroundColor: theme.colorScheme.onPrimary),
                         icon: Icon(controller.playing
                             ? Icons.pause
                             : Icons.play_arrow),
@@ -173,12 +206,15 @@ class MiniPlayerBar extends StatelessWidget {
                         onPressed: () =>
                             controller.seekBy(const Duration(seconds: 30)),
                       ),
-                      TextButton(
-                        key: const Key('player-speed'),
-                        onPressed: controller.cycleSpeed,
-                        child: FittedBox(
-                            fit: BoxFit.scaleDown,
-                            child: Text(_speedLabel(controller.speed))),
+                      Tooltip(
+                        message: 'Playback speed',
+                        child: TextButton(
+                          key: const Key('player-speed'),
+                          onPressed: controller.cycleSpeed,
+                          child: FittedBox(
+                              fit: BoxFit.scaleDown,
+                              child: Text(_speedLabel(controller.speed))),
+                        ),
                       ),
                     ],
                   ),

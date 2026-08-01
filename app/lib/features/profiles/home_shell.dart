@@ -74,6 +74,13 @@ class _HomeShellState extends State<HomeShell> {
     localAudioFileFor: widget.services.localMlAvailable
         ? widget.services.audioFileFor
         : null,
+    // Campaign 9 Phase 2e (ADR-0015 Decision 3): the SAME localMlAvailable
+    // gate localAudioFileFor above already follows — a real existsSync()
+    // read would throw under dart2js, so the web tier never gets a
+    // function that could attempt one.
+    artworkFileFor: widget.services.localMlAvailable
+        ? widget.services.artworkFileFor
+        : null,
   );
   late final TranscribeCoordinator _coordinator = TranscribeCoordinator(
     db: widget.db,
@@ -121,6 +128,11 @@ class _HomeShellState extends State<HomeShell> {
     super.initState();
     _coordinator.restore();
     _dspCoordinator?.restore();
+    // Campaign 9 Phase 2 ("resume after restart"): shows the mini bar
+    // paused at wherever playback last was, before anything is tapped —
+    // see PlayerController.rehydrateLastPlayed's own doc for why this is
+    // cheap (a DB read, never a real audio load).
+    _player.rehydrateLastPlayed();
   }
 
   @override
@@ -182,17 +194,25 @@ class _HomeShellState extends State<HomeShell> {
             tts: widget.services.tts,
             resolveSpeechEngine: widget.services.resolveSpeechEngine,
             createSpeechTempFiles: widget.services.createSpeechTempFiles,
-            resolveTranslator: widget.services.resolveTranslator)));
+            resolveTranslator: widget.services.resolveTranslator,
+            availableTranslationTargets:
+                widget.services.availableTranslationTargets)));
   }
 
   /// The study crown's "Capture" verb (Phase 2): one tap, a calm snackbar —
-  /// no counter, no streak (ADR-0003 law 5).
+  /// no counter, no streak (ADR-0003 law 5). Campaign 9 Phase 1 adds the
+  /// first discovery path for where a capture goes: a "View" action that
+  /// opens the same captures list [_openCaptures] already wires to the
+  /// bookmark door.
   Future<void> _capture() async {
     final id = await _player.capture();
     if (!mounted || id == null) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(const SnackBar(content: Text('Captured.')));
+      ..showSnackBar(SnackBar(
+        content: const Text('Captured.'),
+        action: SnackBarAction(label: 'View', onPressed: _openCaptures),
+      ));
   }
 
   void _openCaptures() {
@@ -271,6 +291,8 @@ class _HomeShellState extends State<HomeShell> {
             createSpeechTempFiles: widget.services.createSpeechTempFiles,
             player: _player,
             resolveTranslator: widget.services.resolveTranslator,
+            availableTranslationTargets:
+                widget.services.availableTranslationTargets,
             onImportAudiobook: _onImportAudiobook,
             onDeleteAudiobookFiles: widget.services.localMlAvailable
                 ? _deleteAudiobookFiles
@@ -287,7 +309,9 @@ class _HomeShellState extends State<HomeShell> {
             resolveSpeechEngine: widget.services.resolveSpeechEngine,
             lookupDefinition: widget.services.lookupDefinition,
             createSpeechTempFiles: widget.services.createSpeechTempFiles,
-            resolveTranslator: widget.services.resolveTranslator),
+            resolveTranslator: widget.services.resolveTranslator,
+            availableTranslationTargets:
+                widget.services.availableTranslationTargets),
         _ => CoursesScreen(
           db: widget.db,
           profile: widget.profile,

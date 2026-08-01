@@ -169,6 +169,31 @@ List<SpmPiece> parseSpmPieceTable(Uint8List bytes) {
 
 const String _spaceEscape = '▁'; // ▁
 
+/// Folds Unicode's Halfwidth-and-Fullwidth-Forms punctuation block
+/// (U+FF01-U+FF5E — the fullwidth '！'/'？'/etc. every CJK IME emits) to
+/// its plain-ASCII counterpart (U+0021-U+007E), a fixed `-0xFEE0`
+/// codepoint offset. Verified against real sentencepiece output from the
+/// zh-en/jap-en `source.spm` models (Campaign 8 "Babel widens" Phase 0,
+/// docs/reference/mt-models.md): this is the ONE cause of every observed
+/// divergence on real CJK golden sentences, and it is common in ordinary
+/// text (not a rare edge case the way a decomposed Latin accent is) —
+/// worth porting exactly even though the general 237KB NFKC charsmap
+/// stays out of scope. Deliberately does NOT touch ideographic
+/// punctuation (U+3001 、, U+3002 。) or the ideographic space (U+3000):
+/// the real model's normalizer leaves those alone, confirmed on the same
+/// golden sentences.
+String _foldFullwidthAscii(String text) {
+  final out = StringBuffer();
+  for (final codePoint in text.runes) {
+    if (codePoint >= 0xFF01 && codePoint <= 0xFF5E) {
+      out.writeCharCode(codePoint - 0xFEE0);
+    } else {
+      out.writeCharCode(codePoint);
+    }
+  }
+  return out.toString();
+}
+
 class MarianUnigramTokenizer {
   final Map<String, double> _scoreByPiece;
   late final double _unkFallbackScore;
@@ -187,11 +212,13 @@ class MarianUnigramTokenizer {
     _unkFallbackScore = minScore - 10.0;
   }
 
-  /// Whitespace-collapse + trim + dummy-prefix + ▁-escape — verified
-  /// against `source.spm`'s real normalizer for NFKC-stable input; see
-  /// the library doc comment for what is and is not covered.
+  /// Fullwidth-to-halfwidth folding + whitespace-collapse + trim +
+  /// dummy-prefix + ▁-escape — verified against `source.spm`'s real
+  /// normalizer for NFKC-stable input; see the library doc comment for
+  /// what is and is not covered.
   static String normalize(String text) {
-    final collapsed = text.replaceAll(RegExp(r'\s+'), ' ').trim();
+    final folded = _foldFullwidthAscii(text);
+    final collapsed = folded.replaceAll(RegExp(r'\s+'), ' ').trim();
     if (collapsed.isEmpty) return '';
     return ('$_spaceEscape$collapsed').replaceAll(' ', _spaceEscape);
   }

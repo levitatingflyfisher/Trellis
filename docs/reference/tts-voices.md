@@ -275,6 +275,163 @@ every weight file, so the user's copy of the license comes from Supertone
 (the licensor) directly. See ADR-0007's Weights licensing section for the
 full accounting, including why the app's own code stays MIT regardless.
 
+## Campaign 8 "Babel widens" Phase 0: the `unicode_indexer.json` census (2026-08-15)
+
+Every prior language claim for `supertonic-en-m1` — the model's own
+`en/ko/es/pt/fr` list, and the app's own widened `{'en', 'es'}` gate —
+was an ARCHITECTURAL finding (voice-style files are timbre-only,
+language-independent) rather than a check of what the character-level
+`unicode_indexer.json` can actually encode. The spec's own law applies
+literally here: "a language 'supported' whose script the indexer can't
+encode is not supported." This pass downloaded the file (already pinned
+above, re-verified byte-for-byte: 262,196 bytes,
+`b7662a73a0703f43b97c0f2e089f8e8325e26f5d841aca393b5a54c509c92df1`) and
+read it directly — a flat 65,536-entry array (one slot per BMP
+codepoint), `-1` for "not covered," else a non-negative embedding index.
+
+**Only 162 codepoints are covered in the entire file**, spanning
+U+0020-U+20AC: ASCII letters/digits/most punctuation, six Latin
+combining diacritics (`` ̀ ́ ̂ ̃ ̈ ̧`` — grave/acute/circumflex/tilde/
+diaeresis/cedilla, U+0300/0301/0302/0303/0308/0327), `¡ £ « » ¿ œ`, `€`,
+and — unexpectedly — 68 DECOMPOSED Hangul jamo (Korean; not covered as
+precomposed syllables, U+AC00-U+D7A3, which have zero entries).
+
+**The load-bearing shape: the indexer expects NFD-DECOMPOSED text, not
+precomposed.** A literal `é` (U+00E9) has NO entry — only `e` (U+0065)
++ the combining acute (U+0301) does. This is not a gap; it's already
+handled: `supertonic_speech_engine.dart`'s `_applyNfkdDecomposition` +
+`_latinDecompositions` (pre-existing code, not new to this campaign)
+already decomposes exactly this set of precomposed Latin letters before
+indexing, AND decomposes precomposed Hangul syllables into the same
+jamo the indexer covers. The census independently confirms this
+existing decomposition table is EXACTLY right for the six diacritics
+present — no more, no less.
+
+**Per-script verdict, per the spec's mandate:**
+
+| Script | Coverage | Verdict |
+|---|---|---|
+| Basic Latin (English) | 100% (letters/digits/common punctuation) | Supported |
+| Latin + acute/grave/circumflex/tilde/diaeresis/cedilla (es, de most letters, pt, fr) | Covered via the existing NFD decomposition table | Supported |
+| Cyrillic (ru) | **0%** — zero entries in U+0400-U+052F | **Not supported** |
+| Hiragana/Katakana (ja) | **0%** — zero entries in U+3040-U+30FF | **Not supported** |
+| CJK Unified Ideographs + Ext-A (ja/zh) | **0%** — zero entries in U+3400-U+9FFF | **Not supported** |
+| Halfwidth/Fullwidth Forms (common in ja/zh punctuation) | **0%** | **Not supported** |
+
+**One genuine per-character gap found in the existing decomposition
+table, worth recording even though it predates this campaign:** German
+`ß` (U+00DF, sharp s) has NO entry in `_latinDecompositions` — it is not
+NFKD-decomposable (it's an atomic letter, not a combining sequence) —
+and the indexer has no entry for it either. `indexer[r] ?? 0` (the
+lookup's own fallback, `supertonic_speech_engine.dart:321`) means an
+uncovered codepoint doesn't throw or warn: it silently indexes to slot
+`0`, the SPACE character. A German sentence containing `ß` would
+synthesize with that letter rendered as silence, not an error — the
+same quiet-failure shape as an uncovered script, just at single-
+character granularity instead of whole-language. Not fixed in this
+pass (out of scope: Supertonic doesn't carry German at all per the
+finding below); flagged for whoever eventually widens
+`supertonicSupportedLangs` to `de`.
+
+### The gate that actually matters more than the indexer for THIS campaign
+
+`supertonic_speech_engine.dart`'s `_v2ModelLangs = {'en', 'ko', 'es',
+'pt', 'fr'}` — checked in `_preprocessText`, thrown as
+`SupertonicUnsupportedLangException` for anything outside it, on every
+neural-voice utterance (`_preprocessText` is called unconditionally from
+the engine's `synthesize`/`speak` path) — gates BEFORE the indexer ever
+runs. **None of this campaign's three shipped Marian target languages
+(de, ru, zh) is in that list.** Cyrillic and CJK are doubly excluded
+(gated AND 0% indexer coverage); German is gated despite its Latin
+script being almost entirely coverable by the existing decomposition
+table (everything except `ß`). Portuguese (`pt`) — the one NEW language
+`_v2ModelLangs` already claims — is the language with no shipped Marian
+pair this pass (see mt-models.md).
+
+**Consequence for Phase 2/3's "hear your shows in the target language"
+crown flow, for every language this campaign adds:** speech runs
+entirely through the SYSTEM voice (`UtteranceSpeechEngine`, `flutter_tts`)
+via `TtsSpeaker.speak(text, lang: <bare-two-letter-code>)`. Supertonic
+remains an English/Spanish voice; Babel's widening is carried by
+per-locale system voices, not the neural rung. This is a material
+change from what the spec's own Phase 2 language implied ("speak-in-X
+over the episode... the es speak loop generalized by Phase 1's
+parameter") — the es speak loop's NEURAL path doesn't generalize to de/
+ru/zh at all; only its SYSTEM-voice path does, and that path was
+already there for languages the neural voice can't cover (a work whose
+own declared language isn't in `_v2ModelLangs` already falls back to
+system voice today, via `resolveSpeechEngine` returning `null`). Also
+unverified, same as `flutter_tts`'s existing bare `'es'` call: whether a
+bare two-letter code (`'de'`, `'ru'`, `'zh'`) reliably resolves to an
+installed system voice on real Android/iOS hardware, vs. a full BCP-47
+tag (`'de-DE'`) — `flutter_tts` has no `isLanguageAvailable`-style probe
+wired into this app today, so there is no way to gate the picker on it;
+recorded as an open item, not fixed this pass (the existing es case
+already carries the identical unverified assumption — this campaign
+widens the same assumption to three more languages rather than
+introducing a new one).
+
+## Campaign 8 "Babel widens" Phase 3: CJK font-rendering verification (2026-08-15)
+
+The spec called for verifying whether CJK text actually renders on the
+reader's own surfaces, not assuming either way — the same "check the real
+behavior" law Phase 0 applied to Supertonic's language coverage. Rendered
+two real reader screens (scroll-mode dual display showing a Chinese
+translation layer over an English work; RSVP mode reading a native
+Japanese-sourced work directly, exercising this phase's tokenizer fix) via
+`app/test/visual/cjk_font_golden_test.dart` — the same self-guarded,
+gitignored-golden convention `tour_golden_test.dart` already uses
+(`VISUAL_TOUR=1 flutter test ... --update-goldens`), then read the
+resulting PNGs directly.
+
+**Finding: both surfaces render CJK glyphs as tofu boxes (□), and this is
+now a settled, costed ceiling, not an open question.** The app bundles
+only Lora and Nunito (`app/assets/fonts/`) — Latin/Cyrillic Google Fonts,
+nowhere near the multi-MB glyph set a CJK-capable family needs — so this
+alone was expected. Two follow-up checks turned the open question into a
+closed one:
+
+1. **`fontFamilyFallback` does not help, and the reason why is now
+   confirmed rather than hypothesized.** This development box has a real
+   system CJK font installed (`google-noto-sans-cjk-vf-fonts`, confirmed
+   via `fc-list`); declaring it in `fontFamilyFallback` on the reader's
+   translated-line style and re-rendering the SAME golden produced a
+   byte-identical tofu render. Root cause: `flutter test`'s golden
+   pipeline loads only asset-bundled fonts and never consults
+   fontconfig, so naming a system family there is a no-op by
+   construction, regardless of whether the family is actually installed.
+   This says nothing about a real device either way — it says this
+   harness cannot answer the system-fallback question at all, in either
+   direction.
+2. **Bundling a CJK font was costed, not assumed.** Downloaded
+   `notofonts/noto-cjk`'s `Sans2.004` release and measured its
+   single-weight, single-region subset directly:
+   `SubsetOTF/SC/NotoSansSC-Regular.otf` is 8,331,336 bytes (OFL-1.1,
+   same license family as the bundled Lora/Nunito). `app/budgets.json`'s
+   C3 ratchet has ~3.3MB of remaining APK headroom (71,888,630 max vs.
+   68,465,362 measured). It does not fit — not a rounding error, a
+   roughly 2.5x overshoot of the ENTIRE remaining budget for a
+   single-region, single-weight subset, before even considering Japanese.
+
+**This app's own C7 conformance law is the reason the "unverified system
+font" escape hatch was never on the table.** `fleet_conformance_test.dart`
+runs `FleetCheck.c7Fonts` for Trellis specifically so glyph rendering
+never depends on what happens to be installed on a given device — Lora
+and Nunito are BUNDLED for exactly this reason (`reader_prefs.dart`'s own
+comment: "never a system/unbundled face"). Recording "add
+fontFamilyFallback, verify on hardware" as the honest next step (an
+earlier draft of this section did) would have been adopting the exact
+assumption that law exists to forbid, right after proving this harness
+can't check it either way. The consequence for the shipped feature set:
+**`opus-mt-en-zh` (English -> Chinese) is not registered** — see
+mt-models.md's "Phase 3: en-zh demoted" section for the full shipping
+decision; `opus-mt-zh-en` (Chinese -> English) is unaffected, its output
+is Latin text. A user importing a native CJK-sourced work hits the same
+display ceiling regardless of MT pairs; the tokenizer fix (below) still
+makes each CJK word its own legible-if-rendered, tappable unit rather
+than the old single `…` collapse, so what remains is purely typographic,
+not also structural.
+
 ## Considered and rejected: the csukuangfj2 int8 repack
 
 `csukuangfj2/sherpa-onnx-supertonic-tts-int8-2026-03-06` on Hugging Face —

@@ -93,5 +93,83 @@ void main() {
           tier: DeviceTier.t2);
       expect(await services.resolveTranslator(targetLang: 'pt'), isNull);
     });
+
+    test('Campaign 8 "Babel widens": sourceLang disambiguates pairs that '
+        'share a target language — de-en/ru-en/zh-en all produce en, '
+        'pickModel could not tell them apart', () async {
+      final services = testServices(dir,
+          modelStore: FakeModelStore(downloadedIds: {
+            'opus-mt-de-en',
+            'opus-mt-ru-en',
+            'opus-mt-zh-en',
+          }),
+          tier: DeviceTier.t2);
+      final fromDe =
+          await services.resolveTranslator(sourceLang: 'de', targetLang: 'en');
+      final fromZh =
+          await services.resolveTranslator(sourceLang: 'zh', targetLang: 'en');
+      expect(fromDe, isNotNull);
+      expect(fromZh, isNotNull);
+      // Each resolved to a DIFFERENT downloaded pair's files, not the
+      // same one twice by accident — verified indirectly: a pair NOT
+      // downloaded for a given source still refuses.
+      final fromRuNotDownloaded = await services.resolveTranslator(
+          sourceLang: 'ru', targetLang: 'en');
+      expect(fromRuNotDownloaded, isNotNull); // ru-en IS downloaded above
+      final fromJaNotRegistered = await services.resolveTranslator(
+          sourceLang: 'ja', targetLang: 'en');
+      expect(fromJaNotRegistered, isNull,
+          reason: 'no ja-en pair is registered at all (Japanese is the '
+              'Phase 5 Brain-lane language, see docs/reference/'
+              'mt-models.md)');
+    });
+
+    test('sourceLang defaults to en, matching the declared-source-'
+        'language default', () async {
+      final services = testServices(dir,
+          modelStore: FakeModelStore(downloadedIds: {'opus-mt-en-es'}),
+          tier: DeviceTier.t2);
+      expect(await services.resolveTranslator(targetLang: 'es'), isNotNull,
+          reason: 'sourceLang defaults to en; opus-mt-en-es carries '
+              'sourceLang: en');
+    });
+  });
+
+  group('availableTranslationTargets — the picker\'s data source '
+      '(Campaign 8 "Babel widens" Phase 1)', () {
+    test('lists only DOWNLOADED pairs for the given source language, '
+        'never the un-downloaded rest of the catalog', () async {
+      final services = testServices(dir,
+          modelStore: FakeModelStore(downloadedIds: {
+            'opus-mt-en-es',
+            'opus-mt-en-de',
+            // en-ru NOT downloaded — must be excluded.
+          }),
+          tier: DeviceTier.t2);
+      final targets = await services.availableTranslationTargets(
+          sourceLang: 'en');
+      expect(targets, containsAll(['es', 'de']));
+      expect(targets, isNot(contains('ru')));
+    });
+
+    test('never lists the source language itself as a target, even if '
+        'somehow downloaded', () async {
+      final services = testServices(dir,
+          modelStore: FakeModelStore(downloadedIds: {'opus-mt-de-en'}),
+          tier: DeviceTier.t2);
+      // de-en produces 'en' FROM 'de' — asking for en's own targets
+      // must never offer 'en' back to itself.
+      final targets =
+          await services.availableTranslationTargets(sourceLang: 'de');
+      expect(targets, isNot(contains('de')));
+    });
+
+    test('nothing downloaded means an empty list, not null or a throw',
+        () async {
+      final services =
+          testServices(dir, modelStore: FakeModelStore(), tier: DeviceTier.t2);
+      expect(await services.availableTranslationTargets(sourceLang: 'en'),
+          isEmpty);
+    });
   });
 }

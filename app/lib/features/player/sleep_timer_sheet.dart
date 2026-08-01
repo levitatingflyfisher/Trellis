@@ -7,6 +7,12 @@ import 'sleep_timer.dart';
 /// player bar: durations, "end of episode", and — once one is armed — the
 /// remaining time and a cancel button in the SAME sheet, so wherever you
 /// set it is where you go to check or cancel it.
+///
+/// Campaign 9 Phase 1 note: a segmented drag bar (one continuous control
+/// instead of discrete duration buttons) was considered as a replacement
+/// for this picker — the device-test user raised it themselves, then
+/// wasn't sure it was actually better. Left as buttons for now; revisit
+/// only with a concrete case for the drag bar, not by default.
 class SleepTimerSheet extends StatelessWidget {
   final PlayerController controller;
   const SleepTimerSheet({super.key, required this.controller});
@@ -110,24 +116,26 @@ class SleepTimerSheet extends StatelessWidget {
         spacing: 8,
         runSpacing: 8,
         children: [
+          // Campaign 9 Phase 1: a hard `SizedBox(width: 100)` pinned every
+          // button to the same width regardless of text scale, so
+          // "Custom..." clipped to "Custo" at large scale (device
+          // report). `minimumSize` keeps the grid feel at normal scale
+          // (buttons still line up at 100×48) without capping how wide a
+          // button can grow when its label actually needs more room.
           for (final m in _durationsMin)
-            SizedBox(
-              width: 100,
-              height: 48,
-              child: OutlinedButton(
-                key: Key('sleep-timer-$m'),
-                onPressed: () => _pickDuration(context, m),
-                child: Text('$m min'),
-              ),
+            OutlinedButton(
+              key: Key('sleep-timer-$m'),
+              style: OutlinedButton.styleFrom(
+                  minimumSize: const Size(100, 48)),
+              onPressed: () => _pickDuration(context, m),
+              child: Text('$m min'),
             ),
-          SizedBox(
-            width: 100,
-            height: 48,
-            child: OutlinedButton(
-              key: const Key('sleep-timer-custom'),
-              onPressed: () => _custom(context),
-              child: const Text('Custom...'),
-            ),
+          OutlinedButton(
+            key: const Key('sleep-timer-custom'),
+            style:
+                OutlinedButton.styleFrom(minimumSize: const Size(100, 48)),
+            onPressed: () => _custom(context),
+            child: const Text('Custom...'),
           ),
         ],
       ),

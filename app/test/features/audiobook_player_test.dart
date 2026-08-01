@@ -72,6 +72,21 @@ void main() {
       expect(controller.currentFileIdx, 0);
     });
 
+    test('tags the playlist with the book id/title — no album: an '
+        'audiobook has no feed to name one from (Campaign 9 Phase 2e, '
+        'ADR-0015 Decision 3)', () async {
+      final work = await seedAudiobook(title: 'Meditations');
+
+      await controller.playAudiobook(work);
+
+      final tag = player.loadedMediaItem;
+      expect(tag, isNotNull);
+      expect(tag!.id, work.id.toString());
+      expect(tag.title, 'Meditations');
+      expect(tag.album, isNull);
+      expect(tag.artUri, isNull);
+    });
+
     test('a never-opened book starts at file 0, offset 0', () async {
       final work = await seedAudiobook();
       await controller.playAudiobook(work);
@@ -114,6 +129,66 @@ void main() {
           (await db.spineDao.worksOf(profileId)).firstWhere((w) => w.id == workId);
       await controller.playAudiobook(work);
       expect(controller.current, isNull);
+    });
+  });
+
+  group('resume after restart (Campaign 9 Phase 2) — the audiobook path',
+      () {
+    // The discriminating case: playWork's guard opens with
+    // `final url = work.sourceUrl; if (url == null || url.isEmpty) return;`
+    // — an audiobook work has no sourceUrl at all, so a rehydrated
+    // audiobook whose Play tap fell through to playWork (rather than
+    // playAudiobook) would silently do nothing. toggle()'s fallback must
+    // read the rehydrated _currentAudiobookFiles and dispatch correctly.
+    test('rehydrating an audiobook sets isAudiobook, without loading real '
+        'audio', () async {
+      final work = await seedAudiobook();
+      await controller.playAudiobook(work);
+      await controller.toggle(); // pause
+
+      final freshPlayer = FakeEpisodePlayer();
+      final fresh = PlayerController(
+        db: db,
+        profileId: profileId,
+        createPlayer: () => freshPlayer,
+        now: () => DateTime.fromMillisecondsSinceEpoch(nowMs),
+      );
+      addTearDown(fresh.dispose);
+      await fresh.rehydrateLastPlayed();
+
+      expect(fresh.current?.id, work.id);
+      expect(fresh.isAudiobook, isTrue);
+      expect(fresh.playing, isFalse);
+      expect(freshPlayer.loadedFilePaths, isNull,
+          reason: 'no real load until Play is actually tapped');
+    });
+
+    test('tapping play on a rehydrated audiobook loads the WHOLE playlist '
+        'via playAudiobook, not playWork — playWork would no-op (an '
+        'audiobook has no sourceUrl)', () async {
+      final work = await seedAudiobook();
+      await controller.playAudiobook(work);
+      player.emitCurrentIndex(1);
+      player.emitPosition(const Duration(seconds: 7));
+      await controller.toggle(); // pause, saves (fileIdx: 1, tMs: 7000)
+
+      final freshPlayer = FakeEpisodePlayer();
+      final fresh = PlayerController(
+        db: db,
+        profileId: profileId,
+        createPlayer: () => freshPlayer,
+        now: () => DateTime.fromMillisecondsSinceEpoch(nowMs),
+      );
+      addTearDown(fresh.dispose);
+      await fresh.rehydrateLastPlayed();
+
+      await fresh.toggle();
+
+      expect(freshPlayer.loadedFilePaths,
+          ['/audiobooks/1/0.mp3', '/audiobooks/1/1.mp3']);
+      expect(freshPlayer.loadedInitialIndex, 1);
+      expect(freshPlayer.loadedInitialPosition, const Duration(seconds: 7));
+      expect(fresh.playing, isTrue);
     });
   });
 

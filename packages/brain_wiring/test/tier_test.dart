@@ -88,14 +88,16 @@ void main() {
   });
 
   group('UnavailableTierBrain', () {
-    test('stove stub fails calmly, naming the roadmap', () {
+    test('stove stub fails calmly, naming the roadmap in plain words — '
+        'no internal jargon ("household stove") in user-visible copy '
+        '(Campaign 8 "Babel widens" Addendum 2)', () {
       final brain = UnavailableTierBrain(BrainTier.stove);
       expect(
         () => brain.complete('anything'),
         throwsA(isA<AskException>().having(
           (e) => e.message.toLowerCase(),
           'message',
-          contains('stove'),
+          contains('home desktop'),
         )),
       );
     });

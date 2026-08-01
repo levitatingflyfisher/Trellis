@@ -4,6 +4,7 @@
 /// (ADR-0006).
 library;
 
+export 'src/cjk.dart';
 export 'src/sentence_splitter.dart';
 export 'src/spine.dart';
 export 'src/text_parser.dart';

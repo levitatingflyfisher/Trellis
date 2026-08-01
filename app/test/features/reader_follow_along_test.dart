@@ -33,6 +33,17 @@ void main() {
     return profileId;
   }
 
+  /// Campaign 9 Phase 6: `mode-toggle` now opens a labeled three-way
+  /// picker (Scroll / Words / Lines) rather than cycling on its own tap —
+  /// [itemKey] names the destination explicitly (`mode-item-words`,
+  /// `mode-item-scroll`, `mode-item-lines`).
+  Future<void> switchMode(WidgetTester tester, String itemKey) async {
+    await tester.tap(find.byKey(const Key('mode-toggle')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(Key(itemKey)));
+    await tester.pumpAndSettle();
+  }
+
   Future<void> openInScroll(WidgetTester tester, {required String title}) async {
     await tester.pumpWidget(TrellisApp(db: db));
     await tester.pumpAndSettle();
@@ -40,8 +51,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text(title));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('mode-toggle')));
-    await tester.pumpAndSettle();
+    await switchMode(tester, 'mode-item-scroll');
   }
 
   /// Stop the shared cursor timer before the test ends — the doc has
@@ -73,8 +83,7 @@ void main() {
     await tester.tapAt(const Offset(10, 10));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('mode-toggle')));
-    await tester.pumpAndSettle();
+    await switchMode(tester, 'mode-item-scroll');
     await tester.tap(find.byKey(const Key('reader-overflow')));
     await tester.pumpAndSettle();
     expect(find.text('Follow along'), findsOneWidget);

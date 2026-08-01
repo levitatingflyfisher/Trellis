@@ -4,6 +4,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqlite3/sqlite3.dart' as raw;
 import 'package:trellis/db/database.dart';
+import 'package:trellis/features/reader/reader_prefs.dart';
 
 /// The speak-voice preference (ADR-0006's settings escape): a profile-scoped
 /// bool, false by default — the same "on-device state the reader already
@@ -101,6 +102,52 @@ void main() {
     });
   });
 
+  group('recordLastPlayed (Campaign 9 Phase 2, "resume after restart")', () {
+    test('a fresh profile has no last-played work', () async {
+      final profileId = await db.profilesDao.create('Ada');
+      expect((await db.profilesDao.readerPrefs(profileId)).lastPlayedWorkId,
+          isNull);
+    });
+
+    test('recording a play persists it, scoped to this profile only',
+        () async {
+      final ada = await db.profilesDao.create('Ada');
+      final bea = await db.profilesDao.create('Bea');
+
+      await db.profilesDao.recordLastPlayed(ada, 42);
+
+      expect(
+          (await db.profilesDao.readerPrefs(ada)).lastPlayedWorkId, 42);
+      expect(
+          (await db.profilesDao.readerPrefs(bea)).lastPlayedWorkId,
+          isNull,
+          reason: 'the last-played work is per-profile, never fleet-wide');
+    });
+
+    test('recording a second play replaces the first', () async {
+      final profileId = await db.profilesDao.create('Ada');
+      await db.profilesDao.recordLastPlayed(profileId, 1);
+      await db.profilesDao.recordLastPlayed(profileId, 2);
+      expect((await db.profilesDao.readerPrefs(profileId)).lastPlayedWorkId,
+          2);
+    });
+
+    test('recording a play never touches typography already saved in the '
+        'same blob', () async {
+      final profileId = await db.profilesDao.create('Ada');
+      await db.profilesDao.setReaderPrefs(
+          profileId,
+          const ReaderPrefs(
+              typography: ReaderTypography(fontScale: 1.4)));
+
+      await db.profilesDao.recordLastPlayed(profileId, 7);
+
+      final prefs = await db.profilesDao.readerPrefs(profileId);
+      expect(prefs.typography.fontScale, 1.4);
+      expect(prefs.lastPlayedWorkId, 7);
+    });
+  });
+
   group('schema migration v8 → v9', () {
     test('a v8 database gains profiles.scheduler, defaulted to classic, '
         'and keeps its data', () async {
@@ -120,6 +167,7 @@ void main() {
       await seed.close();
       final v8 = raw.sqlite3.open(file.path);
       v8.execute('''
+        ALTER TABLE feeds DROP COLUMN image_url;
         ALTER TABLE profiles DROP COLUMN scheduler;
         ALTER TABLE profiles DROP COLUMN keep_finished_in_queue;
         ALTER TABLE feeds DROP COLUMN speed_override;
@@ -128,6 +176,7 @@ void main() {
         ALTER TABLE feeds DROP COLUMN keep_latest_audio;
         ALTER TABLE episodes DROP COLUMN archived_at_ms;
         ALTER TABLE works DROP COLUMN show_translation_layer;
+        ALTER TABLE works DROP COLUMN active_translation_lang;
         ALTER TABLE feeds DROP COLUMN rules_json;
         ALTER TABLE episodes DROP COLUMN dedup_reason;
         ALTER TABLE episodes DROP COLUMN duplicate_of_work_id;

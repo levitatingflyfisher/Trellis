@@ -228,7 +228,9 @@ class FeedsRepository {
         FeedRefreshState(url: feedUrl), res,
         nowMs: nowMs, parsedTitle: parsed.title);
     await _persistState(feedId, state,
-        nextPageUrl: parsed.nextPageUrl, updateNextPageUrl: true);
+        nextPageUrl: parsed.nextPageUrl, updateNextPageUrl: true,
+        imageUrl: parsed.imageUrl, updateImageUrl: true);
+    await _maybeFetchArtwork(feedId, newUrl: parsed.imageUrl, oldUrl: null);
     // A brand-new feed has no rules yet (rulesJson is still the '[]'
     // default) — nothing to decode, the ingest default applies.
     final added = await ingestFeedItems(
@@ -266,7 +268,10 @@ class FeedsRepository {
       state = applyFetchResult(state, res,
           nowMs: nowMs, parsedTitle: parsed.title);
       await _persistState(feed.id, state,
-          nextPageUrl: parsed.nextPageUrl, updateNextPageUrl: true);
+          nextPageUrl: parsed.nextPageUrl, updateNextPageUrl: true,
+          imageUrl: parsed.imageUrl, updateImageUrl: true);
+      await _maybeFetchArtwork(feed.id,
+          newUrl: parsed.imageUrl, oldUrl: feed.imageUrl);
       final added = await ingestFeedItems(
           db: db,
           profileId: feed.profileId,
@@ -308,14 +313,37 @@ class FeedsRepository {
   }
 
   Future<void> _persistState(int feedId, FeedRefreshState s,
-          {String? nextPageUrl, bool updateNextPageUrl = false}) =>
+          {String? nextPageUrl,
+          bool updateNextPageUrl = false,
+          String? imageUrl,
+          bool updateImageUrl = false}) =>
       db.feedsDao.updateRefreshState(feedId,
           title: s.title,
           etag: s.etag,
           lastModified: s.lastModified,
           breakerJson: encodeBreakerState(s),
           nextPageUrl: nextPageUrl,
-          updateNextPageUrl: updateNextPageUrl);
+          updateNextPageUrl: updateNextPageUrl,
+          imageUrl: imageUrl,
+          updateImageUrl: updateImageUrl);
+
+  /// Fetch-once, offline-first (Campaign 9 Phase 5): downloads [newUrl] to
+  /// this feed's deterministic artwork file (`DeviceServices.artworkFileFor`)
+  /// only when it actually differs from [oldUrl] — an unchanged URL across
+  /// refreshes never re-fetches, and a host that publishes no artwork at all
+  /// ([newUrl] null) has nothing to fetch. Reuses the fleet's one download
+  /// engine (the same [AudioFetcher] the transcription pipeline resumes
+  /// episode audio through) rather than opening a second HTTP path for a
+  /// small image. A null [services] (most unit tests) simply skips this —
+  /// storage is optional the same way DSP eviction above is.
+  Future<void> _maybeFetchArtwork(int feedId,
+      {required String? newUrl, required String? oldUrl}) async {
+    final deviceServices = services;
+    if (deviceServices == null) return;
+    if (newUrl == null || newUrl == oldUrl) return;
+    await deviceServices.audioFetcher
+        .fetch(newUrl, deviceServices.artworkFileFor(feedId));
+  }
 
   /// The explicit "Fetch older episodes" action (RFC 5005): walks the
   /// archive from [feed]'s last-known [Feed.nextPageUrl] and ingests

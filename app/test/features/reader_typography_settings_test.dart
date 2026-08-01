@@ -116,4 +116,23 @@ void main() {
     await open(tester);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('editing typography never clobbers a lastPlayedWorkId already '
+      'in the SAME shared prefs blob (Campaign 9 Phase 2)', (tester) async {
+    await db.profilesDao.setReaderPrefs(
+        profileId, const ReaderPrefs(lastPlayedWorkId: 42));
+
+    await open(tester);
+    final slider =
+        tester.widget<Slider>(find.byKey(const Key('fontscale-slider')));
+    slider.onChanged!(1.5);
+    await tester.pump();
+
+    final saved = await db.profilesDao.readerPrefs(profileId);
+    expect(saved.typography.fontScale, 1.5);
+    expect(saved.lastPlayedWorkId, 42,
+        reason: 'this screen only ever meant to touch typography — '
+            'writing a bare ReaderPrefs(typography: next) would silently '
+            "wipe the player's own key in the same blob");
+  });
 }

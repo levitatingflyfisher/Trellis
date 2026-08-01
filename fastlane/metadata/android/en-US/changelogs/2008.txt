@@ -1,0 +1,9 @@
+Trellis 1.4 answers the first real device test, and Babel widens.
+
+• Control playback from the lock screen and pull-down tray; playback resumes where you left off
+• Hear English episodes in German or Russian; Chinese podcasts become English text
+• The reader can follow the audio as it plays; a new line-paced reading mode
+• Newsletter posts arrive full-length, not as 300-character stubs; the river gets artwork
+• The study screen shows what each grade actually did
+• Trellis finally looks like itself: the lattice icon everywhere
+• Fixed play/pause buttons rendering as blank circles

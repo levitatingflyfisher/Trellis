@@ -69,6 +69,75 @@ void main() {
     });
   });
 
+  group(
+      'wordIndexAtAudioTime (Campaign 9 Phase 7: the reader follows the '
+      'player)', () {
+    // DB segment idx and list POSITION deliberately diverge (2, 5 rather
+    // than 0, 1) -- the same translation [_load] already performs when
+    // restoring a saved Position (blocks.indexWhere, never blocks[idx]).
+    final blocks = [
+      const Segment(idx: 2, kind: SegmentKind.prose, text: 'First one.'),
+      const Segment(idx: 5, kind: SegmentKind.prose, text: 'Second two.'),
+    ];
+    final doc = tokenizeDocument(blocks);
+
+    Spine spineWith(List<({int segmentIdx, int tStartMs, int tEndMs})> rows) =>
+        Spine(
+          segments: const [],
+          layers: const [],
+          alignments: [
+            for (final r in rows)
+              Alignment(
+                  segmentIdx: r.segmentIdx,
+                  tStartMs: r.tStartMs,
+                  tEndMs: r.tEndMs),
+          ],
+        );
+
+    test("projects an audio time into this reader's own word stream", () {
+      final spine = spineWith(const [
+        (segmentIdx: 2, tStartMs: 0, tEndMs: 10000),
+        (segmentIdx: 5, tStartMs: 10000, tEndMs: 20000),
+      ]);
+      expect(
+          wordIndexAtAudioTime(
+              spine: spine, doc: doc, blocks: blocks, audioTimeMs: 500),
+          0);
+      expect(
+          wordIndexAtAudioTime(
+              spine: spine, doc: doc, blocks: blocks, audioTimeMs: 15000),
+          2);
+    });
+
+    test('no alignments at all returns null — nothing to follow', () {
+      final spine = spineWith(const []);
+      expect(
+          wordIndexAtAudioTime(
+              spine: spine, doc: doc, blocks: blocks, audioTimeMs: 0),
+          isNull);
+    });
+
+    test('a projected segment this reader has no block for returns null',
+        () {
+      final spine =
+          spineWith(const [(segmentIdx: 99, tStartMs: 0, tEndMs: 1000)]);
+      expect(
+          wordIndexAtAudioTime(
+              spine: spine, doc: doc, blocks: blocks, audioTimeMs: 0),
+          isNull);
+    });
+
+    test('an empty document returns null', () {
+      final emptyDoc = tokenizeDocument(const []);
+      final spine =
+          spineWith(const [(segmentIdx: 2, tStartMs: 0, tEndMs: 1000)]);
+      expect(
+          wordIndexAtAudioTime(
+              spine: spine, doc: emptyDoc, blocks: const [], audioTimeMs: 0),
+          isNull);
+    });
+  });
+
   group('punctuation dwell (donor: ms = 60000/wpm * pacing)', () {
     test('base word at 300 wpm is 200ms', () {
       expect(msPerWord(300, 1.0), 200);

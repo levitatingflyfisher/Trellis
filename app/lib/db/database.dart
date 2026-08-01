@@ -74,6 +74,16 @@ class Works extends Table {
   /// [TranslationSentences] rows actually exist for this work.
   BoolColumn get showTranslationLayer =>
       boolean().withDefault(const Constant(false))();
+
+  /// Campaign 8 "Babel widens" Phase 1: WHICH language
+  /// [showTranslationLayer] refers to — `null` means no language has
+  /// ever been chosen (the show-toggle carries no meaning without one).
+  /// The two columns are kept in sync by the DAO's own setters
+  /// ([SpineDao.setActiveTranslationLang]/[SpineDao
+  /// .clearActiveTranslationLang]), never written independently — "one
+  /// active translation layer per work at a time" is the law this column
+  /// makes literal: there is exactly one slot, not a set.
+  TextColumn get activeTranslationLang => text().nullable()();
 }
 
 class Segments extends Table {
@@ -121,6 +131,16 @@ class TranslationSentences extends Table {
   TextColumn get lang => text()();
   TextColumn get sourceText => text()();
   TextColumn get body => text()();
+
+  /// Campaign 8 "Babel widens" Phase 5: which engine produced this row —
+  /// `'marian'` or a Brain identifier (`domovoi:stove`,
+  /// `domovoi:byok:<provider>`, ...). Provenance only — nothing reads
+  /// this to decide behavior, only to display it, so a `null` row
+  /// (every row written before this column existed) is read as
+  /// `'marian'` by convention rather than migrated: every row in this
+  /// table predates the Brain lane, so it IS a Marian row.
+  TextColumn get engine => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {workId, segmentIdx, sentenceIdx, lang};
 }
@@ -220,6 +240,15 @@ class Feeds extends Table {
   /// fallback the player invents on its own" law as [speedOverride] and
   /// its siblings above. true/false is an explicit override either way.
   BoolColumn get dspEnabled => boolean().nullable()();
+
+  /// Channel-level artwork (Campaign 9 Phase 5, "the river gets faces"):
+  /// the REMOTE image URL comms_core's parser found (itunes:image href,
+  /// falling back to RSS's own image/url) — null when the host publishes
+  /// neither. This column exists only to detect "did the artwork change"
+  /// across refreshes; the actual downloaded file lives at a path derived
+  /// from the feed id (`DeviceServices.artworkFileFor`), fetched once and
+  /// never re-fetched at render.
+  TextColumn get imageUrl => text().nullable()();
 }
 
 /// River metadata for a feed item. The item itself IS a spine work
@@ -1157,6 +1186,16 @@ class ProfilesDao extends DatabaseAccessor<AppDatabase>
       (update(profiles)..where((p) => p.id.equals(profileId)))
           .write(ProfilesCompanion(readerPrefsJson: Value(prefs.encode())));
 
+  /// Campaign 9 Phase 2 ("resume after restart"): records [workId] as the
+  /// most recently played work, in the SAME shared blob [readerPrefs]
+  /// already owns — a read-modify-write so whatever else lives in the
+  /// blob (typography today) rides along untouched, the same law
+  /// [ReaderPrefs.copyWith] itself enforces.
+  Future<void> recordLastPlayed(int profileId, int workId) async {
+    final prefs = await readerPrefs(profileId);
+    await setReaderPrefs(profileId, prefs.copyWith(lastPlayedWorkId: workId));
+  }
+
   /// Campaign 4 Phase 5's write side (see [ReadingDays]'s own doc comment
   /// for why this table exists at all): idempotent by the composite
   /// (profileId, epochDay) primary key, so a work reopened many times in
@@ -1394,6 +1433,42 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
       (update(works)..where((w) => w.id.equals(workId)))
           .write(WorksCompanion(showTranslationLayer: Value(value)));
 
+  /// The one active translation target language for this work (Campaign
+  /// 8 "Babel widens" Phase 1) — `null` for a work no row exists for yet
+  /// or that has never had one chosen. See [Works.activeTranslationLang].
+  Future<String?> activeTranslationLang(int workId) async {
+    final row = await (select(works)..where((w) => w.id.equals(workId)))
+        .getSingleOrNull();
+    return row?.activeTranslationLang;
+  }
+
+  /// Sets the one active translation target — replacing whatever was
+  /// active before, never adding a second ("one active translation layer
+  /// per work at a time"). Keeps the legacy [Works.showTranslationLayer]
+  /// bool in sync (turned on) so nothing that still reads it alone sees
+  /// a stale `false` while a language is actually active.
+  Future<void> setActiveTranslationLang(int workId, String lang) =>
+      (update(works)..where((w) => w.id.equals(workId))).write(
+          WorksCompanion(
+              activeTranslationLang: Value(lang),
+              showTranslationLayer: const Value(true)));
+
+  /// Clears the active slot — same sync law as [setActiveTranslationLang],
+  /// in reverse.
+  Future<void> clearActiveTranslationLang(int workId) =>
+      (update(works)..where((w) => w.id.equals(workId))).write(
+          const WorksCompanion(
+              activeTranslationLang: Value(null),
+              showTranslationLayer: Value(false)));
+
+  /// Sets a work's declared source language (Campaign 8 "Babel widens"
+  /// Phase 1's calm per-work selector — see [Works.lang]). Most intake
+  /// paths never populate this at import time; a reader who knows better
+  /// corrects it here. No auto-detection — recorded ceiling.
+  Future<void> setWorkLang(int workId, String lang) =>
+      (update(works)..where((w) => w.id.equals(workId)))
+          .write(WorksCompanion(lang: Value(lang)));
+
   /// Persists one translated sentence — idempotent by (workId, segmentIdx,
   /// sentenceIdx, lang): re-running a unit (a retry, or a resumed job
   /// re-executing the same unit) overwrites with the same inputs rather
@@ -1405,6 +1480,7 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
     required String lang,
     required String sourceText,
     required String body,
+    String? engine,
   }) =>
       into(translationSentences).insertOnConflictUpdate(
           TranslationSentencesCompanion.insert(
@@ -1413,7 +1489,8 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
               sentenceIdx: sentenceIdx,
               lang: lang,
               sourceText: sourceText,
-              body: body));
+              body: body,
+              engine: Value(engine)));
 
   /// Every translated sentence a work has in [lang], keyed by
   /// (segmentIdx, sentenceIdx) — the shape the scroll-mode dual display and
@@ -1853,12 +1930,20 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
   /// (feed/source, read state) that [SpineDao.worksOf] alone doesn't
   /// carry. A left join, not inner: most library kinds have no episode
   /// row at all, and must still appear.
+  ///
+  /// Campaign 9 Phase 4 ("the feed becomes honest reading"): an ephemeron
+  /// work never appears here — that's what the river is for, and every
+  /// feed item arrives as one (ADR-0002) whether or not it's ever kept.
+  /// [SpineDao.promoteWork] (the river's Keep gesture) flips persistence
+  /// to 'work', at which point the SAME query starts returning it — no
+  /// separate refresh path exists or is needed.
   Future<List<LibraryQueryEntry>> libraryQueryEntriesOf(int profileId) async {
     final q = select(works).join([
       leftOuterJoin(episodes, episodes.workId.equalsExp(works.id)),
       leftOuterJoin(feeds, feeds.id.equalsExp(episodes.feedId)),
     ])
-      ..where(works.profileId.equals(profileId));
+      ..where(works.profileId.equals(profileId) &
+          works.persistence.isNotValue('ephemeron'));
     final rows = await q.get();
     return [
       for (final r in rows)
@@ -2069,7 +2154,8 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
   /// (the fresh-parse path, where a null value means the host's archive
   /// link is genuinely gone now). A non-fresh refresh (304/throttled/error)
   /// has no new body to learn that from, so it omits both and the column
-  /// keeps whatever it already held.
+  /// keeps whatever it already held. [imageUrl]/[updateImageUrl] (Campaign 9
+  /// Phase 5) follow the identical shape for the channel artwork URL.
   Future<void> updateRefreshState(
     int feedId, {
     required String title,
@@ -2078,6 +2164,8 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
     required String breakerJson,
     String? nextPageUrl,
     bool updateNextPageUrl = false,
+    String? imageUrl,
+    bool updateImageUrl = false,
   }) => (update(feeds)..where((f) => f.id.equals(feedId))).write(
     FeedsCompanion(
       title: Value(title),
@@ -2087,6 +2175,7 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
       nextPageUrl: updateNextPageUrl
           ? Value(nextPageUrl)
           : const Value.absent(),
+      imageUrl: updateImageUrl ? Value(imageUrl) : const Value.absent(),
     ),
   );
 
@@ -2549,11 +2638,18 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 18;
+  int get schemaVersion => 20;
   // There is no v14: it was reserved for the reader-depth campaign, which
   // landed as v18 after three sibling campaigns merged ahead of it, so the
   // guard chain skips from 13 to 15. Version gaps are harmless — an
   // upgrader below 15 still runs every block below in order.
+  //
+  // v19 belongs to Campaign 8 "Babel widens" (two blocks below: `works
+  // .activeTranslationLang` unconditional, `translationSentences.engine`
+  // guarded on `from >= 13`). This branch's own change (Campaign 9 Phase 5,
+  // feeds.imageUrl) chains after both as v20 — an upgrader sitting anywhere
+  // below 20 still runs every block below exactly once, in order, same as
+  // every gap above.
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
@@ -2713,6 +2809,52 @@ class AppDatabase extends _$AppDatabase {
             // this evidence; kept as `from < 18` pending its reply.
             await m.addColumn(profiles, profiles.readerPrefsJson);
             await m.createTable(readingDays);
+          }
+          if (from < 19) {
+            // Campaign 8 "Babel widens" Phase 1: which language a work's
+            // translation layer refers to (see [Works
+            // .activeTranslationLang]). No lower bound — `works`, like
+            // `profiles`, is never created fresh inside onUpgrade at
+            // all, so every path that reaches here still needs it
+            // added, the same reasoning as `works.showTranslationLayer`
+            // itself (the `from < 13` block above) and
+            // `profiles.readerPrefsJson` (the `from < 18` block).
+            await m.addColumn(works, works.activeTranslationLang);
+          }
+          if (from >= 13 && from < 19) {
+            // Campaign 8 "Babel widens" Phase 5: which engine produced a
+            // stored translated sentence (see [TranslationSentences
+            // .engine]). Guarded on `from >= 13`, NOT unconditional —
+            // unlike `works`/`profiles` elsewhere in this file,
+            // `translationSentences` IS created fresh inside onUpgrade,
+            // by the `from < 13` block above. That block's own
+            // `createTable` always uses the CURRENT (this file's, right
+            // now) table definition, which already carries `engine` —
+            // so a `from < 13` upgrade already has this column the
+            // moment `if (from < 13)` finishes, and an unconditional
+            // addColumn here would double-add it. A `from >= 13` upgrade
+            // is the only case where `translationSentences` predates
+            // this column for real (a genuine historical v13-v18
+            // database, built by an older app version that never had
+            // it) — verified empirically: all 12 of this repo's
+            // seed-and-strip migration fixtures target `from` values
+            // between 1 and 12, and every one of them passed unmodified
+            // once this guard was added, because `from >= 13` is false
+            // for all of them and the column their fresh createTable
+            // already carries is never touched again here.
+            await m.addColumn(
+                translationSentences, translationSentences.engine);
+          }
+          if (from >= 2 && from < 20) {
+            // Campaign 9 Phase 5 ("the river gets faces"): channel artwork
+            // URL (see [Feeds.imageUrl]). Guarded on from >= 2 for exactly
+            // the reason [Feeds.nextPageUrl] above is: a from < 2 upgrade
+            // just created `feeds` fresh, via the current (already-
+            // imageUrl-bearing) class definition — addColumn there would
+            // be a duplicate column. Chained after both v19 blocks above
+            // (Campaign 8 "Babel widens") so an upgrader landing anywhere
+            // below 20 runs every hop in order, once each.
+            await m.addColumn(feeds, feeds.imageUrl);
           }
         },
         beforeOpen: (details) async {

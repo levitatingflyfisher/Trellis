@@ -49,6 +49,17 @@ void main() {
     await tester.pump();
   }
 
+  /// Campaign 9 Phase 6: `mode-toggle` now opens a labeled three-way
+  /// picker (Scroll / Words / Lines) rather than cycling on its own tap —
+  /// [itemKey] names the destination explicitly (`mode-item-words`,
+  /// `mode-item-scroll`, `mode-item-lines`).
+  Future<void> switchMode(WidgetTester tester, String itemKey) async {
+    await tester.tap(find.byKey(const Key('mode-toggle')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(Key(itemKey)));
+    await tester.pumpAndSettle();
+  }
+
   testWidgets('opening the reader renders the first word split at the ORP',
       (tester) async {
     await seed('One two three four five.');
@@ -111,8 +122,7 @@ void main() {
     expect(rsvpWord(tester), 'three');
 
     // → scroll: the same word is the cursor, highlighted in flowing text.
-    await tester.tap(find.byKey(const Key('mode-toggle')));
-    await tester.pumpAndSettle();
+    await switchMode(tester, 'mode-item-scroll');
     expect(
         tester.widget<Text>(find.byKey(const Key('cursor-word'))).data, 'three');
 
@@ -122,9 +132,10 @@ void main() {
     expect(
         tester.widget<Text>(find.byKey(const Key('cursor-word'))).data, 'five.');
 
-    // → RSVP: the tapped word is what renders.
-    await tester.tap(find.byKey(const Key('mode-toggle')));
-    await tester.pumpAndSettle();
+    // → Words (RSVP), named explicitly rather than "toggled back" — the
+    // picker is a labeled three-way choice, not a binary cycle
+    // (Campaign 9 Phase 6): the tapped word is what renders.
+    await switchMode(tester, 'mode-item-words');
     expect(rsvpWord(tester), 'five.');
   });
 

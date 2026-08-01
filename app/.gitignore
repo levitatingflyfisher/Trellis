@@ -56,3 +56,8 @@ test/visual/goldens/
 # Built by natives/build-android.sh (see natives/README.md) — a binary
 # the repo documents how to reproduce, never carries.
 android/app/src/main/jniLibs/
+
+# The Kotlin compiler's per-build session scratch. Appears during every
+# Gradle run and empties itself afterwards, so it shows up as untracked
+# noise exactly when you are least able to tell it apart from real work.
+android/.kotlin/
