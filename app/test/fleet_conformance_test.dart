@@ -25,12 +25,19 @@ void main() => runFleetConformance(const FleetAppConfig(
       // the v1.0 release artifacts (2026-08-12), then +5% — the ratchet
       // compares only when build/ artifacts exist, so a plain test run
       // stays green and a bloated release build fails loudly.
+      //
+      // C8 is ON: the app's two play/pause toggles migrated onto
+      // `OhIconButton.filled` from openhearth_design (the fix for
+      // Campaign 9 Phase 0's "blank circles"), so a bare `IconButton.filled`
+      // or `IconButton.filledTonal` reappearing in lib/ is now a red suite,
+      // not a silent invisible button.
       checks: {
         FleetCheck.c1Style,
         FleetCheck.c3Budgets,
         FleetCheck.c4Permissions,
         FleetCheck.c6Harness,
         FleetCheck.c7Fonts,
+        FleetCheck.c8IconButtons,
       },
       // Tier T: canonical openhearth_design tokens consumed by sibling
       // path; theme construction stays local (local ThemeData over

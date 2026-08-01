@@ -1,6 +1,7 @@
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:openhearth_design/openhearth_design.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/reader/reader_screen.dart';
 
@@ -159,7 +160,7 @@ void main() {
     await tester.pump();
     expect(
         tester
-            .widget<IconButton>(find.byKey(const Key('play-toggle')))
+            .widget<OhIconButton>(find.byKey(const Key('play-toggle')))
             .tooltip,
         'Play',
         reason: 'starting speech paused the ticker');

@@ -18,9 +18,14 @@ import '../support/fake_tts.dart';
 /// `color: primary` — the SAME color `IconButton.filled` fills its own
 /// background with — so an unstyled `IconButton.filled` paints its glyph
 /// in the exact color of the circle behind it. Not a missing icon; an
-/// invisible one. The two `IconButton.filled` calls in the app (the ONLY
-/// two — grep confirms it) are mini_player_bar.dart's transport toggle and
-/// reader_screen.dart's RSVP toggle.
+/// invisible one.
+///
+/// The app's two play/pause toggles (mini_player_bar.dart's transport
+/// toggle and reader_screen.dart's RSVP toggle) have since migrated onto
+/// `OhIconButton.filled` from `openhearth_design`, which pins the
+/// high-contrast foreground itself; the fleet's C8 conformance check now
+/// forbids a bare `IconButton.filled`/`IconButton.filledTonal` in `lib/`
+/// so the collision can't reopen unnoticed.
 ///
 /// This is the enforced regression gate (unconditional, unlike the
 /// gitignored/env-guarded golden PNGs, which drift across machines and
@@ -95,7 +100,7 @@ void main() {
             reason: 'the glyph must not render in the same color as the '
                 "button's own fill — that is the blank-circle bug");
         expect(resolved, onPrimary,
-            reason: 'IconButton.filled should paint its glyph with the '
+            reason: 'OhIconButton.filled should paint its glyph with the '
                 'high-contrast onPrimary token');
       });
     }
@@ -146,7 +151,7 @@ void main() {
             reason: 'the glyph must not render in the same color as the '
                 "button's own fill — that is the blank-circle bug");
         expect(resolved, onPrimary,
-            reason: 'IconButton.filled should paint its glyph with the '
+            reason: 'OhIconButton.filled should paint its glyph with the '
                 'high-contrast onPrimary token');
       });
     }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:openhearth_design/openhearth_design.dart';
 
 import '../models/format.dart' show formatClock;
 import 'player_controller.dart';
@@ -181,19 +182,11 @@ class MiniPlayerBar extends StatelessWidget {
                         onPressed: () =>
                             controller.seekBy(const Duration(seconds: -15)),
                       ),
-                      IconButton.filled(
+                      OhIconButton.filled(
                         key: const Key('player-toggle'),
                         tooltip: controller.playing ? 'Pause' : 'Play',
-                        // Campaign 9 Phase 0: OhTheme's app-wide
-                        // `ThemeData.iconTheme` sets color: primary — the
-                        // same color this button fills its own background
-                        // with — so an unstyled IconButton.filled paints
-                        // its glyph invisibly on top of itself (the
-                        // device report's "blank circles"). Pin the
-                        // high-contrast onPrimary token explicitly rather
-                        // than let it fall through to the ambient theme.
-                        style: IconButton.styleFrom(
-                            foregroundColor: theme.colorScheme.onPrimary),
+                        // Glyph contrast (Campaign 9 Phase 0's "blank
+                        // circles") is pinned by OhIconButton, not here.
                         icon: Icon(controller.playing
                             ? Icons.pause
                             : Icons.play_arrow),

@@ -1938,20 +1938,12 @@ class _ReaderScreenState extends State<ReaderScreen>
           Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              IconButton.filled(
+              OhIconButton.filled(
                 key: const Key('play-toggle'),
                 iconSize: 36,
                 tooltip: _playing ? 'Pause' : 'Play',
-                // Campaign 9 Phase 0: OhTheme's app-wide
-                // `ThemeData.iconTheme` sets color: primary — the same
-                // color this button fills its own background with — so
-                // an unstyled IconButton.filled paints its glyph
-                // invisibly on top of itself (the device report's "blank
-                // circles"). Pin the high-contrast onPrimary token
-                // explicitly rather than let it fall through to the
-                // ambient theme.
-                style: IconButton.styleFrom(
-                    foregroundColor: Theme.of(context).colorScheme.onPrimary),
+                // Glyph contrast (Campaign 9 Phase 0's "blank circles")
+                // is pinned by OhIconButton, not here.
                 onPressed: _playing ? _pause : _play,
                 icon: Icon(_playing ? Icons.pause : Icons.play_arrow),
               ),
