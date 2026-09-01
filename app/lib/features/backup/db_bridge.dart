@@ -268,7 +268,7 @@ class DbBridge {
               .importCourse(profileId: profileId, raw: body, nowMs: nowMs);
           imported['courses'] = (imported['courses'] ?? 0) + 1;
         } on FormatException {
-          skip("a course this app's parser refused");
+          skip("a course this app’s parser refused");
         }
       }
 
@@ -440,7 +440,7 @@ class DbBridge {
         skipped: skipped,
         dropped: [
           ...result.report.dropped,
-          'Reading stats stay with the old app — this one counts from here.',
+          'Reading stats stay with the old app; this one counts from here.',
           'Vocabulary extracts joined the word ledger; the ledger keeps the '
               'words, not their review schedules.',
         ],

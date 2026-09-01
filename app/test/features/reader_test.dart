@@ -1,8 +1,10 @@
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
+import 'package:openhearth_design/openhearth_design.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/main.dart';
+import '../support/pick_reader.dart';
 
 /// The reader half of the alpha loop: RSVP with the donor ORP pivot,
 /// punctuation dwell, the cursor law across mode switches (ADR-0002), and
@@ -29,8 +31,7 @@ void main() {
       {String title = 'Five Words'}) async {
     await tester.pumpWidget(TrellisApp(db: db));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Ada'));
-    await tester.pumpAndSettle();
+    await pickReader(tester, 'Ada');
     await tester.tap(find.text(title));
     await tester.pumpAndSettle();
   }
@@ -69,7 +70,7 @@ void main() {
     expect(tester.widget<Text>(find.byKey(const Key('rsvp-bef'))).data, 'O');
     final piv = tester.widget<Text>(find.byKey(const Key('rsvp-piv')));
     expect(piv.data, 'n');
-    expect(piv.style?.color, const Color(0xFFA85040));
+    expect(piv.style?.color, OhColors.hearth500);
     expect(tester.widget<Text>(find.byKey(const Key('rsvp-aft'))).data, 'e');
   });
 
@@ -185,5 +186,41 @@ void main() {
 
     tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pump();
+  });
+
+  testWidgets('the reader remembers how you read: mode, speed and nearby '
+      'words come back on the next open (persona A1)', (tester) async {
+    await seed('One two three four five.');
+    await openReader(tester);
+
+    // Words at 450 with nearby words on, then Scroll.
+    final slider = tester.widget<Slider>(find.byKey(const Key('wpm-slider')));
+    slider.onChanged!(450);
+    slider.onChangeEnd!(450);
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('parafoveal-toggle')));
+    await tester.pumpAndSettle();
+    await switchMode(tester, 'mode-item-scroll');
+
+    // Leave and come back.
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Five Words'));
+    await tester.pumpAndSettle();
+
+    expect(
+        find.descendant(
+            of: find.byKey(const Key('mode-toggle')),
+            matching: find.text('Scroll')),
+        findsOneWidget,
+        reason: 'opens in the mode it was left in, named as a word');
+    await switchMode(tester, 'mode-item-words');
+    expect(tester.widget<Slider>(find.byKey(const Key('wpm-slider'))).value,
+        450);
+    expect(
+        tester
+            .widget<FilterChip>(find.byKey(const Key('parafoveal-toggle')))
+            .selected,
+        isTrue);
   });
 }

@@ -96,9 +96,10 @@ void main() {
     expect(tts.utterances, hasLength(3));
     pos = await savedPosition();
     expect(pos!.segmentIdx, 2);
-    expect(tester
-        .widget<IconButton>(find.byKey(const Key('speak-toggle')))
-        .isSelected, isFalse);
+    // Speaking ended: the bar's word is back to the offer, not "Stop".
+    expect(
+        tester.widget<OhBarAction>(find.byKey(const Key('speak-toggle'))).label,
+        'Read aloud');
   });
 
   testWidgets('speech reads the layer the reader is showing',
@@ -110,6 +111,8 @@ void main() {
     ]);
     await pumpReader(tester);
 
+    await tester.tap(find.byKey(const Key('reader-overflow')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('lang-toggle')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('speak-toggle')));

@@ -7,7 +7,7 @@ import 'parent_pin.dart';
 /// recovery exists would make the gate a fiction.
 const String kPinNoRecoveryNotice =
     'If the PIN is forgotten there is no recovery: it can only be removed '
-    "with the current PIN, or by clearing the app's data. Reading is never "
+    "with the current PIN, or by clearing the app’s data. Reading is never "
     'locked.';
 
 /// THE one PIN chokepoint. True means the door is open: either no PIN is
@@ -68,7 +68,7 @@ class _PinEntryDialogState extends State<_PinEntryDialog> {
             onSubmitted: (_) => _unlock(),
             decoration: InputDecoration(
                 labelText: 'PIN',
-                errorText: _wrong ? "That's not the PIN." : null),
+                errorText: _wrong ? "That’s not the PIN." : null),
           ),
           const SizedBox(height: 12),
           Text(kPinNoRecoveryNotice,
@@ -128,7 +128,7 @@ class _SetPinDialogState extends State<_SetPinDialog> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Text(
-              'The PIN protects profile changes and the parent dashboard — '
+              'The PIN protects profile changes and the parent dashboard, '
               'never reading or studying.',
               style: Theme.of(context).textTheme.bodyMedium),
           const SizedBox(height: 12),
@@ -221,7 +221,7 @@ class _CurrentPinDialogState extends State<_CurrentPinDialog> {
       Navigator.of(context).pop();
     } else {
       setState(() {
-        _currentError = "That's not the current PIN.";
+        _currentError = "That’s not the current PIN.";
         _nextError = null;
       });
     }
@@ -284,6 +284,6 @@ class _CurrentPinDialogState extends State<_CurrentPinDialog> {
 /// Null when [next] is usable and confirmed; the calm reason otherwise.
 String? validateNewPin(String next, String confirm) {
   if (next.length < 4) return 'Use at least 4 characters.';
-  if (next != confirm) return "The PINs don't match.";
+  if (next != confirm) return "The PINs don’t match.";
   return null;
 }

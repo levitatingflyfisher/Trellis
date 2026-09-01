@@ -86,12 +86,12 @@ Future<GutendexSearchOutcome> searchGutendex({
         headers: const {'accept': 'application/json'}, timeout: timeout);
   } on TimeoutException {
     return const GutendexSearchRefused(
-        'The catalogue took too long to answer — try again later.');
+        'The catalogue took too long to answer. Try again later.');
   } on CommsException catch (e) {
     return GutendexSearchRefused(e.message);
   } catch (_) {
     return const GutendexSearchRefused(
-        "The catalogue couldn't be reached right now.");
+        "The catalogue couldn’t be reached right now.");
   }
   if (!response.ok) {
     return GutendexSearchRefused(
@@ -115,7 +115,7 @@ Future<GutendexSearchOutcome> searchGutendex({
         decodeResponseBytes(bytes, response.headers['content-type'] ?? '')));
   } on FormatException {
     return const GutendexSearchRefused(
-        "The catalogue's answer couldn't be read.");
+        "The catalogue’s answer couldn’t be read.");
   }
 }
 
@@ -132,7 +132,7 @@ Future<GutenbergBookOutcome> fetchGutenbergBook({
   final raw = book.importUrl;
   if (raw == null) {
     return const GutenbergBookRefused(
-        'This edition has no readable text — try another result.');
+        'This edition has no readable text. Try another result.');
   }
   final Uri url;
   try {
@@ -149,12 +149,12 @@ Future<GutenbergBookOutcome> fetchGutenbergBook({
         timeout: timeout);
   } on TimeoutException {
     return const GutenbergBookRefused(
-        'The download took too long — try again later.');
+        'The download took too long. Try again later.');
   } on CommsException catch (e) {
     return GutenbergBookRefused(e.message);
   } catch (_) {
     return const GutenbergBookRefused(
-        "That book couldn't be reached right now.");
+        "That book couldn’t be reached right now.");
   }
   if (!response.ok) {
     return GutenbergBookRefused(
@@ -171,7 +171,7 @@ Future<GutenbergBookOutcome> fetchGutenbergBook({
     return GutenbergBookRefused(e.message);
   } on TimeoutException {
     return const GutenbergBookRefused(
-        'The download took too long — try again later.');
+        'The download took too long. Try again later.');
   } catch (_) {
     return const GutenbergBookRefused(
         'The book stopped arriving before it finished.');

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../db/database.dart';
 import 'feeds_repository.dart';
+import '../shared/capped_body.dart';
 
 /// One feed's own episodes, newest first — and the RFC 5005 escape hatch:
 /// a quiet "Fetch older episodes" action when the last refresh found an
@@ -73,14 +74,14 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
         title: Text(_feed.title.isEmpty ? _feed.url : _feed.title,
             overflow: TextOverflow.ellipsis),
       ),
-      body: switch (episodes) {
+      body: CappedBody(child: switch (episodes) {
         null => const Center(child: CircularProgressIndicator()),
         _ => ListView.builder(
             itemCount: episodes.length + 1,
             itemBuilder: (_, i) =>
                 i < episodes.length ? _episodeTile(episodes[i]) : _footer(),
           ),
-      },
+      }),
     );
   }
 

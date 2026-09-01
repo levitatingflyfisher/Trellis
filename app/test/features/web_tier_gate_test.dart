@@ -13,6 +13,7 @@ import 'package:trellis/services/device_services.dart' show WebFetchLane;
 import '../support/fake_player.dart';
 import '../support/fake_services.dart';
 import '../support/scripted_fetcher.dart';
+import '../support/pick_reader.dart';
 
 /// The web-tier honesty gates (proposal-2 §1): the PWA reads, studies,
 /// listens and backs up — local ML rides the installed app. Where that is
@@ -65,8 +66,7 @@ void main() {
         createPlayer: () => player,
         services: testServices(tmp, localMlAvailable: localMlAvailable)));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Ada'));
-    await tester.pumpAndSettle();
+    await pickReader(tester, 'Ada');
   }
 
   testWidgets(
@@ -74,7 +74,7 @@ void main() {
       'menu items', (t) async {
     final ids = await seedEpisode();
     await pumpApp(t, localMlAvailable: false);
-    await t.tap(find.text('River'));
+    await t.tap(find.text('Inbox'));
     await t.pumpAndSettle();
 
     expect(find.byKey(Key('play-${ids.workId}')), findsOneWidget);
@@ -93,7 +93,7 @@ void main() {
       (t) async {
     final ids = await seedEpisode();
     await pumpApp(t, localMlAvailable: true);
-    await t.tap(find.text('River'));
+    await t.tap(find.text('Inbox'));
     await t.pumpAndSettle();
 
     await t.tap(find.byKey(Key('menu-${ids.workId}')));
@@ -105,6 +105,8 @@ void main() {
       (t) async {
     await seedEpisode();
     await pumpApp(t, localMlAvailable: false);
+    await t.tap(find.byKey(const Key('library-more')));
+    await t.pumpAndSettle();
     await t.tap(find.byKey(const Key('open-models')));
     await t.pumpAndSettle();
 
@@ -118,6 +120,8 @@ void main() {
       (t) async {
     await seedEpisode();
     await pumpApp(t, localMlAvailable: true);
+    await t.tap(find.byKey(const Key('library-more')));
+    await t.pumpAndSettle();
     await t.tap(find.byKey(const Key('open-models')));
     await t.pumpAndSettle();
 

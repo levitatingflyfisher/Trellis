@@ -13,7 +13,10 @@ import 'dart:typed_data';
 import 'package:comms_core/comms_core.dart';
 import 'package:dio/dio.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sanctuary_backup_ui/sanctuary_backup_ui.dart'
+    show AppScopedSecureKeyStore;
 import 'package:trellis/bootstrap/bootstrap_web.dart' as web;
+import 'package:trellis/features/backup/backup_custody.dart';
 import 'package:trellis/features/models/model_store.dart';
 import 'package:trellis/features/transcribe/decoder.dart';
 import 'package:trellis/features/transcribe/foreground_gate.dart';
@@ -63,6 +66,15 @@ class _CapturingAdapter implements HttpClientAdapter {
 }
 
 void main() {
+  test('the PWA keeps its recovery words under its own name', () {
+    // Every fleet PWA shares one origin, so one localStorage: with the
+    // default key names, words confirmed in one app would be Trellis's too
+    // (sanctuary_backup_ui 0.3.0's appScopedKeyStoreOverride, applied to
+    // the one store Trellis reads).
+    final custody = web.webServices().backupCustody! as SecureBackupCustody;
+    expect(custody.keys, isA<AppScopedSecureKeyStore>());
+  });
+
   test('web services are built from web-safe parts', () {
     final s = web.webServices();
     // No weighable database file on the web (IndexedDB/OPFS).

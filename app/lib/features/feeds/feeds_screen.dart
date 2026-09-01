@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:comms_core/comms_core.dart' as comms;
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:openhearth_design/openhearth_design.dart';
 
 import '../../db/database.dart';
 import '../../services/picked_save.dart';
@@ -12,6 +13,7 @@ import 'feed_detail_screen.dart';
 import 'feed_settings_screen.dart';
 import 'feeds_repository.dart';
 import 'subscribe_screen.dart';
+import '../shared/capped_body.dart';
 
 /// The platform seams for OPML files — injectable so widget tests never
 /// touch a platform channel. Pure parsing/serialization is comms_core's.
@@ -75,6 +77,26 @@ class _FeedsScreenState extends State<FeedsScreen> {
   List<Feed>? _feeds;
   bool _dspGlobalDefault = false;
 
+  /// Feeds unfollowed but still on offer to Undo (fleet delete ruling:
+  /// a deliberate unfollow doesn't ask; its Undo never times out). The
+  /// cascade runs only when the offer is let go.
+  final Set<int> _unfollowing = {};
+  final OhUndoController _undo = OhUndoController();
+
+  @override
+  void dispose() {
+    _undo.dispose();
+    super.dispose();
+  }
+
+  /// Leaving lets a pending unfollow go, and the cascade finishes before the
+  /// route pops: the Inbox reloads as soon as it is back and must not show
+  /// the unfollowed feed's items.
+  Future<void> _leave() async {
+    await _undo.dismiss();
+    if (mounted) Navigator.of(context).pop();
+  }
+
   @override
   void initState() {
     super.initState();
@@ -119,31 +141,21 @@ class _FeedsScreenState extends State<FeedsScreen> {
     if (followed == true) await _load();
   }
 
-  Future<void> _unfollow(Feed feed) async {
+  void _unfollow(Feed feed) {
     final name = feed.title.isEmpty ? feed.url : feed.title;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialog) => AlertDialog(
-        title: Text("Unfollow '$name'?"),
-        content: const Text(
-          'Its unread river items go too. Anything you pinned or '
-          'finished stays in the library.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialog, false),
-            child: const Text('Keep following'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.pop(dialog, true),
-            child: const Text('Unfollow'),
-          ),
-        ],
-      ),
+    setState(() => _unfollowing.add(feed.id));
+    _undo.show(
+      message: "Unfollowed '$name'. Its unread items go too; anything you "
+          'kept stays in the library.',
+      onUndo: () async {
+        if (mounted) setState(() => _unfollowing.remove(feed.id));
+      },
+      onCommit: () async {
+        await widget.db.feedsDao.deleteFeedCascade(feed.id);
+        _unfollowing.remove(feed.id);
+        if (mounted) await _load();
+      },
     );
-    if (confirmed != true) return;
-    await widget.db.feedsDao.deleteFeedCascade(feed.id);
-    await _load();
   }
 
   Future<void> _openSettings(Feed feed) async {
@@ -162,7 +174,9 @@ class _FeedsScreenState extends State<FeedsScreen> {
     try {
       outlines = comms.parseOpml(utf8.decode(bytes, allowMalformed: true));
     } on comms.OpmlParseException catch (e) {
-      _toast(e.message);
+      // The parser's words ("Invalid OPML file") are for the log.
+      debugPrint('OPML import refused: ${e.message}');
+      _toast("That file isn’t an OPML podcast list Trellis can read.");
       return;
     }
     if (outlines.isEmpty) {
@@ -215,51 +229,64 @@ class _FeedsScreenState extends State<FeedsScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final feeds = _feeds;
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Feeds'),
-        actions: [
-          PopupMenuButton<String>(
-            key: const Key('opml-menu'),
-            tooltip: 'More',
-            onSelected: (v) => switch (v) {
-              'import' => _importOpml(),
-              'export' => _exportOpml(),
-              _ => _toggleDspGlobalDefault(),
-            },
-            itemBuilder: (_) => [
-              const PopupMenuItem(value: 'import', child: Text('Import OPML')),
-              const PopupMenuItem(value: 'export', child: Text('Export OPML')),
-              if (widget.localMlAvailable)
-                CheckedPopupMenuItem<String>(
-                  key: const Key('dsp-global-default-toggle'),
-                  value: 'dsp-default',
-                  checked: _dspGlobalDefault,
-                  child: const Text(
-                    'Trim silence & even out volume by default',
-                  ),
-                ),
-            ],
-          ),
-        ],
-      ),
-      floatingActionButton: (feeds == null || feeds.isEmpty)
-          ? null
-          : FloatingActionButton.extended(
-              onPressed: _follow,
-              icon: const Icon(Icons.add),
-              label: const Text('Follow'),
-            ),
-      body: switch (feeds) {
-        null => const Center(child: CircularProgressIndicator()),
-        [] => _EmptyFeeds(onFollow: _follow),
-        _ => ListView.builder(
-          padding: const EdgeInsets.only(bottom: 88),
-          itemCount: feeds.length,
-          itemBuilder: (_, i) => _feedTile(feeds[i]),
-        ),
+    final feeds = _feeds == null
+        ? null
+        : [
+            for (final f in _feeds!)
+              if (!_unfollowing.contains(f.id)) f
+          ];
+    return PopScope(
+      canPop: _unfollowing.isEmpty,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _leave();
       },
+      child: Scaffold(
+        bottomSheet: OhUndoBar(controller: _undo),
+        appBar: AppBar(
+          title: const Text('Feeds'),
+          actions: [
+            OhBarActions(children: [
+            OhBarOverflow<String>(
+              key: const Key('opml-menu'),
+              onSelected: (v) => switch (v) {
+                'import' => _importOpml(),
+                'export' => _exportOpml(),
+                _ => _toggleDspGlobalDefault(),
+              },
+              itemBuilder: (_) => [
+                const PopupMenuItem(value: 'import', child: Text('Import OPML')),
+                const PopupMenuItem(value: 'export', child: Text('Export OPML')),
+                if (widget.localMlAvailable)
+                  CheckedPopupMenuItem<String>(
+                    key: const Key('dsp-global-default-toggle'),
+                    value: 'dsp-default',
+                    checked: _dspGlobalDefault,
+                    child: const Text(
+                      'Trim silence & even out volume by default',
+                    ),
+                  ),
+              ],
+            ),
+            ]),
+          ],
+        ),
+        floatingActionButton: (feeds == null || feeds.isEmpty)
+            ? null
+            : FloatingActionButton.extended(
+                onPressed: _follow,
+                icon: const Icon(Icons.add),
+                label: const Text('Follow'),
+              ),
+        body: CappedBody(child: switch (feeds) {
+          null => const Center(child: CircularProgressIndicator()),
+          [] => _EmptyFeeds(onFollow: _follow),
+          _ => ListView.builder(
+            padding: const EdgeInsets.only(bottom: 88),
+            itemCount: feeds.length,
+            itemBuilder: (_, i) => _feedTile(feeds[i]),
+          ),
+        }),
+      ),
     );
   }
 

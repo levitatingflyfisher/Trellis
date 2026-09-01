@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/main.dart';
+import '../support/pick_reader.dart';
 
 /// The alpha loop's front half: first-run profile creation into a calm empty
 /// library, paste intake, and the library's pin/delete hands.
@@ -16,30 +17,70 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('first run: create a profile, land in the inviting empty library',
-      (tester) async {
+  testWidgets('first run opens into the inviting empty library, with no '
+      'name to type first (operator ruling 48)', (tester) async {
     await pumpApp(tester);
 
-    expect(find.text("Who's reading?"), findsOneWidget);
-    await tester.enterText(find.byKey(const Key('profile-name')), 'Ada');
-    await tester.tap(find.text('Start reading'));
-    await tester.pumpAndSettle();
-
+    expect(find.text('Who’s reading?'), findsNothing);
     // The calm empty state invites intake (ADR-0003: no guilt, an offer).
     expect(find.text('Nothing on the trellis yet.'), findsOneWidget);
     expect(find.text('Paste text'), findsOneWidget);
     expect(find.text('Import an EPUB'), findsOneWidget);
 
     final created = await db.profilesDao.all();
-    expect(created.single.name, 'Ada');
+    expect(created.single.name, 'Reader');
+  });
+
+  testWidgets('a cold launch reopens the last reader; a stale one falls back '
+      'to the picker', (tester) async {
+    await db.profilesDao.create('Ada');
+    final blaise = await db.profilesDao.create('Blaise');
+    await pumpApp(tester);
+    await pickReader(tester, 'Blaise');
+    expect(await db.deviceSettingsDao.lastProfileId(), blaise);
+
+    // Relaunch: straight into Blaise's library, no tollgate (audit rank 5).
+    await tester.pumpWidget(const SizedBox());
+    await pumpApp(tester);
+    expect(find.text('Who’s reading?'), findsNothing);
+    await tester.tap(find.byKey(const Key('library-more')));
+    await tester.pumpAndSettle();
+    expect(find.text('Switch reader (Blaise)'), findsOneWidget);
+    await tester.tapAt(const Offset(5, 5));
+    await tester.pumpAndSettle();
+
+    // Blaise removed elsewhere (or a restore replaced everyone): the
+    // remembered id is stale, and two readers remain a real choice.
+    await db.householdDao.deleteProfileCascade(blaise);
+    await db.profilesDao.create('Cy');
+    await tester.pumpWidget(const SizedBox());
+    await pumpApp(tester);
+    expect(find.text('Who’s reading?'), findsOneWidget);
+  });
+
+  testWidgets('adding a reader: the button is live only once there is a name',
+      (tester) async {
+    await db.profilesDao.create('Ada');
+    await db.profilesDao.create('Blaise');
+    await pumpApp(tester);
+    await tester.tap(find.text('Add a reader'));
+    await tester.pumpAndSettle();
+
+    FilledButton add() => tester.widget<FilledButton>(
+        find.ancestor(of: find.text('Add reader'), matching: find.byType(FilledButton)));
+    expect(add().onPressed, isNull);
+    expect(find.text('Type a name to add this reader.'), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('profile-name')), 'Cy');
+    await tester.pump();
+    expect(add().onPressed, isNotNull);
+    await tester.tap(find.text('Add reader'));
+    await tester.pumpAndSettle();
+    expect(find.text('Nothing on the trellis yet.'), findsOneWidget);
   });
 
   testWidgets('paste intake: parsed text appears as a work with its title',
       (tester) async {
-    await pumpApp(tester);
-    await tester.enterText(find.byKey(const Key('profile-name')), 'Ada');
-    await tester.tap(find.text('Start reading'));
-    await tester.pumpAndSettle();
+    await pumpApp(tester); // a first launch opens the new reader's Library
 
     await tester.tap(find.text('Paste text'));
     await tester.pumpAndSettle();
@@ -62,10 +103,7 @@ void main() {
 
   testWidgets('a pasted work with no title keeps the parser-detected title',
       (tester) async {
-    await pumpApp(tester);
-    await tester.enterText(find.byKey(const Key('profile-name')), 'Ada');
-    await tester.tap(find.text('Start reading'));
-    await tester.pumpAndSettle();
+    await pumpApp(tester); // a first launch opens the new reader's Library
 
     await tester.tap(find.text('Paste text'));
     await tester.pumpAndSettle();
@@ -95,8 +133,7 @@ void main() {
         firstSeenEpochDay: 100);
 
     await pumpApp(tester);
-    await tester.tap(find.text('Ada'));
-    await tester.pumpAndSettle();
+    await pickReader(tester, 'Ada');
 
     // Newest first by default: Second above First.
     var firstY = tester.getTopLeft(find.text('First')).dy;
@@ -112,14 +149,29 @@ void main() {
     secondY = tester.getTopLeft(find.text('Second')).dy;
     expect(firstY, lessThan(secondY));
 
-    // Delete Second, confirming calmly.
+    // Remove Second: a deliberate menu choice, so no dialog. It leaves the
+    // list at once and a lasting Undo brings it back.
     await tester.tap(find.byKey(Key('work-menu-$second')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Remove'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Remove from library'));
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(find.text('Second'), findsNothing);
+    expect(find.text("Removed 'Second'"), findsOneWidget);
+    await tester.pump(const Duration(hours: 1));
+    expect(find.text('Undo'), findsOneWidget, reason: 'Undo never expires');
+    await tester.tap(find.text('Undo'));
     await tester.pumpAndSettle();
+    expect(find.text('Second'), findsOneWidget);
+    expect(await db.spineDao.worksOf(profileId), hasLength(2));
 
+    // Removed again and let go (Dismiss): now it is gone for good.
+    await tester.tap(find.byKey(Key('work-menu-$second')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Remove'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Dismiss'));
+    await tester.pumpAndSettle();
     expect(find.text('Second'), findsNothing);
     expect((await db.spineDao.worksOf(profileId)).single.title, 'First');
   });
@@ -129,14 +181,15 @@ void main() {
     await db.profilesDao.create('Blaise');
 
     await pumpApp(tester);
-    expect(find.text("Who's reading?"), findsOneWidget);
-    await tester.tap(find.text('Blaise'));
-    await tester.pumpAndSettle();
+    expect(find.text('Who’s reading?'), findsOneWidget);
+    await pickReader(tester, 'Blaise');
     expect(find.text('Nothing on the trellis yet.'), findsOneWidget);
 
+    await tester.tap(find.byKey(const Key('library-more')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('profile-switcher')));
     await tester.pumpAndSettle();
-    expect(find.text("Who's reading?"), findsOneWidget);
+    expect(find.text('Who’s reading?'), findsOneWidget);
     expect(find.text('Ada'), findsOneWidget);
   });
 
@@ -155,8 +208,7 @@ void main() {
           firstSeenEpochDay: epochDay);
 
       await pumpApp(tester);
-      await tester.tap(find.text('Ada'));
-      await tester.pumpAndSettle();
+      await pickReader(tester, 'Ada');
 
       expect(find.text('5 Aug'), findsOneWidget);
     });
@@ -185,8 +237,7 @@ void main() {
           publishedAtMs: DateTime(2026, 1, 1).millisecondsSinceEpoch);
 
       await pumpApp(tester);
-      await tester.tap(find.text('Ada'));
-      await tester.pumpAndSettle();
+      await pickReader(tester, 'Ada');
 
       expect(find.text('1 Jan'), findsOneWidget);
     });

@@ -19,6 +19,7 @@ import '../models/consent.dart';
 import '../study/course_import.dart';
 import 'brain_labels.dart';
 import 'brain_store.dart';
+import '../shared/capped_body.dart';
 
 /// The overflow-menu entry point. Shows the calm one-line explanation when
 /// no Brain is configured; otherwise walks consent (cloud tiers only) and
@@ -45,7 +46,7 @@ Future<void> openDistillFlow(
         final ok = await confirmDownload(context, items: [
           DownloadItem(
               'Send the text of “${work.title}” to ${use.egressHost} to '
-              'distill a course — the reply size is unknown until it '
+              'distill a course. The reply size is unknown until it '
               'arrives'),
         ]);
         if (!ok || !context.mounted) return;
@@ -118,7 +119,7 @@ class _DistillScreenState extends State<DistillScreen> {
     if (source.isEmpty) {
       if (mounted) {
         setState(
-            () => _error = 'Nothing to distill — this work has no text yet.');
+            () => _error = 'Nothing to distill: this work has no text yet.');
       }
       return;
     }
@@ -157,7 +158,7 @@ class _DistillScreenState extends State<DistillScreen> {
     final error = _error;
     return Scaffold(
       appBar: AppBar(title: const Text('Distill')),
-      body: SafeArea(
+      body: CappedBody(child: SafeArea(
         child: Center(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(24),
@@ -171,7 +172,7 @@ class _DistillScreenState extends State<DistillScreen> {
             ),
           ),
         ),
-      ),
+      )),
     );
   }
 
@@ -179,7 +180,7 @@ class _DistillScreenState extends State<DistillScreen> {
     final theme = Theme.of(context);
     final status = _attempt <= 1
         ? 'Asking the model…'
-        : 'Round $_attempt — repairing the course…';
+        : 'Round $_attempt: repairing the course…';
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [

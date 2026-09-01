@@ -8,6 +8,7 @@ import 'db/database.dart';
 import 'features/player/episode_player.dart';
 import 'features/player/just_audio_player.dart';
 import 'features/profiles/home_flow.dart';
+import 'features/settings/theme_preference.dart';
 import 'net/io_fetcher.dart';
 import 'services/device_services.dart';
 
@@ -46,11 +47,19 @@ Future<void> main() async {
     notes: bootNotes,
   );
 
+  // Read before the first frame, so a chosen theme never flashes the
+  // other one first, but only within a short deadline: a slow database
+  // open must not keep the first frame from painting (1.4.0). On a slow
+  // start this is null and TrellisApp applies the choice when it arrives.
+  final db = createDb();
+  final theme = await ThemePreferenceController.readBeforeFirstFrame(db);
+
   runApp(TrellisApp(
-    db: createDb(),
+    db: db,
     fetcher: createFetcher(lane: services.webFetchLane),
     services: services,
     bootNotes: bootNotes,
+    initialTheme: theme,
   ));
 }
 
@@ -60,7 +69,7 @@ Future<void> main() async {
 /// are passed down — tests inject `AppDatabase.forTesting`, a
 /// ScriptedFetcher, a FakeEpisodePlayer and fake DeviceServices, so no test
 /// ever touches a socket or a platform channel.
-class TrellisApp extends StatelessWidget {
+class TrellisApp extends StatefulWidget {
   final AppDatabase db;
   final HttpFetcher fetcher;
   final EpisodePlayer Function() createPlayer;
@@ -70,34 +79,67 @@ class TrellisApp extends StatelessWidget {
   /// swallowed. Empty on an ordinary start.
   final List<String> bootNotes;
 
+  /// The theme choice read before `runApp`; when null (widget tests) the
+  /// app reads it itself on its first frame.
+  final OhThemeModePreference? initialTheme;
+
   TrellisApp(
       {super.key,
       required this.db,
       HttpFetcher? fetcher,
       EpisodePlayer Function()? createPlayer,
       DeviceServices? services,
-      this.bootNotes = const []})
+      this.bootNotes = const [],
+      this.initialTheme})
       : fetcher = fetcher ?? IoHttpFetcher(),
         createPlayer = createPlayer ?? (() => JustAudioEpisodePlayer()),
         services = services ?? DeviceServices.detached();
 
   @override
+  State<TrellisApp> createState() => _TrellisAppState();
+}
+
+class _TrellisAppState extends State<TrellisApp> {
+  late final ThemePreferenceController _theme = ThemePreferenceController(
+      widget.db, widget.initialTheme ?? OhThemeModePreference.system);
+
+  @override
+  void initState() {
+    super.initState();
+    if (widget.initialTheme == null) _theme.load();
+  }
+
+  @override
+  void dispose() {
+    _theme.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Trellis',
-      // The ribbon overlapped the appbar's profile chip (visual tour).
-      debugShowCheckedModeBanner: false,
-      // The wall by day and at dusk (proposal-2 §12): the fleet tri-theme,
-      // hearth terracotta on warm linen, from the canonical tokens (C1).
-      theme: OhTheme.light(),
-      darkTheme: OhTheme.hearthDark(),
-      home: BootNotice(
-        notes: bootNotes,
-        child: HomeFlow(
-            db: db,
-            fetcher: fetcher,
-            createPlayer: createPlayer,
-            services: services),
+    return ThemePreferenceScope(
+      controller: _theme,
+      child: ListenableBuilder(
+        listenable: _theme,
+        builder: (context, _) => MaterialApp(
+          title: 'Trellis',
+          // The ribbon overlapped the appbar's profile chip (visual tour).
+          debugShowCheckedModeBanner: false,
+          // The wall by day and at dusk (proposal-2 §12): hearth
+          // terracotta on warm linen, from the canonical tokens (C1). Light,
+          // dark or follow the phone, the person's choice (fleet ruling).
+          theme: OhTheme.light(),
+          darkTheme: OhTheme.hearthDark(),
+          themeMode: _theme.value.themeMode,
+          home: BootNotice(
+            notes: widget.bootNotes,
+            child: HomeFlow(
+                db: widget.db,
+                fetcher: widget.fetcher,
+                createPlayer: widget.createPlayer,
+                services: widget.services),
+          ),
+        ),
       ),
     );
   }

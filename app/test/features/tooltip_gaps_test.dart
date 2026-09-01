@@ -1,6 +1,7 @@
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:openhearth_design/openhearth_design.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/feeds/feeds_repository.dart';
 import 'package:trellis/features/feeds/feeds_screen.dart';
@@ -66,10 +67,14 @@ void main() {
     ));
     await tester.pumpAndSettle();
 
+    // The OPML menu is the bar's worded More menu: its name is on screen.
     final opmlMenu = tester
-        .widget<PopupMenuButton<String>>(find.byKey(const Key('opml-menu')));
-    expect(opmlMenu.tooltip, isNotNull);
-    expect(opmlMenu.tooltip, isNotEmpty);
+        .widget<OhBarOverflow<String>>(find.byKey(const Key('opml-menu')));
+    expect(opmlMenu.label, isNotEmpty);
+    expect(find.descendant(
+            of: find.byKey(const Key('opml-menu')),
+            matching: find.text(opmlMenu.label)),
+        findsOneWidget);
 
     final feedMenu = tester.widget<PopupMenuButton<String>>(
         find.byKey(Key('feed-menu-${feed.id}')));

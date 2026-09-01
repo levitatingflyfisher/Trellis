@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../db/database.dart';
+import '../shared/capped_body.dart';
 
 /// The Up Next queue's own small view: what's queued, in play order, with
 /// a remove verb per row and drag to reorder. Reachable from the mini
@@ -52,7 +53,7 @@ class _QueueScreenState extends State<QueueScreen> {
     final entries = _entries;
     return Scaffold(
       appBar: AppBar(title: const Text('Up Next')),
-      body: switch (entries) {
+      body: CappedBody(child: switch (entries) {
         null => const Center(child: CircularProgressIndicator()),
         [] => const Center(child: Text('Nothing queued yet.')),
         _ => ReorderableListView.builder(
@@ -74,7 +75,7 @@ class _QueueScreenState extends State<QueueScreen> {
               );
             },
           ),
-      },
+      }),
     );
   }
 }

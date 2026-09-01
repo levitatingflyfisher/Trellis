@@ -247,7 +247,7 @@ void main() {
         tester
             .widget<Text>(find.byKey(const Key('gutenberg-error')))
             .data,
-        "This edition has no readable text — try another result.");
+        'This edition has no readable text. Try another result.');
   });
 
   testWidgets('a search error yields a calm sentence, never a stack',
@@ -256,6 +256,7 @@ void main() {
         tester, handler: (u, h) => textResponse('down', status: 503));
     await search(tester, 'anything');
 
+    expect(find.byIcon(Icons.error_outline), findsOneWidget);
     expect(
         tester.widget<Text>(find.byKey(const Key('gutenberg-error'))).data,
         'The catalogue answered with an error (503).');

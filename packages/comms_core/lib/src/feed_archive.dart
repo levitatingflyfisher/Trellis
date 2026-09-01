@@ -129,10 +129,10 @@ Future<FeedArchiveResult> walkFeedArchive(
         pagesFetched: pagesFetched,
         stopReason: ArchiveWalkStopReason.fetchFailed,
         message: pagesFetched == 0
-            ? "The archive couldn't be reached — no older episodes were "
+            ? 'The archive couldn’t be reached, so no older episodes were '
                 'fetched.'
             : 'Stopped after $pagesFetched archive '
-                "${_pageWord(pagesFetched)} — the next one couldn't be "
+                '${_pageWord(pagesFetched)}: the next one couldn’t be '
                 'reached.',
       );
     }

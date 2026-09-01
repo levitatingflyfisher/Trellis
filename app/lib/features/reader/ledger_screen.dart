@@ -1,12 +1,15 @@
 import 'package:flutter/material.dart';
+import 'package:openhearth_design/openhearth_design.dart';
 
 import '../../db/database.dart';
+import '../shared/capped_body.dart';
 
 /// One profile's word ledger, newest catch first. The collection is the
 /// user's own (ADR-0003 law 2: promotion requires the hand) — so there is
-/// nothing here but the words: no counts, no review nags, and removal is one
-/// swipe or one tap away, undo-free because the dao's add is idempotent and
-/// a lost word is one long-press from coming back.
+/// nothing here but the words: no counts, no review nags. Removal follows
+/// the fleet's delete ruling: the Remove button is deliberate, so it acts
+/// at once with an Undo that never times out; a swipe is an easy gesture,
+/// so it asks first.
 class LedgerScreen extends StatefulWidget {
   final AppDatabase db;
   final int profileId;
@@ -19,6 +22,17 @@ class LedgerScreen extends StatefulWidget {
 
 class _LedgerScreenState extends State<LedgerScreen> {
   List<WordLedgerRow>? _rows;
+
+  /// Words removed with the button but still on offer to Undo; the row is
+  /// deleted only when the offer is let go.
+  final Set<int> _removing = {};
+  final OhUndoController _undo = OhUndoController();
+
+  @override
+  void dispose() {
+    _undo.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -37,19 +51,40 @@ class _LedgerScreenState extends State<LedgerScreen> {
     await _load();
   }
 
+  void _removeWithUndo(WordLedgerRow row) {
+    setState(() => _removing.add(row.id));
+    _undo.show(
+      message: "Removed '${row.word}'",
+      onUndo: () async {
+        if (mounted) setState(() => _removing.remove(row.id));
+      },
+      onCommit: () async {
+        await widget.db.ledgerDao.remove(row.id);
+        _removing.remove(row.id);
+        if (mounted) await _load();
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
-    final rows = _rows;
+    final rows = _rows == null
+        ? null
+        : [
+            for (final r in _rows!)
+              if (!_removing.contains(r.id)) r
+          ];
     return Scaffold(
+      bottomSheet: OhUndoBar(controller: _undo),
       appBar: AppBar(title: const Text('Word ledger')),
-      body: switch (rows) {
+      body: CappedBody(child: switch (rows) {
         null => const Center(child: CircularProgressIndicator()),
         [] => const _EmptyState(),
         _ => ListView.builder(
             itemCount: rows.length,
             itemBuilder: (_, i) => _wordTile(rows[i]),
           ),
-      },
+      }),
     );
   }
 
@@ -57,6 +92,13 @@ class _LedgerScreenState extends State<LedgerScreen> {
     return Dismissible(
       key: ValueKey('ledger-row-${row.id}'),
       direction: DismissDirection.endToStart,
+      confirmDismiss: (_) => showOhConfirm(
+        context,
+        title: "Remove '${row.word}' from your words?",
+        confirmLabel: "Remove '${row.word}'",
+        cancelLabel: 'Keep',
+        destructive: true,
+      ),
       onDismissed: (_) => _remove(row),
       background: Container(
         color: Theme.of(context).colorScheme.errorContainer,
@@ -74,7 +116,7 @@ class _LedgerScreenState extends State<LedgerScreen> {
           key: Key('ledger-remove-${row.id}'),
           tooltip: 'Remove',
           icon: const Icon(Icons.close),
-          onPressed: () => _remove(row),
+          onPressed: () => _removeWithUndo(row),
         ),
       ),
     );

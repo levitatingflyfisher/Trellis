@@ -95,7 +95,7 @@ void main() {
         home: CapturesScreen(db: db, controller: controller, work: work)));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('transcript'), findsOneWidget);
+    expect(find.textContaining('Transcript'), findsOneWidget);
   });
 
   testWidgets('tapping a capture jumps playback to its exact position',

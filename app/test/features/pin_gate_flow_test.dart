@@ -25,6 +25,17 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+  /// A one-reader household opens straight into its Library; the picker
+  /// (with its Add a reader and Parent dashboard doors) is one Switch
+  /// reader away.
+  Future<void> toPicker(WidgetTester tester) async {
+    if (find.text('Who’s reading?').evaluate().isNotEmpty) return;
+    await tester.tap(find.byKey(const Key('library-more')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('profile-switcher')));
+    await tester.pumpAndSettle();
+  }
+
   testWidgets('kids can always read: picking a profile never asks for a PIN',
       (tester) async {
     await db.profilesDao.create('Ada');
@@ -44,6 +55,7 @@ void main() {
       (tester) async {
     await db.profilesDao.create('Ada');
     await pumpApp(tester);
+    await toPicker(tester);
 
     await tester.tap(find.text('Parent dashboard'));
     await tester.pumpAndSettle();
@@ -57,6 +69,7 @@ void main() {
     await db.profilesDao.create('Ada');
     await ParentPinService(db).enable('1234');
     await pumpApp(tester);
+    await toPicker(tester);
 
     await tester.tap(find.text('Parent dashboard'));
     await tester.pumpAndSettle();
@@ -82,6 +95,7 @@ void main() {
     await db.profilesDao.create('Ada');
     await ParentPinService(db).enable('1234');
     await pumpApp(tester);
+    await toPicker(tester);
 
     await tester.tap(find.text('Add a reader'));
     await tester.pumpAndSettle();
@@ -97,6 +111,7 @@ void main() {
   testWidgets('without a PIN, "Add a reader" opens directly', (tester) async {
     await db.profilesDao.create('Ada');
     await pumpApp(tester);
+    await toPicker(tester);
 
     await tester.tap(find.text('Add a reader'));
     await tester.pumpAndSettle();
@@ -105,10 +120,20 @@ void main() {
     expect(find.byKey(const Key('profile-name')), findsOneWidget);
   });
 
-  testWidgets('first run is untouched: no profiles, no PIN, straight to '
-      'creating a reader', (tester) async {
+  testWidgets('first run: no profiles, no PIN, straight into a Library '
+      '(operator ruling 48: open into the task)', (tester) async {
     await pumpApp(tester);
-    expect(find.byKey(const Key('profile-name')), findsOneWidget);
+    expect(find.byKey(const Key('profile-name')), findsNothing);
     expect(find.byKey(const Key('pin-entry')), findsNothing);
+    expect(find.text('Nothing on the trellis yet.'), findsOneWidget);
+  });
+
+  testWidgets('a PIN with no readers keeps the create door behind the gate',
+      (tester) async {
+    await ParentPinService(db).enable('1234');
+    await pumpApp(tester);
+    expect(find.text('Who’s reading?'), findsOneWidget);
+    expect(await db.profilesDao.all(), isEmpty,
+        reason: 'no reader is made for a PIN-protected household');
   });
 }

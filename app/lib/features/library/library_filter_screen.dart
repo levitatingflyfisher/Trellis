@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 
 import '../../db/database.dart' hide Alignment;
 import 'library_query.dart';
+import '../shared/capped_body.dart';
 
 class LibraryFilterScreen extends StatefulWidget {
   final AppDatabase db;
@@ -90,7 +91,7 @@ class _LibraryFilterScreenState extends State<LibraryFilterScreen> {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Saved views')),
-      body: SingleChildScrollView(
+      body: CappedBody(child: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -161,7 +162,7 @@ class _LibraryFilterScreenState extends State<LibraryFilterScreen> {
               ),
           ],
         ),
-      ),
+      )),
     );
   }
 }

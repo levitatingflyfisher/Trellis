@@ -15,6 +15,16 @@ const String espalierAadContext = '$espalierAppDomain-backup/v1';
 /// BIP39 phrase -> PBKDF2 seed -> HKDF (appDomain-separated) master key ->
 /// ChaCha20-Poly1305 OHBK envelope with [espalierAadContext] as AAD.
 abstract final class EspalierBackup {
+  /// Mints a fresh 12-word BIP39 recovery phrase — the fleet's one
+  /// generator (`OpenHearthMnemonic.generate`, secure random entropy), so a
+  /// phrase this app issues derives keys exactly as [encrypt] does.
+  static String newPhrase() => OpenHearthMnemonic.generate();
+
+  /// Whether [phrase] is a valid BIP39 phrase (real words + checksum) —
+  /// the same verdict [encrypt] would reach, without the key derivation.
+  static bool isValidPhrase(String phrase) =>
+      OpenHearthMnemonic.validate(phrase);
+
   /// Encrypts [payload] (see `RowPayload.encode`) under [phrase].
   ///
   /// Throws [ArgumentError] for an invalid BIP39 phrase.

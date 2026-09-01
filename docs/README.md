@@ -23,5 +23,7 @@
   the media-session gap. (This list was stale by six entries before
   Campaign 9 caught it — keep it current going forward rather than
   letting it drift again.)
+- **Personas**: [explanation/personas.md](explanation/personas.md), who agents
+  play when they test the UI, with scenarios.
 - **Provenance** — [research/](research/): the 12-agent design panel's donor
   inventories, cited ML/UX research, four rival proposals, three judgments.

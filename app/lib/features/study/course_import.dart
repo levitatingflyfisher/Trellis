@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:openhearth_design/openhearth_design.dart';
 import 'package:flutter/services.dart' show rootBundle;
 
 import '../../db/database.dart';
@@ -73,6 +74,7 @@ class _PasteCourseDialogState extends State<_PasteCourseDialog> {
   // it the moment showDialog returned crashed the still-animating TextField.
   final _controller = TextEditingController();
   String? _error;
+  bool _showDetails = false;
 
   @override
   void dispose() {
@@ -87,7 +89,10 @@ class _PasteCourseDialogState extends State<_PasteCourseDialog> {
       if (!mounted) return;
       Navigator.pop(context, id);
     } on FormatException catch (e) {
-      setState(() => _error = e.message);
+      setState(() {
+        _error = e.message;
+        _showDetails = false;
+      });
     }
   }
 
@@ -100,7 +105,7 @@ class _PasteCourseDialogState extends State<_PasteCourseDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('A .ohcourse file is JSON — paste its text here.'),
+            const Text('A .ohcourse file is JSON. Paste its text here.'),
             const SizedBox(height: 8),
             TextField(
               key: const Key('course-json'),
@@ -109,14 +114,37 @@ class _PasteCourseDialogState extends State<_PasteCourseDialog> {
               maxLines: 12,
               decoration: const InputDecoration(
                 border: OutlineInputBorder(),
-                hintText: '{ "schemaVersion": "1.0", … }',
+                // JSON syntax, not prose: straight quotes, or the hint would teach
+                // course authors JSON that does not parse.
+                hintText: '{ "schemaVersion": "1.0", … }', // copy-typography: code
               ),
             ),
             if (_error != null) ...[
               const SizedBox(height: 8),
-              Text(_error!,
-                  style:
-                      TextStyle(color: Theme.of(context).colorScheme.error)),
+              // Urgency is colour + icon + word, never colour alone; the
+              // strict parser's own message (JSON keys, for course
+              // authors) waits behind Details.
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.error_outline,
+                      size: 20, color: Theme.of(context).colorScheme.error),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text("That text isn’t a course Trellis can read.",
+                        style: TextStyle(
+                            color: Theme.of(context).colorScheme.error)),
+                  ),
+                ],
+              ),
+              TextButton(
+                onPressed: () => setState(() => _showDetails = !_showDetails),
+                child: Text(_showDetails ? 'Hide details' : 'Details'),
+              ),
+              if (_showDetails)
+                SelectableText(_error!,
+                    style: OhTypography.code(
+                        color: Theme.of(context).colorScheme.onSurface)),
             ],
           ],
         ),

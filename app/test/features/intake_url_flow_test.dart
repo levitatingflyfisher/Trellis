@@ -136,7 +136,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(fetcher.calls, hasLength(1));
-    expect(errorSentence(tester), contains('River'));
+    expect(errorSentence(tester), contains('Inbox'));
     expect((await db.spineDao.worksOf(profile.id)), isEmpty);
   });
 
@@ -174,5 +174,33 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(errorSentence(tester), 'The site answered with an error (500).');
+  });
+
+  testWidgets('a refused address says so with icon and word, and offers '
+      'pasting the text instead, carrying the address (audit rank 7, '
+      'dfh-04)', (tester) async {
+    await pumpLibrary(tester,
+        handler: (u, h) => textResponse('no', status: 403));
+    await openAndFetch(tester, url);
+    await tester.tap(find.byKey(const Key('consent-accept')));
+    await tester.pumpAndSettle();
+
+    // Urgency is colour + icon + word, not colour alone.
+    expect(
+        find.descendant(
+            of: find.byKey(const Key('url-intake-error-row')),
+            matching: find.byIcon(Icons.error_outline)),
+        findsOneWidget);
+    await tester.tap(find.text('Paste the text instead'));
+    await tester.pumpAndSettle();
+    expect(find.text('Paste text'), findsOneWidget);
+    await tester.enterText(find.byKey(const Key('paste-text')),
+        'The garden in winter.\n\nMostly waiting.');
+    await tester.tap(find.text('Add to library'));
+    await tester.pumpAndSettle();
+
+    final work = (await db.spineDao.worksOf(profile.id)).single;
+    expect(work.sourceUrl, url,
+        reason: 'the pasted text keeps the address it came from');
   });
 }

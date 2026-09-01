@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart' hide Alignment;
 import 'package:trellis/main.dart';
+import '../support/pick_reader.dart';
 
 /// Phase 2 (Campaign 5) built the filter and its saved-view persistence.
 /// Campaign 9 Phase 1 modernized the FILTERING half into a live modal
@@ -39,8 +40,7 @@ void main() {
   Future<void> pumpApp(WidgetTester tester) async {
     await tester.pumpWidget(TrellisApp(db: db));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Ada'));
-    await tester.pumpAndSettle();
+    await pickReader(tester, 'Ada');
   }
 
   testWidgets('the filter icon opens the live filter sheet', (tester) async {

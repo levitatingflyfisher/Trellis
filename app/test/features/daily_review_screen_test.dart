@@ -266,7 +266,7 @@ void main() {
       expect(find.textContaining('again'), findsWidgets,
           reason: 'the Soon button (or its caption) must say what '
               'tapping it DOES');
-      expect(find.textContaining("I've got this"), findsOneWidget,
+      expect(find.textContaining("I’ve got this"), findsOneWidget,
           reason: 'the Eventually button must say what tapping it DOES');
     });
 

@@ -15,6 +15,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:ml_runtime/ml_runtime.dart';
 import 'package:stardict_core/stardict_core.dart';
 
+import '../features/backup/backup_custody.dart';
 import '../features/models/model_store.dart';
 import '../features/reader/speech/speech_engine.dart';
 import '../features/reader/speech/supertonic_engine.dart';
@@ -156,6 +157,12 @@ class DeviceServices {
   /// consulted for anything but the two web-only intake doors.
   final WebFetchLane webFetchLane;
 
+  /// Where this app's confirmed recovery phrase is kept (the OS keychain in
+  /// production). Null on surfaces with no keychain — plain widget tests —
+  /// where backups ask for the phrase every time and no finish-setup
+  /// reminder is shown.
+  final BackupCustody? backupCustody;
+
   DeviceServices({
     required this.supportDir,
     required this.modelStore,
@@ -171,6 +178,7 @@ class DeviceServices {
     this.localMlAvailable = true,
     this.tier = DeviceTier.t1,
     this.webFetchLane = WebFetchLane.direct,
+    this.backupCustody,
   }) : tts = tts ?? NoopTtsSpeaker(),
        dspEncoder = dspEncoder ?? UnavailableDspEncoder();
 
@@ -192,6 +200,7 @@ class DeviceServices {
         tts: FlutterTtsSpeaker(),
         dspEncoder: _isAndroid ? FfmpegDspEncoder() : UnavailableDspEncoder(),
         databaseFile: databaseFile,
+        backupCustody: SecureBackupCustody(),
         engineFor: (modelPath) => WhisperEngineSpec(
           modelPath: modelPath,
           libraryPath: whisperLibraryPath(),
@@ -201,7 +210,7 @@ class DeviceServices {
   /// A placeholder for surfaces that never start a P3 flow (plain widget
   /// tests): everything is present, nothing touches a platform. The support
   /// dir points into systemTemp and is only created if actually used.
-  factory DeviceServices.detached() {
+  factory DeviceServices.detached({BackupCustody? backupCustody}) {
     final dir = Directory(
       '${Directory.systemTemp.path}/trellis-detached-services',
     );
@@ -213,6 +222,7 @@ class DeviceServices {
       audioFetcher: DioAudioFetcher(),
       executor: InlineTranscribeExecutor(),
       foregroundGate: NoopJobForegroundGate(),
+      backupCustody: backupCustody,
       engineFor: (modelPath) => WhisperEngineSpec(
         modelPath: modelPath,
         libraryPath: whisperLibraryPath(),
@@ -283,7 +293,7 @@ class DeviceServices {
     final file = spec.files.firstWhere(
       (f) => Uri.parse(f.url).pathSegments.last == fileName,
       orElse: () => throw StateError(
-        'model "${spec.id}": no registered file named "$fileName"',
+        'model “${spec.id}”: no registered file named “$fileName”',
       ),
     );
     return modelStore.pathOf(spec, file);

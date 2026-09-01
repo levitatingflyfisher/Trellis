@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/reader/reader_logic.dart';
 import 'package:trellis/main.dart';
+import '../support/pick_reader.dart';
 
 /// Campaign 4 Phase 2: the lost priming visuals, restored as first-class
 /// reader options (donor OpenHearth/ohPrimer index.html) --
@@ -40,8 +41,7 @@ void main() {
       {String title = 'Visuals'}) async {
     await tester.pumpWidget(TrellisApp(db: db));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Ada'));
-    await tester.pumpAndSettle();
+    await pickReader(tester, 'Ada');
     await tester.tap(find.text(title));
     await tester.pumpAndSettle();
   }
@@ -87,17 +87,18 @@ void main() {
 
   group('Parafoveal (RSVP sub-toggle, never named "ticker")', () {
     testWidgets(
-        'the toggle switches the display and its own tooltip is always named Parafoveal',
-        (tester) async {
+        'the toggle is a state control named in plain words, and switches '
+        'the display', (tester) async {
       await seed('one two three.');
       await openReader(tester);
 
-      // The public name is always Parafoveal (handoff #8) — checked
-      // against the actual tooltip text, not just its absence, so this
-      // assertion could fail if the copy ever drifted.
-      expect(find.byTooltip('Parafoveal mode'), findsOneWidget,
-          reason: 'classic mode offers to switch TO Parafoveal');
-      expect(find.byTooltip('Classic mode'), findsNothing);
+      // Jargon ruling: "Nearby words", a visible word, not the field's
+      // "parafoveal" hidden in a tooltip.
+      FilterChip chip() =>
+          tester.widget<FilterChip>(find.byKey(const Key('parafoveal-toggle')));
+      expect(find.text('Nearby words'), findsOneWidget);
+      expect(chip().selected, isFalse);
+      expect(find.textContaining('arafoveal'), findsNothing);
 
       await tester.tap(find.byKey(const Key('parafoveal-toggle')));
       await tester.pump();
@@ -105,9 +106,9 @@ void main() {
       expect(find.byKey(const Key('parafoveal-center')), findsOneWidget);
       expect(find.byKey(const Key('rsvp-bef')), findsNothing,
           reason: 'classic-mode pivot spans are gone once parafoveal is on');
-      expect(find.byTooltip('Classic mode'), findsOneWidget,
-          reason: 'the toggle now offers the way back');
-      expect(find.byTooltip('Parafoveal mode'), findsNothing);
+      expect(chip().selected, isTrue);
+      expect(find.text('Focus spread: higher keeps nearby words brighter'),
+          findsOneWidget);
     });
 
     testWidgets('neighbor words carry the Gaussian opacity/scale by distance',
@@ -137,8 +138,7 @@ void main() {
           workId, [(idx: 0, kind: 'code', text: 'let x = 1;')]);
       await tester.pumpWidget(TrellisApp(db: db));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Ada'));
-      await tester.pumpAndSettle();
+      await pickReader(tester, 'Ada');
       await tester.tap(find.text('Sentinel'));
       await tester.pumpAndSettle();
 

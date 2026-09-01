@@ -8,6 +8,8 @@ import '../../services/device_services.dart' show WebFetchLane;
 import '../models/consent.dart';
 import 'gutenberg_fetch.dart';
 import 'paste_intake.dart' show epochDayUtcNow;
+import '../shared/capped_body.dart';
+import '../shared/error_line.dart';
 
 /// Project Gutenberg, through the Gutendex catalogue. This is a network
 /// SEARCH surface: the typed words themselves leave the device, so the
@@ -113,13 +115,13 @@ class _GutenbergSearchScreenState extends State<GutenbergSearchScreen> {
     if (url == null) {
       // Refused BEFORE consent: nothing to download, so no dialog.
       setState(() =>
-          _error = 'This edition has no readable text — try another result.');
+          _error = 'This edition has no readable text. Try another result.');
       return;
     }
 
     // THE chokepoint (ADR-0003 law 6), before any byte of the book moves.
     final ok = await confirmDownload(context, items: [
-      DownloadItem('${book.title} — $url — size unknown until it arrives'),
+      DownloadItem('${book.title}, $url (size unknown until it arrives)'),
     ]);
     if (!ok || !mounted) return;
 
@@ -163,7 +165,7 @@ class _GutenbergSearchScreenState extends State<GutenbergSearchScreen> {
     final books = _books;
     return Scaffold(
       appBar: AppBar(title: const Text('Project Gutenberg')),
-      body: SafeArea(
+      body: CappedBody(child: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -176,7 +178,7 @@ class _GutenbergSearchScreenState extends State<GutenbergSearchScreen> {
                   Text(
                       'Searches the free Project Gutenberg catalogue at '
                       'gutendex.com. Your search words are sent there when '
-                      'you press Search — nothing before.',
+                      'you press Search, and nothing before.',
                       style: theme.textTheme.bodyMedium),
                   if (widget.webTier) ...[
                     const SizedBox(height: 8),
@@ -189,7 +191,7 @@ class _GutenbergSearchScreenState extends State<GutenbergSearchScreen> {
                           'In the browser, the search works but gutenberg.org '
                           'refuses the book download itself. Save the EPUB '
                           'with your browser and bring it in with Import an '
-                          'EPUB — or use the installed app, which downloads '
+                          'EPUB, or use the installed app, which downloads '
                           'directly.',
                           key: const Key('gutenberg-web-note'),
                           style: theme.textTheme.bodySmall),
@@ -207,10 +209,7 @@ class _GutenbergSearchScreenState extends State<GutenbergSearchScreen> {
                   ),
                   if (_error != null) ...[
                     const SizedBox(height: 12),
-                    Text(_error!,
-                        key: const Key('gutenberg-error'),
-                        style: theme.textTheme.bodyMedium
-                            ?.copyWith(color: theme.colorScheme.error)),
+                    ErrorLine(_error!, textKey: const Key('gutenberg-error')),
                   ],
                   const SizedBox(height: 12),
                   FilledButton.icon(
@@ -233,7 +232,7 @@ class _GutenbergSearchScreenState extends State<GutenbergSearchScreen> {
                     const LinearProgressIndicator(),
                     const SizedBox(height: 8),
                     Text(
-                        'Bringing the book in — '
+                        'Bringing the book in: '
                         '${(_receivedBytes / 1024).round()} KB so far.',
                         style: theme.textTheme.bodySmall),
                   ],
@@ -247,7 +246,7 @@ class _GutenbergSearchScreenState extends State<GutenbergSearchScreen> {
                       child: Padding(
                         padding: const EdgeInsets.all(24),
                         child: Text(
-                            'Seventy-five thousand free books — search by '
+                            'Seventy-five thousand free books. Search by '
                             'title or author.',
                             style: theme.textTheme.bodyMedium,
                             textAlign: TextAlign.center),
@@ -278,7 +277,7 @@ class _GutenbergSearchScreenState extends State<GutenbergSearchScreen> {
             ),
           ],
         ),
-      ),
+      )),
     );
   }
 

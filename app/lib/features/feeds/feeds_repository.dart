@@ -93,7 +93,7 @@ typedef RefreshOutcome = ({RefreshStatus status, int newItems});
 /// overwhelmingly common case. Shared with [FeedsRepository.fetchOlderEpisodes]'s
 /// own defensive fallback so the two never drift apart.
 const String noFeedArchiveNote =
-    "The publisher's feed offers only these episodes — older ones aren't "
+    "The publisher’s feed offers only these episodes. Older ones aren’t "
     'published in it.';
 
 typedef FetchOlderOutcome = ({int newItems, String message});
@@ -152,12 +152,12 @@ class FeedsRepository {
           timeout: const Duration(seconds: 10));
     } on TimeoutException {
       return const PodcastSearchFailure(
-          'The directory took too long to answer — try again later.');
+          'The directory took too long to answer. Try again later.');
     } on CommsException catch (e) {
       return PodcastSearchFailure(e.message);
     } catch (_) {
       return const PodcastSearchFailure(
-          "The podcast directory couldn't be reached right now.");
+          "The podcast directory couldn’t be reached right now.");
     }
     if (!response.ok) {
       return PodcastSearchFailure(
@@ -173,7 +173,7 @@ class FeedsRepository {
       return PodcastSearchFailure(e.message);
     } on FormatException {
       return const PodcastSearchFailure(
-          "The directory's answer couldn't be read.");
+          "The directory’s answer couldn’t be read.");
     } catch (_) {
       return const PodcastSearchFailure(
           'The answer stopped arriving before it finished.');
@@ -212,7 +212,7 @@ class FeedsRepository {
       // "the browser blocked this fetch"); only an unexplained failure
       // falls back to the generic one.
       return SubscribeFailure(res.message ??
-          "That address couldn't be reached as a feed right now.");
+          "That address couldn’t be reached as a feed right now.");
     }
     final ParsedFeed parsed;
     try {
@@ -373,7 +373,7 @@ class FeedsRepository {
     final message = added > 0
         ? 'Found $added older ${added == 1 ? 'episode' : 'episodes'}.'
         : (result.stopReason == ArchiveWalkStopReason.noMorePages
-            ? "No older episodes were published in the feed's archive."
+            ? "No older episodes were published in the feed’s archive."
             : result.message);
     return (newItems: added, message: message);
   }

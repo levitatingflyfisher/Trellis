@@ -1,8 +1,10 @@
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
+import 'package:openhearth_design/openhearth_design.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/main.dart';
+import '../support/pick_reader.dart';
 
 /// The print-like reader (proposal-2 §12): scroll mode reads like a set
 /// page — Lora body at a book line height, a centered ~680dp measure on
@@ -37,8 +39,7 @@ void main() {
       {String title = 'Print'}) async {
     await tester.pumpWidget(TrellisApp(db: db));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Ada'));
-    await tester.pumpAndSettle();
+    await pickReader(tester, 'Ada');
     await tester.tap(find.text(title));
     await tester.pumpAndSettle();
   }
@@ -71,7 +72,7 @@ void main() {
     await toScroll(tester);
 
     final style = tester.widget<Text>(find.text('two')).style;
-    expect(style?.fontFamily, 'Lora');
+    expect(style?.fontFamily, 'packages/openhearth_design/Lora');
     expect(style?.height, closeTo(1.6, 0.05));
   });
 
@@ -85,7 +86,7 @@ void main() {
     expect(find.byKey(const Key('drop-cap')), findsOneWidget);
     final cap = tester.widget<Text>(find.byKey(const Key('drop-cap')));
     expect(cap.data, 'O');
-    expect(cap.style?.fontFamily, 'Lora');
+    expect(cap.style?.fontFamily, 'packages/openhearth_design/Lora');
     final body = tester.widget<Text>(find.text('two')).style;
     expect(cap.style!.fontSize!, greaterThan(body!.fontSize!),
         reason: 'a drop cap is outsized against the body face');
@@ -146,9 +147,9 @@ void main() {
 
     final bef = tester.widget<Text>(find.byKey(const Key('rsvp-bef')));
     final piv = tester.widget<Text>(find.byKey(const Key('rsvp-piv')));
-    expect(bef.style?.fontFamily, 'Lora');
-    expect(piv.style?.fontFamily, 'Lora');
+    expect(bef.style?.fontFamily, 'packages/openhearth_design/Lora');
+    expect(piv.style?.fontFamily, 'packages/openhearth_design/Lora');
     // The pivot law, untouched: the heritage hearth red.
-    expect(piv.style?.color, const Color(0xFFA85040));
+    expect(piv.style?.color, OhColors.hearth500);
   });
 }

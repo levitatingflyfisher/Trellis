@@ -9,6 +9,7 @@ library;
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
 import 'package:ml_runtime/ml_runtime.dart';
 
@@ -100,9 +101,10 @@ Future<MarianModelHandle> _openRealMarianHandle(
   } catch (e) {
     await encoderSession.close();
     await decoderSession.close();
-    throw MarianModelInitException(
-      'The downloaded translator\'s tokenizer files could not be read '
-      '($e). Try re-downloading it in Models.',
+    debugPrint('Marian tokenizer files unreadable: $e');
+    throw const MarianModelInitException(
+      "The downloaded translator’s files couldn’t be read. Try "
+      'downloading it again in Models.',
     );
   }
 
@@ -178,9 +180,10 @@ class MarianTranslator {
     } on MarianModelInitException {
       rethrow;
     } catch (e) {
-      throw MarianModelInitException(
-        'The downloaded translator could not be started ($e). Try '
-        're-downloading it in Models.',
+      debugPrint('Marian translator failed to start: $e');
+      throw const MarianModelInitException(
+        "The downloaded translator couldn’t be started. Try downloading "
+        'it again in Models.',
       );
     }
   }
@@ -194,8 +197,8 @@ class MarianTranslator {
     ]) {
       if (!File(path).existsSync()) {
         throw MarianModelMissingFilesException(
-          'The Spanish translator is missing a file it needs — try '
-          're-downloading it in Models.',
+          'The Spanish translator is missing a file it needs. Try '
+          'downloading it again in Models.',
         );
       }
     }

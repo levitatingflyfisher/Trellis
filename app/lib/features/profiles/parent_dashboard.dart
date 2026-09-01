@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
+import 'package:openhearth_design/openhearth_design.dart';
 
 import '../../db/database.dart';
 import 'parent_pin.dart';
 import 'pin_dialogs.dart';
+import '../shared/capped_body.dart';
 
 /// The parent dashboard (P5): a calm per-profile card of what each reader
 /// has BUILT — lifetime totals only (ADR-0003 law 5). Design laws:
@@ -29,6 +31,26 @@ typedef _Entry = ({Profile profile, LifetimeBuilt built});
 class _ParentDashboardScreenState extends State<ParentDashboardScreen> {
   List<_Entry>? _entries;
   bool _pinSet = false;
+
+  /// Profiles removed but still on offer to Undo. Remove is a deliberate
+  /// button behind the household PIN, so it doesn't ask (fleet delete
+  /// ruling); the cascade runs only when the offer is let go.
+  final Set<int> _removing = {};
+  final OhUndoController _undo = OhUndoController();
+
+  @override
+  void dispose() {
+    _undo.dispose();
+    super.dispose();
+  }
+
+  /// Leaving the dashboard lets a pending removal go, and the removal
+  /// finishes before the route pops: the picker behind it re-reads the
+  /// profiles as soon as it is back, and must not see a half-removed one.
+  Future<void> _leave() async {
+    await _undo.dismiss();
+    if (mounted) Navigator.of(context).pop();
+  }
 
   @override
   void initState() {
@@ -60,30 +82,21 @@ class _ParentDashboardScreenState extends State<ParentDashboardScreen> {
     await _load();
   }
 
-  Future<void> _remove(Profile profile) async {
-    final sure = await showDialog<bool>(
-      context: context,
-      builder: (dialog) => AlertDialog(
-        title: Text("Remove ${profile.name}'s profile?"),
-        content: const Text(
-          'Their library, courses, progress and collected words go with '
-          "it. This can't be undone.",
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialog).pop(false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(dialog).pop(true),
-            child: const Text('Remove profile'),
-          ),
-        ],
-      ),
+  void _remove(Profile profile) {
+    final id = profile.id;
+    setState(() => _removing.add(id));
+    _undo.show(
+      message: "Removed ${profile.name}'s profile, with their library, "
+          'courses, progress and collected words.',
+      onUndo: () async {
+        if (mounted) setState(() => _removing.remove(id));
+      },
+      onCommit: () async {
+        await widget.db.householdDao.deleteProfileCascade(id);
+        _removing.remove(id);
+        if (mounted) await _load();
+      },
     );
-    if (sure != true) return;
-    await widget.db.householdDao.deleteProfileCascade(profile.id);
-    await _load();
   }
 
   Future<void> _pinDialog(
@@ -95,34 +108,46 @@ class _ParentDashboardScreenState extends State<ParentDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final entries = _entries;
-    return Scaffold(
-      appBar: AppBar(title: const Text('Parent dashboard')),
-      body: entries == null
-          ? const Center(child: CircularProgressIndicator())
-          : ListView(
-              padding: const EdgeInsets.all(16),
-              children: [
-                Text(
-                  'What each reader has built.',
-                  style: Theme.of(context).textTheme.bodyMedium,
-                ),
-                const SizedBox(height: 8),
-                for (final e in entries)
-                  _ProfileCard(
-                    entry: e,
-                    onRename: () => _rename(e.profile),
-                    onRemove: () => _remove(e.profile),
+    final entries = _entries == null
+        ? null
+        : [
+            for (final e in _entries!)
+              if (!_removing.contains(e.profile.id)) e
+          ];
+    return PopScope(
+      canPop: _removing.isEmpty,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _leave();
+      },
+      child: Scaffold(
+        bottomSheet: OhUndoBar(controller: _undo),
+        appBar: AppBar(title: const Text('Parent dashboard')),
+        body: CappedBody(child: entries == null
+            ? const Center(child: CircularProgressIndicator())
+            : ListView(
+                padding: const EdgeInsets.all(16),
+                children: [
+                  Text(
+                    'What each reader has built.',
+                    style: Theme.of(context).textTheme.bodyMedium,
                   ),
-                const SizedBox(height: 16),
-                _PinSection(
-                  pinSet: _pinSet,
-                  onSet: () => _pinDialog(showSetPinDialog),
-                  onChange: () => _pinDialog(showChangePinDialog),
-                  onRemove: () => _pinDialog(showRemovePinDialog),
-                ),
-              ],
-            ),
+                  const SizedBox(height: 8),
+                  for (final e in entries)
+                    _ProfileCard(
+                      entry: e,
+                      onRename: () => _rename(e.profile),
+                      onRemove: () => _remove(e.profile),
+                    ),
+                  const SizedBox(height: 16),
+                  _PinSection(
+                    pinSet: _pinSet,
+                    onSet: () => _pinDialog(showSetPinDialog),
+                    onChange: () => _pinDialog(showChangePinDialog),
+                    onRemove: () => _pinDialog(showRemovePinDialog),
+                  ),
+                ],
+              )),
+      ),
     );
   }
 }
@@ -224,7 +249,7 @@ class _PinSection extends StatelessWidget {
             const SizedBox(height: 8),
             Text(
               pinSet
-                  ? 'A PIN protects profile changes and this dashboard — '
+                  ? 'A PIN protects profile changes and this dashboard, '
                         'never reading or studying.'
                   : 'No PIN is set.',
               style: Theme.of(context).textTheme.bodyMedium,
@@ -326,7 +351,7 @@ List<String> builtLines(LifetimeBuilt built) {
     if (built.activeReadingDays > 0)
       _n(built.activeReadingDays, 'day of reading', 'days of reading'),
     if (built.currentCourse != null)
-      'Current course: ${built.currentCourse!.title} — '
+      'Current course: ${built.currentCourse!.title}, '
           '${built.currentCourse!.mastered} of ${built.currentCourse!.total} '
           'mastered',
   ];

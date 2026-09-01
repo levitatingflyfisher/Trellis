@@ -1,3 +1,4 @@
+import 'package:flutter/painting.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/features/reader/reader_prefs.dart';
 
@@ -49,6 +50,23 @@ void main() {
     test('readerTypefaceFontFamily only ever names a bundled face', () {
       expect(readerTypefaceFontFamily(ReaderTypeface.lora), 'Lora');
       expect(readerTypefaceFontFamily(ReaderTypeface.nunito), 'Nunito');
+    });
+
+    test('with kReaderFontPackage it resolves to the package font, once',
+        () {
+      // A fresh style and a theme style that already carries the package
+      // both end up with exactly one prefix.
+      const themed =
+          TextStyle(fontFamily: 'Nunito', package: 'openhearth_design');
+      for (final base in [const TextStyle(), themed]) {
+        expect(
+            base
+                .copyWith(
+                    fontFamily: readerTypefaceFontFamily(ReaderTypeface.lora),
+                    package: kReaderFontPackage)
+                .fontFamily,
+            'packages/openhearth_design/Lora');
+      }
     });
   });
 
@@ -118,5 +136,17 @@ void main() {
       expect(ReaderPrefs.decode('{"lastPlayedWorkId":"not an id"}')
           .lastPlayedWorkId, isNull);
     });
+  });
+
+  test('the reading session round-trips and a corrupt one falls back', () {
+    const prefs = ReaderPrefs(
+        session: ReaderSession(
+            mode: 'scroll', wpm: 450, nearbyWords: true, focusSpread: 3.0));
+    expect(ReaderPrefs.decode(prefs.encode()).session, prefs.session);
+    expect(
+        ReaderPrefs.decode('{"session":{"mode":"sideways","wpm":"fast"}}')
+            .session,
+        const ReaderSession());
+    expect(ReaderPrefs.decode('{}').session, const ReaderSession());
   });
 }

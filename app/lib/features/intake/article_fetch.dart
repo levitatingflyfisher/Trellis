@@ -54,12 +54,12 @@ Future<ArticleFetchOutcome> fetchArticle({
         timeout: timeout);
   } on TimeoutException {
     return const ArticleRefused(
-        'The site took too long to answer — try again later.');
+        'The site took too long to answer. Try again later.');
   } on CommsException catch (e) {
     // Donor-verbatim user-facing messages (redirect refusals, hop SSRF).
     return ArticleRefused(e.message);
   } catch (_) {
-    return const ArticleRefused("That address couldn't be reached.");
+    return const ArticleRefused("That address couldn’t be reached.");
   }
 
   if (response.statusCode < 200 || response.statusCode >= 300) {
@@ -76,7 +76,7 @@ Future<ArticleFetchOutcome> fetchArticle({
     return ArticleRefused(e.message);
   } on TimeoutException {
     return const ArticleRefused(
-        'The site took too long to answer — try again later.');
+        'The site took too long to answer. Try again later.');
   } catch (_) {
     return const ArticleRefused(
         'The page stopped arriving before it finished.');
@@ -88,7 +88,7 @@ Future<ArticleFetchOutcome> fetchArticle({
 
   if (article.isFeedXml) {
     return const ArticleRefused(
-        'That address is a feed of episodes — follow it from the River tab '
+        'That address is a feed of episodes. Follow it from the Inbox tab '
         'instead.');
   }
   // Donor loadUrl law: under 200 chars of extracted text is not an article.

@@ -9,6 +9,7 @@ import 'package:trellis/main.dart';
 
 import '../support/fake_player.dart';
 import '../support/scripted_fetcher.dart';
+import '../support/pick_reader.dart';
 
 /// The river sheds leaves as ephemera decay (proposal-2 §12) — deletion made
 /// visible and calm. The presentation is a pure mapping over the SAME day
@@ -83,16 +84,18 @@ void main() {
   });
 
   group('driftSubtitle', () {
-    test('is silent outside the last two days — no countdown urgency', () {
-      expect(driftSubtitle(31), isNull);
-      expect(driftSubtitle(3), isNull);
+    // Audit wid-02/visual-02: a leaf fading 2.4 alpha points a day says
+    // nothing a person can read; every row states its days from day one.
+    test('states the days left on every row, from the first day', () {
+      expect(driftSubtitle(31), 'Leaves the Inbox in 31 days');
+      expect(driftSubtitle(3), 'Leaves the Inbox in 3 days');
+      expect(driftSubtitle(2), 'Leaves the Inbox in 2 days');
     });
 
-    test('names the last two days in plain, calm words', () {
-      expect(driftSubtitle(2), 'drifts away in 2 days');
-      expect(driftSubtitle(1), 'drifts away in 1 day');
-      // Overdue but not yet swept (the sweep runs at boot): still calm.
-      expect(driftSubtitle(0), 'drifts away in 1 day');
+    test('the last day, and overdue-but-unswept, read as tomorrow', () {
+      expect(driftSubtitle(1), 'Leaves the Inbox tomorrow');
+      // Overdue but not yet swept (the sweep runs at start-up).
+      expect(driftSubtitle(0), 'Leaves the Inbox tomorrow');
     });
   });
 
@@ -181,26 +184,22 @@ void main() {
         fetcher: ScriptedFetcher((u, h) => textResponse('')),
         createPlayer: () => FakeEpisodePlayer()));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Ada'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('River'));
+    await pickReader(tester, 'Ada');
+    await tester.tap(find.text('Inbox'));
     await tester.pumpAndSettle();
   }
 
-  testWidgets('the drift line appears only inside the last two days, '
-      'and never on a promoted work', (tester) async {
+  testWidgets('every Inbox row says in words how long it stays, from day '
+      'one; never on a promoted work', (tester) async {
     final ids = await seedSpread();
     await openRiver(tester);
 
-    expect(find.byKey(Key('drift-${ids.fresh}')), findsNothing);
-    expect(find.byKey(Key('drift-${ids.outside}')), findsNothing,
-        reason: 'three days out is still outside the window');
-    expect(
-        tester.widget<Text>(find.byKey(Key('drift-${ids.twoDays}'))).data,
-        'drifts away in 2 days');
-    expect(
-        tester.widget<Text>(find.byKey(Key('drift-${ids.lastDay}'))).data,
-        'drifts away in 1 day');
+    String line(int id) =>
+        tester.widget<Text>(find.byKey(Key('drift-$id'))).data!;
+    expect(line(ids.fresh), startsWith('Leaves the Inbox in '));
+    expect(line(ids.outside), 'Leaves the Inbox in 3 days');
+    expect(line(ids.twoDays), 'Leaves the Inbox in 2 days');
+    expect(line(ids.lastDay), 'Leaves the Inbox tomorrow');
     expect(find.byKey(Key('drift-${ids.promoted}')), findsNothing,
         reason: 'works persist — there is nothing to narrate');
 
@@ -226,5 +225,25 @@ void main() {
 
     expect(find.byKey(Key('leaf-${ids.promoted}')), findsNothing,
         reason: 'a promoted work persists — no decay to show');
+  });
+
+  testWidgets('a held item (in Up Next) says it stays, never a countdown it '
+      'will not keep', (tester) async {
+    final profileId = await db.profilesDao.create('Ada');
+    final feedId = await db.feedsDao
+        .insertFeed(profileId: profileId, url: 'https://cast.test/feed');
+    final old = await seedItem(
+        profileId: profileId,
+        feedId: feedId,
+        title: 'Queued long ago',
+        firstSeenEpochDay: todayEpochDay() - 45,
+        publishedAtMs: 1000);
+    await db.queueDao.playLast(profileId: profileId, workId: old, nowMs: 1);
+    await openRiver(tester);
+
+    expect(find.text('Queued long ago'), findsOneWidget,
+        reason: 'held items do not decay');
+    expect(tester.widget<Text>(find.byKey(Key('drift-$old'))).data,
+        'Stays while it’s in Up Next or has captures');
   });
 }

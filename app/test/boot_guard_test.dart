@@ -100,6 +100,20 @@ void main() {
       expect(find.textContaining('Lock-screen controls'), findsOneWidget);
     });
 
+    testWidgets('says it in plain words; the raw error waits behind Details',
+        (tester) async {
+      await tester.pumpWidget(
+          harness(const ['Lock-screen controls unavailable: boom']));
+      expect(
+          find.text('Lock-screen controls didn’t start. '
+              'The rest of the app works.'),
+          findsOneWidget);
+      expect(find.textContaining('boom'), findsNothing);
+      await tester.tap(find.text('Details'));
+      await tester.pump();
+      expect(find.textContaining('boom'), findsOneWidget);
+    });
+
     testWidgets('the notice can be dismissed', (tester) async {
       await tester
           .pumpWidget(harness(const ['Lock-screen controls unavailable: x']));

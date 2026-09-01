@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:comms_core/comms_core.dart';
 import 'package:flutter/material.dart';
+import 'package:openhearth_design/openhearth_design.dart';
 
 import '../../db/database.dart' hide Alignment;
 import '../../net/io_fetcher.dart';
@@ -17,9 +18,11 @@ import '../reader/reader_screen.dart';
 import '../reader/speech/speech_engine.dart';
 import '../reader/speech/speech_temp_files.dart';
 import '../reader/translation/marian_engine.dart';
+import '../settings/theme_preference.dart';
 import 'library_filter_screen.dart';
 import 'library_filter_sheet.dart';
 import 'library_query.dart';
+import '../shared/capped_body.dart';
 
 typedef _Entry = ({
   Work work,
@@ -144,6 +147,12 @@ class LibraryScreen extends StatefulWidget {
 class _LibraryScreenState extends State<LibraryScreen> {
   List<_Entry>? _entries;
   LibraryQuery? _activeQuery;
+
+  /// Works removed but still on offer to Undo (the fleet's delete ruling:
+  /// a deliberate delete doesn't ask, and its Undo never times out). They
+  /// leave the list at once; the rows go only when the offer is let go.
+  final Set<int> _removing = {};
+  final OhUndoController _undo = OhUndoController();
   List<SavedViewRow> _savedViews = const [];
 
   SpineDao get _dao => widget.db.spineDao;
@@ -200,8 +209,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
   /// The filtered view of [_entries] — pure, re-evaluated on every build
   /// rather than stored, so applying/clearing a filter never needs a DB
   /// round-trip.
+  List<_Entry>? get _liveEntries => _entries == null
+      ? null
+      : [
+          for (final e in _entries!)
+            if (!_removing.contains(e.work.id)) e
+        ];
+
   List<_Entry> get _visibleEntries {
-    final entries = _entries ?? const [];
+    final entries = _liveEntries ?? const [];
     final query = _activeQuery;
     if (query == null) return entries;
     return [
@@ -271,7 +287,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
     } on FormatException {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("That file couldn't be read as an EPUB.")));
+          content: Text("That file couldn’t be read as an EPUB.")));
     }
   }
 
@@ -364,31 +380,32 @@ class _LibraryScreenState extends State<LibraryScreen> {
     await _load();
   }
 
-  Future<void> _remove(_Entry e) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialog) => AlertDialog(
-        title: Text("Remove '${e.work.title}'?"),
-        content:
-            const Text('It leaves this library; nothing else is touched.'),
-        actions: [
-          TextButton(
-              onPressed: () => Navigator.pop(dialog, false),
-              child: const Text('Keep it')),
-          FilledButton(
-              onPressed: () => Navigator.pop(dialog, true),
-              child: const Text('Remove from library')),
-        ],
-      ),
+  /// Remove is a deliberate menu choice, so it doesn't ask (fleet delete
+  /// ruling). The work leaves the list at once and the bar offers Undo
+  /// until the person dismisses it, removes something else or leaves the
+  /// screen; only then are the rows (and an audiobook's copied files)
+  /// deleted. A process killed meanwhile deletes nothing.
+  void _remove(_Entry e) {
+    final id = e.work.id;
+    setState(() => _removing.add(id));
+    _undo.show(
+      message: "Removed '${e.work.title}'",
+      onUndo: () async {
+        if (mounted) setState(() => _removing.remove(id));
+      },
+      onCommit: () async {
+        // Campaign 7 (ADR-0013): deleteWork only ever removes DB rows (the
+        // same law ADR-0012 recorded for a downloaded episode's audio
+        // file) — an audiobook's copied bytes on disk are this screen's
+        // own job to clear, or Remove silently leaks the whole book.
+        if (e.work.kind == 'audiobook') {
+          widget.onDeleteAudiobookFiles?.call(id);
+        }
+        await _dao.deleteWork(id);
+        _removing.remove(id);
+        if (mounted) await _load();
+      },
     );
-    if (confirmed != true) return;
-    // Campaign 7 (ADR-0013): deleteWork only ever removes DB rows (the
-    // same law ADR-0012 recorded for a downloaded episode's audio file) —
-    // an audiobook's copied bytes on disk are this screen's own job to
-    // clear, or Remove silently leaks the whole book.
-    if (e.work.kind == 'audiobook') widget.onDeleteAudiobookFiles?.call(e.work.id);
-    await _dao.deleteWork(e.work.id);
-    await _load();
   }
 
   Future<void> _open(_Entry e) async {
@@ -444,40 +461,52 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   @override
+  void dispose() {
+    _undo.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final entries = _entries;
+    final entries = _liveEntries;
     final hasFilter = _activeQuery != null;
     return Scaffold(
+      bottomSheet: OhUndoBar(controller: _undo),
       appBar: AppBar(
         title: const Text('Library'),
+        // Icon + word for what matters here; rarer doors in a worded menu
+        // (fleet ruling on top bars; audit rank 3).
         actions: [
-          IconButton(
-            key: const Key('open-filter'),
-            tooltip: hasFilter ? 'Clear filter' : 'Filter & saved views',
-            icon: Icon(hasFilter ? Icons.filter_alt_off : Icons.filter_alt_outlined),
-            onPressed: _openFilter,
-          ),
-          if (widget.onOpenModels != null)
-            IconButton(
-              key: const Key('open-models'),
-              tooltip: 'On this device',
-              icon: const Icon(Icons.memory_outlined),
-              onPressed: widget.onOpenModels,
+          OhBarActions(children: [
+            OhBarAction(
+              key: const Key('open-filter'),
+              icon: hasFilter ? Icons.filter_alt_off : Icons.filter_alt_outlined,
+              label: hasFilter ? 'Clear filter' : 'Filter',
+              onPressed: _openFilter,
             ),
-          TextButton.icon(
-            key: const Key('profile-switcher'),
-            onPressed: widget.onSwitchProfile,
-            icon: const Icon(Icons.person_outline),
-            // AppBar actions get intrinsic width — without a bound the
-            // ellipsis never engages and long names overflow at 320dp.
-            label: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 108),
-              child: Text(widget.profile.name,
-                  overflow: TextOverflow.ellipsis,
-                  maxLines: 1,
-                  softWrap: false),
+            const TrellisThemeToggle(),
+            OhBarOverflow<String>(
+              key: const Key('library-more'),
+              onSelected: (v) => switch (v) {
+                'models' => widget.onOpenModels?.call(),
+                _ => widget.onSwitchProfile(),
+              },
+              itemBuilder: (_) => [
+                PopupMenuItem(
+                  key: const Key('profile-switcher'),
+                  value: 'switch',
+                  child: Text('Switch reader (${widget.profile.name})',
+                      overflow: TextOverflow.ellipsis),
+                ),
+                if (widget.onOpenModels != null)
+                  const PopupMenuItem(
+                    key: Key('open-models'),
+                    value: 'models',
+                    child: Text('On this device'),
+                  ),
+              ],
             ),
-          ),
+          ]),
         ],
       ),
       floatingActionButton: (entries == null || entries.isEmpty)
@@ -486,7 +515,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
               onPressed: _addSheet,
               icon: const Icon(Icons.add),
               label: const Text('Add')),
-      body: switch (entries) {
+      body: CappedBody(child: switch (entries) {
         null => const Center(child: CircularProgressIndicator()),
         [] => _EmptyState(
             onPaste: _pasteText,
@@ -501,7 +530,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
               Expanded(child: _libraryList(_visibleEntries)),
             ],
           ),
-      },
+      }),
     );
   }
 

@@ -63,8 +63,12 @@ void main() {
     expect(tester.takeException(), isNull,
         reason: 'no RenderFlex overflow with every AppBar action wired at '
             '320dp/2x');
+    // The door lives in the worded More menu (fleet ruling on top bars:
+    // rarer doors in a worded menu), where it arrives as a word.
+    await tester.tap(find.byKey(const Key('study-settings')));
+    await tester.pumpAndSettle();
     expect(find.byKey(const Key('open-echo')), findsOneWidget);
-    expect(find.text('Echo'), findsOneWidget,
+    expect(find.text('What you’ve built'), findsOneWidget,
         reason: 'the door names itself — a word, not just a glyph');
   });
 }

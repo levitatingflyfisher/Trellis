@@ -11,6 +11,7 @@ import 'package:trellis/main.dart';
 import '../support/fake_player.dart';
 import '../support/fake_services.dart';
 import '../support/scripted_fetcher.dart';
+import '../support/pick_reader.dart';
 
 /// The canonical user's path (P3): a podcast episode in her language →
 /// synced text on the same work. The overflow menu starts it, the ONE
@@ -64,9 +65,8 @@ void main() {
         createPlayer: () => player,
         services: services));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Ada'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('River'));
+    await pickReader(tester, 'Ada');
+    await tester.tap(find.text('Inbox'));
     await tester.pumpAndSettle();
   }
 

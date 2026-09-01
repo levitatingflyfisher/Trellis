@@ -8,9 +8,8 @@ library;
 
 import 'dart:convert';
 
-/// The two BUNDLED faces (this pass downloads no new font — Lora and
-/// Nunito are the whole set; verified against `pubspec.yaml`'s `fonts:`
-/// block, which names no third face).
+/// The two faces the app ships: Lora and Nunito, bundled as package fonts
+/// by openhearth_design (the app carries no font files of its own).
 enum ReaderTypeface { lora, nunito }
 
 ReaderTypeface _typefaceFromWire(Object? v) => switch (v) {
@@ -23,9 +22,16 @@ String _typefaceToWire(ReaderTypeface t) => switch (t) {
       ReaderTypeface.nunito => 'nunito',
     };
 
-/// The font family name Flutter renders [t] with — always one of the two
-/// bundled families, never a system/unbundled face (C7 only pins glyph
-/// coverage for bundled fonts).
+/// The package that bundles the reader's two faces. Pass it with
+/// [readerTypefaceFontFamily] in every `copyWith(fontFamily:, package:)`:
+/// a bare `'Lora'` would silently fall back to the platform font now that
+/// the app carries no font files of its own, and a pre-prefixed name would
+/// be prefixed twice by a theme style that already carries the package.
+const String kReaderFontPackage = 'openhearth_design';
+
+/// The family name for [t], always one of the two faces openhearth_design
+/// bundles (C7 pins glyph coverage for exactly these), never a system face.
+/// Unprefixed: pair it with `package: kReaderFontPackage`.
 String readerTypefaceFontFamily(ReaderTypeface t) => switch (t) {
       ReaderTypeface.lora => 'Lora',
       ReaderTypeface.nunito => 'Nunito',
@@ -128,10 +134,76 @@ class ReaderTypography {
       fontScale, lineHeight, maxTextWidth, paragraphSpacing, typeface, justified);
 }
 
+/// How this reader last read: the mode, the Words speed, and the nearby-
+/// words display with its focus spread. Remembered per reader, so someone
+/// who chose Scroll, or Words at 450, gets that back on the next open
+/// (audit about-face-01: these were session-scoped and lost on every
+/// open). The mode travels as a wire name ('words' | 'scroll' | 'lines');
+/// the screen maps it to its own enum.
+class ReaderSession {
+  const ReaderSession({
+    this.mode = 'words',
+    this.wpm = 300,
+    this.nearbyWords = false,
+    this.focusSpread = 2.0,
+  });
+
+  final String mode;
+  final double wpm;
+  final bool nearbyWords;
+  final double focusSpread;
+
+  ReaderSession copyWith(
+          {String? mode,
+          double? wpm,
+          bool? nearbyWords,
+          double? focusSpread}) =>
+      ReaderSession(
+        mode: mode ?? this.mode,
+        wpm: wpm ?? this.wpm,
+        nearbyWords: nearbyWords ?? this.nearbyWords,
+        focusSpread: focusSpread ?? this.focusSpread,
+      );
+
+  Map<String, Object?> toJson() => {
+        'mode': mode,
+        'wpm': wpm,
+        'nearbyWords': nearbyWords,
+        'focusSpread': focusSpread,
+      };
+
+  factory ReaderSession.fromJson(Map<String, dynamic>? m) {
+    if (m == null) return const ReaderSession();
+    const d = ReaderSession();
+    final mode = m['mode'];
+    return ReaderSession(
+      mode: mode is String && const {'words', 'scroll', 'lines'}.contains(mode)
+          ? mode
+          : d.mode,
+      wpm: _num(m['wpm'], d.wpm).clamp(100, 1500).toDouble(),
+      nearbyWords:
+          m['nearbyWords'] is bool ? m['nearbyWords'] as bool : d.nearbyWords,
+      focusSpread: _num(m['focusSpread'], d.focusSpread).clamp(0.8, 4.0).toDouble(),
+    );
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is ReaderSession &&
+      other.mode == mode &&
+      other.wpm == wpm &&
+      other.nearbyWords == nearbyWords &&
+      other.focusSpread == focusSpread;
+
+  @override
+  int get hashCode => Object.hash(mode, wpm, nearbyWords, focusSpread);
+}
+
 /// The whole [Profiles.readerPrefsJson] blob, decoded. Started as typography
-/// only (Phase 2's Parafoveal/follow-along controls are session-scoped, the
-/// reader's existing wpm precedent, and Phase 5's lifetime totals read
-/// [ReadingDays], not this blob) — but its own doc always called the shape
+/// only (Phase 5's lifetime totals read [ReadingDays], not this blob); the
+/// reading mode, speed and nearby-words display joined it as [session] once
+/// the audit found them lost on every open (about-face-01). Its
+/// own doc always called the shape
 /// open to "a sibling key landing here later without a further schema hop."
 /// [lastPlayedWorkId] (Campaign 9 Phase 2, "resume after restart") is that
 /// sibling key: this app has no SharedPreferences usage anywhere (see
@@ -140,9 +212,15 @@ class ReaderTypography {
 /// already owns. This is now genuinely a shared app-prefs blob, not a
 /// reader-only one, even though the class name and column predate that.
 class ReaderPrefs {
-  const ReaderPrefs({this.typography = const ReaderTypography(), this.lastPlayedWorkId});
+  const ReaderPrefs(
+      {this.typography = const ReaderTypography(),
+      this.session = const ReaderSession(),
+      this.lastPlayedWorkId});
 
   final ReaderTypography typography;
+
+  /// How this reader last read (mode, speed, nearby words).
+  final ReaderSession session;
 
   /// The most recently played work's id, for the mini bar to rehydrate a
   /// paused thread back to it after an app restart — null means nothing
@@ -155,11 +233,13 @@ class ReaderPrefs {
   /// update-flag pair uses for exactly this reason.
   ReaderPrefs copyWith({
     ReaderTypography? typography,
+    ReaderSession? session,
     int? lastPlayedWorkId,
     bool clearLastPlayedWorkId = false,
   }) =>
       ReaderPrefs(
         typography: typography ?? this.typography,
+        session: session ?? this.session,
         lastPlayedWorkId: clearLastPlayedWorkId
             ? null
             : (lastPlayedWorkId ?? this.lastPlayedWorkId),
@@ -167,6 +247,7 @@ class ReaderPrefs {
 
   String encode() => json.encode({
         'typography': typography.toJson(),
+        'session': session.toJson(),
         if (lastPlayedWorkId != null) 'lastPlayedWorkId': lastPlayedWorkId,
       });
 
@@ -182,6 +263,10 @@ class ReaderPrefs {
       return ReaderPrefs(
           typography: ReaderTypography.fromJson(
               decoded['typography'] as Map<String, dynamic>?),
+          session: ReaderSession.fromJson(
+              decoded['session'] is Map<String, dynamic>
+                  ? decoded['session'] as Map<String, dynamic>
+                  : null),
           lastPlayedWorkId: rawId is int ? rawId : null);
     } on FormatException {
       return const ReaderPrefs();

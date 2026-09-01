@@ -1,6 +1,7 @@
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:openhearth_design/openhearth_design.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/reader/reader_screen.dart';
 import 'package:trellis/features/reader/speech/speech_engine.dart';
@@ -182,20 +183,16 @@ void main() {
       await tester.pump();
 
       expect(
-          tester
-              .widget<IconButton>(find.byKey(const Key('speak-toggle')))
-              .isSelected,
-          isTrue,
+          tester.widget<OhBarAction>(find.byKey(const Key('speak-toggle'))).label,
+          'Stop',
           reason: 'still speaking — the last clip has not finished playing');
 
       queue.emitCompleted(); // the queue finished playing everything
       await tester.pump();
 
       expect(
-          tester
-              .widget<IconButton>(find.byKey(const Key('speak-toggle')))
-              .isSelected,
-          isFalse);
+          tester.widget<OhBarAction>(find.byKey(const Key('speak-toggle'))).label,
+          'Read aloud');
       final pos = await savedPosition();
       expect(pos!.segmentIdx, 2);
       expect(pos.lastModality, 'speak');

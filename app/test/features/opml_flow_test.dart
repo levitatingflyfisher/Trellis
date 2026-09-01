@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:comms_core/comms_core.dart' as comms;
@@ -139,7 +140,9 @@ void main() {
     await tester.tap(find.text('Import OPML'));
     await tester.pumpAndSettle();
 
-    expect(find.text('Invalid OPML file'), findsOneWidget);
+    expect(find.text("That file isn’t an OPML podcast list Trellis can read."),
+        findsOneWidget);
+    expect(find.text('Invalid OPML file'), findsNothing);
     expect(await db.feedsDao.feedsOf(profile.id), isEmpty);
   });
 
@@ -219,12 +222,65 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Unfollow'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Unfollow').last); // the dialog's confirm
+    // Deliberate (a menu choice): no dialog; gone from the list, with a
+    // lasting Undo, and nothing deleted until the offer is let go.
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(find.textContaining('Unfollowed'), findsOneWidget);
+    expect(await db.feedsDao.feedsOf(profile.id), hasLength(1));
+    await tester.tap(find.text('Undo'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(Key('feed-menu-$feedId')), findsOneWidget);
+
+    await tester.tap(find.byKey(Key('feed-menu-$feedId')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Unfollow'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(Key('feed-menu-$feedId')), findsNothing);
+    await tester.tap(find.byTooltip('Dismiss'));
     await tester.pumpAndSettle();
 
     expect(await db.feedsDao.feedsOf(profile.id), isEmpty);
     final titles = (await db.spineDao.worksOf(profile.id)).map((w) => w.title);
     expect(titles, ['Kept episode']);
+  });
+
+  testWidgets('leaving with an unfollow on offer finishes it before the '
+      'screen behind reloads', (tester) async {
+    final feedId = await db.feedsDao.insertFeed(
+      profileId: profile.id,
+      url: 'https://cast.test/feed',
+    );
+    late BuildContext home;
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(builder: (c) {
+        home = c;
+        return const Text('inbox');
+      }),
+    ));
+    // What the Inbox does: await the push, then reload at once.
+    List<Feed>? seenOnReturn;
+    unawaited(Navigator.of(home)
+        .push(MaterialPageRoute<void>(
+            builder: (_) => FeedsScreen(
+                  db: db,
+                  repository: FeedsRepository(
+                      db: db,
+                      fetcher: ScriptedFetcher((u, h) => textResponse(_rss))),
+                  profile: profile,
+                )))
+        .then((_) async =>
+            seenOnReturn = await db.feedsDao.feedsOf(profile.id)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(Key('feed-menu-$feedId')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Unfollow'));
+    await tester.pumpAndSettle();
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('inbox'), findsOneWidget);
+    expect(seenOnReturn, isEmpty,
+        reason: 'the cascade ran before the pop, not after the reload');
   });
 
   testWidgets('a feed\'s podcast settings (speed, skip intro/outro) round-trip '

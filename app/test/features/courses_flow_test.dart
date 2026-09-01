@@ -10,6 +10,7 @@ import 'package:trellis/main.dart';
 
 import '../support/fake_player.dart';
 import '../support/scripted_fetcher.dart';
+import '../support/pick_reader.dart';
 
 /// The Courses tab: import is study_core's strict parser or nothing (a bad
 /// paste shows the parser's own calm error and leaves ZERO rows), the list
@@ -69,14 +70,9 @@ void main() {
         fetcher: ScriptedFetcher((u, h) => textResponse('')),
         createPlayer: () => player));
     await tester.pumpAndSettle();
-    final nameField = find.byKey(const Key('profile-name'));
-    if (nameField.evaluate().isNotEmpty) {
-      await tester.enterText(nameField, 'Ada');
-      await tester.tap(find.text('Start reading'));
-    } else {
-      await tester.tap(find.text('Ada')); // the picker
-    }
-    await tester.pumpAndSettle();
+    // A first launch opens straight into a reader's Library; the picker
+    // shows only when there is a choice to make.
+    await pickReader(tester, 'Ada');
     await tester.tap(find.text('Courses'));
     await tester.pumpAndSettle();
   }
@@ -93,9 +89,11 @@ void main() {
       'reader\'s own private year-in-review (never PIN-gated -- that\'s '
       'the parent dashboard\'s door)', (tester) async {
     await pumpToCourses(tester);
+    await tester.tap(find.byKey(const Key('study-settings')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('open-echo')));
     await tester.pumpAndSettle();
-    expect(find.text('Trellis Echo'), findsOneWidget);
+    expect(find.text('What you’ve built'), findsWidgets);
     expect(find.textContaining('Nothing built yet'), findsOneWidget);
   });
 
@@ -108,7 +106,13 @@ void main() {
         find.byKey(const Key('course-json')), '{"schemaVersion":"9.9"}');
     await tester.tap(find.text('Import'));
     await tester.pumpAndSettle();
-    // The strict parser's own message, shown inline; the dialog stays open.
+    // A plain sentence inline; the strict parser's own message only
+    // behind Details (for course authors); the dialog stays open.
+    expect(find.text("That text isn’t a course Trellis can read."),
+        findsOneWidget);
+    expect(find.textContaining('unsupported schemaVersion'), findsNothing);
+    await tester.tap(find.text('Details'));
+    await tester.pumpAndSettle();
     expect(find.textContaining('unsupported schemaVersion'), findsOneWidget);
     await tester.tap(find.text('Cancel'));
     await tester.pumpAndSettle();

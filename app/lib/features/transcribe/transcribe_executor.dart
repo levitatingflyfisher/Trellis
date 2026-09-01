@@ -37,7 +37,7 @@ sealed class TranscribeEngineSpec {
             libraryPath: m['libraryPath'] as String),
         'scripted' => ScriptedEngineSpec(
             chunkJsons: (m['chunks'] as List).cast<String>()),
-        final other => throw ArgumentError('unknown engine "$other"'),
+        final other => throw ArgumentError('unknown engine “$other”'),
       };
 
   Transcriber build();

@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 
 import '../../db/database.dart';
 import 'reader_prefs.dart';
+import '../shared/capped_body.dart';
 
 class ReaderTypographySettingsScreen extends StatefulWidget {
   const ReaderTypographySettingsScreen(
@@ -62,7 +63,7 @@ class _ReaderTypographySettingsScreenState
     return Scaffold(
       key: const Key('reader-typography-settings-screen'),
       appBar: AppBar(title: const Text('Reading style')),
-      body: !_loaded
+      body: CappedBody(child: !_loaded
           ? const Center(child: CircularProgressIndicator())
           : ListView(
               padding: const EdgeInsets.all(16),
@@ -98,8 +99,25 @@ class _ReaderTypographySettingsScreenState
                 _paragraphSpacingStepper(),
                 const SizedBox(height: 16),
                 _justifiedSwitch(),
+                const SizedBox(height: 24),
+                // The field's real terms, kept here in the detail view with
+                // a line each (operator jargon ruling); the reader itself
+                // says Words, Scroll, Lines and Nearby words.
+                Text('About the reading modes',
+                    style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 8),
+                const Text(
+                    'Words shows one word at a time in a fixed spot, so your '
+                    'eyes stay still. Speed-reading research calls this RSVP '
+                    '(rapid serial visual presentation).',
+                    key: Key('about-rsvp')),
+                const SizedBox(height: 8),
+                const Text(
+                    'Nearby words fades in the words on either side of the '
+                    'focus word, what research calls parafoveal preview. '
+                    'Focus spread sets how far the fade reaches.'),
               ],
-            ),
+            )),
     );
   }
 
@@ -114,11 +132,12 @@ class _ReaderTypographySettingsScreenState
       ),
       child: Text(
         'The quick brown fox reads this paragraph at the settings you '
-        'choose below — this is exactly how your books will look.',
+        'choose below. This is exactly how your books will look.',
         key: const Key('typography-preview'),
         textAlign: _t.justified ? TextAlign.justify : TextAlign.start,
         style: base?.copyWith(
           fontFamily: readerTypefaceFontFamily(_t.typeface),
+          package: kReaderFontPackage,
           height: _t.lineHeight,
           fontSize: size == null ? null : size * _t.fontScale,
         ),
@@ -208,7 +227,7 @@ class _ReaderTypographySettingsScreenState
       subtitle: const Text(
           'Lines stretch edge to edge. This reader justifies without '
           'hyphenation, so wide gaps can appear on narrow screens or '
-          'short lines — ragged-right avoids that.'),
+          'short lines. Ragged-right avoids that.'),
     );
   }
 }

@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/main.dart';
+import '../support/pick_reader.dart';
 
 /// Campaign 4 Phase 2: follow-along guided pacing for scroll mode — the
 /// speak-mode karaoke path (per-segment GlobalKeys + Scrollable.
@@ -47,8 +48,7 @@ void main() {
   Future<void> openInScroll(WidgetTester tester, {required String title}) async {
     await tester.pumpWidget(TrellisApp(db: db));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Ada'));
-    await tester.pumpAndSettle();
+    await pickReader(tester, 'Ada');
     await tester.tap(find.text(title));
     await tester.pumpAndSettle();
     await switchMode(tester, 'mode-item-scroll');
@@ -71,8 +71,7 @@ void main() {
     await seedMultiSegment('Along');
     await tester.pumpWidget(TrellisApp(db: db));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Ada'));
-    await tester.pumpAndSettle();
+    await pickReader(tester, 'Ada');
     await tester.tap(find.text('Along'));
     await tester.pumpAndSettle();
     // Still RSVP mode — no Follow along entry yet.

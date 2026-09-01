@@ -118,8 +118,9 @@ void main() {
 
     await tester.tap(find.byKey(const Key('storage-audio-clear')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('storage-clear-dialog')), findsOneWidget);
-    await tester.tap(find.byKey(const Key('storage-clear-confirm')));
+    // The confirm names the act (fleet ruling), not a bare "Delete".
+    expect(find.byType(AlertDialog), findsOneWidget);
+    await tester.tap(find.text('Delete cached episode audio'));
     await tester.pumpAndSettle();
 
     expect(audio.existsSync(), isFalse);
@@ -128,7 +129,7 @@ void main() {
 
     await tester.tap(find.byKey(const Key('storage-pcm-clear')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('storage-clear-confirm')));
+    await tester.tap(find.text('Delete leftover decoded audio'));
     await tester.pumpAndSettle();
     expect(pcm.existsSync(), isFalse);
 
@@ -143,7 +144,7 @@ void main() {
 
     await tester.tap(find.byKey(const Key('storage-audio-clear')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('storage-clear-cancel')));
+    await tester.tap(find.text('Keep'));
     await tester.pumpAndSettle();
 
     expect(audio.existsSync(), isTrue);

@@ -5,11 +5,12 @@
 /// ADR-0003 law 2): an ephemeron decays when `today - firstSeen >
 /// retentionDays`, and the boundary day itself survives. Everything here is
 /// derived from that same whole-epoch-day arithmetic so the story on screen
-/// can never disagree with the deletion the boot sweep executes.
+/// can never disagree with the decay the boot sweep executes. (Decay is a
+/// soft state, not a delete: the Inbox's notice offers Restore or Let go.)
 ///
 /// Calm by construction (ADR-0003, no guilt): the leaf fades but never
-/// vanishes, the drift notice exists only on the last two days, and nothing
-/// here knows how to be red or urgent.
+/// vanishes, every row says in words how long it stays, and nothing here
+/// knows how to be red or urgent.
 library;
 
 /// Whole days of life left before the sweep takes an ephemeron. On the day
@@ -36,11 +37,16 @@ double leafOpacity(int daysLeft, {int retentionDays = 30}) {
   return kLeafMinOpacity + (1.0 - kLeafMinOpacity) * t;
 }
 
-/// The one-line drift notice, shown on the LAST two days only — before that
-/// the fading leaf says everything worth saying (no countdown urgency).
-/// Null means say nothing. An overdue-but-unswept item (the sweep runs at
-/// boot) still reads as one day.
-String? driftSubtitle(int daysLeft) {
-  if (daysLeft > 2) return null;
-  return daysLeft >= 2 ? 'drifts away in 2 days' : 'drifts away in 1 day';
-}
+/// The row's plain statement of how long it stays, on every ephemeron row
+/// from its first day (audit wid-02, visual-02: the fading leaf alone was
+/// below any noticeable step and said nothing to a screen reader). "Leaves",
+/// not "deleted": what leaves is kept a while longer and can be restored.
+/// An overdue-but-unswept item (the sweep runs at start-up) reads as
+/// tomorrow.
+String driftSubtitle(int daysLeft) => daysLeft <= 1
+    ? 'Leaves the Inbox tomorrow'
+    : 'Leaves the Inbox in $daysLeft days';
+
+/// What a held row says instead of a countdown: it is in Up Next or has
+/// captures, so the sweep leaves it alone (see `SpineDao.heldWorkIds`).
+const String heldSubtitle = 'Stays while it’s in Up Next or has captures';

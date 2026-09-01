@@ -45,7 +45,7 @@ class _JobCard extends StatelessWidget {
       case TranscribePhase.fetchingModel:
         final total = card.totalBytes;
         final got = card.receivedBytes ?? 0;
-        return 'Getting the model — ${formatBytes(got)}'
+        return 'Getting the model: ${formatBytes(got)}'
             '${total == null ? '' : ' of ${formatBytes(total)}'}'
             '${eta.isEmpty ? '' : ' · $eta'}';
       case TranscribePhase.fetchingAudio:
@@ -59,15 +59,15 @@ class _JobCard extends StatelessWidget {
             : 'Translating to English';
         final total = card.totalUnits;
         if (total == null) return '$verb…';
-        return '$verb — ${card.doneUnits ?? 0} of $total parts'
+        return '$verb: ${card.doneUnits ?? 0} of $total parts'
             '${eta.isEmpty ? '' : ' · $eta'}';
       case TranscribePhase.paused:
         final total = card.totalUnits;
         return total == null
             ? 'Paused'
-            : 'Paused — ${card.doneUnits ?? 0} of $total parts done';
+            : 'Paused: ${card.doneUnits ?? 0} of $total parts done';
       case TranscribePhase.failed:
-        return "Didn't finish. Your progress is saved.";
+        return "Didn’t finish. Your progress is saved.";
     }
   }
 

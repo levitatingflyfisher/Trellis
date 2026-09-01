@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../db/database.dart';
 import 'feed_rules.dart';
+import '../shared/capped_body.dart';
 
 /// One feed's playback settings (P4 mercy #2): a speed override for its
 /// episodes, how many seconds of intro/outro to skip, and how much of its
@@ -104,13 +105,13 @@ class _FeedSettingsScreenState extends State<FeedSettingsScreen> {
 
   String _matchLabel(FeedRuleMatch m) => switch (m) {
         FeedRuleMatch.contains => 'contains',
-        FeedRuleMatch.notContains => "doesn't contain",
+        FeedRuleMatch.notContains => "doesn’t contain",
       };
 
   String _actionLabel(FeedRuleAction a) => switch (a) {
-        FeedRuleAction.skip => 'Skip — never enters',
+        FeedRuleAction.skip => 'Skip: never enters',
         FeedRuleAction.markReadOnArrival => 'Mark read on arrival',
-        FeedRuleAction.autoKeep => 'Auto-keep — straight to library',
+        FeedRuleAction.autoKeep => 'Auto-keep: straight to the library',
       };
 
   String _speedLabel(double s) =>
@@ -123,7 +124,7 @@ class _FeedSettingsScreenState extends State<FeedSettingsScreen> {
         : widget.feed.title;
     return Scaffold(
       appBar: AppBar(title: const Text('Playback settings')),
-      body: SingleChildScrollView(
+      body: CappedBody(child: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -186,7 +187,7 @@ class _FeedSettingsScreenState extends State<FeedSettingsScreen> {
               controller: _introController,
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
-                hintText: 'e.g. 15 — leave blank to play from the start',
+                hintText: 'e.g. 15. Leave blank to play from the start',
               ),
             ),
             const SizedBox(height: 24),
@@ -200,7 +201,7 @@ class _FeedSettingsScreenState extends State<FeedSettingsScreen> {
               controller: _outroController,
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
-                hintText: 'e.g. 30 — leave blank to play to the true end',
+                hintText: 'e.g. 30. Leave blank to play to the true end',
               ),
             ),
             const SizedBox(height: 24),
@@ -214,7 +215,7 @@ class _FeedSettingsScreenState extends State<FeedSettingsScreen> {
               controller: _keepLatestController,
               keyboardType: TextInputType.number,
               decoration: const InputDecoration(
-                hintText: 'e.g. 5 — leave blank to keep every episode\'s audio',
+                hintText: 'e.g. 5. Leave blank to keep every episode’s audio',
               ),
             ),
             const SizedBox(height: 24),
@@ -228,8 +229,8 @@ class _FeedSettingsScreenState extends State<FeedSettingsScreen> {
             Text('Rules', style: Theme.of(context).textTheme.titleMedium),
             const SizedBox(height: 4),
             Text(
-                'Checked in order against new episodes as they arrive — '
-                'the first match decides; no match means "enter as normal".',
+                'Checked in order against new episodes as they arrive: '
+                'the first match decides; no match means “enter as normal”.',
                 style: Theme.of(context).textTheme.bodySmall),
             const SizedBox(height: 12),
             for (var i = 0; i < _rules.length; i++) _ruleTile(i, _rules[i]),
@@ -306,7 +307,7 @@ class _FeedSettingsScreenState extends State<FeedSettingsScreen> {
             ),
           ],
         ),
-      ),
+      )),
     );
   }
 
@@ -318,7 +319,7 @@ class _FeedSettingsScreenState extends State<FeedSettingsScreen> {
           Expanded(
             child: Text(
                 '${_fieldLabel(rule.field)} ${_matchLabel(rule.match)} '
-                '"${rule.text}" — ${_actionLabel(rule.action)}',
+                '“${rule.text}”: ${_actionLabel(rule.action)}',
                 overflow: TextOverflow.ellipsis,
                 maxLines: 2),
           ),

@@ -10,6 +10,7 @@ import 'package:trellis/main.dart';
 
 import '../support/fake_player.dart';
 import '../support/scripted_fetcher.dart';
+import '../support/pick_reader.dart';
 
 /// iTunes podcast search: a door beside subscribe-by-URL; the screen names
 /// itunes.apple.com plainly and nothing fires before type + submit (the
@@ -76,9 +77,8 @@ void main() {
     await tester.pumpWidget(TrellisApp(
         db: db, fetcher: fetcher, createPlayer: () => FakeEpisodePlayer()));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Ada'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('River'));
+    await pickReader(tester, 'Ada');
+    await tester.tap(find.text('Inbox'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Follow a feed'));
     await tester.pumpAndSettle();

@@ -6,10 +6,11 @@ import 'package:oh_fleet_conformance/oh_fleet_conformance.dart';
 /// stops being true).
 void main() => runFleetConformance(const FleetAppConfig(
       appId: 'trellis',
-      // C7 is ON: the app bundles the fleet's Lora/Nunito for the wall
-      // aesthetic (proposal-2 §12), so every glyph the UI prints must
-      // exist in our own cmaps — the ≤/≥ tofu that boxed in Peckish is
-      // exactly what this check exists to catch.
+      // C7 is ON: the app renders the fleet's Lora/Nunito, which
+      // openhearth_design ships as package fonts (the app bundles no copy
+      // of its own), so every glyph the UI prints must exist in those
+      // cmaps. The ≤/≥ tofu that boxed in Peckish is exactly what this
+      // check exists to catch.
       //
       // C2 (sanctuary_backup_ui) is a RECORDED DIVERGENCE, not a gap:
       // backup here is packages/backup_core on the REAL
@@ -38,6 +39,43 @@ void main() => runFleetConformance(const FleetAppConfig(
         FleetCheck.c6Harness,
         FleetCheck.c7Fonts,
         FleetCheck.c8IconButtons,
+        // C10: no raw exception text on screen. It cannot see an error
+        // stored first and shown later, so those sites were fixed by hand
+        // too (boot notice, course/OPML/backup refusals, model and voice
+        // start failures).
+        FleetCheck.c10RawErrors,
+        // C11, strict: a tooltip is not a bar command's name. Every bar
+        // command shows its word (OhBarAction / OhBarOverflow), folding
+        // by space; pinned at 360dp x 1.3 by bar_labels_test.
+        FleetCheck.c11StrictBarLabels,
+        // C12: the accent (OhTheme's warmth, light and hearthDark) stays
+        // apart from the urgency red; the rest of the separation is the
+        // icon + word every error carries.
+        FleetCheck.c12AccentVsError,
+        // C5-primaryScreens: each screen below is swept at 360dp x 1.3
+        // with its primary action reachable, and 320dp x 3.0 without
+        // overflow (test/a11y/primary_action_sweep_test.dart).
+        FleetCheck.c5PrimaryScreens,
+        // C9 (routes) is NOT enabled: Trellis declares no GoRoute (plain
+        // Navigator pushes from one HomeFlow), so C9 would only report
+        // that it has nothing to check. Reachability is covered instead
+        // by the flow tests that walk each door.
+      },
+      barLabelExemptions: {
+        // The reading-mode picker's face (_BarMenuFace, same file) shows
+        // the current mode as a word ("Scroll", "Words", "Lines") beside
+        // its glyph, folding by the bar's space rule. The scan only sees
+        // the call site, where the Text is inside another widget.
+        'lib/features/reader/reader_screen.dart#mode-toggle':
+            'the _BarMenuFace child shows the current mode as a word',
+      },
+      primaryActionScreens: {
+        'LibraryScreen',
+        'RiverScreen',
+        'CoursesScreen',
+        'ReaderScreen',
+        'UrlIntakeScreen',
+        'BackupScreen',
       },
       // Tier T: canonical openhearth_design tokens consumed by sibling
       // path; theme construction stays local (local ThemeData over

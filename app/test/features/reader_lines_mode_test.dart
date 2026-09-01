@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/reader/reader_screen.dart';
 import 'package:trellis/main.dart';
+import '../support/pick_reader.dart';
 
 /// Campaign 9 Phase 6 ("a third way to read"): Lines is a genuine third
 /// [ReaderMode] alongside Words (RSVP) and Scroll — a scroll-family view
@@ -47,8 +48,7 @@ void main() {
   Future<void> openReader(WidgetTester tester, {required String title}) async {
     await tester.pumpWidget(TrellisApp(db: db));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Ada'));
-    await tester.pumpAndSettle();
+    await pickReader(tester, 'Ada');
     await tester.tap(find.text(title));
     await tester.pumpAndSettle();
   }
@@ -83,8 +83,10 @@ void main() {
     await tester.tap(find.byKey(const Key('mode-toggle')));
     await tester.pumpAndSettle();
 
+    // The menu names all three; the bar's face also names the current
+    // one, so "Words" is on screen twice while the menu is open.
     expect(find.text('Scroll'), findsOneWidget);
-    expect(find.text('Words'), findsOneWidget);
+    expect(find.text('Words'), findsNWidgets(2));
     expect(find.text('Lines'), findsOneWidget);
     final wordsItem = tester.widget<CheckedPopupMenuItem<ReaderMode>>(
         find.byKey(const Key('mode-item-words')));

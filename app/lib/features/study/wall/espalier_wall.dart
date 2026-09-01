@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:openhearth_design/openhearth_design.dart';
 import 'package:study_core/study_core.dart' as study;
 
 import 'ripen.dart';
@@ -197,8 +196,8 @@ class WallFruit extends StatelessWidget {
           rim: Theme.of(context).colorScheme.outline,
         ),
         child: Center(
-          // A warm-white glyph reads on every ripeness, day and dusk.
-          child: Icon(icon, size: 14, color: OhColors.linen50),
+          // Dark ink on a pale unripe fruit, warm white on a ripe one.
+          child: Icon(icon, size: 14, color: ripenInk(mastery)),
         ),
       ),
     );

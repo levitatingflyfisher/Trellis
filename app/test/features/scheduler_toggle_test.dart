@@ -53,7 +53,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('FSRS'), findsWidgets);
-    expect(find.textContaining('won\'t carry over'), findsOneWidget,
+    expect(find.textContaining('won’t carry over'), findsOneWidget,
         reason: 'the honest sentence must name the actual consequence, not '
             'just say "are you sure?"');
     // Not yet applied — the dialog is a confirmation, not a fait accompli.

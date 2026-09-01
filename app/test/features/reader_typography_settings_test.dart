@@ -29,7 +29,7 @@ void main() {
     await open(tester);
     final preview =
         tester.widget<Text>(find.byKey(const Key('typography-preview')));
-    expect(preview.style?.fontFamily, 'Lora');
+    expect(preview.style?.fontFamily, 'packages/openhearth_design/Lora');
     expect(preview.style?.height, 1.6);
   });
 
@@ -66,7 +66,7 @@ void main() {
 
     final preview =
         tester.widget<Text>(find.byKey(const Key('typography-preview')));
-    expect(preview.style?.fontFamily, 'Nunito');
+    expect(preview.style?.fontFamily, 'packages/openhearth_design/Nunito');
     final saved = await db.profilesDao.readerPrefs(profileId);
     expect(saved.typography.typeface, ReaderTypeface.nunito);
   });
@@ -134,5 +134,13 @@ void main() {
         reason: 'this screen only ever meant to touch typography — '
             'writing a bare ReaderPrefs(typography: next) would silently '
             "wipe the player's own key in the same blob");
+  });
+
+  testWidgets('the real terms are explained here, once, in plain words',
+      (tester) async {
+    await open(tester);
+    await tester.scrollUntilVisible(find.byKey(const Key('about-rsvp')), 200);
+    expect(find.textContaining('calls this RSVP'), findsOneWidget);
+    expect(find.textContaining('parafoveal preview'), findsOneWidget);
   });
 }

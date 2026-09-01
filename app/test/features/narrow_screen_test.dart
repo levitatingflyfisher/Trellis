@@ -8,6 +8,7 @@ import 'package:trellis/main.dart';
 
 import '../support/fake_player.dart';
 import '../support/scripted_fetcher.dart';
+import '../support/pick_reader.dart';
 
 /// The fleet's recurring accessibility wound: rigid rows overflowing at
 /// 320dp with large text. RenderFlex overflow throws in widget tests, so
@@ -130,8 +131,7 @@ void main() {
         fetcher: ScriptedFetcher((u, h) => textResponse('')),
         createPlayer: () => player));
     await tester.pumpAndSettle(); // profile picker
-    await tester.tap(find.text('Adalheidis Winterbourne'));
-    await tester.pumpAndSettle(); // library list row + nav bar
+    await pickReader(tester, 'Adalheidis Winterbourne'); // library list row + nav bar
 
     await tester.tap(find.textContaining('A Rather Longer Title'));
     await tester.pumpAndSettle(); // reader, RSVP (long word incoming)
@@ -152,7 +152,7 @@ void main() {
     await tester.pumpAndSettle(); // back through the library
 
     // ── P2 screens ──
-    await tester.tap(find.text('River'));
+    await tester.tap(find.text('Inbox'));
     await tester.pumpAndSettle(); // river list + filter chips
 
     // At 2x the chips row scrolls; bring the far chip on-stage first.

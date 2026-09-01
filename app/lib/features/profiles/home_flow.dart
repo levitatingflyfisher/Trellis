@@ -9,10 +9,18 @@ import 'home_shell.dart';
 import 'parent_dashboard.dart';
 import 'parent_pin.dart';
 import 'pin_dialogs.dart';
+import '../shared/capped_body.dart';
 
-/// The root flow: no profiles → create one; profiles but none chosen → the
-/// picker; a chosen reader → their shell (Library + River). One stateful
-/// widget, no routes — switching reader is a setState, not a navigation.
+/// The name a first launch gives its one reader.
+const defaultReaderName = 'Reader';
+
+/// The root flow, which opens into the task (operator ruling 48; audit
+/// rank 5): a first launch makes a reader called "Reader" and opens their
+/// Library, with no name to type; a later launch opens the reader this
+/// device last had open (or the only one). The picker ("Who's reading?")
+/// appears only when there is a real choice: several readers and no
+/// remembered one, or the reader asked to switch. One stateful widget, no
+/// routes: switching reader is a setState, not a navigation.
 class HomeFlow extends StatefulWidget {
   final AppDatabase db;
   final HttpFetcher fetcher;
@@ -44,15 +52,41 @@ class _HomeFlowState extends State<HomeFlow> {
 
   Future<void> _load() async {
     // Boot-time ephemera sweep (ADR-0003 law 2): decayed feed items leave
-    // before anything renders; promoted works are untouchable by design.
+    // the river before anything renders, into a recoverable soft state the
+    // River announces (Restore / Let go) — never a silent delete. Promoted
+    // works are untouchable by design.
     await widget.db.spineDao.sweepEphemera(todayEpochDay: epochDayUtcNow());
-    final profiles = await widget.db.profilesDao.all();
+    var profiles = await widget.db.profilesDao.all();
     final pinSet = await _pin.isSet;
+    // First launch: nothing to protect yet, so no name to type before the
+    // app is usable. The reader can be renamed from the Parent dashboard.
+    if (profiles.isEmpty && !pinSet && _firstLoad) {
+      await widget.db.profilesDao.create(defaultReaderName);
+      profiles = await widget.db.profilesDao.all();
+    }
+    Profile? active = _active;
+    if (_firstLoad && active == null) {
+      final last = await widget.db.deviceSettingsDao.lastProfileId();
+      // A stale id (reader removed, or a restore replaced everyone) falls
+      // back to the only reader, or to the picker.
+      active = profiles.where((p) => p.id == last).firstOrNull ??
+          (profiles.length == 1 ? profiles.single : null);
+    }
+    _firstLoad = false;
     if (!mounted) return;
     setState(() {
       _profiles = profiles;
       _pinSet = pinSet;
+      _active = active;
     });
+  }
+
+  bool _firstLoad = true;
+
+  /// Opens [p]'s shell and remembers it for the next launch.
+  void _open(Profile p) {
+    setState(() => _active = p);
+    widget.db.deviceSettingsDao.setLastProfileId(p.id);
   }
 
   Future<void> _create(String name) async {
@@ -61,9 +95,9 @@ class _HomeFlowState extends State<HomeFlow> {
     if (!mounted) return;
     setState(() {
       _profiles = profiles;
-      _active = profiles.firstWhere((p) => p.id == id);
       _adding = false;
     });
+    _open(profiles.firstWhere((p) => p.id == id));
   }
 
   /// Creating a reader is PIN-gated once a PIN exists (P5) — through THE
@@ -95,7 +129,7 @@ class _HomeFlowState extends State<HomeFlow> {
   Widget build(BuildContext context) {
     final profiles = _profiles;
     if (profiles == null) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const Scaffold(body: CappedBody(child: Center(child: CircularProgressIndicator())));
     }
     // First run (nothing to protect yet) walks straight into creating a
     // reader; once a PIN exists, even an empty household shows the picker
@@ -110,7 +144,7 @@ class _HomeFlowState extends State<HomeFlow> {
     if (active == null) {
       return _ProfilePickerScreen(
         profiles: profiles,
-        onPick: (p) => setState(() => _active = p),
+        onPick: _open,
         onAdd: _requestAdd,
         onParents: _openDashboard,
       );
@@ -139,6 +173,13 @@ class _CreateProfileScreenState extends State<_CreateProfileScreen> {
   final _name = TextEditingController();
 
   @override
+  void initState() {
+    super.initState();
+    // The button's state follows the field (it is live only with a name).
+    _name.addListener(() => setState(() {}));
+  }
+
+  @override
   void dispose() {
     _name.dispose();
     super.dispose();
@@ -156,7 +197,7 @@ class _CreateProfileScreenState extends State<_CreateProfileScreen> {
       appBar: widget.onBack == null
           ? null
           : AppBar(leading: BackButton(onPressed: widget.onBack)),
-      body: SafeArea(
+      body: CappedBody(child: SafeArea(
         child: Center(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(24),
@@ -166,7 +207,7 @@ class _CreateProfileScreenState extends State<_CreateProfileScreen> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text("Who's reading?",
+                  Text('Add a reader',
                       style: Theme.of(context).textTheme.headlineMedium,
                       textAlign: TextAlign.center),
                   const SizedBox(height: 8),
@@ -180,15 +221,20 @@ class _CreateProfileScreenState extends State<_CreateProfileScreen> {
                     autofocus: true,
                     textInputAction: TextInputAction.done,
                     onSubmitted: (_) => _submit(),
-                    decoration:
-                        const InputDecoration(labelText: 'Your name'),
+                    // The button below is live only with a name, and this
+                    // line says why before anyone taps (audit doet-06,
+                    // humane-10: it used to return silently on an empty
+                    // name).
+                    decoration: const InputDecoration(
+                        labelText: 'Name',
+                        helperText: 'Type a name to add this reader.'),
                   ),
                   const SizedBox(height: 24),
                   FilledButton(
-                    onPressed: _submit,
+                    onPressed: _name.text.trim().isEmpty ? null : _submit,
                     child: const Padding(
                       padding: EdgeInsets.symmetric(vertical: 12),
-                      child: Text('Start reading'),
+                      child: Text('Add reader'),
                     ),
                   ),
                 ],
@@ -196,7 +242,7 @@ class _CreateProfileScreenState extends State<_CreateProfileScreen> {
             ),
           ),
         ),
-      ),
+      )),
     );
   }
 }
@@ -219,7 +265,7 @@ class _ProfilePickerScreen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(
+      body: CappedBody(child: SafeArea(
         child: Center(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(24),
@@ -229,7 +275,7 @@ class _ProfilePickerScreen extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Text("Who's reading?",
+                  Text("Who’s reading?",
                       style: Theme.of(context).textTheme.headlineMedium,
                       textAlign: TextAlign.center),
                   const SizedBox(height: 24),
@@ -259,7 +305,7 @@ class _ProfilePickerScreen extends StatelessWidget {
             ),
           ),
         ),
-      ),
+      )),
     );
   }
 }

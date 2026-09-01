@@ -123,9 +123,28 @@ class _HomeShellState extends State<HomeShell> {
   late final AudiobookPickerGateway? _audiobookGateway =
       widget.services.localMlAvailable ? FilePickerAudiobookGateway() : null;
 
+  /// Operator ruling 48: the "finish setup" line — shown while this app's
+  /// recovery phrase has not been confirmed and kept, until dismissed.
+  bool _showSetupReminder = false;
+
+  Future<void> _checkSetupReminder() async {
+    final custody = widget.services.backupCustody;
+    if (custody == null) return;
+    final show = await custody.readPhrase() == null &&
+        !await custody.reminderDismissed();
+    if (!mounted) return;
+    setState(() => _showSetupReminder = show);
+  }
+
+  Future<void> _dismissSetupReminder() async {
+    setState(() => _showSetupReminder = false);
+    await widget.services.backupCustody?.dismissReminder();
+  }
+
   @override
   void initState() {
     super.initState();
+    unawaited(_checkSetupReminder());
     _coordinator.restore();
     _dspCoordinator?.restore();
     // Campaign 9 Phase 2 ("resume after restart"): shows the mini bar
@@ -165,10 +184,17 @@ class _HomeShellState extends State<HomeShell> {
   Future<void> _openBackup() async {
     final restored = await Navigator.of(context).push<bool>(
       MaterialPageRoute<bool>(
-        builder: (_) => BackupScreen(db: widget.db, profile: widget.profile),
+        builder: (_) => BackupScreen(
+            db: widget.db,
+            profile: widget.profile,
+            custody: widget.services.backupCustody),
       ),
     );
-    if (restored == true) widget.onSwitchProfile();
+    if (restored == true) {
+      widget.onSwitchProfile();
+      return;
+    }
+    await _checkSetupReminder();
   }
 
   /// Campaign 4 Phase 5: Trellis Echo, opened the same door-not-navigation
@@ -323,6 +349,9 @@ class _HomeShellState extends State<HomeShell> {
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
+          if (_showSetupReminder)
+            _SetupReminder(
+                onOpen: _openBackup, onDismiss: _dismissSetupReminder),
           MiniPlayerBar(
             controller: _player,
             onOpenSyncedText: _openSyncedText,
@@ -340,10 +369,13 @@ class _HomeShellState extends State<HomeShell> {
                 selectedIcon: Icon(Icons.local_library),
                 label: 'Library',
               ),
+              // "Inbox", not the coined "River" (operator jargon ruling):
+              // where new items from followed feeds arrive, to keep or to
+              // let pass; keeping happens in the Library.
               NavigationDestination(
-                icon: Icon(Icons.waves_outlined),
-                selectedIcon: Icon(Icons.waves),
-                label: 'River',
+                icon: Icon(Icons.inbox_outlined),
+                selectedIcon: Icon(Icons.inbox),
+                label: 'Inbox',
               ),
               NavigationDestination(
                 icon: Icon(Icons.school_outlined),
@@ -353,6 +385,51 @@ class _HomeShellState extends State<HomeShell> {
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+/// One calm line above the tabs, never a modal and never red: what is
+/// unfinished, the door to finish it, and a way to say "not now" for good.
+class _SetupReminder extends StatelessWidget {
+  final VoidCallback onOpen;
+  final VoidCallback onDismiss;
+  const _SetupReminder({required this.onOpen, required this.onDismiss});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Material(
+      key: const Key('setup-reminder'),
+      color: theme.colorScheme.surfaceContainerHigh,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 8, 0),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              "Finish setup: save your recovery phrase, so this app’s "
+              'backups can be opened.',
+              style: theme.textTheme.bodyMedium,
+            ),
+            OverflowBar(
+              alignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  key: const Key('setup-reminder-dismiss'),
+                  onPressed: onDismiss,
+                  child: const Text('Dismiss'),
+                ),
+                TextButton(
+                  key: const Key('setup-reminder-open'),
+                  onPressed: onOpen,
+                  child: const Text('Set up'),
+                ),
+              ],
+            ),
+          ],
+        ),
       ),
     );
   }

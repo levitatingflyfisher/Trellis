@@ -1,5 +1,5 @@
 name: trellis
-description: "Read, listen, study, remember — a local-first reader, river and recall ladder."
+description: "Read, listen, study, remember: a local-first reader, podcast inbox and study app."
 # The following line prevents the package from being accidentally published to
 # pub.dev using `flutter pub publish`. This is preferred for private packages.
 publish_to: 'none' # Remove this line if you wish to publish to pub.dev
@@ -104,6 +104,14 @@ dependencies:
   # sanctuary_auth_core (per-app HKDF domain + AAD).
   backup_core:
     path: ../packages/backup_core
+  sanctuary_backup_ui:
+    path: ../../packages/sanctuary_backup_ui
+  # The fleet's keychain seam (SecureKeyStore): the confirmed recovery
+  # phrase is kept on the device the way the sanctuary_backup_ui apps keep
+  # it. Already in the tree through backup_core; direct because the app
+  # imports it.
+  sanctuary_auth_core:
+    path: ../../packages/sanctuary_auth_core
   # The Brain seam wiring (proposal-2 §7): tiers, BYOK Anthropic, the
   # Distiller with its must-parse invariant, discourse study, provenance.
   brain_wiring:
@@ -112,7 +120,7 @@ dependencies:
   # transitively, made direct for the brain settings door.
   flutter_secure_storage: ^9.2.4
   # Fleet design tokens (C1): the hearth palette comes from the canonical
-  # package, never retyped hex.
+  # package, never retyped hex. It also ships Lora and Nunito.
   openhearth_design:
     path: ../../ohStyle/openhearth_design
 
@@ -154,28 +162,10 @@ flutter:
     # never auto-imported (the user's hand does the importing, ADR-0003).
     - assets/courses/kalman.ohcourse
 
-  # The fleet's type (proposal-2 §12): Lora for display, Nunito for body —
-  # bundled, so C7 checks every glyph the UI prints against our own cmaps
-  # (the ≤/≥ tofu law learned in Peckish).
-  fonts:
-    - family: Lora
-      fonts:
-        - asset: assets/fonts/Lora-Regular.ttf
-        - asset: assets/fonts/Lora-Italic.ttf
-          style: italic
-        - asset: assets/fonts/Lora-Medium.ttf
-          weight: 500
-        - asset: assets/fonts/Lora-Bold.ttf
-          weight: 700
-    - family: Nunito
-      fonts:
-        - asset: assets/fonts/Nunito-Regular.ttf
-        - asset: assets/fonts/Nunito-Medium.ttf
-          weight: 500
-        - asset: assets/fonts/Nunito-SemiBold.ttf
-          weight: 600
-        - asset: assets/fonts/Nunito-Bold.ttf
-          weight: 700
+  # The fleet's type (proposal-2 §12): Lora for display, Nunito for body,
+  # bundled as package fonts by openhearth_design (0.7.1+), so the app
+  # carries no font files of its own. C7 checks every glyph the UI prints
+  # against those package cmaps (the ≤/≥ tofu law learned in Peckish).
 
   # To add assets to your application, add an assets section, like this:
   # assets:

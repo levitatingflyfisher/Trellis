@@ -63,6 +63,9 @@ void main() {
 
     await tester.enterText(
         find.byKey(const Key('anthropic-key-field')), raw);
+    // The 640dp page cap wraps the copy taller than the test view.
+    await tester.ensureVisible(find.byKey(const Key('save-key')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('save-key')));
     await tester.pumpAndSettle();
 
@@ -105,6 +108,8 @@ void main() {
         home: CoursesScreen(db: db, profile: profile, brainStore: store)));
     await tester.pumpAndSettle();
 
+    await tester.tap(find.byKey(const Key('study-settings')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('open-thinking')));
     await tester.pumpAndSettle();
     expect(find.text('Thinking'), findsOneWidget);

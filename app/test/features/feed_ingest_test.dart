@@ -1059,8 +1059,8 @@ void main() {
 
       expect(outcome.newItems, 0);
       expect(outcome.message,
-          "The publisher's feed offers only these episodes — older ones "
-          "aren't published in it.");
+          'The publisher’s feed offers only these episodes. Older ones '
+          'aren’t published in it.');
       expect(fetcher.calls, isEmpty);
     });
 
@@ -1110,7 +1110,7 @@ void main() {
 
       expect(outcome.newItems, 0);
       expect(outcome.message,
-          "No older episodes were published in the feed's archive.");
+          'No older episodes were published in the feed’s archive.');
     });
 
     test('a failed hop surfaces the honest technical sentence instead of a '
@@ -1123,7 +1123,7 @@ void main() {
 
       expect(outcome.newItems, 0);
       expect(outcome.message, isNot(contains('No older episodes')));
-      expect(outcome.message, contains("couldn't be reached"));
+      expect(outcome.message, contains("couldn’t be reached"));
     });
   });
 }

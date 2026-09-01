@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/reader/reader_prefs.dart';
 import 'package:trellis/main.dart';
+import '../support/pick_reader.dart';
 
 /// Campaign 4 Phase 1: per-profile typography prefs reach the print
 /// reader's rendered paragraph (scroll mode). RSVP/the ticker are untouched
@@ -30,8 +31,7 @@ void main() {
       {String title = 'Typography'}) async {
     await tester.pumpWidget(TrellisApp(db: db));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Ada'));
-    await tester.pumpAndSettle();
+    await pickReader(tester, 'Ada');
     await tester.tap(find.text(title));
     await tester.pumpAndSettle();
     // Campaign 9 Phase 6: `mode-toggle` opens a labeled three-way picker
@@ -57,7 +57,7 @@ void main() {
 
     // 'Zero' (word 0) is the drop cap; 'One' is a plain flowing word.
     final word = tester.widget<Text>(find.text('One'));
-    expect(word.style?.fontFamily, 'Nunito');
+    expect(word.style?.fontFamily, 'packages/openhearth_design/Nunito');
     expect(word.style?.height, 2.0);
     final base = Theme.of(tester.element(find.text('One')))
         .textTheme
@@ -71,7 +71,7 @@ void main() {
     final (_, _) = await seed('Zero One Two Three.');
     await openReaderInScroll(tester);
     final word = tester.widget<Text>(find.text('One'));
-    expect(word.style?.fontFamily, 'Lora');
+    expect(word.style?.fontFamily, 'packages/openhearth_design/Lora');
     expect(word.style?.height, 1.6);
   });
 

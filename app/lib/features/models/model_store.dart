@@ -22,6 +22,7 @@ library;
 import 'dart:async';
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:archive/archive_io.dart';
 import 'package:crypto/crypto.dart' as crypto;
 import 'package:dio/dio.dart';
@@ -175,9 +176,10 @@ class DiskModelStore implements ModelStore {
       final tarBytes = BZip2Decoder().decodeBytes(compressed);
       archive = TarDecoder().decodeBytes(tarBytes);
     } catch (e) {
+      debugPrint('model "${spec.id}": archive unreadable: $e');
       throw ModelExtractionException(
-          'model "${spec.id}": the downloaded archive could not be read '
-          '($e) — try re-downloading it');
+          "The downloaded file couldn’t be unpacked. Try downloading it "
+          'again.');
     }
 
     final stagingDir = Directory(
@@ -188,8 +190,8 @@ class DiskModelStore implements ModelStore {
     if (!unwrapped.existsSync()) {
       await stagingDir.delete(recursive: true);
       throw ModelExtractionException(
-          'model "${spec.id}": the extracted archive did not contain the '
-          'expected "${layout.topLevelDir}" directory — the upstream '
+          'model “${spec.id}”: the extracted archive did not contain the '
+          'expected “${layout.topLevelDir}” directory; the upstream '
           'release layout may have changed');
     }
 
@@ -218,9 +220,10 @@ class DiskModelStore implements ModelStore {
       final tarBytes = GZipDecoder().decodeBytes(compressed);
       archive = TarDecoder().decodeBytes(tarBytes);
     } catch (e) {
+      debugPrint('model "${spec.id}": archive unreadable: $e');
       throw ModelExtractionException(
-          'model "${spec.id}": the downloaded archive could not be read '
-          '($e) — try re-downloading it');
+          "The downloaded file couldn’t be unpacked. Try downloading it "
+          'again.');
     }
 
     final stagingDir = Directory(
@@ -231,8 +234,8 @@ class DiskModelStore implements ModelStore {
     if (!unwrapped.existsSync()) {
       await stagingDir.delete(recursive: true);
       throw ModelExtractionException(
-          'model "${spec.id}": the extracted archive did not contain the '
-          'expected "${layout.topLevelDir}" directory — the upstream '
+          'model “${spec.id}”: the extracted archive did not contain the '
+          'expected “${layout.topLevelDir}” directory; the upstream '
           'release layout may have changed');
     }
 
@@ -265,7 +268,7 @@ class DiskModelStore implements ModelStore {
     for (final f in spec.files) {
       if (!f.isPinned) {
         throw StateError(
-            'model "${spec.id}" has an unpinned file (${f.url}) — the '
+            'model “${spec.id}” has an unpinned file (${f.url}); the '
             'registry law forbids downloading it');
       }
     }
@@ -311,8 +314,8 @@ class DiskModelStore implements ModelStore {
               if (digest != f.sha256) {
                 await part.delete();
                 throw ModelIntegrityException(
-                    'model "${spec.id}": ${_fileName(f)} hashed to $digest, '
-                    'registry pins ${f.sha256} — refusing to install');
+                    'model “${spec.id}”: ${_fileName(f)} hashed to $digest, '
+                    'registry pins ${f.sha256}, so it was not installed');
               }
               await part.rename(finalFile.path);
             },

@@ -225,4 +225,27 @@ void main() {
       );
     });
   });
+
+  group('the phrase this app issues (fleet generator, not a second copy)', () {
+    test('newPhrase mints a valid 12-word phrase that locks and opens',
+        () async {
+      final minted = EspalierBackup.newPhrase();
+      expect(minted.split(' '), hasLength(12));
+      expect(EspalierBackup.isValidPhrase(minted), isTrue);
+      expect(EspalierBackup.newPhrase(), isNot(minted),
+          reason: 'fresh entropy every time');
+      final payload = Uint8List.fromList(utf8.encode('hello'));
+      final blob = await EspalierBackup.encrypt(payload, phrase: minted);
+      expect(await EspalierBackup.decrypt(blob, phrase: minted), payload);
+    });
+
+    test('isValidPhrase rejects a bad checksum or a non-word', () {
+      expect(EspalierBackup.isValidPhrase(phrase), isTrue);
+      expect(
+          EspalierBackup.isValidPhrase(
+              phrase.replaceFirst('about', 'abandon')),
+          isFalse);
+      expect(EspalierBackup.isValidPhrase('not a real phrase'), isFalse);
+    });
+  });
 }

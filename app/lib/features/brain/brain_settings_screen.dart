@@ -15,8 +15,10 @@ library;
 
 import 'package:brain_wiring/brain_wiring.dart';
 import 'package:flutter/material.dart';
+import 'package:openhearth_design/openhearth_design.dart';
 
 import 'brain_store.dart';
+import '../shared/capped_body.dart';
 
 class BrainSettingsScreen extends StatefulWidget {
   const BrainSettingsScreen(
@@ -87,7 +89,7 @@ class _BrainSettingsScreenState extends State<BrainSettingsScreen> {
     final selection = _selection;
     return Scaffold(
       appBar: AppBar(title: const Text('Thinking')),
-      body: selection == null
+      body: CappedBody(child: selection == null
           ? const Center(child: CircularProgressIndicator())
           : ListView(
               padding: const EdgeInsets.all(16),
@@ -96,7 +98,7 @@ class _BrainSettingsScreenState extends State<BrainSettingsScreen> {
                 // missed without one. Study is complete either way.
                 Text(
                     'Study works fully without a brain. One only adds '
-                    'distillation and critiques — and only when you ask.',
+                    'distillation and critiques, and only when you ask.',
                     key: const Key('no-brain-note'),
                     style: theme.textTheme.bodyMedium),
                 const SizedBox(height: 16),
@@ -129,14 +131,14 @@ class _BrainSettingsScreenState extends State<BrainSettingsScreen> {
                       _tierTile(
                         BrainTier.stove,
                         title: 'Home desktop',
-                        subtitle: "Your family's computer, over your home "
-                            'network — on the roadmap.',
+                        subtitle: "Your family’s computer, over your home "
+                            'network. On the roadmap.',
                       ),
                       if (widget.localMlAvailable)
                         _tierTile(
                           BrainTier.localStub,
                           title: 'Local model',
-                          subtitle: 'A model on this device — on the '
+                          subtitle: 'A model on this device. On the '
                               'roadmap.',
                         ),
                     ],
@@ -148,7 +150,7 @@ class _BrainSettingsScreenState extends State<BrainSettingsScreen> {
                   _keySection(theme),
                 ],
               ],
-            ),
+            )),
     );
   }
 
@@ -179,8 +181,8 @@ class _BrainSettingsScreenState extends State<BrainSettingsScreen> {
               Expanded(
                 child: Text(masked,
                     key: const Key('masked-key'),
-                    style: theme.textTheme.bodyLarge
-                        ?.copyWith(fontFamily: 'monospace'),
+                    style: OhTypography.code(
+                        color: theme.colorScheme.onSurface),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis),
               ),
@@ -212,7 +214,7 @@ class _BrainSettingsScreenState extends State<BrainSettingsScreen> {
         ),
         const SizedBox(height: 8),
         Text(
-            'Kept in this device\'s secure storage — never the database, '
+            'Kept in this device’s secure storage, never the database, '
             'never a backup. Each use asks before anything is sent.',
             style: theme.textTheme.bodySmall),
       ],

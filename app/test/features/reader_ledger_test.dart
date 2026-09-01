@@ -10,6 +10,7 @@ import 'package:trellis/features/transcribe/transcript_writer.dart'
 import 'package:trellis/main.dart';
 
 import '../support/fake_player.dart';
+import '../support/pick_reader.dart';
 
 /// The word ledger's UI half (the schema half is ledger_db_test): a
 /// long-press on any word sets it aside via the ONE dao path, cleaned of
@@ -43,8 +44,7 @@ void main() {
       {String title = 'Five Words'}) async {
     await tester.pumpWidget(TrellisApp(db: db));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Ada'));
-    await tester.pumpAndSettle();
+    await pickReader(tester, 'Ada');
     await tester.tap(find.text(title));
     await tester.pumpAndSettle();
   }
@@ -116,17 +116,39 @@ void main() {
         .add(profileId: profileId, word: 'hygge', lang: 'da', nowMs: 2000);
     await openReader(tester);
 
+    await tester.tap(find.byKey(const Key('reader-overflow')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('open-ledger')));
     await tester.pumpAndSettle();
     expect(find.text('hygge'), findsOneWidget, reason: 'newest first');
     expect(find.text('saudade'), findsOneWidget);
 
+    // The Remove button is deliberate: no dialog, a lasting Undo.
     await tester.tap(find.byKey(Key('ledger-remove-$hyggeId')));
     await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
     expect(find.text('hygge'), findsNothing);
+    await tester.tap(find.text('Undo'));
+    await tester.pumpAndSettle();
+    expect(find.text('hygge'), findsOneWidget);
+    await tester.tap(find.byKey(Key('ledger-remove-$hyggeId')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Dismiss'));
+    await tester.pumpAndSettle();
     expect((await db.ledgerDao.wordsOf(profileId)).single.word, 'saudade');
 
-    await tester.tap(find.byKey(Key('ledger-remove-$saudadeId')));
+    // A swipe is an easy gesture, so it asks first, naming the act.
+    await tester.drag(
+        find.byKey(Key('ledger-row-$saudadeId')), const Offset(-600, 0));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsOneWidget);
+    await tester.tap(find.text('Keep'));
+    await tester.pumpAndSettle();
+    expect(find.text('saudade'), findsOneWidget);
+    await tester.drag(
+        find.byKey(Key('ledger-row-$saudadeId')), const Offset(-600, 0));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text("Remove 'saudade'"));
     await tester.pumpAndSettle();
     expect(await db.ledgerDao.wordsOf(profileId), isEmpty);
     expect(find.text('Nothing set aside yet.'), findsOneWidget,

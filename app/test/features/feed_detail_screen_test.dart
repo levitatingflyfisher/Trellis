@@ -75,7 +75,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('no-archive-note')), findsOneWidget);
-    expect(find.textContaining("older ones aren't published in it"),
+    expect(find.textContaining('Older ones aren’t published in it'),
         findsOneWidget);
     expect(find.byKey(const Key('fetch-older-episodes')), findsNothing);
   });
@@ -114,7 +114,7 @@ void main() {
     await tester.tap(find.byKey(const Key('fetch-older-episodes')));
     await tester.pumpAndSettle();
 
-    expect(find.text("No older episodes were published in the feed's "
+    expect(find.text("No older episodes were published in the feed’s "
         'archive.'), findsOneWidget);
     expect(find.text('Aurora season'), findsOneWidget);
   });

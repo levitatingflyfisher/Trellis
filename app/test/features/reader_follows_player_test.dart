@@ -136,6 +136,8 @@ void main() {
 
     await tester.tap(find.text('alpha.')); // segment 0, not the drop cap
     await tester.pump();
+    await tester.tap(find.byKey(const Key('reader-overflow')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('listen-from-here')));
     await tester.pumpAndSettle();
 

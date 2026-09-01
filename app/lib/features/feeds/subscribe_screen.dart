@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 
 import 'feeds_repository.dart';
 import 'podcast_search_screen.dart';
+import '../shared/capped_body.dart';
+import '../shared/error_line.dart';
 
 /// Subscribe by URL, with the podcast-directory search as the second door
 /// beside it. Discovery, the SSRF guard, fetch and parse all live in
@@ -66,7 +68,7 @@ class _SubscribeScreenState extends State<SubscribeScreen> {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Follow a feed')),
-      body: SafeArea(
+      body: CappedBody(child: SafeArea(
         child: Center(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(24),
@@ -77,7 +79,7 @@ class _SubscribeScreenState extends State<SubscribeScreen> {
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Text(
-                      'Paste a feed address, or a site — the feed is '
+                      'Paste a feed address, or a site; the feed is '
                       'discovered for you.',
                       style: theme.textTheme.bodyMedium),
                   const SizedBox(height: 16),
@@ -94,10 +96,7 @@ class _SubscribeScreenState extends State<SubscribeScreen> {
                   ),
                   if (_error != null) ...[
                     const SizedBox(height: 12),
-                    Text(_error!,
-                        key: const Key('subscribe-error'),
-                        style: theme.textTheme.bodyMedium
-                            ?.copyWith(color: theme.colorScheme.error)),
+                    ErrorLine(_error!, textKey: const Key('subscribe-error')),
                   ],
                   const SizedBox(height: 20),
                   FilledButton.icon(
@@ -129,7 +128,7 @@ class _SubscribeScreenState extends State<SubscribeScreen> {
             ),
           ),
         ),
-      ),
+      )),
     );
   }
 }

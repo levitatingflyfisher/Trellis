@@ -9,6 +9,7 @@ import '../brain/brain_labels.dart';
 import '../brain/brain_store.dart';
 import '../intake/paste_intake.dart' show epochDayUtcNow;
 import '../models/consent.dart';
+import '../shared/capped_body.dart';
 
 final _clozeRe = RegExp(r'\{\{(c\d+)(?:::([^}]*))?\}\}');
 
@@ -267,7 +268,7 @@ class _StudySessionScreenState extends State<StudySessionScreen> {
             final ok = await confirmDownload(context, items: [
               DownloadItem(
                   'Send this prompt and your answer to ${use.egressHost} '
-                  'for a critique — the reply size is unknown until it '
+                  'for a critique. The reply size is unknown until it '
                   'arrives'),
             ]);
             if (!ok || !mounted) return;
@@ -303,8 +304,8 @@ class _StudySessionScreenState extends State<StudySessionScreen> {
         _AnswerBox(
             label: critiqueByLine(critique.provenance),
             body: '${critique.critique}\n\n'
-                'The model\'s read: ${critique.suggestedGrade.name} — '
-                'that call stays yours.'),
+                'The model’s read: ${critique.suggestedGrade.name}. '
+                'That call stays yours.'),
       ],
       if (error != null) ...[
         const SizedBox(height: 12),
@@ -386,7 +387,7 @@ class _StudySessionScreenState extends State<StudySessionScreen> {
     if (steps == null) {
       return Scaffold(
         appBar: AppBar(title: Text(widget.course.title)),
-        body: const Center(child: CircularProgressIndicator()),
+        body: CappedBody(child: const Center(child: CircularProgressIndicator())),
       );
     }
     if (steps.isEmpty) return _restScreen();
@@ -403,7 +404,7 @@ class _StudySessionScreenState extends State<StudySessionScreen> {
               value: (_i + 1) / steps.length, minHeight: 4),
         ),
       ),
-      body: SafeArea(
+      body: CappedBody(child: SafeArea(
         child: Padding(
           padding: const EdgeInsets.all(16),
           child: switch (step) {
@@ -412,7 +413,7 @@ class _StudySessionScreenState extends State<StudySessionScreen> {
             _ItemStep(:final node, :final item) => _buildItem(node, item),
           },
         ),
-      ),
+      )),
     );
   }
 
@@ -420,7 +421,7 @@ class _StudySessionScreenState extends State<StudySessionScreen> {
   Widget _restScreen() {
     return Scaffold(
       appBar: AppBar(title: Text(widget.course.title)),
-      body: Center(
+      body: CappedBody(child: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Column(
@@ -441,7 +442,7 @@ class _StudySessionScreenState extends State<StudySessionScreen> {
             ],
           ),
         ),
-      ),
+      )),
     );
   }
 
@@ -459,7 +460,7 @@ class _StudySessionScreenState extends State<StudySessionScreen> {
     final provenance = _provenance;
     return Scaffold(
       appBar: AppBar(title: Text(widget.course.title)),
-      body: Center(
+      body: CappedBody(child: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: ConstrainedBox(
@@ -483,7 +484,7 @@ class _StudySessionScreenState extends State<StudySessionScreen> {
                       textAlign: TextAlign.center),
                 ],
                 const SizedBox(height: 8),
-                Text('It ends when these are done — the queue never grows '
+                Text('It ends when these are done; the queue never grows '
                     'behind your back.',
                     style: theme.textTheme.bodyMedium,
                     textAlign: TextAlign.center),
@@ -499,7 +500,7 @@ class _StudySessionScreenState extends State<StudySessionScreen> {
             ),
           ),
         ),
-      ),
+      )),
     );
   }
 
@@ -507,7 +508,7 @@ class _StudySessionScreenState extends State<StudySessionScreen> {
   Widget _doneScreen() {
     return Scaffold(
       appBar: AppBar(title: const Text('Session complete')),
-      body: Center(
+      body: CappedBody(child: Center(
         child: SingleChildScrollView(
           padding: const EdgeInsets.all(24),
           child: Column(
@@ -525,7 +526,7 @@ class _StudySessionScreenState extends State<StudySessionScreen> {
             ],
           ),
         ),
-      ),
+      )),
     );
   }
 
@@ -989,7 +990,7 @@ class _RungChip extends StatelessWidget {
     const labels = {1: 'cued', 2: 'recall', 3: 'generate', 4: 'free'};
     return Chip(
       visualDensity: VisualDensity.compact,
-      label: Text('rung $rung · ${labels[rung] ?? ''}',
+      label: Text('Step $rung · ${labels[rung] ?? ''}',
           maxLines: 1, overflow: TextOverflow.ellipsis),
     );
   }

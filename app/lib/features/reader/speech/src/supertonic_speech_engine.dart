@@ -57,6 +57,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_onnxruntime/flutter_onnxruntime.dart';
 
 import '../supertonic_voice_handle.dart';
@@ -162,7 +163,7 @@ final _terminalPunctuationPattern =
 String _preprocessText(String text, String lang) {
   if (!_v2ModelLangs.contains(lang)) {
     throw SupertonicUnsupportedLangException(
-        'This voice cannot speak "$lang" — the model covers '
+        'This voice can’t speak “$lang”. The model covers '
         '${_v2ModelLangs.join(', ')}.');
   }
 
@@ -475,7 +476,7 @@ class SupertonicSpeechEngine implements SynthesisSpeechEngine {
     final resolvedLang = lang ?? 'en';
     if (!supertonicSupportedLangs.contains(resolvedLang)) {
       throw SupertonicUnsupportedLangException(
-          'This voice cannot speak "$resolvedLang" — try the system voice.');
+          'This voice can’t speak “$resolvedLang”. Try the system voice.');
     }
 
     final result = _generationQueue.then((_) async {
@@ -495,9 +496,10 @@ class SupertonicSpeechEngine implements SynthesisSpeechEngine {
     } on SupertonicVoiceMissingFilesException {
       rethrow;
     } catch (e) {
-      throw SupertonicNativeInitException(
-          'The downloaded voice could not be started ($e). Try '
-          're-downloading it in Models.');
+      debugPrint('Supertonic voice failed to start: $e');
+      throw const SupertonicNativeInitException(
+          "The downloaded voice couldn’t be started. Try downloading it "
+          'again in Models.');
     }
   }
 
@@ -513,8 +515,8 @@ class SupertonicSpeechEngine implements SynthesisSpeechEngine {
     ]) {
       if (!File(path).existsSync()) {
         throw SupertonicVoiceMissingFilesException(
-            'This voice is missing a file it needs — try re-downloading '
-            'it in Models.');
+            'This voice is missing a file it needs. Try downloading '
+            'it again in Models.');
       }
     }
   }

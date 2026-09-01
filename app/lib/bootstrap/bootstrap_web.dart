@@ -30,6 +30,7 @@ import 'package:drift_flutter/drift_flutter.dart';
 import 'package:ml_runtime/ml_runtime.dart';
 
 import '../db/database.dart';
+import '../features/backup/backup_custody.dart';
 import '../features/models/model_store.dart';
 import '../features/transcribe/audio_fetcher.dart';
 import '../features/transcribe/decoder.dart';
@@ -77,6 +78,7 @@ DeviceServices webServices({WebFetchLane lane = WebFetchLane.direct}) =>
       engineFor: (modelPath) => WhisperEngineSpec(
           modelPath: modelPath, libraryPath: 'libwhisper.so'),
       webFetchLane: lane,
+      backupCustody: SecureBackupCustody.web(),
     );
 
 /// The last resort when [createServices] throws (here: the lane probe).
@@ -208,8 +210,8 @@ class DioHttpFetcher implements HttpFetcher {
       if (e.type == DioExceptionType.connectionError ||
           e.type == DioExceptionType.unknown) {
         throw const FetchFailedException(
-            'The browser blocked this fetch (or the connection failed) — '
-            "sites must allow web pages to read them, and most don't. "
+            'The browser blocked this fetch (or the connection failed): '
+            "sites must allow web pages to read them, and most don’t. "
             'The installed app fetches directly.');
       }
       // Seam contract: slow answers surface as TimeoutException, so the
@@ -262,11 +264,11 @@ class DioHttpFetcher implements HttpFetcher {
       // The daemon itself didn't answer — distinct from Skein answering
       // and refusing (below): here there is no upstream sentence to relay.
       throw const FetchFailedException(
-          "Your Skein couldn't be reached — is it still running?");
+          "Your Skein couldn’t be reached. Is it still running?");
     }
 
     if (response.headers.value(_skeinErrorHeader) != null) {
-      throw FetchFailedException("Your Skein couldn't reach that address — "
+      throw FetchFailedException("Your Skein couldn’t reach that address: "
           '${_skeinRefusalMessage(response.data)}');
     }
     return _toFetchResponse(response);

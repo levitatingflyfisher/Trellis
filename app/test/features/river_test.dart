@@ -10,6 +10,7 @@ import 'package:trellis/services/device_services.dart';
 import '../support/fake_player.dart';
 import '../support/fake_services.dart';
 import '../support/scripted_fetcher.dart';
+import '../support/pick_reader.dart';
 
 const _rssOne = '''
 <?xml version="1.0" encoding="UTF-8"?>
@@ -74,12 +75,11 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Ada'));
-    await tester.pumpAndSettle();
+    await pickReader(tester, 'Ada');
   }
 
   Future<void> openRiver(WidgetTester tester) async {
-    await tester.tap(find.text('River'));
+    await tester.tap(find.text('Inbox'));
     await tester.pumpAndSettle();
   }
 
@@ -123,7 +123,7 @@ void main() {
     await pumpApp(tester, ScriptedFetcher((u, h) => textResponse(_rssOne)));
     await openRiver(tester);
 
-    expect(find.text('The river is quiet.'), findsOneWidget);
+    expect(find.text('Your Inbox is empty.'), findsOneWidget);
     await tester.tap(find.text('Follow a feed'));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('subscribe-url')), findsOneWidget);
@@ -484,7 +484,7 @@ void main() {
       expect(find.byKey(Key('unread-dot-$workId')), findsNothing);
       var work = await db.spineDao.workById(workId);
       expect(work!.persistence, 'work');
-      expect(find.text('Kept — now in your library'), findsOneWidget);
+      expect(find.text('Kept. It’s in your library now.'), findsOneWidget);
 
       await tester.tap(find.text('Undo'));
       await tester.pumpAndSettle();
@@ -904,7 +904,9 @@ void main() {
           reason: "not navigated yet — the queue screen's own title isn't "
               'on screen until the door is tapped');
 
-      await tester.tap(find.byKey(const Key('river-open-queue')));
+      await tester.tap(find.byKey(const Key('river-more')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('river-open-queue')));
       await tester.pumpAndSettle();
 
       expect(find.text('Up Next'), findsOneWidget);
@@ -931,7 +933,9 @@ void main() {
       await tester.tap(find.text('Play next'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('river-open-queue')));
+      await tester.tap(find.byKey(const Key('river-more')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('river-open-queue')));
       await tester.pumpAndSettle();
 
       expect(find.text('Queued item'), findsOneWidget);

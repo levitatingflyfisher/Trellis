@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:drift/drift.dart' hide isNull;
+import 'package:drift/drift.dart' hide isNull, isNotNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:sqlite3/sqlite3.dart' as raw;
@@ -608,7 +608,7 @@ void main() {
           reason: 'the river row is unlinked; sourceUrl still plays it');
     });
 
-    test('the ephemera sweep clears episode rows through deleteWork',
+    test('a decayed item leaves every list but keeps its rows until let go',
         () async {
       final profileId = await seedProfile();
       final feedId =
@@ -624,7 +624,65 @@ void main() {
 
       final swept = await db.spineDao.sweepEphemera(todayEpochDay: 131);
       expect(swept, 1);
-      expect(await db.feedsDao.episodeOf(workId), isNull);
+      expect(await db.feedsDao.episodeOf(workId), isNotNull,
+          reason: 'recoverable: the river row is kept');
+      expect(await db.feedsDao.riverItems(profileId), isEmpty);
+      expect(await db.feedsDao.episodesOfFeed(feedId), isEmpty);
+      expect(await db.libraryDao.libraryQueryEntriesOf(profileId), isEmpty,
+          reason: 'decayed is not kept: it must not surface in the Library');
+      expect(await db.feedsDao.dedupCandidatesOf(profileId), isEmpty);
+
+      await db.spineDao.purgeDecayed(profileId);
+      expect(await db.feedsDao.episodeOf(workId), isNull,
+          reason: 'let go clears episode rows through deleteWork');
+    });
+
+    test('decaying a canonical row un-hides its duplicate', () async {
+      final profileId = await seedProfile();
+      final feedId =
+          await db.feedsDao.insertFeed(profileId: profileId, url: 'https://a/f');
+      final canonical = await db.spineDao.insertWork(
+          profileId: profileId,
+          kind: 'episode',
+          title: 'old',
+          persistence: 'ephemeron',
+          firstSeenEpochDay: 100);
+      await db.feedsDao.insertEpisode(
+          workId: canonical, feedId: feedId, guid: 'g1', publishedAtMs: 1);
+      final dup = await db.spineDao.insertWork(
+          profileId: profileId,
+          kind: 'episode',
+          title: 'old again',
+          persistence: 'ephemeron',
+          firstSeenEpochDay: 125);
+      await db.feedsDao.insertEpisode(
+          workId: dup, feedId: feedId, guid: 'g2', publishedAtMs: 2);
+      await db.feedsDao
+          .setDedup(dup, reason: 'same-url', canonicalWorkId: canonical);
+
+      await db.spineDao.sweepEphemera(todayEpochDay: 131);
+      expect(
+          (await db.feedsDao.riverItems(profileId)).map((e) => e.work.id),
+          [dup]);
+    });
+
+    test('unfollowing a feed takes its decayed items with it', () async {
+      final profileId = await seedProfile();
+      final feedId =
+          await db.feedsDao.insertFeed(profileId: profileId, url: 'https://a/f');
+      final workId = await db.spineDao.insertWork(
+          profileId: profileId,
+          kind: 'episode',
+          title: 'old',
+          persistence: 'ephemeron',
+          firstSeenEpochDay: 100);
+      await db.feedsDao.insertEpisode(
+          workId: workId, feedId: feedId, guid: 'g', publishedAtMs: 1);
+      await db.spineDao.sweepEphemera(todayEpochDay: 131);
+
+      await db.feedsDao.deleteFeedCascade(feedId);
+      expect(await db.spineDao.worksOf(profileId), isEmpty,
+          reason: 'no orphaned decayed work outlives its feed');
     });
   });
 

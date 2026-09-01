@@ -8,6 +8,7 @@ import '../support/fake_player.dart';
 import '../support/fake_services.dart';
 import '../support/scripted_fetcher.dart';
 import 'dart:io';
+import '../support/pick_reader.dart';
 
 /// Campaign 9 Phase 0 — reproduce-first for the device report: "the
 /// play/pause circles don't have play/pause symbols in them, they're just
@@ -98,8 +99,7 @@ void main() {
             createPlayer: () => player,
             services: testServices(dir)));
         await tester.pumpAndSettle();
-        await tester.tap(find.text('Ada'));
-        await tester.pumpAndSettle();
+        await pickReader(tester, 'Ada');
 
         // RSVP controls: open the reader (default mode is RSVP).
         await tester.tap(find.text('An Entangled Bank'));
@@ -112,7 +112,7 @@ void main() {
         // mounts (home_shell.dart hosts it above every screen) — playing
         // first, then toggled to paused, both real code paths, not a
         // hand-copied re-render.
-        await tester.tap(find.text('River'));
+        await tester.tap(find.text('Inbox'));
         await tester.pumpAndSettle();
         await shoot('river_row');
 

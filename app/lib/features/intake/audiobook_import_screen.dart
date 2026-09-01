@@ -9,6 +9,7 @@ import 'package:intake_core/intake_core.dart';
 
 import 'audiobook_import.dart';
 import 'audiobook_picker_gateway.dart';
+import '../shared/error_line.dart';
 
 /// Picks files, confirms a title, imports. Returns the new work id, or
 /// null if the picker was dismissed with nothing chosen, or the confirm
@@ -81,7 +82,7 @@ class _AudiobookImportDialogState extends State<_AudiobookImportDialog> {
     if (outcome == null) {
       setState(() {
         _importing = false;
-        _error = "None of those files could be read — nothing was imported.";
+        _error = "None of those files could be read, so nothing was imported.";
       });
       return;
     }
@@ -124,12 +125,7 @@ class _AudiobookImportDialogState extends State<_AudiobookImportDialog> {
                   if (_error != null)
                     Padding(
                       padding: const EdgeInsets.only(top: 8),
-                      child: Text(
-                        _error!,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                      ),
+                      child: ErrorLine(_error!),
                     ),
                 ],
               ),

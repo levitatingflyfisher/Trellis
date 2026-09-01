@@ -75,7 +75,7 @@ class WavPassthroughDecoder implements Decoder {
     }
     throw DecodeException(
         'unsupported WAV encoding (format ${wav.format}, '
-        '${wav.bitsPerSample}-bit) — PCM16 or float32 only');
+        '${wav.bitsPerSample}-bit); PCM16 or float32 only');
   }
 
   _WavData _parseWav(Uint8List bytes) {

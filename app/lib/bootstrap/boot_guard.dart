@@ -14,6 +14,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:openhearth_design/openhearth_design.dart';
 
 /// Runs [run], returning its value; on ANY throw returns [orElse] instead
 /// and appends a human-readable line to [notes] naming [what] and the real
@@ -79,10 +80,27 @@ class BootNotice extends StatefulWidget {
 
 class _BootNoticeState extends State<BootNotice> {
   bool _dismissed = false;
+  bool _details = false;
+
+  /// The plain half of a note: the step's own name, which [bestEffort]
+  /// writes before " unavailable: " / " fallback also failed: ". The raw
+  /// error after it is for Details and the log, never the face.
+  static String _what(String note) {
+    for (final marker in const [' unavailable: ', ' fallback also failed: ']) {
+      final at = note.indexOf(marker);
+      if (at > 0) return note.substring(0, at);
+    }
+    return 'Part of the app';
+  }
 
   @override
   Widget build(BuildContext context) {
     if (widget.notes.isEmpty || _dismissed) return widget.child;
+    final whats = <String>{for (final n in widget.notes) _what(n)}.toList();
+    final plain = whats.length == 1
+        ? "${whats.single} didn’t start. The rest of the app works."
+        : "These didn’t start: ${whats.join(', ')}. "
+            'The rest of the app works.';
     return Column(
       children: [
         // The banner sits above the app's own Scaffolds, so it owns the
@@ -92,13 +110,27 @@ class _BootNoticeState extends State<BootNotice> {
           child: SafeArea(
             bottom: false,
             child: MaterialBanner(
-              content: Text(
-                widget.notes.length == 1
-                    ? widget.notes.single
-                    : widget.notes.map((n) => '• $n').join('\n'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(plain),
+                  if (_details) ...[
+                    const SizedBox(height: 8),
+                    SelectableText(
+                      widget.notes.join('\n'),
+                      style: OhTypography.code(
+                          color: Theme.of(context).colorScheme.onSurface),
+                    ),
+                  ],
+                ],
               ),
               leading: const Icon(Icons.warning_amber_outlined),
               actions: [
+                TextButton(
+                  onPressed: () => setState(() => _details = !_details),
+                  child: Text(_details ? 'Hide details' : 'Details'),
+                ),
                 TextButton(
                   onPressed: () => setState(() => _dismissed = true),
                   child: const Text('Dismiss'),

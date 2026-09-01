@@ -411,9 +411,10 @@ void main() {
     });
   });
 
-  test('the ephemera sweep deletes exactly the pure verdict, promoted works survive', () async {
+  test('the ephemera sweep decays exactly the pure verdict into a '
+      'recoverable soft state; promoted works survive', () async {
     final profileId = await db.profilesDao.create('Ada');
-    await db.spineDao.insertWork(
+    final old = await db.spineDao.insertWork(
         profileId: profileId, kind: 'episode', title: 'old',
         persistence: 'ephemeron', firstSeenEpochDay: 100);
     final kept = await db.spineDao.insertWork(
@@ -423,7 +424,74 @@ void main() {
 
     final swept = await db.spineDao.sweepEphemera(todayEpochDay: 131);
     expect(swept, 1);
+    // Nothing is deleted at boot: the decayed row stays, marked.
+    expect((await db.spineDao.workById(old))!.persistence, 'decayed');
+    expect((await db.spineDao.decayedOf(profileId)).map((w) => w.title),
+        ['old']);
+    expect(await db.spineDao.sweepEphemera(todayEpochDay: 131), 0,
+        reason: 'an already-decayed row is never swept (or counted) again');
+  });
+
+  test('restoring decayed ephemera gives them a fresh window', () async {
+    final profileId = await db.profilesDao.create('Ada');
+    final old = await db.spineDao.insertWork(
+        profileId: profileId, kind: 'episode', title: 'old',
+        persistence: 'ephemeron', firstSeenEpochDay: 100);
+    await db.spineDao.sweepEphemera(todayEpochDay: 131);
+
+    await db.spineDao.restoreDecayed(profileId, todayEpochDay: 131);
+    final back = (await db.spineDao.workById(old))!;
+    expect(back.persistence, 'ephemeron');
+    expect(back.firstSeenEpochDay, 131,
+        reason: 'else the next boot would decay it straight away');
+    expect(await db.spineDao.sweepEphemera(todayEpochDay: 132), 0);
+    expect(await db.spineDao.decayedOf(profileId), isEmpty);
+  });
+
+  test('letting decayed ephemera go deletes them, and only them', () async {
+    final profileId = await db.profilesDao.create('Ada');
+    await db.spineDao.insertWork(
+        profileId: profileId, kind: 'episode', title: 'old',
+        persistence: 'ephemeron', firstSeenEpochDay: 100);
+    await db.spineDao.insertWork(
+        profileId: profileId, kind: 'episode', title: 'fresh',
+        persistence: 'ephemeron', firstSeenEpochDay: 130);
+    await db.spineDao.sweepEphemera(todayEpochDay: 131);
+
+    await db.spineDao.purgeDecayed(profileId);
     final titles = (await db.spineDao.worksOf(profileId)).map((w) => w.title);
-    expect(titles, ['kept']);
+    expect(titles, ['fresh']);
+  });
+
+  test('an item the person queued or captured from is theirs: it never '
+      'decays while it is queued or has captures', () async {
+    final profileId = await db.profilesDao.create('Ada');
+    final queued = await db.spineDao.insertWork(
+        profileId: profileId, kind: 'episode', title: 'queued',
+        persistence: 'ephemeron', firstSeenEpochDay: 100);
+    final captured = await db.spineDao.insertWork(
+        profileId: profileId, kind: 'episode', title: 'captured',
+        persistence: 'ephemeron', firstSeenEpochDay: 100);
+    await db.queueDao
+        .playLast(profileId: profileId, workId: queued, nowMs: 1);
+    await db.capturesDao.capture(
+        profileId: profileId, workId: captured, positionMs: 0, nowMs: 1);
+
+    expect(await db.spineDao.sweepEphemera(todayEpochDay: 131), 0);
+    expect((await db.spineDao.workById(queued))!.persistence, 'ephemeron');
+    expect((await db.spineDao.workById(captured))!.persistence, 'ephemeron');
+  });
+
+  test('decayed items are kept 30 more days, then deleted for good',
+      () async {
+    final profileId = await db.profilesDao.create('Ada');
+    final old = await db.spineDao.insertWork(
+        profileId: profileId, kind: 'episode', title: 'old',
+        persistence: 'ephemeron', firstSeenEpochDay: 100);
+    await db.spineDao.sweepEphemera(todayEpochDay: 131); // decays
+    await db.spineDao.sweepEphemera(todayEpochDay: 161); // last kept day
+    expect((await db.spineDao.workById(old))!.persistence, 'decayed');
+    await db.spineDao.sweepEphemera(todayEpochDay: 162);
+    expect(await db.spineDao.workById(old), isNull);
   });
 }

@@ -41,8 +41,11 @@ packages/
                 server) — the *_core "no dart:io" law below doesn't apply
                 to it; it isn't a *_core package.
 app/            Flutter app (pkg name trellis): reader, library, intake,
-                feeds/river, player, study, models, transcribe, echo (the
-                lifetime-totals/year-in-review screen). Drift schema
+                feeds/river (shown as "Inbox"), player, study, models,
+                transcribe, echo (shown as "What you've built": the
+                lifetime-totals/year-in-review screen). Code names stay;
+                on-screen words follow the jargon ruling (see Words on
+                screen below). Drift schema
                 versioned with migration tests.
 docs/research/  The design panel's full output. Treat as provenance, not law.
 ```
@@ -64,6 +67,16 @@ docs/research/  The design panel's full output. Treat as provenance, not law.
 - **Naming:** app-level naming ("Espalier") is provisional until the owner
   confirms; that's why internal packages carry no app name. The
   applicationId decision (ADR pending) is irreversible — do not invent one.
+
+## Words on screen
+
+Made-up coinages never reach the screen (operator ruling): the River is
+the **Inbox**, Echo is **What you've built**, the espalier wall is the
+**course map**, rungs are **steps**, sigma is **Focus spread**, Parafoveal
+is **Nearby words**. Real terms (RSVP, parafoveal preview, SM-2, FSRS) are
+kept where a setting is chosen, each with a one-line explanation.
+Punctuation: no spaced em dashes, curly apostrophes and quotes;
+`test/shared/copy_typography_test.dart` enforces both over `lib/`.
 
 ## Building
 

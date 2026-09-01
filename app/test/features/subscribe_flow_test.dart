@@ -7,6 +7,7 @@ import 'package:trellis/main.dart';
 
 import '../support/fake_player.dart';
 import '../support/scripted_fetcher.dart';
+import '../support/pick_reader.dart';
 
 const _rss = '''
 <?xml version="1.0" encoding="UTF-8"?>
@@ -39,9 +40,8 @@ void main() {
         fetcher: fetcher,
         createPlayer: () => FakeEpisodePlayer()));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Ada'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('River'));
+    await pickReader(tester, 'Ada');
+    await tester.tap(find.text('Inbox'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Follow a feed'));
     await tester.pumpAndSettle();

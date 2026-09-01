@@ -27,6 +27,7 @@ import 'package:study_core/study_core.dart' as study;
 import '../../db/database.dart';
 import '../intake/paste_intake.dart' show epochDayUtcNow;
 import '../models/format.dart' show formatClock;
+import '../shared/capped_body.dart';
 
 class _QueueItem {
   final String sourceType;
@@ -189,17 +190,17 @@ class _DailyReviewScreenState extends State<DailyReviewScreen> {
     final theme = Theme.of(context);
     return Scaffold(
       appBar: AppBar(title: const Text('Daily review')),
-      body: switch (queue) {
+      body: CappedBody(child: switch (queue) {
         null => const Center(child: CircularProgressIndicator()),
         [] => Center(
             child: Padding(
               padding: const EdgeInsets.all(24),
               child: Text(
                   _reviewed > 0
-                      ? 'Nothing to review right now — you reviewed '
+                      ? 'Nothing to review right now. You reviewed '
                           '$_reviewed. Come back later; resurfacing happens '
                           'on its own schedule.'
-                      : 'Nothing to review right now — resurfacing happens '
+                      : 'Nothing to review right now. Resurfacing happens '
                           'on its own schedule. Keep a word while you read, '
                           'or a moment while you listen, and it will show '
                           'up here.',
@@ -243,7 +244,7 @@ class _DailyReviewScreenState extends State<DailyReviewScreen> {
               ),
             ],
           ),
-      },
+      }),
     );
   }
 
@@ -268,8 +269,8 @@ class _DailyReviewScreenState extends State<DailyReviewScreen> {
             else if (item.pending)
               Text('Transcript pending.',
                   key: const Key('capture-pending'),
+                  // Upright: Nunito has no italic face (dfh-02).
                   style: theme.textTheme.bodyLarge?.copyWith(
-                      fontStyle: FontStyle.italic,
                       color: theme.colorScheme.onSurfaceVariant),
                   textAlign: TextAlign.center),
             const SizedBox(height: 40),
@@ -286,7 +287,7 @@ class _DailyReviewScreenState extends State<DailyReviewScreen> {
                         child: const Text('Show me again soon'),
                       ),
                       const SizedBox(height: 4),
-                      Text("You'll see this again before it sticks.",
+                      Text("You’ll see this again before it sticks.",
                           style: theme.textTheme.bodySmall,
                           textAlign: TextAlign.center),
                     ],
@@ -301,10 +302,10 @@ class _DailyReviewScreenState extends State<DailyReviewScreen> {
                         onPressed: () => _grade(item, study.Grade.good),
                         style: FilledButton.styleFrom(
                             padding: const EdgeInsets.symmetric(vertical: 18)),
-                        child: const Text("I've got this"),
+                        child: const Text("I’ve got this"),
                       ),
                       const SizedBox(height: 4),
-                      Text("This one steps back — it won't come up again "
+                      Text("This one steps back. It won’t come up again "
                           'for a while.',
                           style: theme.textTheme.bodySmall,
                           textAlign: TextAlign.center),

@@ -172,7 +172,7 @@ void main() {
     expect(find.text('3 minutes saved'), findsOneWidget);
     expect(find.text('2 days of reading'), findsOneWidget);
     expect(
-      find.text('Current course: A Ladder of Two — 1 of 2 mastered'),
+      find.text('Current course: A Ladder of Two, 1 of 2 mastered'),
       findsOneWidget,
     );
 
@@ -244,24 +244,54 @@ void main() {
     expect((await db.profilesDao.all()).first.name, 'Ada Lovelace');
   });
 
-  testWidgets('remove asks first, then removes the reader completely', (
-    tester,
-  ) async {
+  testWidgets('remove offers a lasting Undo, then removes the reader '
+      'completely', (tester) async {
     final (ada, grace) = await seed();
     await pumpDashboard(tester);
 
+    // Remove is a deliberate button behind the PIN: no dialog. The bar
+    // names what goes with the profile and Undo brings it all back.
     await tester.tap(find.byKey(Key('remove-$ada')));
     await tester.pumpAndSettle();
-    // The confirm dialog names what goes with the profile.
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(find.text('Ada'), findsNothing);
     expect(find.textContaining('library'), findsWidgets);
+    await tester.tap(find.text('Undo'));
+    await tester.pumpAndSettle();
+    expect(find.text('Ada'), findsOneWidget);
+    expect(await db.spineDao.worksOf(ada), isNotEmpty);
 
-    await tester.tap(find.text('Remove profile'));
+    await tester.tap(find.byKey(Key('remove-$ada')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Dismiss'));
     await tester.pumpAndSettle();
 
     expect(find.text('Ada'), findsNothing);
     expect(find.text('Grace'), findsOneWidget);
     expect([for (final p in await db.profilesDao.all()) p.id], [grace]);
     expect(await db.spineDao.worksOf(ada), isEmpty);
+  });
+
+  testWidgets('leaving with a removal on offer finishes it before the '
+      'screen behind looks', (tester) async {
+    final (ada, grace) = await seed();
+    late BuildContext home;
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(builder: (c) {
+        home = c;
+        return const Text('picker');
+      }),
+    ));
+    Navigator.of(home).push(MaterialPageRoute<void>(
+        builder: (_) => ParentDashboardScreen(db: db, pin: pin)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(Key('remove-$ada')));
+    await tester.pumpAndSettle();
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.text('picker'), findsOneWidget);
+    expect([for (final p in await db.profilesDao.all()) p.id], [grace]);
   });
 
   testWidgets('household PIN: set, change, remove — the current-PIN law', (

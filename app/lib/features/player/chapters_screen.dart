@@ -10,6 +10,7 @@ import 'package:flutter/material.dart';
 import '../../db/database.dart';
 import 'audiobook_chapters.dart';
 import 'player_controller.dart';
+import '../shared/capped_body.dart';
 
 class ChaptersScreen extends StatefulWidget {
   final PlayerController controller;
@@ -63,10 +64,10 @@ class _ChaptersScreenState extends State<ChaptersScreen> {
     final chapters = _chapters;
     return Scaffold(
       appBar: AppBar(
-        title: Text('Chapters — ${widget.work.title}',
+        title: Text('Chapters: ${widget.work.title}',
             overflow: TextOverflow.ellipsis, maxLines: 1),
       ),
-      body: chapters == null
+      body: CappedBody(child: chapters == null
           ? const Center(child: CircularProgressIndicator())
           : ListView.builder(
               itemCount: chapters.length,
@@ -83,7 +84,7 @@ class _ChaptersScreenState extends State<ChaptersScreen> {
                   onTap: () => _jump(c),
                 );
               },
-            ),
+            )),
     );
   }
 }

@@ -2,15 +2,18 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:openhearth_design/openhearth_design.dart';
 import 'package:study_core/study_core.dart' as study;
 
 import '../../db/database.dart';
 import '../brain/brain_settings_screen.dart';
 import '../brain/brain_store.dart';
 import '../intake/paste_intake.dart' show epochDayUtcNow;
+import '../settings/theme_preference.dart';
 import 'course_import.dart';
 import 'course_map_screen.dart';
 import 'daily_review_screen.dart';
+import '../shared/capped_body.dart';
 
 typedef _Entry = ({CourseRow row, study.Course course});
 
@@ -119,10 +122,11 @@ class _CoursesScreenState extends State<CoursesScreen> {
         builder: (dialog) => AlertDialog(
           title: const Text('Use FSRS for grading?'),
           content: const Text(
-              'FSRS learns each card\'s own difficulty and memory curve to '
-              'schedule reviews more precisely than Classic\'s fixed steps; '
+              'Classic is SM-2, the long-standing spaced-repetition schedule. '
+              'FSRS learns each card’s own difficulty and memory curve to '
+              'schedule reviews more precisely than Classic’s fixed steps; '
               'switching back to Classic later resumes right where Classic '
-              'left off, but FSRS\'s own progress won\'t carry over.'),
+              'left off, but FSRS’s own progress won’t carry over.'),
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(dialog, false),
@@ -152,10 +156,12 @@ class _CoursesScreenState extends State<CoursesScreen> {
           db: widget.db, profileId: widget.profile.id);
       if (id != null) await _load();
     } on FormatException catch (e) {
+      // The strict parser's message names JSON keys; it goes to the log.
+      debugPrint('Course file refused: ${e.message}');
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-          content:
-              Text("That file couldn't be read as a course. ${e.message}")));
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text("That file isn’t a course Trellis can read. "
+              'Paste its text instead to see why.')));
     }
   }
 
@@ -225,47 +231,46 @@ class _CoursesScreenState extends State<CoursesScreen> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('Courses'),
+        // Icon + word for what matters here; rarer doors in a worded menu
+        // (fleet ruling on top bars; audit rank 3).
         actions: [
-          IconButton(
-            key: const Key('open-thinking'),
-            tooltip: 'Thinking',
-            icon: const Icon(Icons.psychology_outlined),
-            onPressed: _openThinking,
-          ),
-          if (widget.onOpenBackup != null)
-            IconButton(
-              key: const Key('open-backup'),
-              tooltip: 'Backup & migrate',
-              icon: const Icon(Icons.settings_backup_restore),
-              onPressed: widget.onOpenBackup,
-            ),
-          // Campaign 9 Phase 1: a bare sparkles icon with no word read as
-          // meaningless ("the sparkles meaning echo? what's an echo?").
-          // Measured at 320dp/2x textScale with every other AppBar action
-          // wired (the worst case) before choosing this over the
-          // icon-only fallback — it fits.
-          if (widget.onOpenEcho != null)
-            TextButton.icon(
-              key: const Key('open-echo'),
-              onPressed: widget.onOpenEcho,
-              icon: const Icon(Icons.auto_awesome_outlined),
-              label: const Text('Echo'),
-            ),
-          PopupMenuButton<String>(
-            key: const Key('study-settings'),
-            tooltip: 'Study settings',
-            onSelected: (value) {
-              if (value == 'scheduler') unawaited(_toggleScheduler());
-            },
-            itemBuilder: (_) => [
-              CheckedPopupMenuItem<String>(
-                key: const Key('scheduler-toggle'),
-                value: 'scheduler',
-                checked: _scheduler == 'fsrs',
-                child: const Text('FSRS scheduler (beta)'),
+          OhBarActions(children: [
+            if (widget.onOpenBackup != null)
+              OhBarAction(
+                key: const Key('open-backup'),
+                icon: Icons.settings_backup_restore,
+                label: 'Backup',
+                onPressed: widget.onOpenBackup,
               ),
-            ],
-          ),
+            const TrellisThemeToggle(),
+            OhBarOverflow<String>(
+              key: const Key('study-settings'),
+              onSelected: (value) {
+                if (value == 'scheduler') unawaited(_toggleScheduler());
+                if (value == 'thinking') _openThinking();
+                if (value == 'echo') widget.onOpenEcho?.call();
+              },
+              itemBuilder: (_) => [
+                const PopupMenuItem<String>(
+                  key: Key('open-thinking'),
+                  value: 'thinking',
+                  child: Text('Thinking (AI helper)'),
+                ),
+                if (widget.onOpenEcho != null)
+                  const PopupMenuItem<String>(
+                    key: Key('open-echo'),
+                    value: 'echo',
+                    child: Text("What you’ve built"),
+                  ),
+                CheckedPopupMenuItem<String>(
+                  key: const Key('scheduler-toggle'),
+                  value: 'scheduler',
+                  checked: _scheduler == 'fsrs',
+                  child: const Text('Newer scheduling: FSRS (beta)'),
+                ),
+              ],
+            ),
+          ]),
         ],
       ),
       floatingActionButton: (entries == null || entries.isEmpty)
@@ -274,7 +279,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
               onPressed: _addSheet,
               icon: const Icon(Icons.add),
               label: const Text('Add')),
-      body: Column(
+      body: CappedBody(child: Column(
         children: [
           if ((_dailyReviewDue ?? 0) > 0) _dailyReviewChip(),
           Expanded(
@@ -290,7 +295,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
             },
           ),
         ],
-      ),
+      )),
     );
   }
 

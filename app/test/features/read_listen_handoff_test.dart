@@ -66,6 +66,8 @@ void main() {
       await tester.pumpWidget(MaterialApp(
           home: ReaderScreen(db: db, profileId: profileId, work: work)));
       await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('reader-overflow')));
+      await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('listen-from-here')), findsNothing);
     });
@@ -83,6 +85,8 @@ void main() {
       await tester.pumpWidget(MaterialApp(
           home: ReaderScreen(
               db: db, profileId: profileId, work: work, player: controller)));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('reader-overflow')));
       await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('listen-from-here')), findsNothing);
@@ -107,6 +111,8 @@ void main() {
       await tester.tap(find.text('Second'));
       await tester.pump();
 
+      await tester.tap(find.byKey(const Key('reader-overflow')));
+      await tester.pumpAndSettle();
       expect(find.byKey(const Key('listen-from-here')), findsOneWidget);
       await tester.tap(find.byKey(const Key('listen-from-here')));
       await tester.pumpAndSettle();

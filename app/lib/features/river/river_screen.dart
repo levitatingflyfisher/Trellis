@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:openhearth_design/openhearth_design.dart';
 
 import '../../db/database.dart' hide Alignment;
+import '../settings/theme_preference.dart';
 import '../dsp/dsp_coordinator.dart';
 import '../dsp/dsp_params.dart' show effectiveDspEnabled;
 import '../feeds/episode_download_coordinator.dart';
@@ -24,6 +25,7 @@ import '../transcribe/job_cards.dart';
 import '../transcribe/transcribe_coordinator.dart';
 import 'river_decay.dart';
 import 'river_triage.dart';
+import '../shared/capped_body.dart';
 
 /// The River (ADR-0003 law 1): ONE reverse-chronological list across every
 /// feed. The order comes from the DAO's single query and is never touched
@@ -101,6 +103,9 @@ enum _RiverFilter { all, text, audio }
 
 class _RiverScreenState extends State<RiverScreen> {
   List<RiverEntry>? _entries;
+
+  /// Ephemera the boot sweep decayed and nobody has restored or let go yet.
+  int _decayed = 0;
   _RiverFilter _filter = _RiverFilter.all;
   late final RiverTriage _triage = RiverTriage(widget.db);
 
@@ -110,10 +115,72 @@ class _RiverScreenState extends State<RiverScreen> {
     _load();
   }
 
+  /// Queued or captured works: they do not decay (see heldWorkIds).
+  Set<int> _held = const {};
+
   Future<void> _load() async {
     final entries = await widget.db.feedsDao.riverItems(widget.profile.id);
+    final decayed = await widget.db.spineDao.decayedOf(widget.profile.id);
+    final held = await widget.db.spineDao.heldWorkIds();
     if (!mounted) return;
-    setState(() => _entries = entries);
+    setState(() {
+      _entries = entries;
+      _decayed = decayed.length;
+      _held = held;
+    });
+  }
+
+  Future<void> _restoreDecayed() async {
+    await widget.db.spineDao
+        .restoreDecayed(widget.profile.id, todayEpochDay: epochDayUtcNow());
+    await _load();
+  }
+
+  Future<void> _letDecayedGo() async {
+    await widget.db.spineDao.purgeDecayed(widget.profile.id);
+    await _load();
+  }
+
+  /// The boot sweep's one-line account (ADR-0003 law 2, made recoverable):
+  /// what decayed, with Restore and Let go. It stays until the user picks
+  /// one — never a snackbar that expires — and shows in the empty state
+  /// too, since after a long absence the river is most likely empty.
+  Widget _decayedNotice() {
+    if (_decayed == 0) return const SizedBox.shrink();
+    final theme = Theme.of(context);
+    return Padding(
+      key: const Key('river-decayed-notice'),
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            _decayed == 1
+                ? '1 item older than 30 days left your Inbox. It’s kept 30 '
+                    'more days, then deleted, unless you restore it.'
+                : '$_decayed items older than 30 days left your Inbox. '
+                    'They’re kept 30 more days, then deleted, unless you '
+                    'restore them.',
+            style: theme.textTheme.bodyMedium,
+          ),
+          OverflowBar(
+            alignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                key: const Key('river-decayed-purge'),
+                onPressed: _letDecayedGo,
+                child: const Text('Let go'),
+              ),
+              TextButton(
+                key: const Key('river-decayed-restore'),
+                onPressed: _restoreDecayed,
+                child: const Text('Restore'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _refresh() async {
@@ -199,7 +266,7 @@ class _RiverScreenState extends State<RiverScreen> {
       profileId: widget.profile.id,
       workId: e.work.id,
       nowMs: DateTime.now().millisecondsSinceEpoch,
-    );
+    );    await _load(); // the row now says it stays while queued
   }
 
   Future<void> _playLast(RiverEntry e) async {
@@ -207,7 +274,7 @@ class _RiverScreenState extends State<RiverScreen> {
       profileId: widget.profile.id,
       workId: e.work.id,
       nowMs: DateTime.now().millisecondsSinceEpoch,
-    );
+    );    await _load(); // the row now says it stays while queued
   }
 
   /// The transcribe entry: plan → the ONE consent chokepoint when anything
@@ -228,7 +295,7 @@ class _RiverScreenState extends State<RiverScreen> {
           if (plan.needsModel)
             DownloadItem(
               '${modelLabel(plan.model.id)} '
-              '(${formatBytes(plan.model.sizeBytes)}) — one time',
+              '(${formatBytes(plan.model.sizeBytes)}), one time',
             ),
           if (plan.needsAudio)
             DownloadItem('This episode’s audio (size depends on the episode)'),
@@ -315,7 +382,7 @@ class _RiverScreenState extends State<RiverScreen> {
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
       ..showSnackBar(SnackBar(
-        content: const Text('Kept — now in your library'),
+        content: const Text('Kept. It’s in your library now.'),
         action: SnackBarAction(
           label: 'Undo',
           onPressed: () => _undoTriage(e.work.id, prior),
@@ -369,27 +436,36 @@ class _RiverScreenState extends State<RiverScreen> {
     final entries = _entries;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('River'),
+        title: const Text('Inbox'),
         actions: [
-          IconButton(
-            key: const Key('river-open-queue'),
-            tooltip: 'Up Next',
-            icon: const Icon(Icons.queue_music_outlined),
-            onPressed: _openQueue,
-          ),
-          IconButton(
-            key: const Key('manage-feeds'),
-            tooltip: 'Manage feeds',
-            icon: const Icon(Icons.rss_feed),
-            onPressed: _manageFeeds,
-          ),
+          OhBarActions(children: [
+            OhBarAction(
+              key: const Key('manage-feeds'),
+              icon: Icons.rss_feed,
+              label: 'Feeds',
+              onPressed: _manageFeeds,
+            ),
+            const TrellisThemeToggle(),
+            OhBarOverflow<String>(
+              key: const Key('river-more'),
+              onSelected: (_) => _openQueue(),
+              itemBuilder: (_) => const [
+                PopupMenuItem(
+                  key: Key('river-open-queue'),
+                  value: 'queue',
+                  child: Text('Up Next'),
+                ),
+              ],
+            ),
+          ]),
         ],
       ),
-      body: switch (entries) {
+      body: CappedBody(child: switch (entries) {
         null => const Center(child: CircularProgressIndicator()),
         [] => Column(
           children: [
             TranscribeJobCards(coordinator: widget.coordinator),
+            _decayedNotice(),
             Expanded(
               child: RefreshIndicator(
                 onRefresh: _refresh,
@@ -409,6 +485,7 @@ class _RiverScreenState extends State<RiverScreen> {
         _ => Column(
           children: [
             TranscribeJobCards(coordinator: widget.coordinator),
+            _decayedNotice(),
             _filterChips(),
             Expanded(
               child: RefreshIndicator(
@@ -422,7 +499,7 @@ class _RiverScreenState extends State<RiverScreen> {
             ),
           ],
         ),
-      },
+      }),
     );
   }
 
@@ -465,11 +542,19 @@ class _RiverScreenState extends State<RiverScreen> {
     // fades toward its sweep day; promoted works persist and carry nothing.
     // Same day arithmetic as the boot sweep — see river_decay.dart.
     final isEphemeron = e.work.persistence == 'ephemeron';
-    final daysLeft = ephemeraDaysLeft(
-      firstSeenEpochDay: e.work.firstSeenEpochDay,
-      todayEpochDay: epochDayUtcNow(),
-    );
-    final drift = isEphemeron ? driftSubtitle(daysLeft) : null;
+    final held = _held.contains(e.work.id);
+    // A held row is not counting down: full leaf, and it says why it stays.
+    final daysLeft = held
+        ? 31
+        : ephemeraDaysLeft(
+            firstSeenEpochDay: e.work.firstSeenEpochDay,
+            todayEpochDay: epochDayUtcNow(),
+          );
+    final drift = !isEphemeron
+        ? null
+        : held
+            ? heldSubtitle
+            : driftSubtitle(daysLeft);
     // P4 "archive, never forget": the row is never gone, only its audio
     // file — dimmed rather than hidden makes that visible truth instead of
     // an assertion nobody can check.
@@ -743,20 +828,23 @@ class _EmptyRiver extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Icon(
-                Icons.waves,
+                Icons.inbox_outlined,
                 size: 56,
                 color: Theme.of(context).colorScheme.primary,
               ),
               const SizedBox(height: 16),
               Text(
-                'The river is quiet.',
+                'Your Inbox is empty.',
                 style: Theme.of(context).textTheme.titleLarge,
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 8),
               Text(
-                'Follow the feeds and podcasts you choose. '
-                'Newest first — nothing decides for you.',
+                // The 30-day rule stated in the same breath as the no-
+                // ranking promise (audit rank 4): leaving is a decision.
+                'New episodes and articles from the feeds you follow arrive '
+                'here, newest first, never ranked. What you don’t keep '
+                'leaves after 30 days.',
                 style: Theme.of(context).textTheme.bodyMedium,
                 textAlign: TextAlign.center,
               ),

@@ -12,7 +12,7 @@ land, entries gain a `✅ shipped` mark; until then this is the plan of record.
 ## Covered (61)
 
 - RSVP classic mode: ORP red pivot, guide ticks, punctuation dwell, long-word shrink (both donors merged into one reader core)
-- Parafoveal ticker mode with Gaussian fade + sigma/window settings (CustomPainter port)
+- Nearby words (the donors' Parafoveal/ticker mode) with Gaussian fade + a Focus spread slider (the donor's sigma), shown as a labelled chip under Words mode; the mode, speed, nearby words and spread are remembered per reader
 - Scroll mode: windowed rendering, past-word dimming, inline figures, tap-to-seek
 - Speak mode: sentence-unit architecture ✅ shipped (ADR-0006) — system TTS
   at T0 (0-byte, every platform) now ticks sentence-by-sentence instead of
@@ -49,7 +49,7 @@ land, entries gain a `✅ shipped` mark; until then this is the plan of record.
 - Beyond both donors (Campaign 5, ADR-0011, the Inoreader/Miniflux lesson) — per-feed rules: skip / mark-read-on-arrival / auto-keep, matched on title or description (contains/not-contains, case-insensitive), evaluated in order at ingest, before an item ever becomes a row. Editable from each feed's own settings screen.
 - Beyond both donors (Campaign 5, ADR-0011) — cross-feed dedup: a canonical-URL match (after tracker-parameter stripping) or an exact-normalized title within 48h hides the younger copy of a story syndicated across feeds; never within the same feed (a repost is the author's own choice). Suppressed rows are hidden, never deleted, and un-hide themselves if the canonical row they duplicate is later removed.
 - Beyond both donors (Campaign 5, ADR-0011, the Miniflux lesson) — tracker-parameter stripping: a curated, documented list (utm_*, ad-platform click ids, newsletter send tracking) stripped from stored article links and dedup comparisons; never from feed fetch URLs or episode audio URLs, whose query params can be load-bearing.
-- River view: reverse-chronological only, unread/audio/text filters, read tracking, ephemera decay. Campaign 5 (ADR-0011) added the triage verbs Keep and Let it pass (swipe or overflow menu — every row now has one; text/article rows had none before), both undoable to the exact prior state; no new "Kept" filter chip exists, by law — kept things live in the library.
+- Inbox (the donors' river; "River" was retired as a coined word): reverse-chronological only, unread/audio/text filters, read tracking, ephemera decay. Every row says how long it stays ("Leaves the Inbox in 12 days") from its first day, and the empty state states the 30-day rule. Decay is recoverable: the boot sweep moves an expired ephemeron to a soft `decayed` state (out of the Inbox, feed detail and library, every row kept) and the Inbox shows a one-line notice with Restore (back with a fresh 30-day window) and Let go; the notice stays until one is chosen and shows in the empty state too. A decayed item is kept 30 more days, then deleted for good, and the notice says so. An item in Up Next or with captures does not decay while it is there. Campaign 5 (ADR-0011) added the triage verbs Keep and Let it pass (swipe or overflow menu — every row now has one; text/article rows had none before), both undoable to the exact prior state; no new "Kept" filter chip exists, by law — kept things live in the library.
 - Library: pin/delete, progress bars. Corrected: this row previously also claimed "debounced search, sorts, ... rename, ... source lines, feed tiles" — none of that existed; `LibraryScreen` had no search, sort, or filter of any kind, and no rename action, before Campaign 5. What Campaign 5 (ADR-0011) actually built: instant (not debounced) title search, a filter model (type/feed/read-state/pinned, any combination) with saveable, reorderable, deletable named views shown as chips. Sort controls, rename, and per-row feed/source display are still not built — not removed by this campaign, never present.
 - Text intake has no bulk/folder-import door — corrected (Campaign 7): this
   row previously claimed "Bulk multi-file + true folder import on native
@@ -70,7 +70,7 @@ land, entries gain a `✅ shipped` mark; until then this is the plan of record.
 - AI passage generation via Brain seam (topic/level/length)
 - Extract-to-card flow (tap/drag focus span, instant vocab flag) PLUS new per-word known/learning/new ledger (LingQ mechanic) feeding context-carrying cards
 - SM-2 review queue with monotonic-interval floor — Trellis scheduler verbatim, sealed; epoch-day UTC; in-session relearn with cleared inputs. The "183 tests" figure elsewhere in this repo's docs (VISION.md, ADR-0001) names the FULL donor Trellis app's suite — domain plus Flutter UI/session/backup/export — as the eventual porting target, not what has landed. As of the study-crown campaign (2026-08), `packages/study_core`'s actual landed suite is 104 tests across sm2_scheduler_test.dart (23), grading_test.dart (42), curriculum_parser_test.dart (38) and progress_unlock_test.dart (1) — verified by running `flutter test` in the package, not read off a comment. The remaining ~132 load-bearing invariants (line below) are still to port into `app/`.
-- Prerequisite DAG unlock gating + unlock-is-first-exposure-only + mastery threshold + course map (reborn as the Espalier Wall with due chips and presentable-due FAB)
+- Prerequisite DAG unlock gating + unlock-is-first-exposure-only + mastery threshold + course map (the donor's espalier wall, with due chips and presentable-due FAB; its ripeness ramp darkens steadily from pale green to deep terracotta so mastery reads without hue)
 - Four typed recall items (cloze/qa/discrimination/procedure) with distinct UIs, hints ExpansionTile, rungs, post-reveal sources
 - Auto-grading + suggested grade (normalized cloze, discrimination index, keyword coverage; learner self-rating drives SRS — kept as law even with LLM judge)
 - Cloze key text-ordering; RSVP math/code stripping; no-remote-fetch markdown/LaTeX rendering (ADR-0005 law kept)
@@ -82,12 +82,12 @@ land, entries gain a `✅ shipped` mark; until then this is the plan of record.
 - SSRF/URL safety ported and stricter on native (real LAN reachability): scheme/loopback/link-local/private/metadata rejection, mid-stream size caps
 - Multi-profile (per-profile prefs/stats/feeds/library/cards/ledger, cascade delete incl. episodes) + parent dashboard + salted-SHA-256 PIN
 - Reading stats bar (lifetime words/minutes/avg WPM/sessions)
-- Backup: encrypted .ohbk (sanctuary_auth_core, appDomain espalier) superseding donor JSON; BOTH donor formats importable (Trellis .ohbk re-encrypt, ohPrimer JSON sanitized import); startup vault snapshot kept; index-last destructive restore
+- Backup: encrypted .ohbk (sanctuary_auth_core, appDomain espalier) superseding donor JSON; BOTH donor formats importable (Trellis .ohbk re-encrypt, ohPrimer JSON sanitized import); startup vault snapshot kept; index-last destructive restore; the phrase is issued, never presupposed: "No phrase yet? Make one" mints it with the fleet generator (`OpenHearthMnemonic.generate` via `EspalierBackup.newPhrase`), shows it (sanctuary_backup_ui `SeedPhraseModal`) and asks it back before it fills the field, and a phrase typed from memory is asked back once before the first write. Every backup is re-opened in memory before it is saved, and only a blob that decrypts back to the exact payload is saved and reported ("Backup saved and checked."). Once confirmed, the phrase is kept in the OS keychain through the fleet's `SecureKeyStore` (`oh_mnemonic_v1` + `oh_seed_ack_v1`, the sanctuary_backup_ui apps' key model; `BackupCustody` in `app/lib/features/backup/`), so later backups ask for nothing; a restore or Trellis import whose file was made under other words asks for those words. A keychain that cannot be read degrades to asking every time. Until the phrase is kept, a persistent but dismissible "Finish setup: save your recovery phrase" line sits above the tabs with a Set up door to Backup (operator ruling 48); a dismissal is remembered on the device
 - OPML import/export (import validates by fetching); reading-list JSON import
 - Share/deep-link: ?url= on web kept; Android share-target intake on APK (superior)
 - Settings: high contrast, eviction policy, word timestamps, voice pickers with preview, AI provider. **Honesty fix (Campaign 4, ADR-0010):** this line previously also claimed "OpenDyslexic bundled (C7 cmap-checked)" and that no settings screen existed — neither was true. The pubspec bundles exactly two faces (Lora, Nunito), both C7-checked; OpenDyslexic was never added. A real reader-typography settings screen ✅ shipped in Campaign 4 Phase 1 (`reader_typography_settings_screen.dart`) — see the "Beyond both donors — reader depth" section below for what it actually covers.
 - Storage panel with real disk accounting, per-feed buckets incl. previously-orphaned ones, purge, boot eviction
-- Theme auto/light/dark + OS listener + high-contrast/dyslexia modes (fleet conventions)
+- Theme: light, dark or follow the phone (the default), a menu on every tab bar (two taps), stored per device + high-contrast/dyslexia modes (fleet conventions)
 - Position persistence — structurally fixed: tiny Position row + flush on pause/background, not whole-record rewrites
 - PWA offline shell (Flutter web SW, drift-wasm, persist() request, slow-boot spinner per fleet playbook)
 - Model download UX: domovoi ResumableTransfer — true Range resume, sha256 fail-closed promote, honest MB/ETA, persistent resume card, cancel keeps partial
@@ -310,7 +310,7 @@ the study crown above. Statuses follow the same convention.
   prompt itself also instructs the model not to invent anything beyond
   what it was shown. Reuses the distill flow's exact consent order
   (gesture → cloud-tier egress consent naming the host → Brain call).
-- ✅ shipped, degraded — **Trellis Echo (lifetime totals + a private
+- ✅ shipped, degraded — **What you've built, formerly "Trellis Echo" (lifetime totals + a private
   year-in-review).** The spec asked for three headline totals — words
   read, minutes listened, works finished — and only the third is
   computable from this schema; verified, not assumed (orientation found
@@ -413,6 +413,26 @@ donor-parity checklist.
   the player; lock-screen RENDERING itself is device-only and stays
   unverified by any test — see the "Background podcast playback" row
   above, moved from Degraded to Covered and worded the same way.
+
+## Fleet rollout (2026-09): shared conventions adopted
+
+- **Deletes.** Removing a work, unfollowing a feed, removing a saved word
+  and removing a reader act at once and offer an Undo bar that never times
+  out; the rows go only when the offer is let go. Swiping a word away asks
+  first. Removing a model or clearing a cache asks first (large files).
+- **First run.** A first launch opens straight into a Library for a reader
+  called "Reader"; later launches reopen the reader this device last had
+  open. The picker appears only when there is a choice (Switch reader).
+- **Top bars.** Icon plus a word for the main commands, the rest in a
+  worded More menu; the reader names its current mode as a word.
+- **Wide screens.** Every screen is a centred column of at most 640 dp
+  (the reader keeps its own chosen text width).
+- **Errors.** Failures are a plain sentence; raw exception text only
+  behind Details or in the log. A refused web address offers "Paste the
+  text instead".
+- **Words.** River is Inbox, Echo is What you've built, the espalier is
+  the course map, rungs are steps, sigma is Focus spread; RSVP, parafoveal
+  preview, SM-2 and FSRS are explained where they are chosen.
 
 ## Donor inventories (the checklist this ledger must satisfy)
 

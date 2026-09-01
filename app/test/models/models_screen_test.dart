@@ -125,9 +125,9 @@ void main() {
     );
     await tester.tap(find.byKey(const Key('model-delete-whisper-tiny-ggml')));
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('delete-model-dialog')), findsOneWidget);
+    expect(find.byType(AlertDialog), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('delete-model-confirm')));
+    await tester.tap(find.text('Remove model'));
     await tester.pumpAndSettle();
 
     expect(store.downloadedIds, isEmpty);

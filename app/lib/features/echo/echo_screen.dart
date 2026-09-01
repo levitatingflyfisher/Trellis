@@ -18,11 +18,13 @@ import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart' hide Alignment;
 import 'package:flutter/rendering.dart' show RenderRepaintBoundary;
+import 'package:openhearth_design/openhearth_design.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../../db/database.dart' hide Alignment;
 import '../backup/backup_gateway.dart';
 import 'echo_export.dart';
+import '../shared/capped_body.dart';
 
 /// The production [EchoScreen.shareImage] — native only (the shell wires
 /// `kIsWeb ? null : shareEchoImage`, matching the `localMlAvailable`
@@ -30,8 +32,8 @@ import 'echo_export.dart';
 /// inject their own closure and assert on the bytes it receives.
 Future<void> shareEchoImage(Uint8List pngBytes) async {
   await SharePlus.instance.share(ShareParams(
-    files: [XFile.fromData(pngBytes, mimeType: 'image/png', name: 'echo.png')],
-    text: 'What I\'ve built, from Trellis.',
+    files: [XFile.fromData(pngBytes, mimeType: 'image/png', name: 'trellis-what-ive-built.png')],
+    text: 'What I’ve built, from Trellis.',
   ));
 }
 
@@ -153,31 +155,33 @@ class _EchoScreenState extends State<EchoScreen> {
     final built = _built;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Trellis Echo'),
+        title: const Text("What you’ve built"),
         actions: [
-          PopupMenuButton<String>(
-            key: const Key('echo-export-menu'),
-            tooltip: 'Export',
-            icon: const Icon(Icons.ios_share_outlined),
-            onSelected: (value) {
-              if (value == 'md') unawaited(_exportMarkdown());
-              if (value == 'json') unawaited(_exportJson());
-            },
-            itemBuilder: (_) => const [
-              PopupMenuItem(value: 'md', child: Text('Export as Markdown')),
-              PopupMenuItem(value: 'json', child: Text('Export as JSON')),
-            ],
-          ),
-          if (widget.shareImage != null)
-            IconButton(
-              key: const Key('echo-share'),
-              tooltip: 'Share',
-              icon: const Icon(Icons.share_outlined),
-              onPressed: built == null ? null : () => unawaited(_share()),
+          OhBarActions(children: [
+            OhBarOverflow<String>(
+              key: const Key('echo-export-menu'),
+              label: 'Export',
+              icon: Icons.ios_share_outlined,
+              onSelected: (value) {
+                if (value == 'md') unawaited(_exportMarkdown());
+                if (value == 'json') unawaited(_exportJson());
+              },
+              itemBuilder: (_) => const [
+                PopupMenuItem(value: 'md', child: Text('Export as Markdown')),
+                PopupMenuItem(value: 'json', child: Text('Export as JSON')),
+              ],
             ),
+            if (widget.shareImage != null)
+              OhBarAction(
+                key: const Key('echo-share'),
+                icon: Icons.share_outlined,
+                label: 'Share',
+                onPressed: built == null ? null : () => unawaited(_share()),
+              ),
+          ]),
         ],
       ),
-      body: built == null
+      body: CappedBody(child: built == null
           ? const Center(child: CircularProgressIndicator())
           : SafeArea(
               child: SingleChildScrollView(
@@ -194,7 +198,7 @@ class _EchoScreenState extends State<EchoScreen> {
                   ),
                 ),
               ),
-            ),
+            )),
     );
   }
 
@@ -210,12 +214,12 @@ class _EchoScreenState extends State<EchoScreen> {
             style: theme.textTheme.headlineSmall
                 ?.copyWith(fontWeight: FontWeight.w700)),
         const SizedBox(height: 4),
-        Text('What you\'ve built',
+        Text('What you’ve built',
             style: theme.textTheme.bodyMedium
                 ?.copyWith(color: theme.colorScheme.onSurfaceVariant)),
         const SizedBox(height: 16),
         if (lines.isEmpty)
-          Text('Nothing built yet — pick up a book.',
+          Text('Nothing built yet. Pick up a book.',
               style: theme.textTheme.bodyLarge)
         else
           for (final line in lines)
@@ -253,7 +257,7 @@ List<String> echoLines(LifetimeBuilt built,
     if (captures > 0) _n(captures, 'capture', 'captures'),
     if (built.listeningMs > 0) _reached(built.listeningMs),
     if (built.currentCourse != null)
-      'Current course: ${built.currentCourse!.title} — '
+      'Current course: ${built.currentCourse!.title}, '
           '${built.currentCourse!.mastered} of ${built.currentCourse!.total} '
           'mastered',
   ];

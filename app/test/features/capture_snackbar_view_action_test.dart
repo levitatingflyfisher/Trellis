@@ -9,6 +9,7 @@ import '../support/fake_player.dart';
 import '../support/fake_services.dart';
 import '../support/scripted_fetcher.dart';
 import 'dart:io';
+import '../support/pick_reader.dart';
 
 /// Campaign 9 Phase 1 — user: "two bookmark symbols… unclear which is doing
 /// what". The capture snackbar was a dead end: "Captured." with nowhere to
@@ -49,10 +50,9 @@ void main() {
         createPlayer: () => player,
         services: testServices(dir)));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Ada'));
-    await tester.pumpAndSettle();
+    await pickReader(tester, 'Ada');
 
-    await tester.tap(find.text('River'));
+    await tester.tap(find.text('Inbox'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(Key('play-$workId')));
     await tester.pumpAndSettle();

@@ -65,7 +65,7 @@ void main() {
     await tester.tap(find.byKey(const Key('rule-add')));
     await tester.pumpAndSettle();
 
-    expect(find.textContaining('"sponsored"'), findsOneWidget);
+    expect(find.textContaining('“sponsored”'), findsOneWidget);
 
     await tester.ensureVisible(find.byKey(const Key('feed-settings-save')));
     await tester.tap(find.byKey(const Key('feed-settings-save')));
@@ -95,11 +95,11 @@ void main() {
     await pumpFeeds(tester);
     await openSettings(tester, feedId);
 
-    expect(find.textContaining('"sponsored"'), findsOneWidget);
+    expect(find.textContaining('“sponsored”'), findsOneWidget);
     await tester.ensureVisible(find.byKey(const Key('rule-delete-0')));
     await tester.tap(find.byKey(const Key('rule-delete-0')));
     await tester.pumpAndSettle();
-    expect(find.textContaining('"sponsored"'), findsNothing);
+    expect(find.textContaining('“sponsored”'), findsNothing);
 
     await tester.ensureVisible(find.byKey(const Key('feed-settings-save')));
     await tester.tap(find.byKey(const Key('feed-settings-save')));
@@ -125,7 +125,7 @@ void main() {
     await pumpFeeds(tester);
     await openSettings(tester, feedId);
 
-    expect(find.textContaining('"transcript"'), findsOneWidget);
-    expect(find.textContaining('— Mark read'), findsOneWidget);
+    expect(find.textContaining('“transcript”'), findsOneWidget);
+    expect(find.textContaining(': Mark read'), findsOneWidget);
   });
 }

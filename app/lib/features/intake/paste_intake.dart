@@ -10,18 +10,24 @@ int epochDayUtcNow() =>
 
 /// Paste intake: text/markdown through the donor `parseTextFile` heuristics
 /// into one spine work. Returns the new work id, or null on cancel/empty.
+///
+/// [sourceUrl] is the address the text came from, when the web intake was
+/// refused and the person pastes the page instead; the work keeps it.
 Future<int?> showPasteIntakeDialog(BuildContext context,
-    {required AppDatabase db, required int profileId}) {
+    {required AppDatabase db, required int profileId, String? sourceUrl}) {
   return showDialog<int>(
     context: context,
-    builder: (_) => _PasteDialog(db: db, profileId: profileId),
+    builder: (_) =>
+        _PasteDialog(db: db, profileId: profileId, sourceUrl: sourceUrl),
   );
 }
 
 class _PasteDialog extends StatefulWidget {
   final AppDatabase db;
   final int profileId;
-  const _PasteDialog({required this.db, required this.profileId});
+  final String? sourceUrl;
+  const _PasteDialog(
+      {required this.db, required this.profileId, this.sourceUrl});
 
   @override
   State<_PasteDialog> createState() => _PasteDialogState();
@@ -51,7 +57,8 @@ class _PasteDialogState extends State<_PasteDialog> {
         kind: 'note',
         title: parsed.title,
         persistence: 'work',
-        firstSeenEpochDay: epochDayUtcNow());
+        firstSeenEpochDay: epochDayUtcNow(),
+        sourceUrl: widget.sourceUrl);
     await widget.db.spineDao.insertSegments(workId, [
       for (final s in parsed.segments)
         (idx: s.idx, kind: s.kind.name, text: s.text)

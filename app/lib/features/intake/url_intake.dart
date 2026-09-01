@@ -6,7 +6,8 @@ import '../../db/database.dart';
 import '../../services/device_services.dart' show WebFetchLane;
 import '../models/consent.dart';
 import 'article_fetch.dart';
-import 'paste_intake.dart' show epochDayUtcNow;
+import 'paste_intake.dart' show epochDayUtcNow, showPasteIntakeDialog;
+import '../shared/capped_body.dart';
 
 /// "From the web": paste a URL, pass the ONE consent chokepoint, preview the
 /// extracted article, confirm — and it lands as a persistent spine work.
@@ -77,7 +78,7 @@ class _UrlIntakeScreenState extends State<UrlIntakeScreen> {
 
     // THE chokepoint, before any byte moves. Size honesty: unknowable here.
     final ok = await confirmDownload(context, items: [
-      DownloadItem('$url — size unknown until it arrives'),
+      DownloadItem('$url (size unknown until it arrives)'),
     ]);
     if (!ok || !mounted) return;
 
@@ -97,6 +98,19 @@ class _UrlIntakeScreenState extends State<UrlIntakeScreen> {
           _preview = outcome;
       }
     });
+  }
+
+  /// Opens the paste dialog carrying the address, so the work still says
+  /// where it came from; a pasted work closes this screen like an add.
+  Future<void> _pasteInstead() async {
+    final raw = _url.text.trim();
+    final workId = await showPasteIntakeDialog(context,
+        db: widget.db,
+        profileId: widget.profileId,
+        sourceUrl: raw.isEmpty
+            ? null
+            : (raw.contains('://') ? raw : 'https://$raw'));
+    if (workId != null && mounted) Navigator.of(context).pop(workId);
   }
 
   Future<void> _add() async {
@@ -119,7 +133,7 @@ class _UrlIntakeScreenState extends State<UrlIntakeScreen> {
     final preview = _preview;
     return Scaffold(
       appBar: AppBar(title: const Text('From the web')),
-      body: SafeArea(
+      body: CappedBody(child: SafeArea(
         child: Center(
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(24),
@@ -131,7 +145,7 @@ class _UrlIntakeScreenState extends State<UrlIntakeScreen> {
             ),
           ),
         ),
-      ),
+      )),
     );
   }
 
@@ -152,7 +166,7 @@ class _UrlIntakeScreenState extends State<UrlIntakeScreen> {
                 style: theme.textTheme.bodySmall)
           else
             Text(
-                "Most sites don't let web pages read them, so fetching from "
+                "Most sites don’t let web pages read them, so fetching from "
                 'the browser often fails. The installed app fetches directly '
                 '— and pasting the text always works.',
                 key: const Key('url-intake-web-note'),
@@ -166,15 +180,42 @@ class _UrlIntakeScreenState extends State<UrlIntakeScreen> {
           keyboardType: TextInputType.url,
           textInputAction: TextInputAction.go,
           onSubmitted: (_) => _fetch(),
-          decoration: const InputDecoration(
-              labelText: 'Web address', hintText: 'example.org/essay'),
+          // The field's own outline turns to the error colour too; the
+          // sentence sits below as ordinary wrapping text (a field's
+          // errorText is one line and ellipsizes at large text).
+          decoration: InputDecoration(
+              labelText: 'Web address',
+              hintText: 'example.org/essay',
+              error: _error == null ? null : const SizedBox.shrink()),
         ),
         if (_error != null) ...[
           const SizedBox(height: 12),
-          Text(_error!,
-              key: const Key('url-intake-error'),
-              style: theme.textTheme.bodyMedium
-                  ?.copyWith(color: theme.colorScheme.error)),
+          // Urgency is colour + icon + word (fleet colour language;
+          // dfh-04), and a refusal comes with a way forward (audit rank
+          // 7): pasting the page's text always works.
+          Row(
+            key: const Key('url-intake-error-row'),
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Icon(Icons.error_outline,
+                  size: 20, color: theme.colorScheme.error),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(_error!,
+                    key: const Key('url-intake-error'),
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                        color: theme.colorScheme.error,
+                        fontWeight: FontWeight.w600)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          OutlinedButton.icon(
+            key: const Key('url-intake-paste-instead'),
+            onPressed: _pasteInstead,
+            icon: const Icon(Icons.content_paste),
+            label: const Text('Paste the text instead'),
+          ),
         ],
         const SizedBox(height: 20),
         FilledButton.icon(

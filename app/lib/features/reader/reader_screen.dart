@@ -218,10 +218,9 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// tests for the mode-switch invariant Parafoveal never touches.)
   bool _parafoveal = false;
 
-  /// The neighbor-fade sigma (donor default 2.0, slider 0.8-4.0 step 0.2).
-  /// Session-scoped like [_wpm], not persisted -- Campaign 4's playback
-  /// controls follow the reader's existing wpm precedent ("holds for the
-  /// session"), not the typography prefs' cross-session precedent.
+  /// The neighbor-fade sigma, shown as "Focus spread" (donor default 2.0,
+  /// slider 0.8-4.0 step 0.2). Remembered per reader with the mode, [_wpm]
+  /// and [_parafoveal] (ReaderSession in reader_prefs.dart).
   double _sigma = 2.0;
 
   /// Donor default window: 5 neighbors either side of the focus word.
@@ -547,6 +546,16 @@ class _ReaderScreenState extends State<ReaderScreen>
       _showTranslation = showTranslation;
       _translatedSentences = translatedSentences;
       _typography = readerPrefs.typography;
+      // How this reader last read: mode, speed, nearby words (persona A1:
+      // "the reader forgets their settings" was a reason to quit).
+      final session = readerPrefs.session;
+      _mode = _modeFromWire(session.mode);
+      _wpm = session.wpm;
+      _parafoveal = session.nearbyWords;
+      _sigma = session.focusSpread;
+      if (_mode != ReaderMode.rsvp && doc.words.isNotEmpty) {
+        _scrollAnchor = cursorAt(doc, wordIdx).segment;
+      }
     });
     // Campaign 9 Phase 7: audio for THIS work already playing when the
     // reader opens is one of the two attach triggers (the other is
@@ -640,7 +649,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(const SnackBar(
-            content: Text('A downloaded voice reads more smoothly — get '
+            content: Text('A downloaded voice reads more smoothly. Get '
                 'one in Models.')));
     }
     unawaited(_speakLoop());
@@ -1113,6 +1122,33 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// modes' own viewport anchor needs re-deriving from it, so a switch
   /// INTO Scroll or Lines from anywhere opens on the segment the cursor
   /// is actually in rather than the top of the document.
+  static ReaderMode _modeFromWire(String wire) => switch (wire) {
+        'scroll' => ReaderMode.scroll,
+        'lines' => ReaderMode.lines,
+        _ => ReaderMode.rsvp,
+      };
+
+  static String _modeToWire(ReaderMode m) => switch (m) {
+        ReaderMode.rsvp => 'words',
+        ReaderMode.scroll => 'scroll',
+        ReaderMode.lines => 'lines',
+      };
+
+  /// Remembers how this reader reads, for the next open (read-modify-write:
+  /// the same blob carries typography and the last-played work).
+  Future<void> _rememberSession() async {
+    final dao = widget.db.profilesDao;
+    final prefs = await dao.readerPrefs(widget.profileId);
+    await dao.setReaderPrefs(
+        widget.profileId,
+        prefs.copyWith(
+            session: ReaderSession(
+                mode: _modeToWire(_mode),
+                wpm: _wpm,
+                nearbyWords: _parafoveal,
+                focusSpread: _sigma)));
+  }
+
   void _setMode(ReaderMode next) {
     if (next == _mode) return;
     _pause();
@@ -1123,6 +1159,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         _scrollAnchor = cursorAt(doc, _wordIdx).segment;
       }
     });
+    unawaited(_rememberSession());
   }
 
   Future<void> _back() async {
@@ -1376,35 +1413,19 @@ class _ReaderScreenState extends State<ReaderScreen>
         leading: BackButton(onPressed: _back),
         title: Text(widget.work.title,
             overflow: TextOverflow.ellipsis, maxLines: 1),
+        // Icon + word for the reading mode (the current one, named on the
+        // face: audit rank 3) and for reading aloud; everything else in the
+        // worded menu (fleet ruling on top bars).
         actions: [
-          if (_mtLangs.isNotEmpty)
-            IconButton(
-              key: const Key('lang-toggle'),
-              tooltip: _activeLang == null
-                  ? 'Show translation'
-                  : 'Showing $_activeLang — tap to switch',
-              isSelected: _activeLang != null,
-              icon: const Icon(Icons.translate),
-              onPressed: doc == null ? null : _toggleLanguage,
-            ),
-          IconButton(
-            key: const Key('speak-toggle'),
-            tooltip: _speaking ? 'Stop reading aloud' : 'Read aloud',
-            isSelected: _speaking,
-            icon: Icon(_speaking ? Icons.stop_circle_outlined
-                : Icons.volume_up_outlined),
-            onPressed: doc == null ? null : _toggleSpeak,
-          ),
+          OhBarActions(children: [
           // Campaign 9 Phase 6: a labeled three-way choice (Scroll / Words
           // / Lines), not a binary cycle — [readerModeLabel] names the
-          // CURRENT mode rather than "what tapping does" (a menu shows
-          // every destination by name, so there is no next-state to
-          // hint at the way the old two-state toggle's icon/tooltip did).
+          // CURRENT mode, on the face of the bar as a word, not only as
+          // the picker's glyph.
           PopupMenuButton<ReaderMode>(
             key: const Key('mode-toggle'),
             tooltip: 'Reading mode: ${readerModeLabel(_mode)}',
             enabled: doc != null,
-            icon: Icon(readerModeIcon(_mode)),
             onSelected: _setMode,
             itemBuilder: (_) => [
               for (final m in ReaderMode.values)
@@ -1415,23 +1436,18 @@ class _ReaderScreenState extends State<ReaderScreen>
                   child: Text(readerModeLabel(m)),
                 ),
             ],
+            child: _BarMenuFace(
+                icon: readerModeIcon(_mode), label: readerModeLabel(_mode)),
           ),
-          IconButton(
-            key: const Key('open-ledger'),
-            tooltip: 'Word ledger',
-            icon: const Icon(Icons.bookmark_border),
-            onPressed: _openLedger,
+          OhBarAction(
+            key: const Key('speak-toggle'),
+            icon: _speaking ? Icons.stop_circle_outlined
+                : Icons.volume_up_outlined,
+            label: _speaking ? 'Stop' : 'Read aloud',
+            onPressed: doc == null ? null : _toggleSpeak,
           ),
-          if (_hasAlignedAudio && widget.player != null)
-            IconButton(
-              key: const Key('listen-from-here'),
-              tooltip: 'Listen from here',
-              icon: const Icon(Icons.headphones_outlined),
-              onPressed: doc == null ? null : _listenFromHere,
-            ),
-          PopupMenuButton<String>(
+          OhBarOverflow<String>(
             key: const Key('reader-overflow'),
-            tooltip: 'More',
             onSelected: (value) {
               if (value == 'distill') unawaited(_distill());
               if (value == 'system-voice') unawaited(_toggleVoicePreference());
@@ -1443,8 +1459,28 @@ class _ReaderScreenState extends State<ReaderScreen>
               if (value == 'reading-style') unawaited(_openTypographySettings());
               if (value == 'work-language') unawaited(_openWorkLanguagePicker());
               if (value == 'follow-along') _playing ? _pause() : _play();
+              if (value == 'lang') _toggleLanguage();
+              if (value == 'ledger') _openLedger();
+              if (value == 'listen-here') unawaited(_listenFromHere());
             },
             itemBuilder: (_) => [
+              if (_mtLangs.isNotEmpty && doc != null)
+                PopupMenuItem(
+                  key: const Key('lang-toggle'),
+                  value: 'lang',
+                  child: Text(_activeLang == null
+                      ? 'Show translation'
+                      : 'Switch translation (showing $_activeLang)'),
+                ),
+              const PopupMenuItem(
+                  key: Key('open-ledger'),
+                  value: 'ledger',
+                  child: Text('Word ledger')),
+              if (_hasAlignedAudio && widget.player != null && doc != null)
+                const PopupMenuItem(
+                    key: Key('listen-from-here'),
+                    value: 'listen-here',
+                    child: Text('Listen from here')),
               const PopupMenuItem(
                   value: 'distill',
                   child: Text('Distill into a course')),
@@ -1527,6 +1563,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                 ),
             ],
           ),
+          ]),
         ],
       ),
       body: Column(
@@ -1619,7 +1656,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                       _activeTranslationLang ?? '');
                   return total == 0
                       ? 'Translating to $label…'
-                      : 'Translating to $label — ${s.doneUnits} of $total sentences';
+                      : 'Translating to $label: ${s.doneUnits} of $total sentences';
                 })(),
                 key: const Key('translation-status'),
                 style: Theme.of(context).textTheme.bodySmall),
@@ -1914,6 +1951,7 @@ class _ReaderScreenState extends State<ReaderScreen>
             value: _wpm,
             label: '${_wpm.round()} wpm',
             onChanged: (v) => setState(() => _wpm = v),
+            onChangeEnd: (_) => unawaited(_rememberSession()),
           ),
           Text('${_wpm.round()} wpm',
               style: Theme.of(context).textTheme.labelMedium),
@@ -1925,18 +1963,22 @@ class _ReaderScreenState extends State<ReaderScreen>
               max: 4.0,
               divisions: 16,
               value: _sigma,
-              label: 'sigma ${_sigma.toStringAsFixed(1)}',
+              label: 'Focus spread ${_sigma.toStringAsFixed(1)}',
               onChanged: (v) => setState(() => _sigma = v),
+              onChangeEnd: (_) => unawaited(_rememberSession()),
             ),
-            // C7 (fleet_conformance_test.dart): the bundled Lora/Nunito
-            // cmaps don't cover σ, so this stays spelled out rather than
-            // tofu on a device without a system fallback for it.
-            Text('Focus sigma — higher = neighbors stay brighter',
+            // Plain words, not the Gaussian's "sigma" (jargon ruling).
+            Text('Focus spread: higher keeps nearby words brighter',
                 style: Theme.of(context).textTheme.labelSmall),
           ],
           const SizedBox(height: 4),
-          Row(
-            mainAxisSize: MainAxisSize.min,
+          // Wrap, not Row: at large text the worded chip drops under the
+          // play button instead of running off the screen.
+          Wrap(
+            alignment: WrapAlignment.center,
+            crossAxisAlignment: WrapCrossAlignment.center,
+            spacing: 12,
+            runSpacing: 8,
             children: [
               OhIconButton.filled(
                 key: const Key('play-toggle'),
@@ -1947,13 +1989,20 @@ class _ReaderScreenState extends State<ReaderScreen>
                 onPressed: _playing ? _pause : _play,
                 icon: Icon(_playing ? Icons.pause : Icons.play_arrow),
               ),
-              const SizedBox(width: 12),
-              IconButton.outlined(
+              // A state control named by a word (audit rank 3; jargon
+              // ruling: "parafoveal" is the field's term, not a household
+              // one): on shows the neighbouring words, faded, beside the
+              // focus word.
+              FilterChip(
                 key: const Key('parafoveal-toggle'),
-                iconSize: 28,
-                tooltip: _parafoveal ? 'Classic mode' : 'Parafoveal mode',
-                onPressed: () => setState(() => _parafoveal = !_parafoveal),
-                icon: Icon(_parafoveal ? Icons.blur_off : Icons.blur_on),
+                label: const Text('Nearby words'),
+                avatar: const Icon(Icons.blur_on),
+                showCheckmark: true,
+                selected: _parafoveal,
+                onSelected: (on) {
+                  setState(() => _parafoveal = on);
+                  unawaited(_rememberSession());
+                },
               ),
             ],
           ),
@@ -2047,10 +2096,15 @@ class _ReaderScreenState extends State<ReaderScreen>
                 borderRadius: BorderRadius.circular(8)),
             child: Text(block.text,
                 style: block.kind == core.SegmentKind.figure
-                    ? theme.textTheme.bodyMedium
-                        ?.copyWith(fontStyle: FontStyle.italic)
-                    : theme.textTheme.bodyMedium
-                        ?.copyWith(fontFamily: 'monospace')),
+                    // Lora, because Nunito has no italic face and a
+                    // synthesized slant is not an italic (dfh-02).
+                    ? theme.textTheme.bodyMedium?.copyWith(
+                        fontFamily:
+                            readerTypefaceFontFamily(ReaderTypeface.lora),
+                        package: kReaderFontPackage,
+                        fontStyle: FontStyle.italic)
+                    : OhTypography.code(
+                        color: theme.colorScheme.onSurface)),
           ),
         );
     }
@@ -2156,6 +2210,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     final bodySize = theme.textTheme.bodyLarge?.fontSize;
     final style = theme.textTheme.bodyLarge!.copyWith(
         fontFamily: readerTypefaceFontFamily(_typography.typeface),
+        package: kReaderFontPackage,
         height: _typography.lineHeight,
         fontSize: bodySize == null ? null : bodySize * _typography.fontScale);
     final cursor = cursorAt(doc, _wordIdx);
@@ -2193,6 +2248,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     final bodySize = theme.textTheme.bodyLarge?.fontSize;
     final base = theme.textTheme.bodyLarge?.copyWith(
         fontFamily: readerTypefaceFontFamily(_typography.typeface),
+        package: kReaderFontPackage,
         height: _typography.lineHeight,
         fontSize: bodySize == null ? null : bodySize * _typography.fontScale);
 
@@ -2263,7 +2319,8 @@ class _ReaderScreenState extends State<ReaderScreen>
         child: Text(text,
             key: key,
             style: theme.textTheme.bodyMedium?.copyWith(
-                fontFamily: 'Lora',
+                fontFamily: readerTypefaceFontFamily(ReaderTypeface.lora),
+                package: kReaderFontPackage,
                 fontStyle: FontStyle.italic,
                 color: theme.colorScheme.onSurfaceVariant)),
       );
@@ -2330,7 +2387,10 @@ class DropCap extends StatelessWidget {
     final cap = chars.take(1).toString();
     final rest = chars.skip(1).toString();
     final capStyle = Theme.of(context).textTheme.displayMedium?.copyWith(
-        fontFamily: 'Lora', fontWeight: FontWeight.w600, height: 1.0);
+        fontFamily: readerTypefaceFontFamily(ReaderTypeface.lora),
+        package: kReaderFontPackage,
+        fontWeight: FontWeight.w700,
+        height: 1.0);
     return Row(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.baseline,
@@ -2343,5 +2403,47 @@ class DropCap extends StatelessWidget {
         if (rest.isNotEmpty) Flexible(child: Text(rest, style: bodyStyle)),
       ],
     );
+  }
+}
+
+/// The face of a top-bar menu that names its current choice: icon, word
+/// and a drop-down caret, in neutral ink, sized like an [OhBarAction]. It
+/// folds (glyph and caret only) by the bar's space rule, like the actions
+/// beside it. Strict C11 cannot see this word from the call site, so the
+/// picker is recorded in `barLabelExemptions`.
+class _BarMenuFace extends StatelessWidget {
+  const _BarMenuFace({required this.icon, required this.label});
+
+  final IconData icon;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final ink = OhBarAction.inkOf(context);
+    Widget face({required bool worded}) => ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: 48, minWidth: 48),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(icon, color: ink),
+                if (worded) ...[
+                  const SizedBox(width: 6),
+                  Text(label,
+                      maxLines: 1,
+                      softWrap: false,
+                      style: Theme.of(context)
+                          .textTheme
+                          .labelLarge
+                          ?.copyWith(color: ink)),
+                ],
+                Icon(Icons.arrow_drop_down, color: ink),
+              ],
+            ),
+          ),
+        );
+    return OhBarFoldable(
+        worded: face(worded: true), folded: face(worded: false));
   }
 }

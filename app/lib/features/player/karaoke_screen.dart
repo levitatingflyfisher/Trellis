@@ -9,6 +9,7 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:openhearth_design/openhearth_design.dart';
 import 'package:loom_core/loom_core.dart' as core;
 
 import '../../db/database.dart';
@@ -20,6 +21,7 @@ import '../reader/translation/marian_engine.dart';
 import '../../services/device_services.dart' show TtsSpeaker;
 import '../transcribe/transcript_writer.dart' show decodeWordTimingBlob;
 import 'player_controller.dart';
+import '../shared/capped_body.dart';
 
 class KaraokeScreen extends StatefulWidget {
   final AppDatabase db;
@@ -178,15 +180,17 @@ class _KaraokeScreenState extends State<KaraokeScreen> {
         title: Text(widget.work.title,
             overflow: TextOverflow.ellipsis, maxLines: 1),
         actions: [
-          IconButton(
-            key: const Key('read-from-here'),
-            tooltip: 'Read from here',
-            icon: const Icon(Icons.chrome_reader_mode_outlined),
-            onPressed: _readFromHere,
-          ),
+          OhBarActions(children: [
+            OhBarAction(
+              key: const Key('read-from-here'),
+              icon: Icons.chrome_reader_mode_outlined,
+              label: 'Read from here',
+              onPressed: _readFromHere,
+            ),
+          ]),
         ],
       ),
-      body: rows == null
+      body: CappedBody(child: rows == null
           ? const Center(child: CircularProgressIndicator())
           : ListenableBuilder(
               listenable: widget.controller,
@@ -203,7 +207,7 @@ class _KaraokeScreenState extends State<KaraokeScreen> {
                   ],
                 );
               },
-            ),
+            )),
     );
   }
 

@@ -186,7 +186,7 @@ class BrainStore {
         final key = await _readQuiet(anthropicKeyName);
         if (key == null || key.isEmpty) {
           return const BrainNotConfigured(
-              'Your Anthropic brain needs its API key — add it under '
+              'Your Anthropic brain needs its API key. Add it under '
               'Thinking, in the Courses tab.');
         }
         final built = _anthropicFactory(key);

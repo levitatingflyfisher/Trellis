@@ -199,7 +199,10 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Remove'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Remove from library'));
+      // Nothing is deleted while Undo is still on offer.
+      expect(deleted, isEmpty);
+      expect(await db.spineDao.worksOf(profileId), hasLength(1));
+      await tester.tap(find.byTooltip('Dismiss'));
       await tester.pumpAndSettle();
 
       expect(deleted, [work.id]);

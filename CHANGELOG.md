@@ -7,6 +7,32 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## Unreleased — fleet rollout (2026-09)
+
+### Changed
+- **Plain words.** The River is the Inbox; Echo is What you've built; the
+  espalier is the course map; rungs are steps; the reader's Parafoveal
+  toggle is a Nearby words chip and sigma is Focus spread. RSVP, SM-2 and
+  FSRS are explained where they are chosen.
+- **First run opens into the task.** No name to type: a first launch
+  opens a Library for "Reader"; later launches reopen the last reader.
+- **The reader remembers** its mode, speed and nearby-words setting per
+  reader.
+- **Deletes.** Remove, Unfollow, a word's Remove and Remove profile act at
+  once with an Undo that never times out; swiping a word away asks first.
+- **Inbox decay** is stated on every row in days; what leaves is kept 30
+  more days, then deleted, and items in Up Next or with captures do not
+  decay.
+- **Theme**: light, dark or follow the phone, on every tab bar.
+- **Top bars** name their commands; **every screen** is capped at 640 dp
+  wide; **errors** are plain sentences with details behind a button; the
+  course map's ripeness darkens steadily; copy uses proper punctuation.
+- **Backup**: a new phrase is checked word by word; the PWA keeps its
+  words under Trellis's own name; backups are saved as
+  `trellis-backup-<date>.ohbk`.
+- Lora and Nunito now come from openhearth_design; the app ships no font
+  files of its own.
+
 ## 1.4.1 — 2026-08-17
 
 A hotfix for a 1.4.0 that did not start. Reported from a real phone:

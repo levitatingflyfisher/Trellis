@@ -47,11 +47,11 @@ class Profiles extends Table {
   /// Campaign 4's one schema hop (v18): the `ReaderPrefs` blob — the print
   /// reader's typography — as JSON in one column, the same shape
   /// [Cards.stateJson] already uses, rather than a column per field. `'{}'`
-  /// decodes to all-default prefs (see [ReaderPrefs.decode]). Phase 2's
-  /// Parafoveal toggle/sigma and follow-along are session-scoped instead
-  /// (the reader's existing wpm precedent: "holds for the session," not
-  /// persisted) — they don't live here. [ReadingDays], not this column, is
-  /// where Phase 5's lifetime totals read from.
+  /// decodes to all-default prefs (see [ReaderPrefs.decode]). It also holds
+  /// how the reader last read (mode, speed, nearby words: [ReaderSession]),
+  /// which used to be lost on every open. Follow-along stays session-scoped.
+  /// [ReadingDays], not this column, is where Phase 5's lifetime totals
+  /// read from.
   TextColumn get readerPrefsJson =>
       text().withDefault(const Constant('{}'))();
 }
@@ -557,6 +557,19 @@ class HouseholdPin extends Table {
   Set<Column> get primaryKey => {id};
 }
 
+/// Device-level settings, one row per key: what belongs to this device
+/// rather than to a reader (the theme choice, which reader was last
+/// active). Key/value so a new setting never needs a schema hop. Not part
+/// of a backup: another device keeps its own.
+@DataClassName('DeviceSettingRow')
+class DeviceSettings extends Table {
+  TextColumn get key => text()();
+  TextColumn get value => text()();
+
+  @override
+  Set<Column> get primaryKey => {key};
+}
+
 /// One checkpointed long-running task (proposal-2 §9): jobs_core's row plus
 /// [payloadJson] — app-side context (which work, which whisper task) the
 /// engine never reads. States travel as [jobs.JobState] names.
@@ -1004,7 +1017,7 @@ class JobsDao extends DatabaseAccessor<AppDatabase> with _$JobsDaoMixin {
           jobsTable,
         )..where((j) => j.id.equals(jobId))).getSingleOrNull();
         if (r == null) {
-          throw StateError('saveCheckpoint for unknown job "$jobId"');
+          throw StateError('saveCheckpoint for unknown job “$jobId”');
         }
         await (update(jobsTable)..where((j) => j.id.equals(jobId))).write(
           JobsTableCompanion(
@@ -1058,6 +1071,36 @@ class _DriftJobStore implements jobs.JobStore {
 
   @override
   Future<void> delete(String jobId) => dao.deleteJob(jobId);
+}
+
+@DriftAccessor(tables: [DeviceSettings])
+class DeviceSettingsDao extends DatabaseAccessor<AppDatabase>
+    with _$DeviceSettingsDaoMixin {
+  DeviceSettingsDao(super.db);
+
+  static const _lastProfile = 'last_profile_id';
+
+  Future<String?> read(String key) async =>
+      (await (select(deviceSettings)..where((r) => r.key.equals(key)))
+              .getSingleOrNull())
+          ?.value;
+
+  Future<void> write(String key, String value) => into(deviceSettings)
+      .insertOnConflictUpdate(
+          DeviceSettingsCompanion.insert(key: key, value: value));
+
+  Future<void> clear(String key) =>
+      (delete(deviceSettings)..where((r) => r.key.equals(key))).go();
+
+  /// The reader this device last had open, so a cold launch opens into
+  /// their library instead of asking "Who's reading?" every time. A stale
+  /// id (the reader was removed, or a restore replaced everyone) is the
+  /// caller's to check against the profiles that exist.
+  Future<int?> lastProfileId() async =>
+      int.tryParse(await read(_lastProfile) ?? '');
+
+  Future<void> setLastProfileId(int? id) =>
+      id == null ? clear(_lastProfile) : write(_lastProfile, '$id');
 }
 
 @DriftAccessor(tables: [WordLedger])
@@ -1519,32 +1562,100 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
     return ((await q.getSingle()).read(c) ?? 0) > 0;
   }
 
-  /// Executes the pure verdict from loom_core (ADR-0003 law 2). Returns the
-  /// number of works removed.
+  /// Executes the pure verdict from loom_core (ADR-0003 law 2) as a SOFT
+  /// decay: each named ephemeron leaves the river (persistence `decayed`)
+  /// but keeps every row, so the River can say what left and offer it back
+  /// ([restoreDecayed]) or let it go for good ([purgeDecayed]). Decay stays
+  /// the default; only the silent, irreversible delete is gone. Items in
+  /// Up Next or with captures are held (the person's hand is on them). A
+  /// decayed item nobody restores is deleted for good one more retention
+  /// window later. Returns the number of works that decayed on this pass.
   Future<int> sweepEphemera({
     required int todayEpochDay,
     int retentionDays = 30,
   }) async {
-    final rows = await select(works).get();
+    // Queuing an item or capturing from it is the person's hand on it
+    // (ADR-0003 law 2), so it never decays while that is true; it can
+    // still decay later, once it is out of the queue and has no captures.
+    final held = await heldWorkIds();
+    final rows = [
+      for (final w in await (select(works)
+            ..where((w) => w.persistence.equals('ephemeron')))
+          .get())
+        if (!held.contains(w.id)) w
+    ];
+    // What decayed is kept for a second window, then deleted for good; the
+    // Inbox's notice says so. Without an end, rows nobody ever answers
+    // would pile up forever.
+    final expired = await (select(works)
+          ..where((w) =>
+              w.persistence.equals('decayed') &
+              w.firstSeenEpochDay
+                  .isSmallerThanValue(todayEpochDay - 2 * retentionDays - 1)))
+        .get();
+    for (final w in expired) {
+      await deleteWork(w.id);
+    }
     final verdict = core.sweepEphemera(
       [
         for (final w in rows)
           core.Work(
             id: '${w.id}',
             kind: core.WorkKind.episode,
-            persistence: w.persistence == 'work'
-                ? core.Persistence.work
-                : core.Persistence.ephemeron,
+            persistence: core.Persistence.ephemeron,
             firstSeenEpochDay: w.firstSeenEpochDay,
           ),
       ],
       todayEpochDay: todayEpochDay,
       retentionDays: retentionDays,
     );
-    for (final id in verdict) {
-      await deleteWork(int.parse(id));
-    }
+    await transaction(() async {
+      for (final id in verdict) {
+        final workId = int.parse(id);
+        // As deleteWork does: a hidden duplicate must not stay hidden
+        // behind a canonical row that just left the river.
+        await (update(episodes)
+              ..where((e) => e.duplicateOfWorkId.equals(workId)))
+            .write(const EpisodesCompanion(
+                dedupReason: Value(null), duplicateOfWorkId: Value(null)));
+        await setPersistence(workId, 'decayed');
+      }
+    });
     return verdict.length;
+  }
+
+  /// Works the person's hand is on without having kept them: queued in Up
+  /// Next, or captured from. The sweep never decays these, and the Inbox
+  /// says so on their rows instead of a countdown.
+  Future<Set<int>> heldWorkIds() async => {
+        for (final q in await select(queueTable).get()) q.workId,
+        for (final c in await select(captures).get()) c.workId,
+      };
+
+  /// The profile's decayed ephemera — what the River's notice counts.
+  Future<List<Work>> decayedOf(int profileId) => (select(works)
+        ..where((w) =>
+            w.profileId.equals(profileId) & w.persistence.equals('decayed')))
+      .get();
+
+  /// Brings every decayed ephemeron of [profileId] back to the river with a
+  /// fresh retention window starting [todayEpochDay] — otherwise the next
+  /// boot's sweep would take it straight back.
+  Future<void> restoreDecayed(int profileId, {required int todayEpochDay}) =>
+      (update(works)
+            ..where((w) =>
+                w.profileId.equals(profileId) &
+                w.persistence.equals('decayed')))
+          .write(WorksCompanion(
+              persistence: const Value('ephemeron'),
+              firstSeenEpochDay: Value(todayEpochDay)));
+
+  /// The one gesture that deletes decayed ephemera: the user letting them
+  /// go from the River's notice.
+  Future<void> purgeDecayed(int profileId) async {
+    for (final w in await decayedOf(profileId)) {
+      await deleteWork(w.id);
+    }
   }
 }
 
@@ -1943,7 +2054,8 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
       leftOuterJoin(feeds, feeds.id.equalsExp(episodes.feedId)),
     ])
       ..where(works.profileId.equals(profileId) &
-          works.persistence.isNotValue('ephemeron'));
+          works.persistence.isNotValue('ephemeron') &
+          works.persistence.isNotValue('decayed'));
     final rows = await q.get();
     return [
       for (final r in rows)
@@ -2247,6 +2359,7 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
       innerJoin(works, works.id.equalsExp(episodes.workId)),
     ])
       ..where(works.profileId.equals(profileId) &
+          works.persistence.isNotValue('decayed') &
           episodes.dedupReason.isNull());
     final rows = await q.get();
     return [
@@ -2295,6 +2408,7 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
       innerJoin(feeds, feeds.id.equalsExp(episodes.feedId)),
     ])
       ..where(works.profileId.equals(profileId) &
+          works.persistence.isNotValue('decayed') &
           episodes.dedupReason.isNull())
       ..orderBy([OrderingTerm.desc(episodes.publishedAtMs)]);
     final rows = await q.get();
@@ -2318,7 +2432,8 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
         select(
             episodes,
           ).join([innerJoin(works, works.id.equalsExp(episodes.workId))])
-          ..where(episodes.feedId.equals(feedId))
+          ..where(episodes.feedId.equals(feedId) &
+              works.persistence.isNotValue('decayed'))
           ..orderBy([OrderingTerm.desc(episodes.publishedAtMs)]);
     final rows = await q.get();
     return [
@@ -2384,7 +2499,7 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
         .get();
     for (final r in rows) {
       final work = r.readTable(works);
-      if (work.persistence == 'ephemeron') {
+      if (work.persistence == 'ephemeron' || work.persistence == 'decayed') {
         await db.spineDao.deleteWork(work.id);
       } else {
         await (delete(episodes)..where((e) => e.workId.equals(work.id))).go();
@@ -2629,16 +2744,16 @@ class HouseholdDao extends DatabaseAccessor<AppDatabase>
         Episodes, PlayerPositions, Courses, Cards, Revlog, JobsTable,
         WordLedger, HouseholdPin, Captures, DailyReviewCards, QueueTable,
         TranslationSentences, SavedViews, Audiobooks, AudiobookFiles,
-        ReadingDays],
+        ReadingDays, DeviceSettings],
     daos: [ProfilesDao, SpineDao, FeedsDao, StudyDao, JobsDao, LedgerDao,
         HouseholdDao, CapturesDao, DailyReviewDao, QueueDao, LibraryDao,
-        AudiobooksDao])
+        AudiobooksDao, DeviceSettingsDao])
 class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 20;
+  int get schemaVersion => 21;
   // There is no v14: it was reserved for the reader-depth campaign, which
   // landed as v18 after three sibling campaigns merged ahead of it, so the
   // guard chain skips from 13 to 15. Version gaps are harmless — an
@@ -2855,6 +2970,11 @@ class AppDatabase extends _$AppDatabase {
             // (Campaign 8 "Babel widens") so an upgrader landing anywhere
             // below 20 runs every hop in order, once each.
             await m.addColumn(feeds, feeds.imageUrl);
+          }
+          if (from < 21) {
+            // Device-level settings (theme, last active reader). A new
+            // table, so every upgrader simply creates it.
+            await m.createTable(deviceSettings);
           }
         },
         beforeOpen: (details) async {

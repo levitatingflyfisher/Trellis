@@ -18,34 +18,36 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:openhearth_design/openhearth_design.dart';
 import 'package:ml_runtime/ml_runtime.dart';
 
 import '../../services/device_services.dart';
 import 'consent.dart';
 import 'format.dart';
 import 'model_store.dart';
+import '../shared/capped_body.dart';
 
 /// Human names for the registry ids; unknown ids fall back to the id.
 const Map<String, String> kModelLabels = {
-  'whisper-tiny-ggml': 'Whisper Tiny — speech to text, multilingual',
-  'whisper-base-ggml': 'Whisper Base — speech to text, multilingual',
-  'silero-vad': 'Silence filter — voice activity detection',
-  'qwen2.5-0.5b-instruct-litert': 'Qwen 2.5 0.5B — small local assistant',
-  'supertonic-en-m1': 'Supertonic voice (English) — read aloud, offline',
-  'opus-mt-en-es': 'Spanish translation — English to Spanish, offline',
+  'whisper-tiny-ggml': 'Whisper Tiny: speech to text, multilingual',
+  'whisper-base-ggml': 'Whisper Base: speech to text, multilingual',
+  'silero-vad': 'Silence filter: voice activity detection',
+  'qwen2.5-0.5b-instruct-litert': 'Qwen 2.5 0.5B: small local assistant',
+  'supertonic-en-m1': 'Supertonic voice (English): read aloud, offline',
+  'opus-mt-en-es': 'Spanish translation: English to Spanish, offline',
   // Campaign 8 "Babel widens": one label per shipped direction — a
   // pair's two directions are separate downloads (separate registry
   // ids), so each gets its own line rather than one combined label.
-  'opus-mt-en-de': 'German translation — English to German, offline',
-  'opus-mt-de-en': 'German translation — German to English, offline',
-  'opus-mt-en-ru': 'Russian translation — English to Russian, offline',
-  'opus-mt-ru-en': 'Russian translation — Russian to English, offline',
+  'opus-mt-en-de': 'German translation: English to German, offline',
+  'opus-mt-de-en': 'German translation: German to English, offline',
+  'opus-mt-en-ru': 'Russian translation: English to Russian, offline',
+  'opus-mt-ru-en': 'Russian translation: Russian to English, offline',
   // en-zh (English to Chinese) is not offered here — registry.dart's own
   // comment has the full reasoning: real translation quality, but no
   // verified way to display the Chinese output (a golden-test render
   // showed tofu; bundling a CJK font blows the C3 APK budget).
-  'opus-mt-zh-en': 'Chinese translation — Chinese to English, offline',
-  'wiktionary-en-en-stardict': 'Wiktionary dictionary (English) — word lookups, offline',
+  'opus-mt-zh-en': 'Chinese translation: Chinese to English, offline',
+  'wiktionary-en-en-stardict': 'Wiktionary dictionary (English): word lookups, offline',
 };
 
 String modelLabel(String id) => kModelLabels[id] ?? id;
@@ -87,7 +89,7 @@ class WebTierModelsNotice extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('On this device')),
-      body: Padding(
+      body: CappedBody(child: Padding(
         key: const Key('web-tier-notice'),
         padding: const EdgeInsets.all(24),
         child: Column(
@@ -100,7 +102,7 @@ class WebTierModelsNotice extends StatelessWidget {
             const SizedBox(height: 12),
             const Text(
               'Reading, feeds, courses, study and backup all live here, '
-              'in your browser’s own storage — nothing leaves this '
+              'in your browser’s own storage. Nothing leaves this '
               'device unless you export it.',
             ),
             const SizedBox(height: 12),
@@ -111,7 +113,7 @@ class WebTierModelsNotice extends StatelessWidget {
             ),
           ],
         ),
-      ),
+      )),
     );
   }
 }
@@ -206,7 +208,9 @@ class _ModelsScreenState extends State<ModelsScreen> {
     } on ModelIntegrityException catch (e) {
       _tell(e.message);
     } catch (e) {
-      _tell("The download didn't finish — your progress is kept. ($e)");
+      debugPrint('Model download stopped: $e');
+      _tell('${ohFriendlyErrorMessage(e)} The download didn’t finish; '
+          'what came down is kept, so trying again carries on from there.');
     } finally {
       // Never awaited: cancel() of a finished stream returns the root-zone
       // null future, which a widget test's fake clock can never resume.
@@ -219,30 +223,20 @@ class _ModelsScreenState extends State<ModelsScreen> {
   }
 
   Future<void> _delete(ModelSpec spec) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        key: const Key('delete-model-dialog'),
-        title: const Text('Remove this model?'),
-        content: Text(
-          '${modelLabel(spec.id)} frees '
+    // A model is gigabytes to fetch again, so removing one keeps asking
+    // first (the Peckish ruling on large downloads), with a label that
+    // names the act.
+    final ok = await showOhConfirm(
+      context,
+      title: 'Remove this model?',
+      message: '${modelLabel(spec.id)} frees '
           '${formatBytes(spec.sizeBytes)}. You can download it again '
           'anytime.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Keep'),
-          ),
-          FilledButton(
-            key: const Key('delete-model-confirm'),
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Remove'),
-          ),
-        ],
-      ),
+      confirmLabel: 'Remove model',
+      cancelLabel: 'Keep',
+      destructive: true,
     );
-    if (ok != true) return;
+    if (!ok) return;
     await widget.store.delete(spec);
     await _refresh();
   }
@@ -256,27 +250,15 @@ class _ModelsScreenState extends State<ModelsScreen> {
     required int bytes,
     required String reassurance,
   }) async {
-    final ok = await showDialog<bool>(
-      context: context,
-      builder: (context) => AlertDialog(
-        key: const Key('storage-clear-dialog'),
-        title: Text('Delete $what?'),
-        content: Text('Frees ${formatBytes(bytes)}. $reassurance'),
-        actions: [
-          TextButton(
-            key: const Key('storage-clear-cancel'),
-            onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('Keep'),
-          ),
-          FilledButton(
-            key: const Key('storage-clear-confirm'),
-            onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
+    final ok = await showOhConfirm(
+      context,
+      title: 'Delete $what?',
+      message: 'Frees ${formatBytes(bytes)}. $reassurance',
+      confirmLabel: 'Delete $what',
+      cancelLabel: 'Keep',
+      destructive: true,
     );
-    if (ok != true) return;
+    if (!ok) return;
     if (dir.existsSync()) await dir.delete(recursive: true);
     await _refresh();
   }
@@ -292,7 +274,7 @@ class _ModelsScreenState extends State<ModelsScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text('On this device')),
-      body: ListView(
+      body: CappedBody(child: ListView(
         children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
@@ -305,7 +287,7 @@ class _ModelsScreenState extends State<ModelsScreen> {
           for (final spec in widget.registry.specs) _modelTile(spec),
           if (widget.services != null) ..._storageSection(),
         ],
-      ),
+      )),
     );
   }
 
@@ -378,7 +360,7 @@ class _ModelsScreenState extends State<ModelsScreen> {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Your works, positions and courses — not a cache.',
+                  'Your works, positions and courses. Not a cache.',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
                 const SizedBox(height: 8),
@@ -464,7 +446,7 @@ class _ModelsScreenState extends State<ModelsScreen> {
       );
     } else if (row.partialBytes > 0) {
       stateLine = Text(
-        'Paused — ${formatBytes(row.partialBytes)} of '
+        'Paused: ${formatBytes(row.partialBytes)} of '
         '${formatBytes(spec.sizeBytes)} kept',
         key: Key('model-state-${spec.id}'),
         style: theme.textTheme.bodySmall,

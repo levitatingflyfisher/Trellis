@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 
 import '../../db/database.dart';
 import 'player_controller.dart';
+import '../shared/capped_body.dart';
 
 class CapturesScreen extends StatefulWidget {
   final AppDatabase db;
@@ -59,7 +60,7 @@ class _CapturesScreenState extends State<CapturesScreen> {
       if (fileIdx != null) {
         return 'File ${fileIdx + 1}, ${seconds}s in.';
       }
-      return 'Captured at ${seconds}s — transcript pending.';
+      return 'Captured at ${seconds}s. Transcript pending.';
     }
     final parts = [
       for (final i in [segmentIdx - 1, segmentIdx, segmentIdx + 1])
@@ -89,17 +90,17 @@ class _CapturesScreenState extends State<CapturesScreen> {
     final captures = _captures;
     return Scaffold(
       appBar: AppBar(
-        title: Text('Captures — ${widget.work.title}',
+        title: Text('Captures: ${widget.work.title}',
             overflow: TextOverflow.ellipsis, maxLines: 1),
       ),
-      body: captures == null
+      body: CappedBody(child: captures == null
           ? const Center(child: CircularProgressIndicator())
           : captures.isEmpty
               ? Center(
                   child: Padding(
                     padding: const EdgeInsets.all(24),
                     child: Text(
-                        'Nothing captured yet — tap the bookmark on the '
+                        'Nothing captured yet. Tap the bookmark on the '
                         'player to keep a moment.',
                         style: Theme.of(context).textTheme.bodyLarge,
                         textAlign: TextAlign.center),
@@ -115,7 +116,7 @@ class _CapturesScreenState extends State<CapturesScreen> {
                       onTap: () => _jump(c),
                     );
                   },
-                ),
+                )),
     );
   }
 }

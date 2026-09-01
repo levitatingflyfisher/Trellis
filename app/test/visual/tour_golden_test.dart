@@ -8,6 +8,7 @@ import '../support/fake_player.dart';
 import '../support/fake_services.dart';
 import '../support/scripted_fetcher.dart';
 import 'dart:io';
+import '../support/pick_reader.dart';
 
 /// The visual-loop tour (not a regression gate): renders the app's main
 /// surfaces at three widths and writes goldens to READ, montaged by
@@ -98,8 +99,7 @@ void main() {
           createPlayer: () => player,
           services: testServices(dir)));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Ada'));
-      await tester.pumpAndSettle();
+      await pickReader(tester, 'Ada');
       await shoot('library');
 
       await tester.tap(find.text('An Entangled Bank'));
@@ -115,7 +115,7 @@ void main() {
       await tester.pageBack();
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('River'));
+      await tester.tap(find.text('Inbox'));
       await tester.pumpAndSettle();
       await shoot('river');
 

@@ -2,6 +2,8 @@ import 'package:comms_core/comms_core.dart' show PodcastSearchResult;
 import 'package:flutter/material.dart';
 
 import 'feeds_repository.dart';
+import '../shared/capped_body.dart';
+import '../shared/error_line.dart';
 
 /// Search Apple's public podcast directory. This is a network SEARCH
 /// surface: the typed words themselves leave the device, so the screen
@@ -88,7 +90,7 @@ class _PodcastSearchScreenState extends State<PodcastSearchScreen> {
     final results = _results;
     return Scaffold(
       appBar: AppBar(title: const Text('Search podcasts')),
-      body: SafeArea(
+      body: CappedBody(child: SafeArea(
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -99,9 +101,9 @@ class _PodcastSearchScreenState extends State<PodcastSearchScreen> {
                 children: [
                   // The endpoint, stated plainly before anything happens.
                   Text(
-                      "Searches Apple's public podcast directory at "
+                      "Searches Apple’s public podcast directory at "
                       'itunes.apple.com. Your search words are sent there '
-                      'when you press Search — nothing before.',
+                      'when you press Search, and nothing before.',
                       style: theme.textTheme.bodyMedium),
                   const SizedBox(height: 12),
                   TextField(
@@ -116,10 +118,7 @@ class _PodcastSearchScreenState extends State<PodcastSearchScreen> {
                   ),
                   if (_error != null) ...[
                     const SizedBox(height: 12),
-                    Text(_error!,
-                        key: const Key('podcast-search-error'),
-                        style: theme.textTheme.bodyMedium
-                            ?.copyWith(color: theme.colorScheme.error)),
+                    ErrorLine(_error!, textKey: const Key('podcast-search-error')),
                   ],
                   const SizedBox(height: 12),
                   FilledButton.icon(
@@ -173,7 +172,7 @@ class _PodcastSearchScreenState extends State<PodcastSearchScreen> {
             ),
           ],
         ),
-      ),
+      )),
     );
   }
 }

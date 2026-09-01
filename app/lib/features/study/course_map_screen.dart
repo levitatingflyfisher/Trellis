@@ -10,6 +10,7 @@ import '../intake/paste_intake.dart' show epochDayUtcNow;
 import 'anki_export.dart';
 import 'study_session_screen.dart';
 import 'wall/espalier_wall.dart';
+import '../shared/capped_body.dart';
 
 /// Writes [bytes] where the user's picker points. Mobile pickers write the
 /// bytes themselves; desktop ones only return a path — cover both. Returns
@@ -75,7 +76,7 @@ class _CourseMapScreenState extends State<CourseMapScreen> {
         await (widget.saveApkg ?? _pickAndSaveApkg)(name, bytes);
     if (!mounted || !saved) return;
     ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Saved $name — import it in Anki.')));
+        SnackBar(content: Text('Saved $name. Import it in Anki.')));
   }
 
   /// Hidden where the builder cannot run (web) — never shown-then-broken.
@@ -105,7 +106,7 @@ class _CourseMapScreenState extends State<CourseMapScreen> {
     if (cards == null) {
       return Scaffold(
         appBar: AppBar(title: Text(widget.course.title), actions: _actions),
-        body: const Center(child: CircularProgressIndicator()),
+        body: CappedBody(child: const Center(child: CircularProgressIndicator())),
       );
     }
 
@@ -147,7 +148,7 @@ class _CourseMapScreenState extends State<CourseMapScreen> {
               onPressed: _study,
               icon: const Icon(Icons.psychology_alt_outlined),
               label: Text('Study · $totalDue due')),
-      body: ListView(
+      body: CappedBody(child: ListView(
         padding: const EdgeInsets.all(16),
         children: [
           if (course.description.isNotEmpty) ...[
@@ -163,7 +164,7 @@ class _CourseMapScreenState extends State<CourseMapScreen> {
             child: LinearProgressIndicator(value: overall, minHeight: 8),
           ),
           const SizedBox(height: 20),
-          Text('The espalier', style: theme.textTheme.titleLarge),
+          Text('Course map', style: theme.textTheme.titleLarge),
           const SizedBox(height: 8),
           EspalierWall(
             course: course,
@@ -172,7 +173,7 @@ class _CourseMapScreenState extends State<CourseMapScreen> {
           ),
           const SizedBox(height: 80),
         ],
-      ),
+      )),
     );
   }
 }

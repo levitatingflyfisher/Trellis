@@ -219,7 +219,7 @@ class DspCoordinator extends ChangeNotifier {
       await gate.jobStarted(title, 'Measuring…');
       final audio = services.audioFileFor(workId, url);
       if (!audio.existsSync()) {
-        throw DspEncodeException('no downloaded audio to process for "$title"');
+        throw DspEncodeException('no downloaded audio to process for “$title”');
       }
       if (flow.cancelRequested) return await _pause(workId, jobId);
 
@@ -232,7 +232,7 @@ class DspCoordinator extends ChangeNotifier {
       final ext = _extensionOf(audio.path);
       final codec = dspCodecFor(ext);
       if (codec == null) {
-        throw DspEncodeException('unrecognized audio format "$ext"');
+        throw DspEncodeException('unrecognized audio format “$ext”');
       }
       final tempPath = dspPartPathFor(audio.path);
       await services.dspEncoder.process(
@@ -257,7 +257,7 @@ class DspCoordinator extends ChangeNotifier {
       )) {
         if (tempFile.existsSync()) tempFile.deleteSync();
         throw DspEncodeException(
-          'processed output failed the sanity check for "$title" — '
+          'processed output failed the sanity check for “$title”; '
           'original kept',
         );
       }
