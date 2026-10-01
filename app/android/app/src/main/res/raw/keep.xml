@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Resources the Dart side names only by string (see
+     bootstrap_io.dart audioNotificationIcon). The release shrinker can't
+     see those references; without this the media notification has no
+     icon and Android kills the app on first playback. -->
+<resources xmlns:tools="http://schemas.android.com/tools"
+    tools:keep="@drawable/ic_notification" />

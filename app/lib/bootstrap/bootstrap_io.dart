@@ -78,9 +78,13 @@ HttpFetcher createFetcher({WebFetchLane lane = WebFetchLane.direct}) =>
 /// Android/iOS only; the web side's own [createServices]-adjacent stub
 /// (bootstrap_web.dart) is a no-op, so `main()` can call this name
 /// unconditionally on every platform without a check of its own.
+/// Reached by name only, so `res/raw/keep.xml` must list it or the release
+/// shrinker strips it and the first playback notification kills the app.
+const audioNotificationIcon = 'drawable/ic_notification';
+
 Future<void> initAudioBackground() => JustAudioBackground.init(
       androidNotificationChannelId: 'com.openhearth.trellis.channel.audio',
       androidNotificationChannelName: 'Trellis playback',
-      androidNotificationIcon: 'drawable/ic_notification',
+      androidNotificationIcon: audioNotificationIcon,
       androidNotificationOngoing: true,
     );
