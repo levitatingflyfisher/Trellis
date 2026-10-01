@@ -5,6 +5,7 @@ import 'package:trellis/db/database.dart';
 import 'package:trellis/features/reader/reader_prefs.dart';
 import 'package:trellis/main.dart';
 import '../support/pick_reader.dart';
+import '../support/tabs.dart';
 
 /// Campaign 4 Phase 1: per-profile typography prefs reach the print
 /// reader's rendered paragraph (scroll mode). RSVP/the ticker are untouched
@@ -32,6 +33,7 @@ void main() {
     await tester.pumpWidget(TrellisApp(db: db));
     await tester.pumpAndSettle();
     await pickReader(tester, 'Ada');
+    await toTab(tester, 'Library');
     await tester.tap(find.text(title));
     await tester.pumpAndSettle();
     // Campaign 9 Phase 6: `mode-toggle` opens a labeled three-way picker

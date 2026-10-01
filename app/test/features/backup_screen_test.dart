@@ -14,6 +14,7 @@ import 'package:trellis/features/backup/db_bridge.dart';
 import 'package:trellis/main.dart';
 
 import '../support/fake_player.dart';
+import '../support/tabs.dart';
 import '../support/scripted_fetcher.dart';
 // The shared fixtures: phrase, donor blob, seedRichly — one source of truth.
 import 'backup_bridge_test.dart' as fx;
@@ -125,7 +126,7 @@ void main() {
         createPlayer: () => FakeEpisodePlayer()));
     await tester.pumpAndSettle();
     // A first launch opens straight into the new reader's Library.
-    await tester.tap(find.text('Courses'));
+    await tester.tap(tabLabel('Courses'));
     await tester.pumpAndSettle();
 
     await tester.tap(find.byKey(const Key('open-backup')));

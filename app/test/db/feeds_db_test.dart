@@ -442,6 +442,27 @@ void main() {
           .insertFeed(profileId: profileId, url: 'https://a.test/feed');
       expect(await db.feedsDao.episodesOfFeed(feedId), isEmpty);
     });
+
+    // ADR-0019: dedup shows a story once in Latest, but the duplicate is
+    // never lost — its own show's page still lists it.
+    test('lists a dedup\'d duplicate on its own show', () async {
+      final profileId = await seedProfile();
+      final feedA = await db.feedsDao
+          .insertFeed(profileId: profileId, url: 'https://a.test/feed');
+      final feedB = await db.feedsDao
+          .insertFeed(profileId: profileId, url: 'https://b.test/feed');
+      final canonical = await seedEpisode(
+          profileId: profileId, feedId: feedA, title: 'story', publishedAtMs: 1);
+      final duplicate = await seedEpisode(
+          profileId: profileId, feedId: feedB, title: 'story', publishedAtMs: 2);
+      await db.feedsDao
+          .setDedup(duplicate, reason: 'title', canonicalWorkId: canonical);
+
+      expect((await db.feedsDao.riverItems(profileId)).map((e) => e.work.id),
+          [canonical]);
+      expect((await db.feedsDao.episodesOfFeed(feedB)).map((r) => r.work.id),
+          [duplicate]);
+    });
   });
 
   group('episode state for rows (ADR-0016)', () {
@@ -500,7 +521,7 @@ void main() {
       expect(ep.finishedAtMs, 700);
       expect(ep.readAtMs, 700);
       expect((await db.spineDao.workById(s.workId))!.persistence, 'ephemeron',
-          reason: 'clean-up must not make ephemera permanent (law 2)');
+          reason: 'clean-up is not Keep: it never promotes (ADR-0019)');
     });
 
     test('mark played leaves an earlier read time alone', () async {
@@ -776,83 +797,6 @@ void main() {
           reason: 'the ephemeron\'s spine rows went with it');
       expect(await db.feedsDao.episodeOf(keptId), isNull,
           reason: 'the river row is unlinked; sourceUrl still plays it');
-    });
-
-    test('a decayed item leaves every list but keeps its rows until let go',
-        () async {
-      final profileId = await seedProfile();
-      final feedId =
-          await db.feedsDao.insertFeed(profileId: profileId, url: 'https://a/f');
-      final workId = await db.spineDao.insertWork(
-          profileId: profileId,
-          kind: 'episode',
-          title: 'old',
-          persistence: 'ephemeron',
-          firstSeenEpochDay: 100);
-      await db.feedsDao.insertEpisode(
-          workId: workId, feedId: feedId, guid: 'g', publishedAtMs: 1);
-
-      final swept = await db.spineDao.sweepEphemera(todayEpochDay: 131);
-      expect(swept, 1);
-      expect(await db.feedsDao.episodeOf(workId), isNotNull,
-          reason: 'recoverable: the river row is kept');
-      expect(await db.feedsDao.riverItems(profileId), isEmpty);
-      expect(await db.feedsDao.episodesOfFeed(feedId), isEmpty);
-      expect(await db.libraryDao.libraryQueryEntriesOf(profileId), isEmpty,
-          reason: 'decayed is not kept: it must not surface in the Library');
-      expect(await db.feedsDao.dedupCandidatesOf(profileId), isEmpty);
-
-      await db.spineDao.purgeDecayed(profileId);
-      expect(await db.feedsDao.episodeOf(workId), isNull,
-          reason: 'let go clears episode rows through deleteWork');
-    });
-
-    test('decaying a canonical row un-hides its duplicate', () async {
-      final profileId = await seedProfile();
-      final feedId =
-          await db.feedsDao.insertFeed(profileId: profileId, url: 'https://a/f');
-      final canonical = await db.spineDao.insertWork(
-          profileId: profileId,
-          kind: 'episode',
-          title: 'old',
-          persistence: 'ephemeron',
-          firstSeenEpochDay: 100);
-      await db.feedsDao.insertEpisode(
-          workId: canonical, feedId: feedId, guid: 'g1', publishedAtMs: 1);
-      final dup = await db.spineDao.insertWork(
-          profileId: profileId,
-          kind: 'episode',
-          title: 'old again',
-          persistence: 'ephemeron',
-          firstSeenEpochDay: 125);
-      await db.feedsDao.insertEpisode(
-          workId: dup, feedId: feedId, guid: 'g2', publishedAtMs: 2);
-      await db.feedsDao
-          .setDedup(dup, reason: 'same-url', canonicalWorkId: canonical);
-
-      await db.spineDao.sweepEphemera(todayEpochDay: 131);
-      expect(
-          (await db.feedsDao.riverItems(profileId)).map((e) => e.work.id),
-          [dup]);
-    });
-
-    test('unfollowing a feed takes its decayed items with it', () async {
-      final profileId = await seedProfile();
-      final feedId =
-          await db.feedsDao.insertFeed(profileId: profileId, url: 'https://a/f');
-      final workId = await db.spineDao.insertWork(
-          profileId: profileId,
-          kind: 'episode',
-          title: 'old',
-          persistence: 'ephemeron',
-          firstSeenEpochDay: 100);
-      await db.feedsDao.insertEpisode(
-          workId: workId, feedId: feedId, guid: 'g', publishedAtMs: 1);
-      await db.spineDao.sweepEphemera(todayEpochDay: 131);
-
-      await db.feedsDao.deleteFeedCascade(feedId);
-      expect(await db.spineDao.worksOf(profileId), isEmpty,
-          reason: 'no orphaned decayed work outlives its feed');
     });
   });
 
@@ -1231,8 +1175,8 @@ void main() {
   });
 
   group('unplayed counts for Subscriptions (ADR-0016)', () {
-    test('counts audio not finished and not let pass, per feed, matching '
-        'the podcast page', () async {
+    test('counts audio not finished, per feed, matching the podcast page',
+        () async {
       final p = await seedProfile();
       final a = await db.feedsDao.insertFeed(profileId: p, url: 'a');
       final b = await db.feedsDao.insertFeed(profileId: p, url: 'b');
@@ -1244,10 +1188,6 @@ void main() {
           profileId: p, feedId: a, title: 'a2', publishedAtMs: 2,
           enclosureUrl: 'https://a/2.mp3');
       await db.feedsDao.markPlayed(played, 5);
-      final passed = await seedEpisode(
-          profileId: p, feedId: a, title: 'a3', publishedAtMs: 3,
-          enclosureUrl: 'https://a/3.mp3');
-      await db.spineDao.setPersistence(passed, 'decayed');
       await seedEpisode(
           profileId: p, feedId: b, title: 'b1', publishedAtMs: 1,
           enclosureUrl: 'https://b/1.mp3');

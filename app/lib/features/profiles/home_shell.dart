@@ -9,6 +9,7 @@ import '../../services/device_services.dart';
 import '../backup/backup_screen.dart';
 import '../dsp/dsp_coordinator.dart';
 import '../echo/echo_screen.dart';
+import '../episodes/episode_actions.dart';
 import '../feeds/background/feed_check_settings.dart';
 import '../feeds/episode_download_coordinator.dart';
 import '../feeds/feeds_repository.dart';
@@ -28,11 +29,13 @@ import '../player/karaoke_screen.dart';
 import '../player/mini_player_bar.dart';
 import '../player/player_controller.dart';
 import '../player/queue_screen.dart';
+import '../reader/reader_doors.dart';
 import '../river/river_screen.dart';
+import '../search/search_screen.dart';
 import '../study/courses_screen.dart';
 import '../transcribe/transcribe_coordinator.dart';
 
-/// One reader's shell: Library, River and Courses tabs over a single
+/// One reader's shell: Latest, Queue, Library and Courses tabs over a single
 /// persistent mini-player bar. The player, the feeds repository and the
 /// transcription coordinator live here so playback and running jobs
 /// survive tab switches — and reopening the app finds its resumable job
@@ -78,6 +81,10 @@ class HomeShell extends StatefulWidget {
 }
 
 class _HomeShellState extends State<HomeShell> {
+  static const _queueTab = 1;
+
+  /// Latest first, and where a reader lands: what arrived is the usual
+  /// reason to open a podcast app.
   int _tab = 0;
   late final FeedsRepository _repository = FeedsRepository(
     db: widget.db,
@@ -279,13 +286,44 @@ class _HomeShellState extends State<HomeShell> {
         builder: (_) => JobsScreen(jobs: widget.jobs)));
   }
 
-  void _openQueue() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => QueueScreen(db: widget.db, profile: widget.profile),
-      ),
-    );
-  }
+  /// The queue is a tab now (user: "I freaking hate how hidden the up
+  /// next and up last screen is"), so the mini bar's door switches to it
+  /// rather than stacking a second copy over the shell.
+  void _openQueue() => setState(() => _tab = _queueTab);
+
+  /// History, from the Queue bar: the queue is what plays next, history
+  /// is what played. Built here, not in the Queue tab, because opening a
+  /// row needs the reader's and the episode actions' whole kit.
+  Future<void> _openHistory() => Navigator.of(context).push<void>(
+        MaterialPageRoute(
+          builder: (_) => HistoryScreen(
+            doors: SearchDoors(
+              db: widget.db,
+              profile: widget.profile,
+              actions: EpisodeActions(
+                db: widget.db,
+                profileId: widget.profile.id,
+                player: _player,
+                downloader: _downloadCoordinator,
+                dsp: _dspCoordinator,
+                services: _repository.services,
+                localMlAvailable: widget.services.localMlAvailable,
+              ),
+              readerDoors: ReaderDoors(
+                tts: widget.services.tts,
+                localMlAvailable: widget.services.localMlAvailable,
+                resolveSpeechEngine: widget.services.resolveSpeechEngine,
+                lookupDefinition: widget.services.lookupDefinition,
+                createSpeechTempFiles: widget.services.createSpeechTempFiles,
+                player: _player,
+                resolveTranslator: widget.services.resolveTranslator,
+                availableTranslationTargets:
+                    widget.services.availableTranslationTargets,
+              ),
+            ),
+          ),
+        ),
+      );
 
   /// The audiobook door (Campaign 7, ADR-0013) — null when the door was
   /// never constructed (the web tier), which also hides the option on
@@ -329,52 +367,69 @@ class _HomeShellState extends State<HomeShell> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: switch (_tab) {
-        0 => LibraryScreen(
-            db: widget.db,
-            profile: widget.profile,
-            onSwitchProfile: widget.onSwitchProfile,
-            onOpenModels: _openModels,
-            fetcher: widget.fetcher,
-            tts: widget.services.tts,
-            lane: widget.services.webFetchLane,
-            localMlAvailable: widget.services.localMlAvailable,
-            resolveSpeechEngine: widget.services.resolveSpeechEngine,
-            lookupDefinition: widget.services.lookupDefinition,
-            createSpeechTempFiles: widget.services.createSpeechTempFiles,
-            player: _player,
-            resolveTranslator: widget.services.resolveTranslator,
-            availableTranslationTargets:
-                widget.services.availableTranslationTargets,
-            onImportAudiobook: _onImportAudiobook,
-            onDeleteAudiobookFiles: widget.services.localMlAvailable
-                ? _deleteAudiobookFiles
-                : null),
-        1 => RiverScreen(
-            db: widget.db,
-            profile: widget.profile,
-            repository: _repository,
-            playerController: _player,
-            coordinator: _coordinator,
-            downloadCoordinator: _downloadCoordinator,
-            dspCoordinator: _dspCoordinator,
-            onOpenJobs: _openJobs,
-            localMlAvailable: widget.services.localMlAvailable,
-            resolveSpeechEngine: widget.services.resolveSpeechEngine,
-            lookupDefinition: widget.services.lookupDefinition,
-            createSpeechTempFiles: widget.services.createSpeechTempFiles,
-            resolveTranslator: widget.services.resolveTranslator,
-            availableTranslationTargets:
-                widget.services.availableTranslationTargets,
-            tts: widget.services.tts),
-        _ => CoursesScreen(
-          db: widget.db,
-          profile: widget.profile,
-          onOpenBackup: _openBackup,
-          onOpenEcho: _openEcho,
-          localMlAvailable: widget.services.localMlAvailable,
-        ),
-      },
+      // Latest stays mounted under the other tabs, so a trip to the Queue
+      // comes back to the same loaded pages, scroll position and "new
+      // since" line. The others are still built per visit: each reads its
+      // data on mount, which keeps it current after a change made
+      // elsewhere (a Keep in Latest, a Library removal).
+      body: IndexedStack(
+        index: _tab == 0 ? 0 : 1,
+        children: [
+          RiverScreen(
+              active: _tab == 0,
+              db: widget.db,
+              profile: widget.profile,
+              repository: _repository,
+              playerController: _player,
+              coordinator: _coordinator,
+              downloadCoordinator: _downloadCoordinator,
+              dspCoordinator: _dspCoordinator,
+              onOpenJobs: _openJobs,
+              localMlAvailable: widget.services.localMlAvailable,
+              resolveSpeechEngine: widget.services.resolveSpeechEngine,
+              lookupDefinition: widget.services.lookupDefinition,
+              createSpeechTempFiles: widget.services.createSpeechTempFiles,
+              resolveTranslator: widget.services.resolveTranslator,
+              availableTranslationTargets:
+                  widget.services.availableTranslationTargets,
+              tts: widget.services.tts),
+          switch (_tab) {
+            0 => const SizedBox.shrink(),
+            _queueTab => QueueScreen(
+                db: widget.db,
+                profile: widget.profile,
+                player: _player,
+                onOpenHistory: _openHistory),
+            2 => LibraryScreen(
+                db: widget.db,
+                profile: widget.profile,
+                onSwitchProfile: widget.onSwitchProfile,
+                onOpenModels: _openModels,
+                fetcher: widget.fetcher,
+                tts: widget.services.tts,
+                lane: widget.services.webFetchLane,
+                localMlAvailable: widget.services.localMlAvailable,
+                resolveSpeechEngine: widget.services.resolveSpeechEngine,
+                lookupDefinition: widget.services.lookupDefinition,
+                createSpeechTempFiles: widget.services.createSpeechTempFiles,
+                player: _player,
+                resolveTranslator: widget.services.resolveTranslator,
+                availableTranslationTargets:
+                    widget.services.availableTranslationTargets,
+                onImportAudiobook: _onImportAudiobook,
+                onDeleteAudiobookFiles: widget.services.localMlAvailable
+                    ? _deleteAudiobookFiles
+                    : null),
+            _ => CoursesScreen(
+              db: widget.db,
+              profile: widget.profile,
+              onOpenBackup: _openBackup,
+              onOpenEcho: _openEcho,
+              localMlAvailable: widget.services.localMlAvailable,
+            ),
+          },
+        ],
+      ),
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -394,18 +449,26 @@ class _HomeShellState extends State<HomeShell> {
             selectedIndex: _tab,
             onDestinationSelected: (i) => setState(() => _tab = i),
             destinations: const [
+              // "Latest", the industry's word, not the coined "River"
+              // (operator naming ruling): every item from every followed
+              // feed, newest first, kept for good (ADR-0019); keeping one
+              // puts it in the Library.
+              NavigationDestination(
+                icon: Icon(Icons.dynamic_feed_outlined),
+                selectedIcon: Icon(Icons.dynamic_feed),
+                label: 'Latest',
+              ),
+              // "Queue", not the coined "Up Next": what plays after this,
+              // in the order the listener chose.
+              NavigationDestination(
+                icon: Icon(Icons.queue_music_outlined),
+                selectedIcon: Icon(Icons.queue_music),
+                label: 'Queue',
+              ),
               NavigationDestination(
                 icon: Icon(Icons.local_library_outlined),
                 selectedIcon: Icon(Icons.local_library),
                 label: 'Library',
-              ),
-              // "Inbox", not the coined "River" (operator jargon ruling):
-              // where new items from followed feeds arrive, to keep or to
-              // let pass; keeping happens in the Library.
-              NavigationDestination(
-                icon: Icon(Icons.inbox_outlined),
-                selectedIcon: Icon(Icons.inbox),
-                label: 'Inbox',
               ),
               NavigationDestination(
                 icon: Icon(Icons.school_outlined),

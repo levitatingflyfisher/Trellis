@@ -226,14 +226,49 @@ class TranscribeCoordinator extends ChangeNotifier {
       required bool translate}) async {
     if (_flows.containsKey(workId)) return;
     final jobId = transcribeJobId(workId);
+    final existing = await db.jobsDao.load(jobId);
+    // Locked once, so a resume decodes in the same language. A job that
+    // already exists keeps the language it has: its checkpoint holds
+    // windows decoded in it, and recomputing (the feed's tag may have
+    // changed since) would mix two languages in one transcript.
+    Map<String, dynamic>? prior;
+    if (existing != null) {
+      try {
+        prior = jsonDecode(await db.jobsDao.payloadOf(jobId))
+            as Map<String, dynamic>;
+      } catch (_) {
+        prior = null;
+      }
+    }
+    // Otherwise the work's own language, else the one its feed declares,
+    // else none and the first window detects it. Only codes whisper knows
+    // count.
+    String? lockedLang;
+    String? lockedSource;
+    if (prior != null) {
+      lockedLang = prior['lang'] as String?;
+      lockedSource = prior['langSource'] as String?;
+    } else {
+      final declared = whisperLanguageOf(lang);
+      final fromFeed = declared == null
+          ? whisperLanguageOf(await db.feedsDao.languageOfWorkFeed(workId))
+          : null;
+      lockedLang = declared ?? fromFeed;
+      lockedSource = declared != null
+          ? 'declared'
+          : fromFeed != null
+              ? 'feed'
+              : null;
+    }
     final payload = jsonEncode({
       'workId': workId,
       'title': title,
       'url': enclosureUrl,
-      'lang': lang,
+      'lang': lockedLang,
+      'langSource': lockedSource,
       'translate': translate,
     });
-    if (await db.jobsDao.load(jobId) == null) {
+    if (existing == null) {
       await db.jobsDao.save(Job(
         id: jobId,
         kind: 'transcribe',
@@ -312,7 +347,12 @@ class TranscribeCoordinator extends ChangeNotifier {
     final payload = jsonDecode(payloadJson) as Map<String, dynamic>;
     final title = payload['title'] as String? ?? 'Episode';
     final url = payload['url'] as String;
-    final lang = payload['lang'] as String?;
+    // Normalized again: a job queued before 1.5.3 stored the work's
+    // language as given.
+    final lang = whisperLanguageOf(payload['lang'] as String?);
+    final langSource = lang == null
+        ? null
+        : payload['langSource'] as String? ?? 'declared';
     final translate = payload['translate'] as bool? ?? false;
 
     final gate = services.foregroundGate;
@@ -429,6 +469,7 @@ class TranscribeCoordinator extends ChangeNotifier {
         modelPath: modelPath,
         task: WhisperTask.transcribe,
         lang: lang,
+        langSource: langSource,
         phase: TranscribePhase.transcribing,
       );
       if (first.state != JobState.done) {
@@ -437,6 +478,7 @@ class TranscribeCoordinator extends ChangeNotifier {
 
       TranscriptionResult? mt;
       if (translate) {
+        final detected = await _lockedLangOf(jobId);
         final secondId = translateJobId(workId);
         if (await db.jobsDao.load(secondId) == null) {
           await db.jobsDao.save(Job(
@@ -459,7 +501,14 @@ class TranscribeCoordinator extends ChangeNotifier {
           pcmPath: pcm.path,
           modelPath: modelPath,
           task: WhisperTask.translate,
-          lang: lang,
+          // Transcription already settled the language; detecting it
+          // again would cost the same second encoder pass per window.
+          lang: lang ?? detected,
+          langSource: lang != null
+              ? langSource
+              : detected != null
+                  ? 'detected'
+                  : null,
           phase: TranscribePhase.translating,
         );
         if (second.state != JobState.done) {
@@ -470,7 +519,11 @@ class TranscribeCoordinator extends ChangeNotifier {
 
       // 6. The spine rows, in one transaction; then the job is over.
       await writeTranscript(
-          db: db, workId: workId, result: first.result!, translation: mt);
+          db: db,
+          workId: workId,
+          result: first.result!,
+          translation: mt,
+          langSource: langSource);
       // Here rather than in a shell's callback: a resumed job can land
       // before any reader is open.
       await db.capturesDao.backfillForWork(workId);
@@ -500,6 +553,7 @@ class TranscribeCoordinator extends ChangeNotifier {
     required String modelPath,
     required WhisperTask task,
     required String? lang,
+    required String? langSource,
     required TranscribePhase phase,
   }) async {
     final run = services.executor.start(
@@ -508,6 +562,7 @@ class TranscribeCoordinator extends ChangeNotifier {
         pcmPath: pcmPath,
         task: task,
         lang: lang,
+        langSource: langSource,
         engine: services.engineFor(modelPath),
       ),
       db.jobsDao.store,
@@ -532,6 +587,15 @@ class TranscribeCoordinator extends ChangeNotifier {
       unawaited(sub.cancel());
       flow.cancelStage = null;
     }
+  }
+
+  /// The language a finished stage detected and locked, read off its
+  /// checkpoint (the transcript itself is labelled only by a hint).
+  Future<String?> _lockedLangOf(String jobId) async {
+    final checkpoint = (await db.jobsDao.load(jobId))?.checkpoint;
+    if (checkpoint == null) return null;
+    final lang = (jsonDecode(checkpoint) as Map<String, dynamic>)['lang'];
+    return whisperLanguageOf(lang as String?);
   }
 
   Future<void> _afterStoppedStage(int workId, JobState state) async {

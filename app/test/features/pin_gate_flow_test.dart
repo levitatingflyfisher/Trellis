@@ -7,6 +7,7 @@ import 'package:trellis/main.dart';
 
 import '../support/fake_player.dart';
 import '../support/scripted_fetcher.dart';
+import '../support/tabs.dart';
 
 /// The one PIN chokepoint (P5). What the PIN gates: profile create/delete/
 /// rename and the parent dashboard. What it NEVER gates: reading, playing,
@@ -25,11 +26,12 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// A one-reader household opens straight into its Library; the picker
-  /// (with its Add a reader and Parent dashboard doors) is one Switch
-  /// reader away.
+  /// A one-reader household opens straight into its shell; the picker
+  /// (with its Add a reader and Parent dashboard doors) is the Library's
+  /// Switch reader away.
   Future<void> toPicker(WidgetTester tester) async {
     if (find.text('Who’s reading?').evaluate().isNotEmpty) return;
+    await toTab(tester, 'Library');
     await tester.tap(find.byKey(const Key('library-more')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('profile-switcher')));
@@ -47,7 +49,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('pin-entry')), findsNothing);
-    expect(find.text('Library'), findsWidgets, reason: 'straight to the '
+    expect(find.byType(NavigationBar), findsOneWidget, reason: 'straight to the '
         'shell — reading is never locked');
   });
 
@@ -120,12 +122,12 @@ void main() {
     expect(find.byKey(const Key('profile-name')), findsOneWidget);
   });
 
-  testWidgets('first run: no profiles, no PIN, straight into a Library '
+  testWidgets('first run: no profiles, no PIN, straight into Latest '
       '(operator ruling 48: open into the task)', (tester) async {
     await pumpApp(tester);
     expect(find.byKey(const Key('profile-name')), findsNothing);
     expect(find.byKey(const Key('pin-entry')), findsNothing);
-    expect(find.text('Nothing on the trellis yet.'), findsOneWidget);
+    expect(find.text('Nothing in Latest yet.'), findsOneWidget);
   });
 
   testWidgets('a PIN with no readers keeps the create door behind the gate',

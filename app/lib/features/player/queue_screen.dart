@@ -1,15 +1,32 @@
 import 'package:flutter/material.dart';
+import 'package:openhearth_design/openhearth_design.dart';
 
 import '../../db/database.dart';
+import '../settings/theme_preference.dart';
 import '../shared/capped_body.dart';
+import 'player_controller.dart';
 
-/// The Up Next queue's own small view: what's queued, in play order, with
-/// a remove verb per row and drag to reorder. Reachable from the mini
-/// player bar.
+/// The Queue tab: what's queued, in play order, with a remove verb per row
+/// and drag to reorder. A tab root, so it has no back arrow; the mini
+/// bar's queue button switches to it.
 class QueueScreen extends StatefulWidget {
   final AppDatabase db;
   final Profile profile;
-  const QueueScreen({super.key, required this.db, required this.profile});
+
+  /// The shell's player. Finishing an episode takes it off the queue while
+  /// this tab may be the one on screen, so a change of what's playing
+  /// reloads the list.
+  final PlayerController? player;
+
+  /// Opens History, which the bar shows as a visible door: the queue is
+  /// what plays next, history is what played.
+  final Future<void> Function()? onOpenHistory;
+  const QueueScreen(
+      {super.key,
+      required this.db,
+      required this.profile,
+      this.player,
+      this.onOpenHistory});
 
   @override
   State<QueueScreen> createState() => _QueueScreenState();
@@ -18,9 +35,28 @@ class QueueScreen extends StatefulWidget {
 class _QueueScreenState extends State<QueueScreen> {
   List<QueueEntry>? _entries;
 
+  int? _playingId;
+
   @override
   void initState() {
     super.initState();
+    _playingId = widget.player?.current?.id;
+    widget.player?.addListener(_onPlayer);
+    _load();
+  }
+
+  @override
+  void dispose() {
+    widget.player?.removeListener(_onPlayer);
+    super.dispose();
+  }
+
+  // The player notifies on every tick; only a change of work can have
+  // moved the queue.
+  void _onPlayer() {
+    final id = widget.player?.current?.id;
+    if (id == _playingId) return;
+    _playingId = id;
     _load();
   }
 
@@ -51,8 +87,34 @@ class _QueueScreenState extends State<QueueScreen> {
   @override
   Widget build(BuildContext context) {
     final entries = _entries;
+    final theme = ThemePreferenceScope.maybeOf(context);
     return Scaffold(
-      appBar: AppBar(title: const Text('Up Next')),
+      appBar: AppBar(
+        title: const Text('Queue'),
+        actions: [
+          OhBarActions(children: [
+            if (widget.onOpenHistory case final open?)
+              OhBarAction(
+                key: const Key('queue-history'),
+                icon: Icons.history,
+                label: 'History',
+                tooltip: 'History',
+                onPressed: () async {
+                  await open();
+                  // Playing from History may have moved the queue.
+                  await _load();
+                },
+              ),
+            // A tab like the others, so the theme is in its menu too.
+            if (theme != null)
+              OhBarOverflow<String>(
+                key: const Key('queue-more'),
+                onSelected: (v) => chooseThemeFromMenu(theme, v),
+                itemBuilder: (_) => themeMenuItems(theme, divided: false),
+              ),
+          ]),
+        ],
+      ),
       body: CappedBody(child: switch (entries) {
         null => const Center(child: CircularProgressIndicator()),
         [] => const Center(child: Text('Nothing queued yet.')),

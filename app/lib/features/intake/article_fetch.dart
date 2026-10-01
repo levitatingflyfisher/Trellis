@@ -88,7 +88,7 @@ Future<ArticleFetchOutcome> fetchArticle({
 
   if (article.isFeedXml) {
     return const ArticleRefused(
-        'That address is a feed of episodes. Follow it from the Inbox tab '
+        'That address is a feed of episodes. Follow it from Subscriptions '
         'instead.');
   }
   // Donor loadUrl law: under 200 chars of extracted text is not an article.

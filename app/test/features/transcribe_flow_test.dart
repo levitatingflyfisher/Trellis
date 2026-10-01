@@ -5,12 +5,14 @@ import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jobs_core/jobs_core.dart';
+import 'package:ml_runtime/ml_runtime.dart' show WhisperTask;
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/transcribe/decoder.dart';
 import 'package:trellis/features/transcribe/transcribe_coordinator.dart';
 import 'package:trellis/main.dart';
 
 import '../support/fake_player.dart';
+import '../support/tabs.dart';
 import '../support/fake_services.dart';
 import '../support/scripted_fetcher.dart';
 import '../support/pick_reader.dart';
@@ -68,7 +70,7 @@ void main() {
         services: services));
     await tester.pumpAndSettle();
     await pickReader(tester, 'Ada');
-    await tester.tap(find.text('Inbox'));
+    await tester.tap(tabLabel('Latest'));
     await tester.pumpAndSettle();
   }
 
@@ -397,6 +399,134 @@ void main() {
     final capture = (await db.capturesDao.capturesOf(seeded.workId))
         .singleWhere((c) => c.id == captureId);
     expect(capture.segmentIdx, isNotNull);
+  });
+
+  group('the language each stage is locked to', () {
+    Future<RecordingExecutor> run(int workId,
+        {String? feedLang,
+        String? workLang,
+        String? detectedLang,
+        bool translate = false}) async {
+      if (feedLang != null) {
+        final feed = (await db.feedsDao.feedById(
+            (await db.feedsDao.episodeOf(workId))!.feedId))!;
+        await db.feedsDao.updateRefreshState(feed.id,
+            title: feed.title,
+            etag: null,
+            lastModified: null,
+            breakerJson: '{}',
+            language: feedLang,
+            updateLanguage: true);
+      }
+      final executor = RecordingExecutor();
+      final services = testServices(tmp,
+          executor: executor,
+          detectedLang: detectedLang,
+          modelStore: FakeModelStore(downloadedIds: {'whisper-tiny-ggml'}));
+      services.audioFileFor(workId, enclosure)
+        ..parent.createSync(recursive: true)
+        ..writeAsBytesSync([1, 2, 3]);
+      await TranscribeCoordinator(db: db, services: services).start(
+          workId: workId,
+          title: 'Um episódio',
+          enclosureUrl: enclosure,
+          lang: workLang,
+          translate: translate);
+      return executor;
+    }
+
+    test('the feed\'s declared language, as whisper names it', () async {
+      final seeded = await seedEpisode();
+      final spec = (await run(seeded.workId, feedLang: 'pt-BR')).specs.single;
+      expect(spec.lang, 'pt');
+      expect(spec.langSource, 'feed');
+    });
+
+    test('the work\'s own language wins over the feed\'s', () async {
+      final seeded = await seedEpisode();
+      final spec = (await run(seeded.workId, feedLang: 'en-us', workLang: 'pt'))
+          .specs
+          .single;
+      expect(spec.lang, 'pt');
+      expect(spec.langSource, 'declared');
+    });
+
+    test('the feed\'s language labels the transcript but never becomes the '
+        'work\'s own', () async {
+      final seeded = await seedEpisode();
+      final first = (await run(seeded.workId, feedLang: 'pt-BR')).specs.single;
+      expect(first.lang, 'pt');
+      expect((await db.spineDao.workById(seeded.workId))!.lang, isNull,
+          reason: 'a feed tag is a guess about the show, not the episode');
+      expect(
+          (await db.spineDao.layersOf(seeded.workId, lang: 'pt')),
+          isNotEmpty,
+          reason: 'translate offers still need the label');
+
+      // The publisher fixes its tag; the next run must follow it.
+      final second = (await run(seeded.workId, feedLang: 'es')).specs.single;
+      expect(second.lang, 'es');
+      expect(second.langSource, 'feed');
+      expect((await db.spineDao.workById(seeded.workId))!.lang, isNull);
+    });
+
+    test('a language the user declared is the work\'s from then on',
+        () async {
+      final seeded = await seedEpisode();
+      await run(seeded.workId, workLang: 'pt');
+      expect((await db.spineDao.workById(seeded.workId))!.lang, 'pt');
+    });
+
+    test('starting over a paused job keeps the language it was locked to',
+        () async {
+      final seeded = await seedEpisode();
+      final jobId = 'transcribe-${seeded.workId}';
+      await db.jobsDao.save(Job(
+          id: jobId,
+          kind: 'transcribe',
+          state: JobState.cancelled,
+          checkpoint: null,
+          totalUnits: 0,
+          doneUnits: 0,
+          createdAtMs: 5));
+      await db.jobsDao.setPayload(
+          jobId,
+          jsonEncode({
+            'workId': seeded.workId,
+            'title': 'Um episódio',
+            'url': enclosure,
+            'lang': 'pt',
+            'langSource': 'feed',
+            'translate': false,
+          }));
+      // The feed has since changed its tag; the half-done transcript is
+      // already in the old language.
+      final spec = (await run(seeded.workId, feedLang: 'es')).specs.single;
+      expect(spec.lang, 'pt');
+      expect(spec.langSource, 'feed');
+    });
+
+    test('a language whisper does not know falls back to detection',
+        () async {
+      final seeded = await seedEpisode();
+      final spec = (await run(seeded.workId, feedLang: 'tlh')).specs.single;
+      expect(spec.lang, isNull);
+    });
+
+    test('translate reuses the language transcription detected', () async {
+      final seeded = await seedEpisode();
+      final specs = (await run(seeded.workId,
+              detectedLang: 'pt', translate: true))
+          .specs;
+      expect(specs.map((s) => s.task),
+          [WhisperTask.transcribe, WhisperTask.translate]);
+      expect(specs.first.lang, isNull);
+      expect(specs.last.lang, 'pt');
+      expect(specs.last.langSource, 'detected');
+      expect((await db.spineDao.workById(seeded.workId))!.lang, isNull,
+          reason: 'a detection is not a declaration: a wrong one must not '
+              'lock every later run');
+    });
   });
 
   test('a refused screen-off service is never released', () async {

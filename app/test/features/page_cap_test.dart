@@ -10,6 +10,7 @@ import 'package:trellis/main.dart';
 import '../support/fake_player.dart';
 import '../support/scripted_fetcher.dart';
 import '../support/pick_reader.dart';
+import '../support/tabs.dart';
 
 /// Fleet rule: a phone layout is not stretched across a tablet or a
 /// desktop browser (audit about-face-08, dfh-08). Every Scaffold body sits
@@ -59,6 +60,7 @@ void main() {
         createPlayer: () => FakeEpisodePlayer()));
     await tester.pumpAndSettle();
     await pickReader(tester, 'Ada');
+    await toTab(tester, 'Library');
     final row = tester.getRect(find.ancestor(
         of: find.text('Wide'), matching: find.byType(ListTile)).first);
     expect(row.width, lessThanOrEqualTo(640));

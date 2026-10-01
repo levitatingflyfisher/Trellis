@@ -1,4 +1,8 @@
-/// Synced text — the karaoke view (P3, the canonical user's payoff).
+/// Synced text — the karaoke view (P3, the canonical user's payoff), and
+/// the transcript of any transcribed work, playing or not: a podcast is
+/// readable without being played. Segments and timings come from the
+/// database for [KaraokeScreen.work]; tapping a line plays that work from
+/// there, loading it if something else is playing.
 ///
 /// When a work has alignments, playback and text are the same cursor
 /// projected two ways (ADR-0002): the segment holding the playhead is lit,
@@ -131,9 +135,16 @@ class _KaraokeScreenState extends State<KaraokeScreen> {
     });
   }
 
+  /// Live-follow belongs to the work in the player. Any other work's
+  /// transcript lights nothing: the playhead is another episode's.
+  bool get _live => widget.controller.isLoaded(widget.work.id);
+
+  void _playFrom(int ms) => widget.controller
+      .playWorkAt(widget.work, Duration(milliseconds: ms));
+
   int _litSegment() {
     final spine = _spine;
-    if (spine == null || spine.alignments.isEmpty) return -1;
+    if (!_live || spine == null || spine.alignments.isEmpty) return -1;
     return spine
         .positionAtAudioTime(widget.controller.position.inMilliseconds)
         .segmentIdx;
@@ -156,8 +167,11 @@ class _KaraokeScreenState extends State<KaraokeScreen> {
   /// Position row is — so this writes through the SAME row the reader
   /// already loads via [PlayerController.saveProgress] (no second store)
   /// and then opens the reader, which picks the row up in its own [_load].
+  ///
+  /// For a work that isn't playing there is no live time to hand over, so
+  /// the reader opens at that work's own saved place.
   Future<void> _readFromHere() async {
-    await widget.controller.saveProgress();
+    if (_live) await widget.controller.saveProgress();
     if (!mounted) return;
     await Navigator.of(context).push(MaterialPageRoute<void>(
         builder: (_) => ReaderScreen(
@@ -177,8 +191,7 @@ class _KaraokeScreenState extends State<KaraokeScreen> {
     final rows = _rows;
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.work.title,
-            overflow: TextOverflow.ellipsis, maxLines: 1),
+        title: const Text('Transcript'),
         actions: [
           OhBarActions(children: [
             OhBarAction(
@@ -202,6 +215,11 @@ class _KaraokeScreenState extends State<KaraokeScreen> {
                   padding: const EdgeInsets.symmetric(
                       horizontal: 20, vertical: 16),
                   children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+                      child: Text(widget.work.title,
+                          style: Theme.of(context).textTheme.titleMedium),
+                    ),
                     for (final row in rows) _segment(row, lit),
                     const SizedBox(height: 80),
                   ],
@@ -234,10 +252,7 @@ class _KaraokeScreenState extends State<KaraokeScreen> {
     return GestureDetector(
       key: _keys.putIfAbsent(row.idx, GlobalKey.new),
       behavior: HitTestBehavior.opaque,
-      onTap: aligned
-          ? () => widget.controller
-              .seekTo(Duration(milliseconds: row.tStartMs!))
-          : null,
+      onTap: aligned ? () => _playFrom(row.tStartMs!) : null,
       child: Container(
         key: Key('karaoke-seg-${row.idx}'),
         padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 8),
@@ -286,8 +301,7 @@ class _KaraokeScreenState extends State<KaraokeScreen> {
       children: [
         for (var i = 0; i < row.words.length; i++)
           GestureDetector(
-            onTap: () => widget.controller
-                .seekTo(Duration(milliseconds: row.words[i][1] as int)),
+            onTap: () => _playFrom(row.words[i][1] as int),
             onLongPress: () => _keepWord(row.words[i][0] as String),
             child: i == litWord
                 ? Container(

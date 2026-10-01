@@ -1,10 +1,9 @@
 /// P4 "archive, never forget": episode ROWS are never deleted when a feed
 /// drops them or storage is reclaimed — only downloaded AUDIO FILES are,
 /// and only the ones a feed's own `keepLatestAudio` policy says to let go
-/// of. This is deliberately narrower than ADR-0003's own age-based
-/// ephemera sweep (which still deletes whole rows after the retention
-/// window unless promoted) — that law is untouched; this one only ever
-/// touches a file on disk plus one timestamp column.
+/// of. Rows never age out either (ADR-0019, which retired the old
+/// ephemera sweep); this only ever touches a file on disk plus one
+/// timestamp column.
 library;
 
 import 'dart:io';

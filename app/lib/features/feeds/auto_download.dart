@@ -24,20 +24,35 @@ int autoDownloadCapFor(int? keepLatestAudio) => keepLatestAudio == null
 
 typedef AutoDownloadPick = ({int workId, String url, String title});
 
-/// Which of [episodes] (one show's, any order) to fetch. Only rows above
-/// [afterWorkId] count as new: work ids only grow, so the mark is the last
-/// pass's newest row and the back catalogue stays below it. Skipped:
-/// no audio, already on disk, evicted by keep-latest (fetching it again
-/// fights the eviction), played, or hidden as a duplicate.
+/// Which of [episodes] (one show's, any order) to fetch. A row is new
+/// when it is above [afterWorkId] (work ids only grow, so the mark is the
+/// last pass's newest row) AND published no earlier than the newest row at
+/// or below the mark. A tie counts as new: some feeds stamp every item
+/// with one date, and they must keep working as they did on ids alone. The id alone is not enough: a full re-parse (schema v28's)
+/// re-adds back-catalogue items an old sweep deleted, with fresh ids and
+/// old dates. The bound is what the feed already had at the last pass, so
+/// it needs no clock and no new state; an item with no date was stamped
+/// with its arrival time, so it still counts as new. Skipped: no audio,
+/// already on disk, evicted by keep-latest (fetching it again fights the
+/// eviction), played, or hidden as a duplicate.
 List<AutoDownloadPick> pickAutoDownloads(
   List<({Work work, Episode episode})> episodes, {
   required int afterWorkId,
   required int cap,
   required bool Function(int workId, String url) onDisk,
 }) {
+  int? knownNewestMs;
+  for (final e in episodes) {
+    if (e.work.id <= afterWorkId) {
+      knownNewestMs = math.max(knownNewestMs ?? e.episode.publishedAtMs,
+          e.episode.publishedAtMs);
+    }
+  }
   final fresh = [
     for (final e in episodes)
       if (e.work.id > afterWorkId &&
+          (knownNewestMs == null ||
+              e.episode.publishedAtMs >= knownNewestMs) &&
           e.episode.enclosureUrl != null &&
           e.episode.archivedAtMs == null &&
           e.episode.finishedAtMs == null &&

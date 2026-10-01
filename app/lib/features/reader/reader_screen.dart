@@ -1283,6 +1283,58 @@ class _ReaderScreenState extends State<ReaderScreen>
     _attachAudioFollow();
   }
 
+  /// Whether the visible Play button listens: this work has aligned
+  /// audio and a player to hand it to. Otherwise it is the silent pacer.
+  bool get _canListen => _hasAlignedAudio && widget.player != null;
+
+  /// The reader's one visible Play. With audio it listens: "Listen" hands
+  /// the cursor to the player (it replaced ⋮ → "Listen from here"), and
+  /// "Pause" pauses the player. Without audio it is the silent pacer that
+  /// used to hide in ⋮ as "Follow along", named "Play" because it makes
+  /// no sound. Null in RSVP for a work with no audio, whose controls
+  /// already hold the pacer's Play.
+  Widget? _playButton({required bool fab}) {
+    if (!_canListen) {
+      if (!fab) return null;
+      return FloatingActionButton(
+        key: const Key('reader-play'),
+        tooltip: _playing ? 'Pause' : 'Play',
+        onPressed: _playing ? _pause : _play,
+        child: Icon(_playing ? Icons.pause : Icons.play_arrow),
+      );
+    }
+    final player = widget.player!;
+    return ListenableBuilder(
+      listenable: player,
+      builder: (context, _) {
+        final listening =
+            player.current?.id == widget.work.id && player.playing;
+        final VoidCallback onPressed = listening
+            ? () => unawaited(player.toggle())
+            : () {
+                // One hand on the cursor at a time.
+                _pause();
+                unawaited(_stopSpeak());
+                unawaited(_listenFromHere());
+              };
+        final icon = Icon(listening ? Icons.pause : Icons.headphones);
+        final tooltip = listening ? 'Pause' : 'Listen';
+        return fab
+            ? FloatingActionButton(
+                key: const Key('reader-play'),
+                tooltip: tooltip,
+                onPressed: onPressed,
+                child: icon)
+            : OhIconButton.filledTonal(
+                key: const Key('reader-play'),
+                iconSize: 28,
+                tooltip: tooltip,
+                onPressed: onPressed,
+                icon: icon);
+      },
+    );
+  }
+
   // ───── Campaign 9 Phase 7: the reader follows the player ─────
 
   /// True whenever there is ANYTHING to follow, whether or not this
@@ -1441,6 +1493,12 @@ class _ReaderScreenState extends State<ReaderScreen>
   Widget build(BuildContext context) {
     final doc = _doc;
     return Scaffold(
+      // Scroll and Lines put Play where the thumb rests; RSVP's own
+      // controls already hold its Play, and hold Listen beside it.
+      floatingActionButton:
+          doc == null || doc.words.isEmpty || _mode == ReaderMode.rsvp
+              ? null
+              : _playButton(fab: true),
       appBar: AppBar(
         leading: BackButton(onPressed: _back),
         title: Text(widget.work.title,
@@ -1490,10 +1548,8 @@ class _ReaderScreenState extends State<ReaderScreen>
               if (value == 'speak-translation') _toggleSpeakTranslation();
               if (value == 'reading-style') unawaited(_openTypographySettings());
               if (value == 'work-language') unawaited(_openWorkLanguagePicker());
-              if (value == 'follow-along') _playing ? _pause() : _play();
               if (value == 'lang') _toggleLanguage();
               if (value == 'ledger') _openLedger();
-              if (value == 'listen-here') unawaited(_listenFromHere());
             },
             itemBuilder: (_) => [
               if (_mtLangs.isNotEmpty && doc != null)
@@ -1508,11 +1564,6 @@ class _ReaderScreenState extends State<ReaderScreen>
                   key: Key('open-ledger'),
                   value: 'ledger',
                   child: Text('Word ledger')),
-              if (_hasAlignedAudio && widget.player != null && doc != null)
-                const PopupMenuItem(
-                    key: Key('listen-from-here'),
-                    value: 'listen-here',
-                    child: Text('Listen from here')),
               const PopupMenuItem(
                   value: 'distill',
                   child: Text('Distill into a course')),
@@ -1529,19 +1580,6 @@ class _ReaderScreenState extends State<ReaderScreen>
                   key: const Key('work-language-action'),
                   value: 'work-language',
                   child: Text('Language: ${languageDisplayName(_sourceLang)}')),
-              // Campaign 4 Phase 2: scroll-family modes only (Scroll, and
-              // Lines as of Campaign 9 Phase 6) — RSVP already has its own
-              // dedicated play-toggle button; this shares the same
-              // _playing/_play/_pause the RSVP button drives, so switching
-              // modes (which already _pause()s first) can never leave a
-              // stray follow-along timer running behind RSVP.
-              if (_mode != ReaderMode.rsvp)
-                PopupMenuItem(
-                  key: const Key('follow-along-toggle'),
-                  value: 'follow-along',
-                  child: Text(
-                      _playing ? 'Stop following along' : 'Follow along'),
-                ),
               // The settings escape (ADR-0006): only visible when there is
               // a neural voice to escape FROM — no dead settings.
               if (_synthEngineHolder != null)
@@ -2021,6 +2059,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                 onPressed: _playing ? _pause : _play,
                 icon: Icon(_playing ? Icons.pause : Icons.play_arrow),
               ),
+              ?_playButton(fab: false),
               // A state control named by a word (audit rank 3; jargon
               // ruling: "parafoveal" is the field's term, not a household
               // one): on shows the neighbouring words, faded, beside the
@@ -2081,6 +2120,8 @@ class _ReaderScreenState extends State<ReaderScreen>
                 childCount: blocks.length - anchor,
               ),
             ),
+            // Room under the last line for the Play button.
+            const SliverToBoxAdapter(child: SizedBox(height: 88)),
           ],
         ),
       ),
@@ -2212,6 +2253,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                 childCount: blocks.length - anchor,
               ),
             ),
+            const SliverToBoxAdapter(child: SizedBox(height: 88)),
           ],
         ),
       ),

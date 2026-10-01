@@ -5,7 +5,8 @@ Trellis is a speed-reader, a podcast player that transcribes episodes on your ow
 • Read four ways: RSVP speed-reading, plain print, a ticker, or spoken aloud — your place is one position that survives switching between them
 • Bring anything in: EPUB, web articles, pasted text, Project Gutenberg, RSS and podcast feeds
 • Transcribe podcasts on the device, in the language they are spoken — including an English layer via Whisper's translate task
-• Feeds are reverse-chronological and episodes decay by default: no ranking, no streaks, no engagement tricks
+• Latest lists every episode and article from your feeds, newest first, and keeps them all: no ranking, no streaks, no engagement tricks
+• A Queue tab holds what plays next, in the order you choose, and only what you put there
 • Study concepts on a prerequisite lattice: a concept stays locked until the ones it builds on hold
 • Four kinds of recall item, scheduled by spaced repetition with a monotonic-interval guarantee
 • Export your cards to Anki whenever you want

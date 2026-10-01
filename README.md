@@ -11,7 +11,8 @@ monotonic-interval guarantee, and discourse-grade recall items.
 
 An espalier is a tree trained on a trellis to bear more fruit in less space.
 **You train the tree; the tree never trains you** — reverse-chronological
-feeds only, ephemera decay by default, zero engagement optimization, and
+feeds only, a timeline that never drops what it was sent, zero engagement
+optimization, and
 every one of those claims is a test, not a promise.
 
 ## Status

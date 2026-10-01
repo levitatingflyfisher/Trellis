@@ -5,6 +5,7 @@ import 'package:trellis/db/database.dart';
 import 'package:trellis/main.dart';
 
 import '../support/fake_player.dart';
+import '../support/tabs.dart';
 import '../support/fake_services.dart';
 import '../support/scripted_fetcher.dart';
 import 'dart:io';
@@ -15,8 +16,8 @@ import '../support/pick_reader.dart';
 /// contact-sheet.sh. Run with --update-goldens; the PNGs are gitignored.
 ///
 /// Real seeded content on every screen: a prose work for the print
-/// reader's drop cap, an expiring audio episode for the river's leaf
-/// decay, and the bundled Kalman starter for the Espalier Wall.
+/// reader's drop cap, an audio episode for Latest, and the bundled Kalman
+/// starter for the Espalier Wall.
 void main() {
   const sizes = <String, Size>{
     'phone': Size(320, 690),
@@ -49,7 +50,7 @@ void main() {
     await db.spineDao
         .insertSegments(workId, [(idx: 0, kind: 'prose', text: prose)]);
 
-    // An audio episode two days from drifting away: faded leaf + notice.
+    // An audio episode for Latest.
     final feedId = await db.feedsDao.insertFeed(
         profileId: profileId, url: 'https://cast.example.test/feed.xml');
     final epWork = await db.spineDao.insertWork(
@@ -100,6 +101,7 @@ void main() {
           services: testServices(dir)));
       await tester.pumpAndSettle();
       await pickReader(tester, 'Ada');
+      await toTab(tester, 'Library');
       await shoot('library');
 
       await tester.tap(find.text('An Entangled Bank'));
@@ -115,11 +117,11 @@ void main() {
       await tester.pageBack();
       await tester.pumpAndSettle();
 
-      await tester.tap(find.text('Inbox'));
+      await tester.tap(tabLabel('Latest'));
       await tester.pumpAndSettle();
       await shoot('river');
 
-      await tester.tap(find.text('Courses'));
+      await tester.tap(tabLabel('Courses'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Add the starter course'));
       await tester.pumpAndSettle();

@@ -11,6 +11,7 @@ import 'package:trellis/main.dart';
 
 import '../support/fake_player.dart';
 import '../support/pick_reader.dart';
+import '../support/tabs.dart';
 
 /// The word ledger's UI half (the schema half is ledger_db_test): a
 /// long-press on any word sets it aside via the ONE dao path, cleaned of
@@ -45,6 +46,7 @@ void main() {
     await tester.pumpWidget(TrellisApp(db: db));
     await tester.pumpAndSettle();
     await pickReader(tester, 'Ada');
+    await toTab(tester, 'Library');
     await tester.tap(find.text(title));
     await tester.pumpAndSettle();
   }

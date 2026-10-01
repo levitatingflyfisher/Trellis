@@ -1,5 +1,5 @@
 /// What any episode list can do with its rows: play, queue, download,
-/// mark played. One home so the Inbox and the podcast page can't drift,
+/// mark played. One home so Latest and the podcast page can't drift,
 /// and so there is still exactly one download consent path (ADR-0003
 /// law 6).
 library;
@@ -98,7 +98,7 @@ class EpisodeActions {
       db.feedsDao.markUnplayed(profileId: profileId, workId: workId);
 
   /// "Play from here": this episode and the unplayed ones after it in the
-  /// order the listener is looking at go to the front of Up Next, then it
+  /// order the listener is looking at go to the front of the queue, then it
   /// plays. The listener's own act, so it isn't autoplay; the queue only
   /// holds what they just asked for.
   Future<void> playFromHere(List<EpisodeEntry> ordered, int index) async {
@@ -117,7 +117,7 @@ class EpisodeActions {
     await p.playWork(start.work);
   }
 
-  /// Appends every unplayed episode in [ordered] to Up Next, in that
+  /// Appends every unplayed episode in [ordered] to the queue, in that
   /// order. Returns how many were added.
   Future<int> addUnplayed(List<EpisodeEntry> ordered) =>
       db.queueDao.playLastAll(

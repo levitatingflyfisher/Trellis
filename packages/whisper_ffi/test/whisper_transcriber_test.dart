@@ -69,8 +69,25 @@ class _FakeWhisper {
   final List<List<_Seg>> script;
   bool failInit = false;
   int fullResult = 0;
+
+  /// What `wfs_full_lang` answers after each `full`; null models a shipped
+  /// `.so` built before the shim exported it (the binding is absent).
+  String? Function()? detectedLang;
   int initCalls = 0;
   int freeCalls = 0;
+
+  /// Whether the fake also exports the wfs_state_* set (model loaded with
+  /// no state, a fresh state per window). Off models a `.so` built before
+  /// 1.5.3's per-window state.
+  bool withState = false;
+  int modelInitCalls = 0;
+  int stateNewCalls = 0;
+  int stateFreeCalls = 0;
+  bool failStateNew = false;
+
+  /// The state the last stateFull ran in; getters must be handed it.
+  Pointer<Void>? _liveState;
+  int _nextState = 0x5000;
   final List<String> initPaths = [];
   final List<_FullCall> fullCalls = [];
 
@@ -92,6 +109,55 @@ class _FakeWhisper {
     }
     _allocated.clear();
   }
+
+  /// A getter read off anything but the live, unfreed state is the bug
+  /// the per-window state exists to prevent.
+  T _onState<T>(Pointer<Void> state, T Function() read) {
+    if (state != _liveState) {
+      throw StateError('read from a state that is not live: $state');
+    }
+    return read();
+  }
+
+  WhisperStateBindings get _stateBindings => WhisperStateBindings(
+        initModel: (path) {
+          modelInitCalls++;
+          initPaths.add(path.toDartString());
+          return failInit ? nullptr : _ctx;
+        },
+        newState: (ctx) {
+          expect(ctx, _ctx);
+          stateNewCalls++;
+          if (failStateNew) return nullptr;
+          return _liveState = Pointer<Void>.fromAddress(_nextState++);
+        },
+        freeState: (state) {
+          expect(state, _liveState);
+          stateFreeCalls++;
+          _liveState = null;
+        },
+        full: (ctx, state, samples, nSamples, lang, translate,
+            tokenTimestamps, nThreads, noContext) {
+          expect(state, _liveState);
+          return bindings.full(ctx, samples, nSamples, lang, translate,
+              tokenTimestamps, nThreads, noContext);
+        },
+        nSegments: (st) => _onState(st, () => _current.length),
+        segmentText: (st, i) => _onState(st, () => _utf8(_current[i].text)),
+        segmentT0: (st, i) => _onState(st, () => _current[i].t0),
+        segmentT1: (st, i) => _onState(st, () => _current[i].t1),
+        nTokens: (st, i) => _onState(st, () => _current[i].tokens.length),
+        tokenText: (ctx, st, i, j) =>
+            _onState(st, () => _utf8(_current[i].tokens[j].text)),
+        tokenT0: (st, i, j) => _onState(st, () => _current[i].tokens[j].t0),
+        tokenT1: (st, i, j) => _onState(st, () => _current[i].tokens[j].t1),
+        tokenIsSpecial: (ctx, st, i, j) =>
+            _onState(st, () => _current[i].tokens[j].special ? 1 : 0),
+        fullLang: (st) => _onState(st, () {
+          final code = detectedLang?.call();
+          return code == null ? nullptr : _utf8(code);
+        }),
+      );
 
   WhisperBindings get bindings => WhisperBindings(
         initFromFile: (path) {
@@ -125,6 +191,13 @@ class _FakeWhisper {
         tokenT0: (ctx, i, j) => _current[i].tokens[j].t0,
         tokenT1: (ctx, i, j) => _current[i].tokens[j].t1,
         tokenIsSpecial: (ctx, i, j) => _current[i].tokens[j].special ? 1 : 0,
+        fullLang: detectedLang == null
+            ? null
+            : (ctx) {
+                final code = detectedLang!();
+                return code == null ? nullptr : _utf8(code);
+              },
+        state: withState ? _stateBindings : null,
       );
 }
 
@@ -143,12 +216,14 @@ void main() {
 
   tearDown(() => fake.dispose());
 
-  WhisperTranscriber transcriber({int? threads, bool noContext = true}) =>
+  WhisperTranscriber transcriber(
+          {int? threads, bool noContext = true, bool keepContext = false}) =>
       WhisperTranscriber(
         bindings: fake.bindings,
         modelPath: 'model.bin',
         threads: threads,
         noContext: noContext,
+        keepContext: keepContext,
       );
 
   group('params marshalling', () {
@@ -397,6 +472,222 @@ void main() {
       await gotFirst.future;
       await sub.cancel();
 
+      expect(fake.freeCalls, 1);
+    });
+  });
+
+  group('job-scoped context (keepContext)', () {
+    test('one init across many calls; close frees it exactly once', () async {
+      fake = _FakeWhisper([[], [], []]);
+      final t = transcriber(keepContext: true);
+      for (var k = 0; k < 3; k++) {
+        await t.transcribe(ListPcmSource([_window(8)])).toList();
+      }
+      expect(fake.initCalls, 1);
+      expect(fake.freeCalls, 0);
+      t.close();
+      t.close();
+      expect(fake.freeCalls, 1);
+    });
+
+    test('close before any call loads nothing and frees nothing', () {
+      fake = _FakeWhisper([]);
+      transcriber(keepContext: true).close();
+      expect(fake.initCalls, 0);
+      expect(fake.freeCalls, 0);
+    });
+
+    test('a failed whisper_full keeps the context for the retry', () async {
+      fake = _FakeWhisper([[], []])..fullResult = -6;
+      final t = transcriber(keepContext: true);
+      await expectLater(t.transcribe(ListPcmSource([_window(8)])).toList(),
+          throwsA(isA<WhisperException>()));
+      fake.fullResult = 0;
+      await t.transcribe(ListPcmSource([_window(8)])).toList();
+      expect(fake.initCalls, 1);
+      expect(fake.freeCalls, 0);
+      t.close();
+      expect(fake.freeCalls, 1);
+    });
+
+    test('cancelling a stream mid-way keeps the context', () async {
+      fake = _FakeWhisper([
+        [_Seg(' one', 0, 50)],
+        [_Seg(' two', 0, 50)],
+      ]);
+      final t = transcriber(keepContext: true);
+      final gotFirst = Completer<void>();
+      final sub = t
+          .transcribe(ListPcmSource([_window(16000), _window(16000)]),
+              wordTimings: false)
+          .listen((_) {
+        if (!gotFirst.isCompleted) gotFirst.complete();
+      });
+      await gotFirst.future;
+      await sub.cancel();
+      expect(fake.freeCalls, 0);
+      t.close();
+      expect(fake.freeCalls, 1);
+    });
+
+    test('window offsets restart with each call', () async {
+      fake = _FakeWhisper([
+        [_Seg(' a', 0, 50)],
+        [_Seg(' b', 0, 50)],
+      ]);
+      final t = transcriber(keepContext: true);
+      final first = await t
+          .transcribe(ListPcmSource([_window(16000)]), wordTimings: false)
+          .toList();
+      final second = await t
+          .transcribe(ListPcmSource([_window(16000)]), wordTimings: false)
+          .toList();
+      expect(first.single.tStartMs, 0);
+      expect(second.single.tStartMs, 0);
+      t.close();
+    });
+  });
+
+  group('detected language', () {
+    test('reports what whisper detected for the last window', () async {
+      final answers = ['ru', 'en'];
+      var k = 0;
+      fake = _FakeWhisper([[], []])..detectedLang = () => answers[k++];
+      final t = transcriber();
+      expect(t.lastLanguage, isNull);
+      await t.transcribe(ListPcmSource([_window(8)])).toList();
+      expect(t.lastLanguage, 'ru');
+      await t.transcribe(ListPcmSource([_window(8)])).toList();
+      expect(t.lastLanguage, 'en');
+    });
+
+    test('a native that cannot tell reports null', () async {
+      fake = _FakeWhisper([[]])..detectedLang = () => null;
+      final t = transcriber();
+      await t.transcribe(ListPcmSource([_window(8)])).toList();
+      expect(t.lastLanguage, isNull);
+    });
+
+    test('an older .so without the export reports null and still runs',
+        () async {
+      fake = _FakeWhisper([
+        [_Seg(' hi', 0, 50)]
+      ]);
+      final t = transcriber();
+      final chunks = await t
+          .transcribe(ListPcmSource([_window(8)]), wordTimings: false)
+          .toList();
+      expect(chunks.single.text, 'hi');
+      expect(t.lastLanguage, isNull);
+    });
+  });
+
+  group('per-window state (wfs_state_*)', () {
+    test('a kept model loads once; every window gets a fresh state, freed',
+        () async {
+      fake = _FakeWhisper([
+        [_Seg(' a', 0, 50)],
+        [_Seg(' b', 0, 50)],
+        [_Seg(' c', 0, 50)],
+      ])
+        ..withState = true;
+      final t = transcriber(keepContext: true);
+      final first = await t
+          .transcribe(ListPcmSource([_window(16000), _window(16000)]),
+              wordTimings: false)
+          .toList();
+      final second = await t
+          .transcribe(ListPcmSource([_window(16000)]), wordTimings: false)
+          .toList();
+      expect(first.map((c) => c.text), ['a', 'b']);
+      expect(second.single.text, 'c');
+      expect(fake.modelInitCalls, 1);
+      expect(fake.initCalls, 0, reason: 'the stateful init is never used');
+      expect(fake.stateNewCalls, 3);
+      expect(fake.stateFreeCalls, 3);
+      expect(fake.freeCalls, 0);
+      t.close();
+      expect(fake.freeCalls, 1);
+    });
+
+    test('words and language are read off the window state', () async {
+      fake = _FakeWhisper([
+        [
+          _Seg(' Hi there', 0, 100, [
+            _Tok('[_BEG_]', 0, 0, special: true),
+            _Tok(' Hi', 0, 40),
+            _Tok(' there', 40, 100),
+          ]),
+        ],
+      ])
+        ..withState = true
+        ..detectedLang = () => 'en';
+      final t = transcriber(keepContext: true);
+      final chunks = await t.transcribe(ListPcmSource([_window(8)])).toList();
+      expect(chunks.single.words!.map((w) => w.word), ['Hi', 'there']);
+      expect(t.lastLanguage, 'en');
+      t.close();
+    });
+
+    test('a failed whisper_full frees the state and keeps the model',
+        () async {
+      fake = _FakeWhisper([[], []])
+        ..withState = true
+        ..fullResult = -6;
+      final t = transcriber(keepContext: true);
+      await expectLater(t.transcribe(ListPcmSource([_window(8)])).toList(),
+          throwsA(isA<WhisperException>()));
+      expect(fake.stateFreeCalls, 1);
+      fake.fullResult = 0;
+      await t.transcribe(ListPcmSource([_window(8)])).toList();
+      expect(fake.modelInitCalls, 1);
+      expect(fake.stateFreeCalls, 2);
+      t.close();
+      expect(fake.freeCalls, 1);
+    });
+
+    test('a state that cannot be allocated throws, model kept', () async {
+      fake = _FakeWhisper([[]])
+        ..withState = true
+        ..failStateNew = true;
+      final t = transcriber(keepContext: true);
+      await expectLater(t.transcribe(ListPcmSource([_window(8)])).toList(),
+          throwsA(isA<WhisperException>()));
+      expect(fake.stateFreeCalls, 0);
+      expect(fake.freeCalls, 0);
+      t.close();
+      expect(fake.freeCalls, 1);
+    });
+
+    test('cancelling mid-stream leaves no state alive', () async {
+      fake = _FakeWhisper([
+        [_Seg(' one', 0, 50)],
+        [_Seg(' two', 0, 50)],
+      ])
+        ..withState = true;
+      final t = transcriber(keepContext: true);
+      final gotFirst = Completer<void>();
+      final sub = t
+          .transcribe(ListPcmSource([_window(16000), _window(16000)]),
+              wordTimings: false)
+          .listen((_) {
+        if (!gotFirst.isCompleted) gotFirst.complete();
+      });
+      await gotFirst.future;
+      await sub.cancel();
+      expect(fake.stateFreeCalls, fake.stateNewCalls);
+      t.close();
+      expect(fake.freeCalls, 1);
+    });
+
+    test('without keepContext the model is loaded and freed per call',
+        () async {
+      fake = _FakeWhisper([[], []])..withState = true;
+      final t = transcriber();
+      await t.transcribe(ListPcmSource([_window(8), _window(8)])).toList();
+      expect(fake.modelInitCalls, 1);
+      expect(fake.stateNewCalls, 2);
+      expect(fake.stateFreeCalls, 2);
       expect(fake.freeCalls, 1);
     });
   });

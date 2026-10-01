@@ -2,7 +2,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
 
-/// The Up Next queue (schema v8, P4 mercy #3): a position-ordered,
+/// The queue (schema v8, P4 mercy #3): a position-ordered,
 /// per-profile list of works waiting to play next. Positions stay
 /// contiguous from 0 — every mutating op renumbers rather than leaving
 /// gaps — and "play next"/"play last" move an already-queued work instead

@@ -61,7 +61,6 @@ void main() {
     final unopened = await work(p, 'book', 'Emma');
     await work(p, 'article', 'An essay');
     await work(p, 'audiobook', 'Heard');
-    await work(p, 'book', 'Gone', persistence: 'decayed');
     await work(other, 'book', 'Not mine');
 
     final books = await db.spineDao.booksOf(p);
@@ -119,6 +118,66 @@ void main() {
     expect(await db.spineDao.segmentsOf(workId), isEmpty);
     expect(await db.spineDao.allPositions(), isEmpty);
     expect(await db.spineDao.translationSentencesOf(workId, lang: 'es'), isEmpty);
+  });
+
+  group('removeFromLibrary (ADR-0019 §1: the archive keeps feed items)', () {
+    test('a kept feed episode is demoted, never deleted: it stays in '
+        'Latest with its transcript, captures and position', () async {
+      final profileId = await db.profilesDao.create('Ada');
+      final feedId = await db.feedsDao
+          .insertFeed(profileId: profileId, url: 'https://cast.test/feed');
+      final workId = await db.spineDao.insertWork(
+          profileId: profileId,
+          kind: 'episode',
+          title: 'Kept episode',
+          persistence: 'work',
+          firstSeenEpochDay: 100);
+      await db.feedsDao.insertEpisode(
+          workId: workId, feedId: feedId, guid: 'g', publishedAtMs: 1);
+      await db.spineDao.setPinned(workId, true);
+      await db.spineDao.insertSegments(
+          workId, const [(idx: 0, kind: 'prose', text: 'Said aloud.')]);
+      await db.spineDao.insertAlignments(
+          workId, const [(segmentIdx: 0, tStartMs: 0, tEndMs: 900)]);
+      await db.spineDao.savePosition(
+          profileId: profileId,
+          workId: workId,
+          segmentIdx: 0,
+          wordIdx: 1,
+          lastModality: 'listen');
+      await db.capturesDao.capture(
+          profileId: profileId, workId: workId, positionMs: 400, nowMs: 1);
+
+      await db.spineDao.removeFromLibrary(workId);
+
+      final work = (await db.spineDao.workById(workId))!;
+      expect(work.persistence, 'ephemeron', reason: 'unkept, out of the Library');
+      expect(work.pinned, isFalse);
+      expect(await db.libraryDao.libraryQueryEntriesOf(profileId), isEmpty);
+      expect((await db.feedsDao.riverItems(profileId)).map((e) => e.work.id),
+          [workId]);
+      expect(await db.spineDao.segmentsOf(workId), hasLength(1));
+      expect(await db.spineDao.alignmentsOf(workId), hasLength(1));
+      expect(await db.spineDao.allPositions(), hasLength(1));
+      expect(await db.capturesDao.capturesOf(workId), hasLength(1));
+    });
+
+    test('a work with no feed row is deleted outright', () async {
+      final profileId = await db.profilesDao.create('Ada');
+      final workId = await db.spineDao.insertWork(
+          profileId: profileId,
+          kind: 'note',
+          title: 'Note',
+          persistence: 'work',
+          firstSeenEpochDay: 100);
+      await db.spineDao.insertSegments(
+          workId, const [(idx: 0, kind: 'prose', text: 'x')]);
+
+      await db.spineDao.removeFromLibrary(workId);
+
+      expect(await db.spineDao.workById(workId), isNull);
+      expect(await db.spineDao.segmentsOf(workId), isEmpty);
+    });
   });
 
   group('translation sentences (ADR-0008 "Babel" Phase 3)', () {
@@ -462,89 +521,5 @@ void main() {
           await migrated.spineDao.translationSentencesOf(workId, lang: 'es');
       expect(after[(0, 1)]!.engine, 'marian');
     });
-  });
-
-  test('the ephemera sweep decays exactly the pure verdict into a '
-      'recoverable soft state; promoted works survive', () async {
-    final profileId = await db.profilesDao.create('Ada');
-    final old = await db.spineDao.insertWork(
-        profileId: profileId, kind: 'episode', title: 'old',
-        persistence: 'ephemeron', firstSeenEpochDay: 100);
-    final kept = await db.spineDao.insertWork(
-        profileId: profileId, kind: 'episode', title: 'kept',
-        persistence: 'ephemeron', firstSeenEpochDay: 100);
-    await db.spineDao.promoteWork(kept);
-
-    final swept = await db.spineDao.sweepEphemera(todayEpochDay: 131);
-    expect(swept, 1);
-    // Nothing is deleted at boot: the decayed row stays, marked.
-    expect((await db.spineDao.workById(old))!.persistence, 'decayed');
-    expect((await db.spineDao.decayedOf(profileId)).map((w) => w.title),
-        ['old']);
-    expect(await db.spineDao.sweepEphemera(todayEpochDay: 131), 0,
-        reason: 'an already-decayed row is never swept (or counted) again');
-  });
-
-  test('restoring decayed ephemera gives them a fresh window', () async {
-    final profileId = await db.profilesDao.create('Ada');
-    final old = await db.spineDao.insertWork(
-        profileId: profileId, kind: 'episode', title: 'old',
-        persistence: 'ephemeron', firstSeenEpochDay: 100);
-    await db.spineDao.sweepEphemera(todayEpochDay: 131);
-
-    await db.spineDao.restoreDecayed(profileId, todayEpochDay: 131);
-    final back = (await db.spineDao.workById(old))!;
-    expect(back.persistence, 'ephemeron');
-    expect(back.firstSeenEpochDay, 131,
-        reason: 'else the next boot would decay it straight away');
-    expect(await db.spineDao.sweepEphemera(todayEpochDay: 132), 0);
-    expect(await db.spineDao.decayedOf(profileId), isEmpty);
-  });
-
-  test('letting decayed ephemera go deletes them, and only them', () async {
-    final profileId = await db.profilesDao.create('Ada');
-    await db.spineDao.insertWork(
-        profileId: profileId, kind: 'episode', title: 'old',
-        persistence: 'ephemeron', firstSeenEpochDay: 100);
-    await db.spineDao.insertWork(
-        profileId: profileId, kind: 'episode', title: 'fresh',
-        persistence: 'ephemeron', firstSeenEpochDay: 130);
-    await db.spineDao.sweepEphemera(todayEpochDay: 131);
-
-    await db.spineDao.purgeDecayed(profileId);
-    final titles = (await db.spineDao.worksOf(profileId)).map((w) => w.title);
-    expect(titles, ['fresh']);
-  });
-
-  test('an item the person queued or captured from is theirs: it never '
-      'decays while it is queued or has captures', () async {
-    final profileId = await db.profilesDao.create('Ada');
-    final queued = await db.spineDao.insertWork(
-        profileId: profileId, kind: 'episode', title: 'queued',
-        persistence: 'ephemeron', firstSeenEpochDay: 100);
-    final captured = await db.spineDao.insertWork(
-        profileId: profileId, kind: 'episode', title: 'captured',
-        persistence: 'ephemeron', firstSeenEpochDay: 100);
-    await db.queueDao
-        .playLast(profileId: profileId, workId: queued, nowMs: 1);
-    await db.capturesDao.capture(
-        profileId: profileId, workId: captured, positionMs: 0, nowMs: 1);
-
-    expect(await db.spineDao.sweepEphemera(todayEpochDay: 131), 0);
-    expect((await db.spineDao.workById(queued))!.persistence, 'ephemeron');
-    expect((await db.spineDao.workById(captured))!.persistence, 'ephemeron');
-  });
-
-  test('decayed items are kept 30 more days, then deleted for good',
-      () async {
-    final profileId = await db.profilesDao.create('Ada');
-    final old = await db.spineDao.insertWork(
-        profileId: profileId, kind: 'episode', title: 'old',
-        persistence: 'ephemeron', firstSeenEpochDay: 100);
-    await db.spineDao.sweepEphemera(todayEpochDay: 131); // decays
-    await db.spineDao.sweepEphemera(todayEpochDay: 161); // last kept day
-    expect((await db.spineDao.workById(old))!.persistence, 'decayed');
-    await db.spineDao.sweepEphemera(todayEpochDay: 162);
-    expect(await db.spineDao.workById(old), isNull);
   });
 }

@@ -75,7 +75,7 @@ String bytesProgress(int? received, int? total) {
   return total == null ? got : '$got of ${formatBytes(total)}';
 }
 
-/// One plain line for a download's state; shared with the Inbox row.
+/// One plain line for a download's state; shared with the Latest row.
 String downloadStatus(EpisodeDownloadState s) {
   if (s.failed) return 'Download didn’t finish. ${s.error}';
   final bytes = bytesProgress(s.receivedBytes, s.totalBytes);

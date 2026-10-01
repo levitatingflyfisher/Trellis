@@ -82,12 +82,16 @@ Map<int, String> projectTranslation({
 
 /// Replaces [workId]'s spine rows with [result] (and [translation]'s mt
 /// layer when present) in ONE transaction. The work learns its language
-/// from a transcribe run when it had none.
+/// from a transcribe run when it had none, but only a `declared` one (the
+/// user's, the work's own): a `feed` or `detected` language still labels
+/// the transcript, which translate offers need, yet is only a guess about
+/// the show. Persisting it would outrank the feed's tag on every later run.
 Future<void> writeTranscript({
   required AppDatabase db,
   required int workId,
   required TranscriptionResult result,
   TranscriptionResult? translation,
+  String? langSource,
 }) async {
   final mt = translation == null
       ? const <int, String>{}
@@ -136,7 +140,8 @@ Future<void> writeTranscript({
 
     // 'und' is an honest "could not tell", never worth persisting.
     if (result.layerKind == core.LayerKind.transcript &&
-        result.lang != 'und') {
+        result.lang != 'und' &&
+        (langSource == null || langSource == 'declared')) {
       await (db.update(db.works)
             ..where((w) => w.id.equals(workId) & w.lang.isNull()))
           .write(WorksCompanion(lang: Value(result.lang)));

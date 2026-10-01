@@ -225,6 +225,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
   @override
   Widget build(BuildContext context) {
     final entries = _entries;
+    final theme = ThemePreferenceScope.maybeOf(context);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Courses'),
@@ -239,13 +240,15 @@ class _CoursesScreenState extends State<CoursesScreen> {
                 label: 'Backup',
                 onPressed: widget.onOpenBackup,
               ),
-            const TrellisThemeToggle(),
             OhBarOverflow<String>(
               key: const Key('study-settings'),
               onSelected: (value) {
                 if (value == 'scheduler') unawaited(_toggleScheduler());
                 if (value == 'thinking') _openThinking();
                 if (value == 'echo') widget.onOpenEcho?.call();
+                if (isThemeMenuValue(value) && theme != null) {
+                  unawaited(chooseThemeFromMenu(theme, value));
+                }
               },
               itemBuilder: (_) => [
                 const PopupMenuItem<String>(
@@ -267,6 +270,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
                       'FSRS scheduling: learns each card’s memory curve. '
                       'Off uses Classic (SM-2) fixed steps.'),
                 ),
+                if (theme != null) ...themeMenuItems(theme),
               ],
             ),
           ]),

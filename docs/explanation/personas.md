@@ -42,8 +42,8 @@ lists what came in.
 **A5. The course map.** Start: a Spanish course with some mastery. Steps:
 open the course map; tap a locked bud; compare sibling nodes. Success:
 mastery shows as a number, not colour alone; the lock names its key; sibling
-titles are distinguishable. Check: view in grayscale; the Inbox shows days
-left on every item.
+titles are distinguishable. Check: view in grayscale; Latest marks what is
+new since the last visit in words, not a count.
 
 ## Secondary: Dmitri, a parent setting up profiles and backup
 
@@ -66,5 +66,5 @@ writing. Check: the restore dialog emphasises "Keep what I have", not the
 destructive button.
 
 **D3. Remove and restore.** Start: three works. Steps: remove one from the
-Library. Success: Undo is offered, as the Inbox's Keep already does. Check:
+Library. Success: Undo is offered, as Keep in Latest already does. Check:
 undo after delete.

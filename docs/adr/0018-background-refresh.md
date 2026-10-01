@@ -150,7 +150,10 @@ WorkManager runs it again later, still only on Wi-Fi.
 A pick is the newest `min(3, keepLatestAudio)` rows above the mark. It
 skips text items, played rows, rows already on disk, rows hidden as
 duplicates, and rows that keep-latest evicted (fetching those again would
-fight the eviction).
+fight the eviction). A row above the mark must also be dated no earlier
+than the newest row at or below it: a full re-parse (schema v28's) re-adds
+back-catalogue items with fresh ids and old dates, and those are not new.
+A tie counts as new, because some feeds stamp every item with one date.
 
 Auto rows never resume over a network nobody checked:
 

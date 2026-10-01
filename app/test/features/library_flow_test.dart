@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/main.dart';
 import '../support/pick_reader.dart';
+import '../support/tabs.dart';
 
 /// The alpha loop's front half: first-run profile creation into a calm empty
 /// library, paste intake, and the library's pin/delete hands.
@@ -17,9 +18,10 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('first run opens into the inviting empty library, with no '
-      'name to type first (operator ruling 48)', (tester) async {
+  testWidgets('first run has no name to type first, and its Library is an '
+      'inviting empty one (operator ruling 48)', (tester) async {
     await pumpApp(tester);
+    await toTab(tester, 'Library');
 
     expect(find.text('Who’s reading?'), findsNothing);
     // The calm empty state invites intake (ADR-0003: no guilt, an offer).
@@ -37,11 +39,13 @@ void main() {
     final blaise = await db.profilesDao.create('Blaise');
     await pumpApp(tester);
     await pickReader(tester, 'Blaise');
+    await toTab(tester, 'Library');
     expect(await db.deviceSettingsDao.lastProfileId(), blaise);
 
     // Relaunch: straight into Blaise's library, no tollgate (audit rank 5).
     await tester.pumpWidget(const SizedBox());
     await pumpApp(tester);
+    await toTab(tester, 'Library');
     expect(find.text('Who’s reading?'), findsNothing);
     await tester.tap(find.byKey(const Key('library-more')));
     await tester.pumpAndSettle();
@@ -75,12 +79,13 @@ void main() {
     expect(add().onPressed, isNotNull);
     await tester.tap(find.text('Add reader'));
     await tester.pumpAndSettle();
-    expect(find.text('Nothing on the trellis yet.'), findsOneWidget);
+    expect(find.text('Nothing in Latest yet.'), findsOneWidget);
   });
 
   testWidgets('paste intake: parsed text appears as a work with its title',
       (tester) async {
-    await pumpApp(tester); // a first launch opens the new reader's Library
+    await pumpApp(tester); // a first launch makes a reader
+    await toTab(tester, 'Library');
 
     await tester.tap(find.text('Paste text'));
     await tester.pumpAndSettle();
@@ -103,7 +108,8 @@ void main() {
 
   testWidgets('a pasted work with no title keeps the parser-detected title',
       (tester) async {
-    await pumpApp(tester); // a first launch opens the new reader's Library
+    await pumpApp(tester); // a first launch makes a reader
+    await toTab(tester, 'Library');
 
     await tester.tap(find.text('Paste text'));
     await tester.pumpAndSettle();
@@ -134,6 +140,7 @@ void main() {
 
     await pumpApp(tester);
     await pickReader(tester, 'Ada');
+    await toTab(tester, 'Library');
 
     // Newest first by default: Second above First.
     var firstY = tester.getTopLeft(find.text('First')).dy;
@@ -176,6 +183,48 @@ void main() {
     expect((await db.spineDao.worksOf(profileId)).single.title, 'First');
   });
 
+  testWidgets('removing a kept feed episode takes it out of the Library '
+      'only: it stays in Latest with its transcript (ADR-0019 §1)',
+      (tester) async {
+    final profileId = await db.profilesDao.create('Ada');
+    final feedId = await db.feedsDao
+        .insertFeed(profileId: profileId, url: 'https://cast.test/feed');
+    final ep = await db.spineDao.insertWork(
+        profileId: profileId,
+        kind: 'episode',
+        title: 'Kept episode',
+        persistence: 'work',
+        firstSeenEpochDay: 100);
+    await db.feedsDao.insertEpisode(
+        workId: ep,
+        feedId: feedId,
+        guid: 'g',
+        publishedAtMs: DateTime.now().millisecondsSinceEpoch);
+    await db.spineDao.insertSegments(
+        ep, const [(idx: 0, kind: 'prose', text: 'Said aloud.')]);
+    await db.spineDao.insertAlignments(
+        ep, const [(segmentIdx: 0, tStartMs: 0, tEndMs: 900)]);
+
+    await pumpApp(tester);
+    await pickReader(tester, 'Ada');
+    await toTab(tester, 'Library');
+
+    await tester.tap(find.byKey(Key('work-menu-$ep')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Remove from Library'));
+    await tester.pumpAndSettle();
+    expect(find.text('Kept episode'), findsNothing);
+    expect(find.text("Removed 'Kept episode' from Library"), findsOneWidget);
+    await tester.tap(find.byTooltip('Dismiss'));
+    await tester.pumpAndSettle();
+
+    expect((await db.spineDao.workById(ep))!.persistence, 'ephemeron');
+    expect(await db.spineDao.segmentsOf(ep), hasLength(1));
+    expect(await db.spineDao.alignmentsOf(ep), hasLength(1));
+    await toTab(tester, 'Latest');
+    expect(find.text('Kept episode'), findsOneWidget);
+  });
+
   testWidgets('the profile switcher returns to the picker', (tester) async {
     await db.profilesDao.create('Ada');
     await db.profilesDao.create('Blaise');
@@ -183,6 +232,7 @@ void main() {
     await pumpApp(tester);
     expect(find.text('Who’s reading?'), findsOneWidget);
     await pickReader(tester, 'Blaise');
+    await toTab(tester, 'Library');
     expect(find.text('Nothing on the trellis yet.'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('library-more')));
@@ -209,6 +259,7 @@ void main() {
 
       await pumpApp(tester);
       await pickReader(tester, 'Ada');
+      await toTab(tester, 'Library');
 
       expect(find.text('5 Aug'), findsOneWidget);
     });
@@ -238,6 +289,7 @@ void main() {
 
       await pumpApp(tester);
       await pickReader(tester, 'Ada');
+      await toTab(tester, 'Library');
 
       expect(find.text('1 Jan'), findsOneWidget);
     });

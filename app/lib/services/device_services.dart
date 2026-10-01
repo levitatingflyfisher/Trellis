@@ -17,6 +17,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:ml_runtime/ml_runtime.dart';
 import 'package:stardict_core/stardict_core.dart';
+import 'package:whisper_ffi/whisper_ffi.dart';
 
 import '../app_version.dart';
 import '../features/backup/backup_custody.dart';
@@ -32,7 +33,9 @@ import '../features/transcribe/audio_fetcher.dart';
 import '../features/transcribe/decoder.dart';
 import '../features/transcribe/ffmpeg_decoder.dart';
 import '../features/transcribe/foreground_gate.dart';
+import '../features/transcribe/native_abi.dart';
 import '../features/transcribe/transcribe_executor.dart';
+import '../features/transcribe/whisper_library.dart';
 
 /// Reads text aloud — the seam over the platform TTS engine, so speak mode
 /// stays testable off-device: tests inject a fake whose utterances complete
@@ -208,6 +211,7 @@ class DeviceServices {
         engineFor: (modelPath) => WhisperEngineSpec(
           modelPath: modelPath,
           libraryPath: whisperLibraryPath(),
+          libraryNote: whisperLibraryNote(),
         ),
       );
 
@@ -228,6 +232,7 @@ class DeviceServices {
         engineFor: (modelPath) => WhisperEngineSpec(
           modelPath: modelPath,
           libraryPath: whisperLibraryPath(),
+          libraryNote: whisperLibraryNote(),
         ),
       );
 
@@ -250,21 +255,38 @@ class DeviceServices {
       engineFor: (modelPath) => WhisperEngineSpec(
         modelPath: modelPath,
         libraryPath: whisperLibraryPath(),
+        libraryNote: whisperLibraryNote(),
       ),
     );
   }
 
   static bool get _isAndroid => !kIsWeb && Platform.isAndroid;
 
+  /// Android's pick between the baseline and dotprod shims, probed once
+  /// per isolate. Only arm64 parses ARM features; the x86_64 emulator
+  /// keeps the baseline name it has always had.
+  static final _androidWhisperLibrary = WhisperLibraryPicker(
+    androidArm64: _isAndroid && isAndroidArm64,
+    readCpuinfo: () => File('/proc/cpuinfo').readAsStringSync(),
+    // Binding, not just dlopen: a build missing a symbol falls back too.
+    open: WhisperBindings.open,
+  );
+
   /// Where the whisper shim lives per platform: the APK's jniLibs resolve
-  /// a bare soname; desktops may point `TRELLIS_WHISPER_LIB` at a build
+  /// a bare soname (the dotprod build when the CPU has it); desktops may
+  /// point `TRELLIS_WHISPER_LIB` at a build
   /// (`natives/out/linux/libwhisper.so`), falling back to the loader path.
   static String whisperLibraryPath() {
-    if (_isAndroid) return 'libwhisper.so';
+    if (_isAndroid) return _androidWhisperLibrary.path;
     final env = Platform.environment['TRELLIS_WHISPER_LIB'];
     if (env != null && env.isNotEmpty) return env;
     return 'libwhisper.so';
   }
+
+  /// Why [whisperLibraryPath] is the baseline on a phone that might have
+  /// had dotprod; null otherwise. For the run's log line.
+  static String? whisperLibraryNote() =>
+      _isAndroid ? _androidWhisperLibrary.choice.reason : null;
 
   /// The neural voice for [voiceSpec], if it's actually usable right now —
   /// the localMlAvailable honesty gate, one layer deeper: even on a tier

@@ -515,7 +515,7 @@ void main() {
     });
   });
 
-  group('Up Next auto-advance', () {
+  group('Queue auto-advance', () {
     test('finishing removes the episode from the queue by default, then '
         'auto-advances to the new head', () async {
       final first = await seedEpisode(title: 'One');
@@ -646,7 +646,7 @@ void main() {
       expect(player.log, isNot(contains('play')));
     });
 
-    test('with finished episodes kept, the last one in Up Next just stops',
+    test('with finished episodes kept, the last one in the queue just stops',
         () async {
       await db.profilesDao.setKeepFinishedInQueue(profileId, true);
       final only = await seedEpisode(title: 'One');

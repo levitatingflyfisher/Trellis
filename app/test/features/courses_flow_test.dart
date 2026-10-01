@@ -9,6 +9,7 @@ import 'package:trellis/db/database.dart';
 import 'package:trellis/main.dart';
 
 import '../support/fake_player.dart';
+import '../support/tabs.dart';
 import '../support/scripted_fetcher.dart';
 import '../support/pick_reader.dart';
 
@@ -73,7 +74,7 @@ void main() {
     // A first launch opens straight into a reader's Library; the picker
     // shows only when there is a choice to make.
     await pickReader(tester, 'Ada');
-    await tester.tap(find.text('Courses'));
+    await tester.tap(tabLabel('Courses'));
     await tester.pumpAndSettle();
   }
 

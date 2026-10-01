@@ -115,11 +115,16 @@ void main() {
       }
     });
 
+    // Latest's page is the exception to the no-SCAN rule: it walks the
+    // publish-time index in order and stops at its LIMIT, which beats
+    // finding the profile's rows by index and sorting all of them.
     test('riverItems', () async {
       final plan = await planOf(() => db.feedsDao.riverItems(profileId),
           containing: 'published_at_ms');
-      expect(scansOf(plan, ['episodes', 'works']), isEmpty,
+      expect(plan.where((d) => d.contains('TEMP B-TREE')), isEmpty,
           reason: plan.join('\n'));
+      expect(scansOf(plan, ['works']), isEmpty, reason: plan.join('\n'));
+      expect(plan.join('\n'), contains('idx_episodes_published'));
     });
   });
 
@@ -142,48 +147,28 @@ void main() {
   group('set-based deletes', () {
     // A statement count that grows with the rows is the per-row loop the
     // audit found; chunks of a few hundred keep it flat.
-    test('purging a thousand decayed works is a handful of statements, and '
-        'takes every child row with it', () async {
+    test('deleting a thousand works is a handful of statements, and takes '
+        'every child row with it', () async {
       final ids = <int>[];
       await db.transaction(() async {
         for (var i = 0; i < 1200; i++) {
-          ids.add(await episode('d$i', persistence: 'decayed'));
-        }
-      });
-      await db.feedsDao.savePlayerPosition(
-          profileId: profileId, workId: ids.last, tMs: 5);
-      rec.statements.clear();
-      await db.spineDao.purgeDecayed(profileId);
-      expect(rec.statements.length, lessThan(60));
-      expect(await db.spineDao.decayedOf(profileId), isEmpty);
-      expect(await db.select(db.episodes).get(), isEmpty);
-      expect(await db.feedsDao.allPlayerPositions(), isEmpty);
-    });
-
-    test('the sweep decays and expires in bulk, clearing suppressions that '
-        'point at what left', () async {
-      final ids = <int>[];
-      await db.transaction(() async {
-        for (var i = 0; i < 700; i++) {
-          ids.add(await episode('e$i', day: 1));
+          ids.add(await episode('d$i'));
         }
       });
       final other = await db.feedsDao.insertFeed(profileId: profileId, url: 'o');
-      final dupe = await episode('x', feed: other, day: 1000);
+      final dupe = await episode('x', feed: other);
       await db.feedsDao
           .setDedup(dupe, reason: 'url', canonicalWorkId: ids.first);
+      await db.feedsDao.savePlayerPosition(
+          profileId: profileId, workId: ids.last, tMs: 5);
       rec.statements.clear();
-      final n = await db.spineDao.sweepEphemera(todayEpochDay: 1000);
-      expect(n, 700);
-      expect(rec.statements.length, lessThan(40));
-      expect((await db.feedsDao.episodeOf(dupe))!.dedupReason, isNull);
-
-      rec.statements.clear();
-      await db.spineDao.sweepEphemera(todayEpochDay: 1100);
+      await db.spineDao.deleteWorks(ids);
       expect(rec.statements.length, lessThan(60));
-      // Only the late arrival is left, decayed on this pass.
-      expect((await db.spineDao.decayedOf(profileId)).map((w) => w.id),
-          [dupe]);
+      expect((await db.select(db.works).get()).map((w) => w.id), [dupe]);
+      expect((await db.select(db.episodes).get()).map((e) => e.workId), [dupe]);
+      expect(await db.feedsDao.allPlayerPositions(), isEmpty);
+      expect((await db.feedsDao.episodeOf(dupe))!.dedupReason, isNull,
+          reason: 'a suppression never outlives the row it names');
     });
 
     test('unfollowing a feed with a large back catalogue keeps what was '
@@ -280,6 +265,102 @@ void main() {
           .map((r) => r.read<String>('name'))
           .toSet();
       expect(names, containsAll(appIndexes.keys));
+    });
+  });
+
+  group('schema migration v26 -> v27', () {
+    test('whatever the old sweep hid is listed again, and Latest gets its '
+        'index and its last-visit column (ADR-0019)', () async {
+      final dir = Directory.systemTemp.createTempSync('trellis-migration-v27');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final file = File('${dir.path}/v26.sqlite');
+
+      final seed = AppDatabase.forTesting(NativeDatabase(file));
+      final p = await seed.profilesDao.create('Ada');
+      final f = await seed.feedsDao.insertFeed(profileId: p, url: 'f');
+      final hidden = await seed.spineDao.insertWork(
+          profileId: p,
+          kind: 'episode',
+          title: 'hidden',
+          persistence: 'ephemeron',
+          firstSeenEpochDay: 1);
+      await seed.feedsDao.insertEpisode(
+          workId: hidden, feedId: f, guid: 'g', publishedAtMs: 1);
+      await seed.feedsDao.updateRefreshState(f,
+          title: 'Show',
+          etag: '"v1"',
+          lastModified: 'Wed, 05 Aug 2026 12:00:00 GMT',
+          breakerJson: '{}');
+      await seed.feedsDao.setBodyHash(f, 'abc');
+      await seed.close();
+      final v26 = raw.sqlite3.open(file.path);
+      v26.execute('''
+        $stripV27
+        UPDATE works SET persistence = 'decayed' WHERE id = $hidden;
+        PRAGMA user_version = 26;
+      ''');
+      v26.dispose();
+
+      final migrated = AppDatabase.forTesting(NativeDatabase(file));
+      addTearDown(migrated.close);
+      expect((await migrated.spineDao.workById(hidden))!.persistence,
+          'ephemeron');
+      expect((await migrated.feedsDao.riverItems(p)).map((e) => e.work.id),
+          [hidden]);
+      final names = (await migrated
+              .customSelect(
+                  "SELECT name FROM sqlite_master WHERE type = 'index'")
+              .get())
+          .map((r) => r.read<String>('name'))
+          .toSet();
+      expect(names, contains('idx_episodes_published'),
+          reason: 'Latest pages from the first launch after the upgrade');
+      expect(await migrated.profilesDao.swapLatestSeen(p, nowMs: 5), isNull,
+          reason: 'the last-visit column lands, empty');
+      // The hops after v27 run too: a v26 install also gets v28's
+      // language column and its one full re-parse.
+      final feed = (await migrated.feedsDao.feedById(f))!;
+      expect(feed.language, isNull);
+      expect(feed.title, 'Show');
+      expect(feed.etag, isNull);
+      expect(feed.lastModified, isNull);
+      expect(feed.bodyHash, isNull);
+    });
+  });
+
+  group('schema migration v27 -> v28', () {
+    test('feeds gain an empty language column, and each forgets its '
+        'validators and body hash so the next refresh parses it in full',
+        () async {
+      final dir = Directory.systemTemp.createTempSync('trellis-migration-v28');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final file = File('${dir.path}/v27.sqlite');
+
+      final seed = AppDatabase.forTesting(NativeDatabase(file));
+      final p = await seed.profilesDao.create('Ada');
+      final f = await seed.feedsDao.insertFeed(profileId: p, url: 'f');
+      await seed.feedsDao.updateRefreshState(f,
+          title: 'Show',
+          etag: '"v1"',
+          lastModified: 'Wed, 05 Aug 2026 12:00:00 GMT',
+          breakerJson: '{}');
+      await seed.feedsDao.setBodyHash(f, 'abc');
+      await seed.close();
+      final v27 = raw.sqlite3.open(file.path);
+      v27.execute('''
+        $stripV28
+        PRAGMA user_version = 27;
+      ''');
+      v27.dispose();
+
+      final migrated = AppDatabase.forTesting(NativeDatabase(file));
+      addTearDown(migrated.close);
+      final feed = (await migrated.feedsDao.feedById(f))!;
+      expect(feed.language, isNull);
+      expect(feed.title, 'Show');
+      expect(feed.etag, isNull);
+      expect(feed.lastModified, isNull);
+      expect(feed.bodyHash, isNull);
     });
   });
 }

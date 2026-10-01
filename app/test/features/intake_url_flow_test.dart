@@ -125,7 +125,7 @@ void main() {
         "Local and private-network addresses can't be loaded.");
   });
 
-  testWidgets('feed XML yields a pointer to the River, not raw XML',
+  testWidgets('feed XML yields a pointer to Subscriptions, not raw XML',
       (tester) async {
     final fetcher = await pumpLibrary(tester,
         handler: (u, h) => textResponse(
@@ -136,7 +136,7 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(fetcher.calls, hasLength(1));
-    expect(errorSentence(tester), contains('Inbox'));
+    expect(errorSentence(tester), contains('Subscriptions'));
     expect((await db.spineDao.worksOf(profile.id)), isEmpty);
   });
 

@@ -5,6 +5,7 @@ import 'package:trellis/db/database.dart';
 import 'package:trellis/features/intake/paste_intake.dart' show epochDayUtcNow;
 import 'package:trellis/main.dart';
 import '../support/pick_reader.dart';
+import '../support/tabs.dart';
 
 /// Campaign 4 Phase 4: LibraryScreen._open resolves `offerRecap` BEFORE
 /// pushing the reader — same "resolved before the push" shape ADR-0006's
@@ -54,6 +55,7 @@ void main() {
     await tester.pumpWidget(TrellisApp(db: db));
     await tester.pumpAndSettle();
     await pickReader(tester, 'Ada');
+    await toTab(tester, 'Library');
     await tester.tap(find.text('Stale'));
     await tester.pumpAndSettle();
 
@@ -69,6 +71,7 @@ void main() {
     await tester.pumpWidget(TrellisApp(db: db));
     await tester.pumpAndSettle();
     await pickReader(tester, 'Ada');
+    await toTab(tester, 'Library');
     await tester.tap(find.text('Fresh'));
     await tester.pumpAndSettle();
 
@@ -83,6 +86,7 @@ void main() {
     await tester.pumpWidget(TrellisApp(db: db));
     await tester.pumpAndSettle();
     await pickReader(tester, 'Ada');
+    await toTab(tester, 'Library');
     await tester.tap(find.text('BarelyStarted'));
     await tester.pumpAndSettle();
 

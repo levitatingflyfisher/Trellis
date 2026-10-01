@@ -21,7 +21,7 @@ import 'search_store.dart';
 import 'share_item.dart';
 
 /// What history and search rows need to act, carried as one value so the
-/// Inbox and the Subscriptions page open these screens the same way.
+/// Latest and the Subscriptions page open these screens the same way.
 class SearchDoors {
   final AppDatabase db;
   final Profile profile;
@@ -155,6 +155,13 @@ class SearchItemTile extends StatelessWidget {
       onPlay: isAudio
           ? () async {
               await actions.play(work);
+              onChanged();
+            }
+          : null,
+      onRead: doors.readerDoors.canOpenTranscript
+          ? () async {
+              await doors.readerDoors
+                  .openTranscript(context, db: doors.db, work: work);
               onChanged();
             }
           : null,

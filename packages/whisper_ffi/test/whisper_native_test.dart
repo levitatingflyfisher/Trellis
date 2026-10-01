@@ -14,6 +14,7 @@
 ///
 /// Paths (overridable by env):
 ///   WHISPER_FFI_LIB        default ../../natives/out/linux/libwhisper.so
+///   WHISPER_FFI_TEST_WAV   default ../../natives/third_party/whisper.cpp/samples/jfk.wav
 ///   WHISPER_FFI_TEST_MODEL default ../../natives/models/ggml-tiny-q8_0.bin
 ///     (the registry-pinned whisper-tiny-ggml file — 43537433 bytes, sha256
 ///      c2085835d3f50733e2ff6e4b41ae8a2b8d8110461e18821b09a15c40c42d1cca;
@@ -92,4 +93,121 @@ void main() {
       expect(c.tEndMs, greaterThanOrEqualTo(c.tStartMs));
     }
   }, timeout: const Timeout(Duration(minutes: 5)));
+
+  group('per-window state on a kept model', () {
+    // jfk.wav ships with the pinned clone (natives/third_party/whisper.cpp).
+    final jfkPath = _fromEnvOrDefault('WHISPER_FFI_TEST_WAV',
+        '../../natives/third_party/whisper.cpp/samples/jfk.wav');
+
+    /// Window A: 10 s of seeded white noise. Window B: jfk.wav under loud
+    /// seeded noise, which on the pinned tiny model decodes through
+    /// temperature fallback, i.e. it samples from decoder 0's RNG.
+    Float32List noise(int seed, int samples, double amp) {
+      final r = math.Random(seed);
+      return Float32List.fromList(
+          List.generate(samples, (_) => (r.nextDouble() * 2 - 1) * amp));
+    }
+
+    Float32List windowB() {
+      final speech = _readWav16(jfkPath);
+      final n = noise(4, speech.length, 0.6);
+      return Float32List.fromList(
+          [for (var i = 0; i < speech.length; i++) speech[i] + n[i]]);
+    }
+
+    Future<String> text(WhisperTranscriber t, Float32List w) async =>
+        (await t.transcribe(ListPcmSource([w]), wordTimings: false).toList())
+            .map((c) => c.text)
+            .join(' | ');
+
+    /// B alone, and B after A on one kept model.
+    Future<(String, String)> aloneAndAfter(WhisperBindings b) async {
+      final a = noise(1, 10 * 16000, 0.3);
+      final bWin = windowB();
+      final fresh = WhisperTranscriber(
+          bindings: b, modelPath: modelPath, keepContext: true, threads: 4);
+      final alone = await text(fresh, bWin);
+      fresh.close();
+      final kept = WhisperTranscriber(
+          bindings: b, modelPath: modelPath, keepContext: true, threads: 4);
+      await text(kept, a);
+      final after = await text(kept, bWin);
+      kept.close();
+      return (alone, after);
+    }
+
+    test('a window decodes the same alone or after another window', () async {
+      expect(File(jfkPath).existsSync(), isTrue,
+          reason: 'jfk.wav missing at $jfkPath — clone the pin per '
+              'natives/README.md');
+      final bindings = WhisperBindings.open(libPath);
+      expect(bindings.state, isNotNull,
+          reason: 'this libwhisper.so predates the wfs_state_* exports');
+
+      final (alone, after) = await aloneAndAfter(bindings);
+      expect(after, alone);
+    }, timeout: const Timeout(Duration(minutes: 5)));
+
+    test('precondition: through the context\'s own state the same pair '
+        'diverges, so window B really reaches the sampler', () async {
+      // Whether window B falls back to sampling depends on this machine's
+      // CPU, thread count and model, so a match here is not a defect in
+      // the code: it only means the identity test above proved less.
+      final (ctxAlone, ctxAfter) =
+          await aloneAndAfter(_withoutState(WhisperBindings.open(libPath)));
+      if (ctxAfter == ctxAlone) {
+        markTestSkipped('window B did not hit temperature fallback on this '
+            'machine, so the shared-state path matched too');
+        return;
+      }
+      expect(ctxAfter, isNot(ctxAlone));
+    }, timeout: const Timeout(Duration(minutes: 5)));
+
+    test('reports the language it detected, read off the state', () async {
+      final bindings = WhisperBindings.open(libPath);
+      expect(bindings.state, isNotNull,
+          reason: 'this libwhisper.so predates the wfs_state_* exports');
+      final t = WhisperTranscriber(
+          bindings: bindings,
+          modelPath: modelPath,
+          keepContext: true);
+      await t
+          .transcribe(ListPcmSource([_readWav16(jfkPath)]), wordTimings: false)
+          .toList();
+      expect(t.lastLanguage, 'en');
+      t.close();
+    }, timeout: const Timeout(Duration(minutes: 5)));
+  });
+}
+
+/// [b] as an older `.so` would bind it: no wfs_state_* set.
+WhisperBindings _withoutState(WhisperBindings b) => WhisperBindings(
+      initFromFile: b.initFromFile,
+      free: b.free,
+      full: b.full,
+      nSegments: b.nSegments,
+      segmentText: b.segmentText,
+      segmentT0: b.segmentT0,
+      segmentT1: b.segmentT1,
+      nTokens: b.nTokens,
+      tokenText: b.tokenText,
+      tokenT0: b.tokenT0,
+      tokenT1: b.tokenT1,
+      tokenIsSpecial: b.tokenIsSpecial,
+      fullLang: b.fullLang,
+    );
+
+/// A 16-bit PCM mono WAV's samples as floats.
+Float32List _readWav16(String path) {
+  final bytes = File(path).readAsBytesSync();
+  final data = ByteData.sublistView(bytes);
+  var off = 12;
+  while (String.fromCharCodes(bytes.sublist(off, off + 4)) != 'data') {
+    off += 8 + data.getUint32(off + 4, Endian.little);
+  }
+  final n = data.getUint32(off + 4, Endian.little) ~/ 2;
+  return Float32List.fromList([
+    for (var i = 0; i < n; i++)
+      data.getInt16(off + 8 + 2 * i, Endian.little) / 32768.0,
+  ]);
 }

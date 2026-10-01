@@ -5,6 +5,7 @@ import 'package:trellis/db/database.dart';
 import 'package:trellis/features/intake/paste_intake.dart' show epochDayUtcNow;
 import 'package:trellis/main.dart';
 import '../support/pick_reader.dart';
+import '../support/tabs.dart';
 
 /// Campaign 4 Phase 5's write side, wired into the reader: every
 /// `_savePosition` call also records today's UTC epoch day in
@@ -32,6 +33,7 @@ void main() {
     await tester.pumpWidget(TrellisApp(db: db));
     await tester.pumpAndSettle();
     await pickReader(tester, 'Ada');
+    await toTab(tester, 'Library');
     await tester.tap(find.text('Five Words'));
     await tester.pumpAndSettle();
 

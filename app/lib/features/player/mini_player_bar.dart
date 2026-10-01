@@ -27,7 +27,7 @@ class MiniPlayerBar extends StatelessWidget {
   /// Opens the captures list for the current work; the shell wires it.
   final VoidCallback? onOpenCaptures;
 
-  /// Opens the Up Next queue view; the shell wires it. Shown whenever the
+  /// Shows the Queue; the shell switches to its tab. Shown whenever the
   /// bar itself is (something is always playing when the bar shows), so no
   /// gate beyond that.
   final VoidCallback? onOpenQueue;
@@ -109,7 +109,7 @@ class MiniPlayerBar extends StatelessWidget {
                       if (onOpenQueue != null)
                         IconButton(
                           key: const Key('open-queue'),
-                          tooltip: 'Up Next',
+                          tooltip: 'Queue',
                           icon: const Icon(Icons.queue_music_outlined),
                           onPressed: onOpenQueue,
                         ),

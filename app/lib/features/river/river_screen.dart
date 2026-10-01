@@ -14,12 +14,10 @@ import '../jobs/jobs_screen.dart' show downloadFraction, downloadStatus;
 import '../feeds/feeds_repository.dart';
 import '../feeds/feeds_screen.dart';
 import '../feeds/subscribe_screen.dart';
-import '../intake/paste_intake.dart' show epochDayUtcNow;
 import '../models/consent.dart';
 import '../models/format.dart';
 import '../models/models_screen.dart' show modelLabel;
 import '../player/player_controller.dart';
-import '../player/queue_screen.dart';
 import '../../services/device_services.dart' show TtsSpeaker;
 import '../reader/reader_doors.dart';
 import '../reader/reader_screen.dart';
@@ -30,13 +28,13 @@ import '../reader/speech/speech_temp_files.dart';
 import '../reader/translation/marian_engine.dart';
 import '../transcribe/job_cards.dart';
 import '../transcribe/transcribe_coordinator.dart';
-import 'river_decay.dart';
 import 'river_triage.dart';
 import '../shared/capped_body.dart';
 
 /// The River (ADR-0003 law 1): ONE reverse-chronological list across every
 /// feed. The order comes from the DAO's single query and is never touched
 /// here — the chips FILTER, they do not sort; no ranking code path exists.
+/// It is a permanent archive (ADR-0019), so it is read a page at a time.
 class RiverScreen extends StatefulWidget {
   final AppDatabase db;
   final Profile profile;
@@ -93,8 +91,13 @@ class RiverScreen extends StatefulWidget {
   /// see `LibraryScreen.tts`.
   final TtsSpeaker? tts;
 
+  /// Whether this is the tab on screen. The shell keeps Latest mounted
+  /// under the other tabs; coming back re-reads what is loaded, in place.
+  final bool active;
+
   const RiverScreen(
       {super.key,
+      this.active = true,
       required this.db,
       required this.profile,
       required this.repository,
@@ -117,11 +120,30 @@ class RiverScreen extends StatefulWidget {
 
 enum _RiverFilter { all, text, audio }
 
-class _RiverScreenState extends State<RiverScreen> {
+class _RiverScreenState extends State<RiverScreen>
+    with WidgetsBindingObserver {
   List<RiverEntry>? _entries;
 
-  /// Ephemera the boot sweep decayed and nobody has restored or let go yet.
-  int _decayed = 0;
+  /// Whether the last page came back full, so another may follow.
+  bool _hasMore = false;
+  bool _loadingMore = false;
+
+  /// The last page below failed to load: the footer offers a retry
+  /// instead of a spinner nothing will ever answer.
+  bool _moreFailed = false;
+
+  /// When this reader's previous visit began; rows published after it
+  /// sit above the "new since" line. A visit is an app session: the time
+  /// is read and replaced on a cold start (this screen's mount) and on
+  /// each return to the app, never on a tab switch, so the line holds
+  /// still while the listener moves between tabs, and an app kill
+  /// mid-visit loses nothing.
+  int? _lastVisitMs;
+
+  /// Bumped by every load that replaces the list, so a page still in
+  /// flight from before a filter change or refresh is dropped on arrival.
+  int _generation = 0;
+
   _RiverFilter _filter = _RiverFilter.all;
   late final RiverTriage _triage = RiverTriage(widget.db);
   late final EpisodeActions _actions = EpisodeActions(
@@ -142,13 +164,63 @@ class _RiverScreenState extends State<RiverScreen> {
   @override
   void initState() {
     super.initState();
-    _selection.reload = _load;
+    _selection.reload = _reloadLoaded;
     _selection.addListener(_onSelection);
+    WidgetsBinding.instance.addObserver(this);
     _load();
+    _markVisit();
+  }
+
+  /// Whether the app went to the background since the visit began. A
+  /// resume from mere `inactive` (the notification shade, a system
+  /// dialog) is not a new visit, and must not wipe the line.
+  bool _backgrounded = false;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.paused) {
+      _backgrounded = true;
+    }
+    if (state != AppLifecycleState.resumed) return;
+    if (_backgrounded) {
+      _backgrounded = false;
+      _markVisit();
+    }
+    // A background check may have brought items while the app was away.
+    _reloadLoaded();
+  }
+
+  @override
+  void didUpdateWidget(RiverScreen old) {
+    super.didUpdateWidget(old);
+    // Back from another tab, where any loaded row may have changed (kept,
+    // played, queued); the re-read keeps the list's length, so its place.
+    if (widget.active && !old.active) _reloadLoaded();
+  }
+
+  Future<void> _markVisit() async {
+    final previous = await widget.db.profilesDao.swapLatestSeen(
+        widget.profile.id,
+        nowMs: DateTime.now().millisecondsSinceEpoch);
+    if (!mounted || previous == null) return;
+    setState(() => _lastVisitMs = previous);
+  }
+
+  /// Whether the "new since" line goes above row [i]: the first row
+  /// published before the last visit, below at least one published after.
+  /// Publish time falls back to first-seen when a feed gives no date.
+  bool _newLineAbove(List<RiverEntry> visible, int i) {
+    final since = _lastVisitMs;
+    return since != null &&
+        i > 0 &&
+        visible[i - 1].episode.publishedAtMs > since &&
+        visible[i].episode.publishedAtMs <= since;
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _selection.removeListener(_onSelection);
     _selection.dispose();
     _undo.dispose();
@@ -161,92 +233,141 @@ class _RiverScreenState extends State<RiverScreen> {
   /// bulk action never reaches rows the listener can't see.
   void _setFilter(_RiverFilter filter) {
     setState(() => _filter = filter);
-    _selection.universe = _entriesOf(_visible);
+    _load();
   }
 
-  /// Older means published strictly earlier, among the rows the filter
-  /// shows: the podcast page's rule, so a tie is never swept up because
-  /// of where the list happened to place it.
-  static List<EpisodeEntry> _olderUnplayed(
-          List<RiverEntry> visible, RiverEntry e) =>
+  RiverKind get _kind => switch (_filter) {
+        _RiverFilter.all => RiverKind.all,
+        _RiverFilter.text => RiverKind.text,
+        _RiverFilter.audio => RiverKind.audio,
+      };
+
+  /// Whether "Mark everything older as played" has anything to reach.
+  /// Older means published strictly earlier: the podcast page's rule, so
+  /// a tie is never swept up because of where the list placed it. Past
+  /// the loaded pages the answer waits for the tap.
+  bool _offersOlder(List<RiverEntry> visible, RiverEntry e) =>
+      _hasMore ||
       unplayedAudio(_entriesOf([
         for (final o in visible)
           if (o.episode.publishedAtMs < e.episode.publishedAtMs) o,
-      ]));
+      ])).isNotEmpty;
+
+  Future<void> _markOlderPlayed(RiverEntry e) async {
+    final older = await widget.db.feedsDao.olderUnplayedAudio(
+        widget.profile.id,
+        publishedBeforeMs: e.episode.publishedAtMs);
+    if (!mounted) return;
+    if (older.isEmpty) {
+      ScaffoldMessenger.of(context)
+        ..clearSnackBars()
+        ..showSnackBar(const SnackBar(
+            persist: false, content: Text('Nothing older to mark.')));
+      return;
+    }
+    await _bulk.markOlderPlayed(context, older);
+  }
 
   static List<EpisodeEntry> _entriesOf(List<RiverEntry> rows) =>
       [for (final e in rows) (work: e.work, episode: e.episode)];
 
-  /// Queued or captured works: they do not decay (see heldWorkIds).
-  Set<int> _held = const {};
+  static RiverCursor _cursorOf(RiverEntry e) =>
+      (publishedAtMs: e.episode.publishedAtMs, workId: e.work.id);
 
+  /// The first page, from the top: on open, on a filter change and after
+  /// a refresh brings new items.
   Future<void> _load() async {
-    final entries = await widget.db.feedsDao.riverItems(widget.profile.id);
-    final decayed = await widget.db.spineDao.decayedOf(widget.profile.id);
-    final held = await widget.db.spineDao.heldWorkIds();
+    final generation = ++_generation;
+    final entries = await widget.db.feedsDao
+        .riverItems(widget.profile.id, kind: _kind);
     final rowState =
         await EpisodeListState.load(widget.db, widget.profile.id);
-    if (!mounted) return;
+    if (!mounted || generation != _generation) return;
     _actions.forgetArtwork();
     setState(() {
       _entries = entries;
-      _decayed = decayed.length;
-      _held = held;
+      _hasMore = entries.length == riverPageSize;
+      _moreFailed = false;
       _rowState = rowState;
     });
   }
 
-  Future<void> _restoreDecayed() async {
-    await widget.db.spineDao
-        .restoreDecayed(widget.profile.id, todayEpochDay: epochDayUtcNow());
-    await _load();
+  /// Re-reads every loaded row, and anything newer, but no further: after
+  /// a bulk change or a return from another screen, where any loaded row
+  /// may have changed. The list keeps its length, so the scroll keeps
+  /// its place.
+  Future<void> _reloadLoaded() async {
+    final loaded = _entries;
+    if (loaded == null || loaded.isEmpty) return _load();
+    final generation = ++_generation;
+    final entries = await widget.db.feedsDao.riverItems(widget.profile.id,
+        kind: _kind, through: _cursorOf(loaded.last), limit: null);
+    final rowState =
+        await EpisodeListState.load(widget.db, widget.profile.id);
+    if (!mounted || generation != _generation) return;
+    _actions.forgetArtwork();
+    setState(() {
+      _entries = entries;
+      _rowState = rowState;
+      _moreFailed = false;
+    });
   }
 
-  Future<void> _letDecayedGo() async {
-    await widget.db.spineDao.purgeDecayed(widget.profile.id);
-    await _load();
+  /// The next page below the last loaded row.
+  Future<void> _loadMore() async {
+    final loaded = _entries;
+    if (_loadingMore ||
+        _moreFailed ||
+        !_hasMore ||
+        loaded == null ||
+        loaded.isEmpty) {
+      return;
+    }
+    _loadingMore = true;
+    final generation = _generation;
+    List<RiverEntry>? page;
+    try {
+      page = await widget.db.feedsDao.riverItems(widget.profile.id,
+          kind: _kind, after: _cursorOf(loaded.last));
+    } catch (e) {
+      debugPrint('Latest: loading the next page failed: $e');
+    } finally {
+      _loadingMore = false;
+    }
+    if (!mounted) return;
+    if (generation != _generation) {
+      // A reload replaced the list while this page was in flight. Its
+      // footer asked meanwhile and was turned away, so ask again for it,
+      // below the new list's last row.
+      unawaited(_loadMore());
+      return;
+    }
+    if (page == null) {
+      setState(() => _moreFailed = true);
+      return;
+    }
+    final got = page;
+    setState(() {
+      _entries = [...loaded, ...got];
+      _hasMore = got.length == riverPageSize;
+    });
   }
 
-  /// The boot sweep's one-line account (ADR-0003 law 2, made recoverable):
-  /// what decayed, with Restore and Let go. It stays until the user picks
-  /// one — never a snackbar that expires — and shows in the empty state
-  /// too, since after a long absence the river is most likely empty.
-  Widget _decayedNotice() {
-    if (_decayed == 0) return const SizedBox.shrink();
-    final theme = Theme.of(context);
-    return Padding(
-      key: const Key('river-decayed-notice'),
-      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Text(
-            _decayed == 1
-                ? '1 item older than 30 days left your Inbox. It’s kept 30 '
-                    'more days, then deleted, unless you restore it.'
-                : '$_decayed items older than 30 days left your Inbox. '
-                    'They’re kept 30 more days, then deleted, unless you '
-                    'restore them.',
-            style: theme.textTheme.bodyMedium,
-          ),
-          OverflowBar(
-            alignment: MainAxisAlignment.end,
-            children: [
-              TextButton(
-                key: const Key('river-decayed-purge'),
-                onPressed: _letDecayedGo,
-                child: const Text('Let go'),
-              ),
-              TextButton(
-                key: const Key('river-decayed-restore'),
-                onPressed: _restoreDecayed,
-                child: const Text('Restore'),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
+  /// Re-reads one row after an action on it, in place.
+  Future<void> _patch(int workId) async {
+    final entry = await widget.db.feedsDao.riverEntryOf(workId);
+    final rowState =
+        await EpisodeListState.load(widget.db, widget.profile.id);
+    if (!mounted) return;
+    setState(() {
+      _rowState = rowState;
+      final entries = _entries;
+      if (entries == null) return;
+      _entries = [
+        for (final e in entries)
+          if (e.work.id != workId) e else ?entry,
+      ];
+    });
   }
 
   Future<void> _refresh() async {
@@ -263,7 +384,7 @@ class _RiverScreenState extends State<RiverScreen> {
         ),
       ),
     );
-    if (followed == true) await _load();
+    if (followed == true) await _reloadLoaded();
   }
 
   ReaderDoors get _readerDoors => ReaderDoors(
@@ -297,33 +418,15 @@ class _RiverScreenState extends State<RiverScreen> {
         ),
       ),
     );
-    await _load();
+    await _reloadLoaded();
   }
 
   Future<void> _openSearch() async {
     await Navigator.of(context).push<void>(MaterialPageRoute(
         builder: (_) => SearchScreen(doors: _searchDoors)));
-    await _load();
+    await _reloadLoaded();
   }
 
-  Future<void> _openHistory() async {
-    await Navigator.of(context).push<void>(MaterialPageRoute(
-        builder: (_) => HistoryScreen(doors: _searchDoors)));
-    await _load();
-  }
-
-  /// Campaign 9 Phase 2: user: "hiding the queue as only accessible in
-  /// the playing bar is odd." Play next/Play last already WRITE to the
-  /// queue from every row's menu regardless of whether anything is
-  /// playing — this is the same [QueueScreen] the mini bar's own door
-  /// opens, just reachable without something already playing first.
-  void _openQueue() {
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => QueueScreen(db: widget.db, profile: widget.profile),
-      ),
-    );
-  }
 
   Future<void> _openItem(RiverEntry e) async {
     await widget.db.feedsDao.markRead(
@@ -351,12 +454,12 @@ class _RiverScreenState extends State<RiverScreen> {
           resolveTranslator: widget.resolveTranslator,
           availableTranslationTargets: widget.availableTranslationTargets),
     ));
-    await _load();
+    await _patch(e.work.id);
   }
 
   Future<void> _playItem(RiverEntry e) async {
     await widget.playerController.playWork(e.work);
-    await _load(); // the unread dot cleared
+    await _patch(e.work.id); // the unread dot cleared
   }
 
   /// The transcribe entry: plan → the ONE consent chokepoint when anything
@@ -401,7 +504,7 @@ class _RiverScreenState extends State<RiverScreen> {
   Future<void> _common(String choice, RiverEntry e) async {
     await _actions.handleCommon(
         context, choice, (work: e.work, episode: e.episode));
-    await _load();
+    await _patch(e.work.id);
   }
 
   /// Keep: into the library, out of the unread flow. Undo restores the
@@ -412,7 +515,7 @@ class _RiverScreenState extends State<RiverScreen> {
     final prior = _triage.priorStateOf(
         persistence: e.work.persistence, readAtMs: e.episode.readAtMs);
     await _triage.keep(e.work.id, nowMs: DateTime.now().millisecondsSinceEpoch);
-    await _load();
+    await _patch(e.work.id);
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
@@ -429,14 +532,13 @@ class _RiverScreenState extends State<RiverScreen> {
   }
 
   /// Let it pass: the explicit "I saw this, no thanks" — marks read,
-  /// promotes nothing. Decay already handles aging; this is that law's
-  /// explicit form.
+  /// promotes nothing, and the item stays in the archive (ADR-0019).
   Future<void> _letItPass(RiverEntry e) async {
     final prior = _triage.priorStateOf(
         persistence: e.work.persistence, readAtMs: e.episode.readAtMs);
     await _triage.letItPass(e.work.id,
         nowMs: DateTime.now().millisecondsSinceEpoch);
-    await _load();
+    await _patch(e.work.id);
     if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..clearSnackBars()
@@ -454,47 +556,37 @@ class _RiverScreenState extends State<RiverScreen> {
 
   Future<void> _undoTriage(int workId, TriagePriorState prior) async {
     await _triage.undo(workId, prior);
-    await _load();
+    await _patch(workId);
   }
 
-  List<RiverEntry> get _visible {
-    final entries = _entries ?? const [];
-    return switch (_filter) {
-      _RiverFilter.all => entries,
-      _RiverFilter.text => [
-        for (final e in entries)
-          if (e.episode.enclosureUrl == null) e,
-      ],
-      _RiverFilter.audio => [
-        for (final e in entries)
-          if (e.episode.enclosureUrl != null) e,
-      ],
-    };
-  }
+  /// The chips filter in the query now, so what is loaded is what shows.
+  List<RiverEntry> get _visible => _entries ?? const [];
 
   @override
   Widget build(BuildContext context) {
     final entries = _entries;
+    final theme = ThemePreferenceScope.maybeOf(context);
     return Scaffold(
       bottomSheet: OhUndoBar(controller: _undo),
       appBar: _selection.active ? _bulk.bar(context) : AppBar(
-        title: const Text('Inbox'),
+        title: const Text('Latest'),
         actions: [
           OhBarActions(children: [
             OhBarAction(
               key: const Key('manage-feeds'),
               icon: Icons.rss_feed,
-              label: 'Feeds',
+              // The industry's word for the shows you follow, and the
+              // title of the screen it opens.
+              label: 'Subscriptions',
               onPressed: _manageFeeds,
             ),
-            const TrellisThemeToggle(),
             OhBarOverflow<String>(
               key: const Key('river-more'),
               onSelected: (choice) => switch (choice) {
                 'jobs' => widget.onOpenJobs?.call(),
-                'history' => _openHistory(),
-                'select' => _selection.enter(),
-                _ => _openQueue(),
+                final v when isThemeMenuValue(v) =>
+                  chooseThemeFromMenu(theme!, v),
+                _ => _selection.enter(),
               },
               itemBuilder: (_) => [
                 if (_entries?.isNotEmpty ?? false)
@@ -503,22 +595,13 @@ class _RiverScreenState extends State<RiverScreen> {
                     value: 'select',
                     child: Text('Select'),
                   ),
-                const PopupMenuItem(
-                  key: Key('river-open-history'),
-                  value: 'history',
-                  child: Text('History'),
-                ),
-                const PopupMenuItem(
-                  key: Key('river-open-queue'),
-                  value: 'queue',
-                  child: Text('Up Next'),
-                ),
                 if (widget.onOpenJobs != null)
                   const PopupMenuItem(
                     key: Key('river-open-jobs'),
                     value: 'jobs',
                     child: Text('Jobs'),
                   ),
+                if (theme != null) ...themeMenuItems(theme),
               ],
             ),
           ]),
@@ -531,7 +614,6 @@ class _RiverScreenState extends State<RiverScreen> {
             SearchEntry(
                 key: const Key('river-search'), onPressed: _openSearch),
             TranscribeJobCards(coordinator: widget.coordinator),
-            _decayedNotice(),
             Expanded(
               child: RefreshIndicator(
                 onRefresh: _refresh,
@@ -563,15 +645,31 @@ class _RiverScreenState extends State<RiverScreen> {
         SearchEntry(
             key: const Key('river-search'), onPressed: _openSearch),
         TranscribeJobCards(coordinator: widget.coordinator),
-        _decayedNotice(),
         _filterChips(),
         Expanded(
           child: RefreshIndicator(
             onRefresh: _refresh,
             child: ListView.builder(
               physics: const AlwaysScrollableScrollPhysics(),
-              itemCount: visible.length,
-              itemBuilder: (_, i) => _itemTile(visible, i),
+              itemCount: visible.length + (_hasMore ? 1 : 0),
+              itemBuilder: (_, i) => i < visible.length
+                  ? (_newLineAbove(visible, i)
+                      ? Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const _NewSinceLine(),
+                            _itemTile(visible, i),
+                          ],
+                        )
+                      : _itemTile(visible, i))
+                  // A new list or a longer one is a new slot, so it asks
+                  // again once it is built.
+                  : _moreFailed
+                      ? _MoreFailed(
+                          onRetry: () => setState(() => _moreFailed = false))
+                      : _MoreBelow(
+                          key: ValueKey((_generation, visible.length)),
+                          onShown: _loadMore),
             ),
           ),
         ),
@@ -615,23 +713,6 @@ class _RiverScreenState extends State<RiverScreen> {
     final theme = Theme.of(context);
     final selecting = _selection.active;
     final isAudio = e.episode.enclosureUrl != null;
-    // The shed-leaves law (proposal-2 §12): an ephemeron carries a leaf that
-    // fades toward its sweep day; promoted works persist and carry nothing.
-    // Same day arithmetic as the boot sweep — see river_decay.dart.
-    final isEphemeron = e.work.persistence == 'ephemeron';
-    final held = _held.contains(e.work.id);
-    // A held row is not counting down: full leaf, and it says why it stays.
-    final daysLeft = held
-        ? 31
-        : ephemeraDaysLeft(
-            firstSeenEpochDay: e.work.firstSeenEpochDay,
-            todayEpochDay: epochDayUtcNow(),
-          );
-    final drift = !isEphemeron
-        ? null
-        : held
-            ? heldSubtitle
-            : driftSubtitle(daysLeft);
     final entry = (work: e.work, episode: e.episode);
     final row = EpisodeRow(
       work: e.work,
@@ -644,33 +725,18 @@ class _RiverScreenState extends State<RiverScreen> {
           ? () => _selection.toggle(e.work.id)
           : () => _openItem(e),
       onPlay: isAudio ? () => _playItem(e) : null,
+      onRead: _readerDoors.canOpenTranscript
+          ? () async {
+              await _readerDoors.openTranscript(context,
+                  db: widget.db, work: e.work);
+              await _patch(e.work.id);
+            }
+          : null,
       selected: selecting ? _selection.contains(e.work.id) : null,
       onLongPress: selecting
           ? () => _selection.toggle(e.work.id)
           : () => _selection.enter(e.work.id),
-      metaLead: isEphemeron
-          ? Padding(
-              padding: const EdgeInsets.only(right: 4),
-              child: Opacity(
-                key: Key('leaf-${e.work.id}'),
-                opacity: leafOpacity(daysLeft),
-                child: const Icon(
-                  Icons.eco,
-                  size: 14,
-                  color: OhColors.sage500,
-                ),
-              ),
-            )
-          : null,
       below: [
-        if (drift != null)
-          Text(
-            drift,
-            key: Key('drift-${e.work.id}'),
-            style: theme.textTheme.bodySmall,
-            overflow: TextOverflow.ellipsis,
-            maxLines: 1,
-          ),
         if (isAudio && widget.downloadCoordinator != null)
           _RowDownload(
               coordinator: widget.downloadCoordinator!, workId: e.work.id),
@@ -683,7 +749,7 @@ class _RiverScreenState extends State<RiverScreen> {
         'pass' => _letItPass(e),
         'transcribe' => _transcribe(e, translate: false),
         'translate' => _transcribe(e, translate: true),
-        'mark-older' => _bulk.markOlderPlayed(context, _olderUnplayed(visible, e)),
+        'mark-older' => _markOlderPlayed(e),
         _ => _common(choice, e),
       },
       menuBuilder: (_) => [
@@ -696,7 +762,7 @@ class _RiverScreenState extends State<RiverScreen> {
             value: 'pass',
             child: const Text('Let it pass')),
         ..._actions.commonMenuItems(entry),
-        if (isAudio && _olderUnplayed(visible, e).isNotEmpty)
+        if (isAudio && _offersOlder(visible, e))
           PopupMenuItem(
               key: Key('mark-older-${e.work.id}'),
               value: 'mark-older',
@@ -751,6 +817,92 @@ class _RiverScreenState extends State<RiverScreen> {
     );
   }
 
+}
+
+/// The quiet line between what arrived since the last visit and what was
+/// already there. Words only: no count, no colour that asks for action.
+class _NewSinceLine extends StatelessWidget {
+  const _NewSinceLine();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Semantics(
+      header: true,
+      child: Padding(
+        key: const Key('latest-new-since'),
+        padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+        child: Row(
+          children: [
+            const Expanded(child: Divider()),
+            Flexible(
+              flex: 3,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text('New since you last looked',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant)),
+              ),
+            ),
+            const Expanded(child: Divider()),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The list's last slot while more pages exist: built as it nears the
+/// screen (the list's cache extent), which is the cue to fetch the next.
+class _MoreBelow extends StatefulWidget {
+  final VoidCallback onShown;
+  const _MoreBelow({super.key, required this.onShown});
+
+  @override
+  State<_MoreBelow> createState() => _MoreBelowState();
+}
+
+class _MoreBelowState extends State<_MoreBelow> {
+  @override
+  void initState() {
+    super.initState();
+    // Not during build: the fetch ends in setState on the list.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) widget.onShown();
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => const Padding(
+        padding: EdgeInsets.symmetric(vertical: 24),
+        child: Center(child: CircularProgressIndicator()),
+      );
+}
+
+/// The footer after a page below failed: says so, and offers the one
+/// verb that helps. Retrying swaps the spinner footer back in, which asks
+/// again as soon as it is built.
+class _MoreFailed extends StatelessWidget {
+  final VoidCallback onRetry;
+  const _MoreFailed({required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Couldn’t load older items.'),
+            const SizedBox(height: 8),
+            OutlinedButton(
+              key: const Key('river-more-retry'),
+              onPressed: onRetry,
+              child: const Text('Try again'),
+            ),
+          ],
+        ),
+      );
 }
 
 /// The row's own honest download line: bytes while it runs, "paused" or
@@ -828,23 +980,23 @@ class _EmptyRiver extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               Icon(
-                Icons.inbox_outlined,
+                Icons.dynamic_feed_outlined,
                 size: 56,
                 color: Theme.of(context).colorScheme.primary,
               ),
               const SizedBox(height: 16),
               Text(
-                'Your Inbox is empty.',
+                'Nothing in Latest yet.',
                 style: Theme.of(context).textTheme.titleLarge,
                 textAlign: TextAlign.center,
               ),
               const SizedBox(height: 8),
               Text(
-                // The 30-day rule stated in the same breath as the no-
-                // ranking promise (audit rank 4): leaving is a decision.
-                'New episodes and articles from the feeds you follow arrive '
-                'here, newest first, never ranked. What you don’t keep '
-                'leaves after 30 days.',
+                // The archive promise in the same breath as the no-ranking
+                // one (ADR-0019): nothing here ever leaves on its own.
+                'Add a podcast or a site’s feed, and its new episodes and '
+                'articles arrive here, newest first, never ranked, and stay. '
+                'What you follow is under Subscriptions, at the top.',
                 style: Theme.of(context).textTheme.bodyMedium,
                 textAlign: TextAlign.center,
               ),

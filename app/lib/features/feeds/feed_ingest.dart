@@ -1,7 +1,8 @@
 /// Feed-item ingestion into the spine (ADR-0002): every item IS a work —
 /// audio items are `episode` works whose sourceUrl is the enclosure, text
 /// items are `article` works whose sourceUrl is the link. All arrive as
-/// ephemera; promotion is the user's hand (ADR-0003 law 2).
+/// ephemera, and stay in Latest for good; promotion is the user's hand
+/// (ADR-0019).
 ///
 /// Also here: the published-date parser (comms_core deliberately leaves feed
 /// dates raw — the donor never parsed them at that layer) and the breaker

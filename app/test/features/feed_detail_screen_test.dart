@@ -10,9 +10,13 @@ import 'package:trellis/features/feeds/feeds_repository.dart';
 import 'package:trellis/features/feeds/feeds_screen.dart';
 
 import 'package:trellis/features/feeds/feed_settings_screen.dart';
+import 'package:trellis/features/player/karaoke_screen.dart';
 import 'package:trellis/features/player/player_controller.dart';
 
+import 'package:trellis/features/reader/reader_doors.dart';
+
 import '../support/fake_player.dart';
+import '../support/fake_tts.dart';
 import '../support/scripted_fetcher.dart';
 
 /// The feed detail screen: a single feed's own episodes, newest first, plus
@@ -62,6 +66,64 @@ void main() {
               db: db,
               repository: FeedsRepository(db: db, fetcher: fetcher),
               feed: feed)));
+
+  // A podcast is readable without being played: the show page offers
+  // Read on a transcribed episode, as Latest does.
+  testWidgets('Read on a transcribed episode opens its transcript',
+      (tester) async {
+    final feed = await seedFeed();
+    final work = (await db.spineDao.worksOf(profileId)).single;
+    await db.spineDao.insertSegments(
+        work.id, const [(idx: 0, kind: 'prose', text: 'Lights overhead.')]);
+    await db.spineDao.insertAlignments(
+        work.id, const [(segmentIdx: 0, tStartMs: 0, tEndMs: 5000)]);
+    final fake = FakeEpisodePlayer();
+    final controller = PlayerController(
+        db: db, profileId: profileId, createPlayer: () => fake);
+    addTearDown(controller.dispose);
+    await tester.pumpWidget(MaterialApp(
+        home: FeedDetailScreen(
+            db: db,
+            repository: FeedsRepository(
+                db: db, fetcher: ScriptedFetcher((u, h) => textResponse(''))),
+            feed: feed,
+            playerController: controller)));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(Key('read-${work.id}')));
+    await tester.pumpAndSettle();
+    expect(find.byType(KaraokeScreen), findsOneWidget);
+    expect(find.text('Lights overhead.'), findsOneWidget);
+    expect(fake.loadedUrl, isNull);
+  });
+
+  testWidgets('the transcript opened here gets the same reader kit as '
+      "Latest's", (tester) async {
+    final feed = await seedFeed();
+    final work = (await db.spineDao.worksOf(profileId)).single;
+    await db.spineDao.insertSegments(
+        work.id, const [(idx: 0, kind: 'prose', text: 'Lights overhead.')]);
+    await db.spineDao.insertAlignments(
+        work.id, const [(segmentIdx: 0, tStartMs: 0, tEndMs: 5000)]);
+    final controller = PlayerController(
+        db: db, profileId: profileId, createPlayer: FakeEpisodePlayer.new);
+    addTearDown(controller.dispose);
+    final tts = FakeTtsSpeaker();
+    await tester.pumpWidget(MaterialApp(
+        home: FeedDetailScreen(
+            db: db,
+            repository: FeedsRepository(
+                db: db, fetcher: ScriptedFetcher((u, h) => textResponse(''))),
+            feed: feed,
+            playerController: controller,
+            readerDoors: ReaderDoors(player: controller, tts: tts))));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(Key('read-${work.id}')));
+    await tester.pumpAndSettle();
+    expect(tester.widget<KaraokeScreen>(find.byType(KaraokeScreen)).tts,
+        same(tts));
+  });
 
   testWidgets('a feed with a known archive link shows the fetch-older action',
       (tester) async {
@@ -327,7 +389,7 @@ void main() {
       expect(find.byKey(Key('queued-${ids['Clear night']}')), findsOneWidget);
     });
 
-    testWidgets('Add unplayed to Up Next appends them and says how many',
+    testWidgets('Add unplayed to Queue appends them and says how many',
         (tester) async {
       await pumpPage(tester);
       await tester.tap(find.byKey(const Key('add-unplayed')));
@@ -336,7 +398,7 @@ void main() {
       final queue = await db.queueDao.queueOf(profileId);
       expect(queue.map((r) => r.workId),
           [ids['Clear night'], ids['Aurora season']]);
-      expect(find.text('Added 2 episodes to Up Next.'), findsOneWidget);
+      expect(find.text('Added 2 episodes to the Queue.'), findsOneWidget);
       expect(player.loadedUrl, isNull, reason: 'queueing never starts play');
     });
 

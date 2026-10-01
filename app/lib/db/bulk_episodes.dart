@@ -164,9 +164,9 @@ class BulkEpisodes {
     });
   }
 
-  /// Appends the ones not already in Up Next, in the order given; queued
+  /// Appends the ones not already in the queue, in the order given; queued
   /// ones keep their place. Undo takes out only what this added.
-  Future<BulkChange> addToUpNext(List<int> workIds,
+  Future<BulkChange> addToQueue(List<int> workIds,
       {required int profileId, required int nowMs}) {
     return db.transaction(() async {
       final have = {

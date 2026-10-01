@@ -16,7 +16,8 @@ packages/
                 prereq DAG, 4 item types, .ohcourse parser). Pure Dart.
                 Do not "improve" the semantics — the tests are the spec.
   loom_core/    Content spine: Work/Segment/Layer/Alignment/Position,
-                the cursor law (ADR-0002), ephemera decay, .ohparcel.
+                the cursor law (ADR-0002), the kept/unkept bit (nothing
+                decays, ADR-0019), .ohparcel.
                 Pure Dart, TDD from scratch.
   comms_core/   Feed/network hygiene: SSRF guard (stricter than donor),
                 conditional GET, RSS/Atom, OPML, breaker. HTTP behind a seam.
@@ -41,7 +42,7 @@ packages/
                 server) — the *_core "no dart:io" law below doesn't apply
                 to it; it isn't a *_core package.
 app/            Flutter app (pkg name trellis): reader, library, intake,
-                feeds/river (shown as "Inbox"), player, study, models,
+                feeds/river (shown as "Latest"), player, study, models,
                 transcribe, echo (shown as "What you've built": the
                 lifetime-totals/year-in-review screen). Code names stay;
                 on-screen words follow the jargon ruling (see Words on
@@ -71,7 +72,9 @@ docs/research/  The design panel's full output. Treat as provenance, not law.
 ## Words on screen
 
 Made-up coinages never reach the screen (operator ruling): the River is
-the **Inbox**, Echo is **What you've built**, the espalier wall is the
+**Latest**, Up Next is the **Queue** (a tab: Latest · Queue · Library ·
+Courses), the follow list is **Subscriptions**, the day-grouped listening
+record is **History** (its door is on the Queue bar), Echo is **What you've built**, the espalier wall is the
 **course map**, rungs are **steps**, sigma is **Focus spread**, Parafoveal
 is **Nearby words**. Real terms (RSVP, parafoveal preview, SM-2, FSRS) are
 kept where a setting is chosen, each with a one-line explanation.

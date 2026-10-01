@@ -4,7 +4,7 @@ import 'package:openhearth_design/openhearth_design.dart';
 import '../../db/database.dart';
 
 /// The device's theme choice (fleet ruling: light, dark or follow the
-/// phone, default follow the phone, one tap away on every primary screen).
+/// phone, default follow the phone, two taps away on every primary screen).
 /// It belongs to the device, not to a reader, so it lives in
 /// [DeviceSettings]. Trellis never stored a theme before this, so there is
 /// no older value to migrate: an unset or unknown value is "follow phone".
@@ -48,7 +48,7 @@ Future<T?> withinDeadline<T>(Future<T> Function() run, Duration deadline) async 
   }
 }
 
-/// Hands the [ThemePreferenceController] to the app bars below it.
+/// Hands the [ThemePreferenceController] to the screens below it.
 class ThemePreferenceScope
     extends InheritedNotifier<ThemePreferenceController> {
   const ThemePreferenceScope(
@@ -60,21 +60,40 @@ class ThemePreferenceScope
       ?.notifier;
 }
 
-/// The fleet's theme toggle for a Trellis app bar: icon plus short label,
-/// a menu of three named choices, so any mode is two taps away. Renders
-/// nothing when no [ThemePreferenceScope] is above it (a screen pumped on
-/// its own in a test).
-class TrellisThemeToggle extends StatelessWidget {
-  const TrellisThemeToggle({super.key});
+const _themeValuePrefix = 'theme:';
 
-  @override
-  Widget build(BuildContext context) {
-    final controller = ThemePreferenceScope.maybeOf(context);
-    if (controller == null) return const SizedBox.shrink();
-    return OhThemeToggle(
-      key: const Key('theme-toggle'),
-      value: controller.value,
-      onChanged: controller.choose,
-    );
-  }
-}
+/// The theme as a checked group at the foot of a tab's overflow menu: a
+/// "Theme" header, then "Follow phone", "Light" and "Dark", the one in use
+/// checked. Two taps (⋮, then the choice), every choice named before it
+/// is picked. It replaced first an app-bar "Auto" button that said nothing
+/// until tapped, then a worded item that opened a chooser: three taps,
+/// over the fleet ruling of one or two.
+/// [divided] is false where the group is the whole menu.
+List<PopupMenuEntry<String>> themeMenuItems(
+        ThemePreferenceController controller,
+        {bool divided = true}) =>
+    [
+      if (divided) const PopupMenuDivider(),
+      const PopupMenuItem<String>(
+        enabled: false,
+        height: 32,
+        child: Text('Theme'),
+      ),
+      for (final p in OhThemeModePreference.values)
+        CheckedPopupMenuItem<String>(
+          key: Key('theme-choice-${p.name}'),
+          value: '$_themeValuePrefix${p.name}',
+          checked: p == controller.value,
+          child: Text(p.label),
+        ),
+    ];
+
+/// Whether a menu value came from [themeMenuItems]. Each tab checks this
+/// before its own default branch, so a theme pick never falls into it.
+bool isThemeMenuValue(String value) => value.startsWith(_themeValuePrefix);
+
+/// Applies a pick from [themeMenuItems].
+Future<void> chooseThemeFromMenu(
+        ThemePreferenceController controller, String value) =>
+    controller.choose(OhThemeModePreference.values
+        .byName(value.substring(_themeValuePrefix.length)));

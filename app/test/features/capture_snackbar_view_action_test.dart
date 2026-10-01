@@ -6,6 +6,7 @@ import 'package:trellis/features/player/captures_screen.dart';
 import 'package:trellis/main.dart';
 
 import '../support/fake_player.dart';
+import '../support/tabs.dart';
 import '../support/fake_services.dart';
 import '../support/scripted_fetcher.dart';
 import 'dart:io';
@@ -52,7 +53,7 @@ void main() {
     await tester.pumpAndSettle();
     await pickReader(tester, 'Ada');
 
-    await tester.tap(find.text('Inbox'));
+    await tester.tap(tabLabel('Latest'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(Key('play-$workId')));
     await tester.pumpAndSettle();

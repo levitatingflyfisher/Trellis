@@ -11,9 +11,10 @@ import 'package:trellis/main.dart';
 import '../support/fake_player.dart';
 import '../support/scripted_fetcher.dart';
 import '../support/pick_reader.dart';
+import '../support/tabs.dart';
 
 /// Fleet ruling: light, dark or follow the phone; default follow the
-/// phone; one tap, at most two, from every primary screen. Trellis never
+/// phone; reachable in two taps from every primary screen. Trellis never
 /// stored a theme before, so there is nothing to migrate: the cases are
 /// the default, a round-trip, and an unknown stored value.
 void main() {
@@ -51,25 +52,46 @@ void main() {
   ThemeMode appMode(WidgetTester tester) =>
       tester.widget<MaterialApp>(find.byType(MaterialApp)).themeMode!;
 
-  for (final tab in ['Library', 'Courses', 'Inbox']) {
-    testWidgets('$tab: dark is two taps away, and it sticks', (tester) async {
+  // The app-bar "Auto" button read as a mystery until tapped (user: "I
+  // clicked it to learn it was about dark mode"), and a worded item that
+  // opened a chooser made it three taps. The fleet ruling is one or two:
+  // the three named choices sit in each tab's menu, the one in use checked.
+  for (final tab in ['Latest', 'Queue', 'Library', 'Courses']) {
+    testWidgets('$tab: dark is two taps from the menu, and sticks',
+        (tester) async {
       await db.profilesDao.create('Ada');
       await pumpApp(tester);
       await pickReader(tester, 'Ada');
-      if (tab != 'Library') {
-        await tester.tap(find.text(tab).last);
+      await toTab(tester, tab);
+      expect(appMode(tester), ThemeMode.system);
+      expect(find.byKey(const Key('theme-toggle')), findsNothing,
+          reason: 'no unexplained theme button on the bar');
+
+      Future<void> openMenu() async {
+        await tester.tap(find.descendant(
+            of: find.byType(AppBar), matching: find.byIcon(Icons.more_vert)));
         await tester.pumpAndSettle();
       }
-      expect(appMode(tester), ThemeMode.system);
 
-      await tester.tap(find.byKey(const Key('theme-toggle')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Dark').last);
+      bool checked(String label) => tester
+          .widget<CheckedPopupMenuItem<String>>(
+              find.widgetWithText(CheckedPopupMenuItem<String>, label))
+          .checked;
+
+      await openMenu();
+      expect(find.text('Theme'), findsOneWidget, reason: 'the group says what it is');
+      expect(checked('Follow phone'), isTrue);
+      expect(checked('Light'), isFalse);
+      expect(checked('Dark'), isFalse);
+      await tester.tap(find.text('Dark'));
       await tester.pumpAndSettle();
 
       expect(appMode(tester), ThemeMode.dark);
       expect(await ThemePreferenceController.read(db),
           OhThemeModePreference.dark);
+      await openMenu();
+      expect(checked('Dark'), isTrue);
+      expect(checked('Follow phone'), isFalse);
     });
   }
 

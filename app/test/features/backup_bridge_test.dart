@@ -254,6 +254,24 @@ void main() {
           isNull);
     });
 
+    test('a backup made while decay existed restores nothing hidden '
+        '(ADR-0019)', () async {
+      await seedRichly(db);
+      await db.customStatement("UPDATE works SET persistence = 'decayed' "
+          "WHERE id = (SELECT MIN(id) FROM works)");
+      final payload = RowPayload.decode(RowPayload.encode(
+          await bridge.exportTables(),
+          createdAt: DateTime.utc(2026, 8, 11)));
+
+      await bridge.restoreFullReplace(payload);
+
+      final persistences = {
+        for (final w in await db.select(db.works).get()) w.persistence
+      };
+      expect(persistences, isNot(contains('decayed')));
+      expect(persistences, contains('ephemeron'));
+    });
+
     test('reproduces every row on a second device, ids intact', () async {
       await seedRichly(db);
       final payload = RowPayload.encode(await bridge.exportTables(),

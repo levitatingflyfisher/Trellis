@@ -35,6 +35,8 @@ switch moves zero data; it reads the same row.
 **Ephemera decay (sovereignty by structure):** feed items and unpromoted
 episodes are `ephemeron` and are swept after a default 30 days. Promotion to
 `work` requires the user's hand (extract, pin, or finish). Works persist.
+**Superseded by [ADR-0019](0019-latest-is-a-permanent-archive.md):**
+nothing decays; `ephemeron` now means only "not in the Library".
 
 **Cuttings (`.ohparcel`):** the spine serializes to a shareable bundle
 (work + segments + layers + alignments + optional course, content-hashed) so

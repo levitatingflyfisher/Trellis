@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/main.dart';
 import '../support/pick_reader.dart';
+import '../support/tabs.dart';
 
 /// The reader half of the alpha loop: RSVP with the donor ORP pivot,
 /// punctuation dwell, the cursor law across mode switches (ADR-0002), and
@@ -32,6 +33,7 @@ void main() {
     await tester.pumpWidget(TrellisApp(db: db));
     await tester.pumpAndSettle();
     await pickReader(tester, 'Ada');
+    await toTab(tester, 'Library');
     await tester.tap(find.text(title));
     await tester.pumpAndSettle();
   }

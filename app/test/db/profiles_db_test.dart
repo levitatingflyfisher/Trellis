@@ -48,6 +48,18 @@ void main() {
     expect(await db.profilesDao.preferSystemVoice(profileId), isFalse);
   });
 
+  group('Latest\'s last visit (ADR-0019)', () {
+    test('the first open has no previous visit; each open hands back the '
+        'one before and records its own, per profile', () async {
+      final ada = await db.profilesDao.create('Ada');
+      final blaise = await db.profilesDao.create('Blaise');
+      expect(await db.profilesDao.swapLatestSeen(ada, nowMs: 100), isNull);
+      expect(await db.profilesDao.swapLatestSeen(ada, nowMs: 200), 100);
+      expect(await db.profilesDao.swapLatestSeen(blaise, nowMs: 300), isNull);
+      expect(await db.profilesDao.swapLatestSeen(ada, nowMs: 400), 200);
+    });
+  });
+
   group('scheduler (study crown: Classic | FSRS, per profile)', () {
     test('a fresh profile defaults to fsrs', () async {
       final profileId = await db.profilesDao.create('Ada');

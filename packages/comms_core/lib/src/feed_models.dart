@@ -98,7 +98,8 @@ class ParsedFeed {
       required this.items,
       this.nextPageUrl,
       this.nextPageRel,
-      this.imageUrl});
+      this.imageUrl,
+      this.language});
 
   /// Channel/feed title, falling back to the feed URL.
   final String title;
@@ -120,4 +121,9 @@ class ParsedFeed {
   /// neither, which the calm river layout treats as "no thumbnail" rather
   /// than an error.
   final String? imageUrl;
+
+  /// The channel's declared `<language>` exactly as written (`en-us`,
+  /// `ru-RU`, trimmed) — null when absent or empty. Transcription locks to
+  /// it when whisper knows it, saving a detection pass on every window.
+  final String? language;
 }

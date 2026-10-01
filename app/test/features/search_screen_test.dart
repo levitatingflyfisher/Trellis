@@ -292,22 +292,32 @@ void main() {
       await tester.pumpAndSettle();
       await pickReader(tester, 'Ada');
       await tester.tap(find.descendant(
-          of: find.byType(NavigationBar), matching: find.text('Inbox')));
+          of: find.byType(NavigationBar), matching: find.text('Latest')));
       await tester.pumpAndSettle();
     }
 
-    testWidgets('Search at the top of the Inbox opens search', (tester) async {
+    testWidgets('Search at the top of Latest opens search', (tester) async {
       await pumpApp(tester);
       await tester.tap(find.byKey(const Key('river-search')));
       await tester.pumpAndSettle();
       expect(find.byType(SearchScreen), findsOneWidget);
     });
 
-    testWidgets('History in the Inbox menu opens history', (tester) async {
+    // Queue is what plays next, History is what played: its door sits on
+    // the Queue bar, visible, not in Latest's menu.
+    testWidgets('History on the Queue bar opens history', (tester) async {
       await pumpApp(tester);
       await tester.tap(find.byKey(const Key('river-more')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('river-open-history')));
+      expect(find.byKey(const Key('river-open-history')), findsNothing);
+      await tester.tapAt(Offset.zero);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.descendant(
+          of: find.byType(NavigationBar), matching: find.text('Queue')));
+      await tester.pumpAndSettle();
+      expect(find.byTooltip('History'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('queue-history')));
       await tester.pumpAndSettle();
       expect(find.byType(HistoryScreen), findsOneWidget);
     });

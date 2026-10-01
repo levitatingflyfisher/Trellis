@@ -62,9 +62,7 @@ void main() {
             player: controller,
             startSegmentIdx: 2)));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('reader-overflow')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('listen-from-here')));
+    await tester.tap(find.byTooltip('Listen'));
     await tester.pumpAndSettle();
     expect(fakePlayer.log.last, 'seek:20000');
   });
@@ -112,9 +110,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('work-language-de')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('reader-overflow')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('listen-from-here')));
+    await tester.tap(find.byTooltip('Listen'));
     await tester.pumpAndSettle();
     expect(fakePlayer.log.last, 'seek:10000');
   });

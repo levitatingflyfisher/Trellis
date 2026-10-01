@@ -313,6 +313,9 @@ void main() {
     // lasting Undo, and nothing deleted until the offer is let go.
     expect(find.byType(AlertDialog), findsNothing);
     expect(find.textContaining('Unfollowed'), findsOneWidget);
+    // Unfollow deletes every unkept item, read or not; the words say so.
+    expect(find.textContaining("What you haven’t kept goes too"),
+        findsOneWidget);
     expect(await db.feedsDao.feedsOf(profile.id), hasLength(1));
     await tester.tap(find.text('Undo'));
     await tester.pumpAndSettle();
@@ -344,7 +347,7 @@ void main() {
         return const Text('inbox');
       }),
     ));
-    // What the Inbox does: await the push, then reload at once.
+    // What Latest does: await the push, then reload at once.
     List<Feed>? seenOnReturn;
     unawaited(Navigator.of(home)
         .push(MaterialPageRoute<void>(

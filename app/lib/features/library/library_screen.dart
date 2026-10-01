@@ -387,25 +387,28 @@ class _LibraryScreenState extends State<LibraryScreen> {
   /// Remove is a deliberate menu choice, so it doesn't ask (fleet delete
   /// ruling). The work leaves the list at once and the bar offers Undo
   /// until the person dismisses it, removes something else or leaves the
-  /// screen; only then are the rows (and an audiobook's copied files)
-  /// deleted. A process killed meanwhile deletes nothing.
+  /// screen; only then does the removal land. A process killed meanwhile
+  /// changes nothing. A feed item only leaves the Library: Latest keeps
+  /// it, so the words say "from Library" (ADR-0019 §1).
   void _remove(_Entry e) {
     final id = e.work.id;
     setState(() => _removing.add(id));
     _undo.show(
-      message: "Removed '${e.work.title}'",
+      message: e.episode == null
+          ? "Removed '${e.work.title}'"
+          : "Removed '${e.work.title}' from Library",
       onUndo: () async {
         if (mounted) setState(() => _removing.remove(id));
       },
       onCommit: () async {
-        // Campaign 7 (ADR-0013): deleteWork only ever removes DB rows (the
+        final deleted = await _dao.removeFromLibrary(id);
+        // Campaign 7 (ADR-0013): a delete only ever removes DB rows (the
         // same law ADR-0012 recorded for a downloaded episode's audio
         // file) — an audiobook's copied bytes on disk are this screen's
         // own job to clear, or Remove silently leaks the whole book.
-        if (e.work.kind == 'audiobook') {
+        if (deleted && e.work.kind == 'audiobook') {
           widget.onDeleteAudiobookFiles?.call(id);
         }
-        await _dao.deleteWork(id);
         _removing.remove(id);
         if (mounted) await _load();
       },
@@ -454,6 +457,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Widget build(BuildContext context) {
     final entries = _liveEntries;
     final hasFilter = _activeQuery != null;
+    final theme = ThemePreferenceScope.maybeOf(context);
     return Scaffold(
       bottomSheet: OhUndoBar(controller: _undo),
       appBar: AppBar(
@@ -468,11 +472,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
               label: hasFilter ? 'Clear filter' : 'Filter',
               onPressed: _openFilter,
             ),
-            const TrellisThemeToggle(),
             OhBarOverflow<String>(
               key: const Key('library-more'),
               onSelected: (v) => switch (v) {
                 'models' => widget.onOpenModels?.call(),
+                final v when isThemeMenuValue(v) =>
+                  chooseThemeFromMenu(theme!, v),
                 _ => widget.onSwitchProfile(),
               },
               itemBuilder: (_) => [
@@ -488,6 +493,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     value: 'models',
                     child: Text('On this device'),
                   ),
+                if (theme != null) ...themeMenuItems(theme),
               ],
             ),
           ]),
@@ -643,7 +649,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
               PopupMenuItem(
                   value: 'pin',
                   child: Text(e.work.pinned ? 'Unpin' : 'Pin')),
-              const PopupMenuItem(value: 'remove', child: Text('Remove')),
+              PopupMenuItem(
+                  value: 'remove',
+                  child: Text(e.episode == null
+                      ? 'Remove'
+                      : 'Remove from Library')),
             ],
           ),
         ],

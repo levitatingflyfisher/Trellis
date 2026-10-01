@@ -7,7 +7,39 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
-## Unreleased — fleet rollout (2026-09)
+## 1.5.3 — 2026-10-24
+
+### Changed
+- **Latest is a permanent archive.** Nothing decays any more: every item
+  from every show and site you follow stays in Latest, newest first, until
+  you unfollow it. Items an older version had hidden come back. Latest
+  loads a page at a time as you scroll, so a big archive opens fast, and a
+  quiet "New since you last looked" line marks what arrived since your last
+  visit. It keeps its place when you switch tabs. Removing a podcast
+  episode from the Library now only takes it out of the Library; it stays
+  in Latest with its transcript.
+- **The Queue is a tab**: Latest · Queue · Library · Courses. Latest is
+  where the app opens. History has its own button on the Queue tab.
+- **Plain names.** Up Next is the Queue, Up Last is History, the follow
+  list is Subscriptions, and the Inbox is Latest.
+- **Theme** (light, dark or follow the phone) moved into each tab's ⋮
+  menu.
+- **Read a podcast without playing it.** A transcribed episode has a Read
+  button beside Play; it opens the transcript, and tapping a line plays
+  from there.
+- **The reader has a Play button** (Listen) whenever the text has audio.
+- **Faster transcription.** Trellis detects a show's language once and
+  locks it for the episode, keeps the model loaded for the whole episode,
+  starts each 30-second window with a fresh state, and phones whose CPU
+  supports it get a faster whisper build.
+- **A one-time full refresh.** After updating, the next refresh reads
+  every feed in full once, to learn each show's declared language.
+
+## Before 1.5.3 — fleet rollout (2026-09)
+
+Some lines below were overtaken by 1.5.3: the Inbox is Latest, nothing
+decays, Up Next is the Queue, and the theme is in each tab's ⋮ menu.
+
 
 ### Changed
 - **Plain words.** The River is the Inbox; Echo is What you've built; the

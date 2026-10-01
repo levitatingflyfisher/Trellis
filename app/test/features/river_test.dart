@@ -8,6 +8,7 @@ import 'package:trellis/main.dart';
 import 'package:trellis/services/device_services.dart';
 
 import '../support/fake_player.dart';
+import '../support/tabs.dart';
 import '../support/fake_services.dart';
 import '../support/scripted_fetcher.dart';
 import '../support/pick_reader.dart';
@@ -79,7 +80,7 @@ void main() {
   }
 
   Future<void> openRiver(WidgetTester tester) async {
-    await tester.tap(find.text('Inbox'));
+    await tester.tap(tabLabel('Latest'));
     await tester.pumpAndSettle();
   }
 
@@ -117,13 +118,27 @@ void main() {
     return workId;
   }
 
+  testWidgets('a fresh install lands on Latest, and its empty state says '
+      'where podcasts are added and followed', (tester) async {
+    await tester.pumpWidget(TrellisApp(
+        db: db,
+        fetcher: ScriptedFetcher((u, h) => textResponse('')),
+        createPlayer: () => player));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Nothing in Latest yet.'), findsOneWidget,
+        reason: 'Latest is the landing tab');
+    expect(find.textContaining('Add a podcast'), findsOneWidget);
+    expect(find.textContaining('under Subscriptions'), findsOneWidget);
+  });
+
   testWidgets('an empty river is an invitation, and its button reaches the '
       'subscribe screen', (tester) async {
     await seedProfile();
     await pumpApp(tester, ScriptedFetcher((u, h) => textResponse(_rssOne)));
     await openRiver(tester);
 
-    expect(find.text('Your Inbox is empty.'), findsOneWidget);
+    expect(find.text('Nothing in Latest yet.'), findsOneWidget);
     await tester.tap(find.text('Follow a feed'));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('subscribe-url')), findsOneWidget);
@@ -327,7 +342,7 @@ void main() {
     expect(find.byKey(const Key('mini-player')), findsOneWidget);
 
     // The bar lives in the shell: still there on the Library tab.
-    await tester.tap(find.text('Library'));
+    await tester.tap(tabLabel('Library'));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('mini-player')), findsOneWidget);
   });
@@ -992,7 +1007,7 @@ void main() {
       expect(find.byKey(Key('progress-$workId')), findsOneWidget);
     });
 
-    testWidgets('a queued episode says it is in Up Next', (tester) async {
+    testWidgets('a queued episode says it is in the queue', (tester) async {
       final profileId = await seedProfile();
       final workId = await seedAudio(profileId);
       await db.queueDao
@@ -1001,38 +1016,53 @@ void main() {
       await openRiver(tester);
 
       expect(find.byKey(Key('queued-$workId')), findsOneWidget);
-      expect(find.text('In Up Next'), findsOneWidget);
+      expect(find.text('In Queue'), findsOneWidget);
     });
   });
 
-  group('Up Next reachability (Campaign 9 Phase 2)', () {
-    // User: "hiding the queue as only accessible in the playing bar is
-    // odd" — Play next/Play last (river_screen.dart) already WRITE to the
-    // queue from every row's menu, but nothing plays, the mini bar never
-    // appears, and the queue stays unreachable.
-    testWidgets("River's AppBar carries an Up Next door that opens the "
-        'queue even when nothing is playing', (tester) async {
+  group('the Queue tab', () {
+    // User: "I freaking hate how hidden the up next and up last screen
+    // is." The queue was a pushed screen behind the mini bar (which shows
+    // only while something plays) or the Latest menu; it is now a tab.
+    Finder tab(String label) => find.descendant(
+        of: find.byType(NavigationBar), matching: find.text(label));
+
+    testWidgets('the tabs read Latest, Queue, Library, Courses, and the '
+        'app opens on Latest', (tester) async {
       await seedProfile();
       await pumpApp(tester, ScriptedFetcher((u, h) => textResponse(_rssOne)));
-      await openRiver(tester);
 
-      expect(find.byKey(const Key('mini-player')), findsNothing,
-          reason: 'the door must work with nothing playing, not just '
-              "riding the bar's own entry");
-      expect(find.text('Up Next'), findsNothing,
-          reason: "not navigated yet — the queue screen's own title isn't "
-              'on screen until the door is tapped');
-
-      await tester.tap(find.byKey(const Key('river-more')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('river-open-queue')));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Up Next'), findsOneWidget);
+      final labels = tester
+          .widget<NavigationBar>(find.byType(NavigationBar))
+          .destinations
+          .cast<NavigationDestination>()
+          .map((d) => d.label)
+          .toList();
+      expect(labels, ['Latest', 'Queue', 'Library', 'Courses']);
+      expect(
+          find.descendant(
+              of: find.byType(AppBar), matching: find.text('Latest')),
+          findsOneWidget);
     });
 
-    testWidgets('a Played-next item is reachable through that same door',
-        (tester) async {
+    testWidgets('Queue is a tab root: its own title, no back arrow, and it '
+        'opens with nothing playing', (tester) async {
+      await seedProfile();
+      await pumpApp(tester, ScriptedFetcher((u, h) => textResponse(_rssOne)));
+      expect(find.byKey(const Key('mini-player')), findsNothing);
+
+      await tester.tap(tab('Queue'));
+      await tester.pumpAndSettle();
+
+      expect(
+          find.descendant(
+              of: find.byType(AppBar), matching: find.text('Queue')),
+          findsOneWidget);
+      expect(find.byType(BackButton), findsNothing);
+      expect(find.text('Nothing queued yet.'), findsOneWidget);
+    });
+
+    testWidgets('a Play-next item shows on the Queue tab', (tester) async {
       final profileId = await seedProfile();
       final feedId = await db.feedsDao.insertFeed(
         profileId: profileId,
@@ -1046,18 +1076,56 @@ void main() {
           enclosureUrl: 'https://a/1.mp3');
 
       await pumpApp(tester, ScriptedFetcher((u, h) => textResponse(_rssOne)));
-      await openRiver(tester);
       await tester.tap(find.byKey(Key('menu-$workId')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Play next'));
       await tester.pumpAndSettle();
 
-      await tester.tap(find.byKey(const Key('river-more')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('river-open-queue')));
+      await tester.tap(tab('Queue'));
       await tester.pumpAndSettle();
 
-      expect(find.text('Queued item'), findsOneWidget);
+      expect(find.byKey(Key('queue-item-$workId')), findsOneWidget);
+    });
+
+    testWidgets("the Latest menu no longer carries the queue: it's a tab",
+        (tester) async {
+      await seedProfile();
+      await pumpApp(tester, ScriptedFetcher((u, h) => textResponse(_rssOne)));
+      await tester.tap(find.byKey(const Key('river-more')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('river-open-queue')), findsNothing);
+    });
+
+    testWidgets("the mini player's queue button switches to the Queue tab",
+        (tester) async {
+      final profileId = await seedProfile();
+      final feedId = await db.feedsDao.insertFeed(
+        profileId: profileId,
+        url: 'https://a/f',
+      );
+      final workId = await seedRiverItem(
+          profileId: profileId,
+          feedId: feedId,
+          title: 'Playing item',
+          publishedAtMs: 1000,
+          enclosureUrl: 'https://a/1.mp3');
+
+      await pumpApp(tester, ScriptedFetcher((u, h) => textResponse(_rssOne)));
+      await tester.tap(find.byKey(Key('play-$workId')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('open-queue')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(BackButton), findsNothing,
+          reason: 'a tab switch, not a pushed route');
+      expect(
+          find.descendant(
+              of: find.byType(AppBar), matching: find.text('Queue')),
+          findsOneWidget);
+      expect(
+          tester.widget<NavigationBar>(find.byType(NavigationBar))
+              .selectedIndex,
+          1);
     });
   });
 }

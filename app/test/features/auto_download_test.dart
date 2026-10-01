@@ -108,6 +108,34 @@ void main() {
       expect(started, [arrived[0], arrived[2], arrived[4]]);
     });
 
+    test('old guids a full re-parse adds again are not new, however high '
+        'their ids', () async {
+      final f = await feed();
+      await episode(f, 100);
+      await episode(f, 200);
+      await setFeedAutoDownload(db, f, true);
+      // The v28 one-time re-parse re-adds back-catalogue items the old
+      // sweep deleted: fresh rows above the mark, dated long before it.
+      for (final t in [10, 20, 150, 199]) {
+        await episode(f, t);
+      }
+      final released = await episode(f, 300);
+
+      expect(await pass(), isTrue);
+      expect(started, [released]);
+    });
+
+    test('a feed that stamps every item with one date still gets its new '
+        'ones', () async {
+      final f = await feed();
+      await episode(f, 100);
+      await setFeedAutoDownload(db, f, true);
+      final arrived = await episode(f, 100);
+
+      expect(await pass(), isTrue);
+      expect(started, [arrived]);
+    });
+
     test('a pass killed mid-download loses no pick and picks none twice',
         () async {
       final f = await feed();

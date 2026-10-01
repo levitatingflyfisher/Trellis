@@ -5,6 +5,7 @@ import 'package:trellis/db/database.dart';
 import 'package:trellis/features/reader/reader_screen.dart';
 import 'package:trellis/main.dart';
 import '../support/pick_reader.dart';
+import '../support/tabs.dart';
 
 /// Campaign 9 Phase 6 ("a third way to read"): Lines is a genuine third
 /// [ReaderMode] alongside Words (RSVP) and Scroll — a scroll-family view
@@ -49,6 +50,7 @@ void main() {
     await tester.pumpWidget(TrellisApp(db: db));
     await tester.pumpAndSettle();
     await pickReader(tester, 'Ada');
+    await toTab(tester, 'Library');
     await tester.tap(find.text(title));
     await tester.pumpAndSettle();
   }
@@ -171,12 +173,10 @@ void main() {
     final scrollable = find.byType(Scrollable).first;
     final before = tester.state<ScrollableState>(scrollable).position.pixels;
 
-    await tester.tap(find.byKey(const Key('reader-overflow')));
-    await tester.pumpAndSettle();
-    expect(find.text('Follow along'), findsOneWidget,
-        reason: 'Lines is scroll-family (Campaign 9 Phase 6) — follow-'
-            'along is offered here too, not just in Scroll');
-    await tester.tap(find.text('Follow along'));
+    expect(find.byTooltip('Play'), findsOneWidget,
+        reason: 'Lines is scroll-family (Campaign 9 Phase 6) — pacing is '
+            'offered here too, not just in Scroll');
+    await tester.tap(find.byTooltip('Play'));
     await tester.pump(const Duration(milliseconds: 300));
 
     for (var i = 0; i < 60; i++) {
@@ -188,9 +188,7 @@ void main() {
         reason: 'ensureVisible followed the cursor into later segments '
             'in Lines mode too');
 
-    await tester.tap(find.byKey(const Key('reader-overflow')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Stop following along'));
+    await tester.tap(find.byTooltip('Pause'));
     await tester.pumpAndSettle();
   });
 }

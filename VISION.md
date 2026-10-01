@@ -9,8 +9,8 @@ on whatever compute they happen to own, from a $90 phone to the family desktop.
 
 Tweets fly by. News cycles rise and die. Podcasts prompt conversations. Books
 leave impressions. Serious studies shape lives. This app is built on that
-gradient: **ephemera decay by default; works persist; what you keep, you keep
-because your own hand promoted it.** No feed ranking. No streaks. No
+gradient: **the feed is a permanent archive, newest first and never ranked;
+what you keep, you keep because your own hand promoted it.** No feed ranking. No streaks. No
 engagement optimization. The app must never develop an interest in your
 attention — that is a design law with tests, not a promise.
 
@@ -68,11 +68,11 @@ English-only. This app is judged against her, end to end.
 | Study engine with prereq DAG + monotonic SM-2 | ✅ ported, donor tests green |
 | Content spine with cross-modality position law | ✅ the cursor law is pinned across read/ticker/speak/play |
 | Reader (4 modes), intake, library | ✅ RSVP·print·ticker·speak; EPUB/URL/paste + Gutenberg browser. URL/Gutenberg *fetching* is native-first: browsers refuse most cross-site reads (no proxy, by design) — the web doors say so and paste/import always work — or serve the PWA from Skein on the family desktop and fetching works same-origin |
-| Feeds, podcasts, background player | ◐ reverse-chron Inbox, decay stated in days on every row (kept 30 more days once it leaves, and restorable), iTunes search, OPML, channel artwork; the mini player rehydrates paused (not blank) after a restart and an Up Next door reaches the queue with nothing playing (Campaign 9); lock-screen/pull-down-tray transport controls are wired end-to-end (`just_audio_background`, `ADR-0015` Decision 3, Campaign 9 Phase 2e — every play tags its MediaItem with id/title/album/artwork, unit-tested) but lock-screen RENDERING itself is device-only and still awaits the user's next device test, which is the only reason this stays ◐ rather than ✅ |
+| Feeds, podcasts, background player | ◐ reverse-chron Latest, a permanent archive read a page at a time with a quiet "New since you last looked" line (ADR-0019, which retired decay), iTunes search, OPML, channel artwork; the mini player rehydrates paused (not blank) after a restart and the Queue is its own tab (Latest · Queue · Library · Courses), reachable with nothing playing; lock-screen/pull-down-tray transport controls are wired end-to-end (`just_audio_background`, `ADR-0015` Decision 3, Campaign 9 Phase 2e — every play tags its MediaItem with id/title/album/artwork, unit-tested) but lock-screen RENDERING itself is device-only and still awaits the user's next device test, which is the only reason this stays ◐ rather than ✅ |
 | Multilingual transcription, checkpointed, resumable | ✅ whisper.cpp natives aboard the APK; native lane green on the pinned model; not yet exercised on a phone |
 | Brain + distillation + discourse study | ✅ BYOK cloud tier wired end to end; local/stove tiers are honest refusals, not engines |
 | Backup/migration, .apkg, storage panel, course map, dashboard+PIN | ✅ |
-| Opens into the task; remembers the reader and how they read | ✅ first launch opens a Library with no name to type; a cold launch reopens the last reader; mode, speed and nearby words come back on the next open (tests pin each) |
+| Opens into the task; remembers the reader and how they read | ✅ every launch lands on Latest, what arrived being the usual reason to open the app (a fresh install's empty Latest points at adding a podcast and at Subscriptions); a first launch has no name to type; a cold launch reopens the last reader; mode, speed and nearby words come back on the next open (tests pin each) |
 | Neural TTS (Supertonic/Kokoro) | ◐ ADR-0006 shipped the sentence-unit spine everywhere (the paragraph-at-a-time stall is fixed on the zero-byte system rung, every platform); ADR-0007 replaced the sherpa-onnx/Piper rung with Supertonic (MIT, no phonemizer — the APK stays MIT-clean, unlike the rung it replaced) — one voice (English, OpenRAIL-M weights on the user's own download) through the models door; the gapless synthesis-ahead pipeline IS threaded into the speak loop (real fork, settings escape, generation fencing) and proven end to end through fakes — not yet proven on a real device (the ONNX Runtime sessions actually opening, actual audio). Kokoro and a web tier stay roadmap |
 | Cuttings (.ohparcel), offline MT, web ML tier, FSRS | ✗ roadmap (P6) |
 

@@ -79,17 +79,19 @@ void main() {
     }
   }
 
-  const theme = ('Auto', 'Theme: Follow phone');
   const more = ('More', 'More');
 
   testWidgets('360 dp at 1.3x: every tab bar and the reader name their '
       'commands', (tester) async {
     await pumpAt(tester, const Size(360, 780), 1.3);
+    await toTab(tester, 'Library');
     seen('Filter');
-    barHolds(tester, 'Library', [('Filter', 'Filter'), theme, more]);
-    await toTab(tester, 'Inbox');
-    seen('Feeds');
-    barHolds(tester, 'Inbox', [('Feeds', 'Feeds'), theme, more]);
+    barHolds(tester, 'Library', [('Filter', 'Filter'), more]);
+    await toTab(tester, 'Latest');
+    seen('Subscriptions');
+    barHolds(tester, 'Latest', [('Subscriptions', 'Subscriptions'), more]);
+    await toTab(tester, 'Queue');
+    barHolds(tester, 'Queue', [more]);
     await toTab(tester, 'Courses');
     seen('Backup');
     await toTab(tester, 'Library');
@@ -121,15 +123,15 @@ void main() {
   testWidgets('320 dp at 3.0x: the bars do not overflow and keep their '
       'titles whole', (tester) async {
     await pumpAt(tester, const Size(320, 640), 3.0);
-    for (final tab in ['Inbox', 'Courses', 'Library']) {
+    for (final tab in ['Latest', 'Queue', 'Courses', 'Library']) {
       await toTab(tester, tab);
       expect(tester.takeException(), isNull, reason: tab);
     }
     // The house floor: titles stay whole at 320 x 3.0, commands named.
     await toTab(tester, 'Library');
-    barHolds(tester, 'Library', [('Filter', 'Filter'), theme, more]);
-    await toTab(tester, 'Inbox');
-    barHolds(tester, 'Inbox', [('Feeds', 'Feeds'), theme, more]);
+    barHolds(tester, 'Library', [('Filter', 'Filter'), more]);
+    await toTab(tester, 'Latest');
+    barHolds(tester, 'Latest', [('Subscriptions', 'Subscriptions'), more]);
     await toTab(tester, 'Library');
     await tester.tap(find.text('A Rather Longer Title Than Any Bar Would Prefer'));
     await tester.pumpAndSettle();

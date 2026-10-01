@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 /// The way into search, worded and full width at the top of a list. The
-/// Inbox and Subscriptions bars have no room left for another word at
+/// Latest and Subscriptions bars have no room left for another word at
 /// 360 dp and 1.3x text (ADR-0016 notes), and an icon whose only name is
 /// a tooltip breaks the bar ruling.
 class SearchEntry extends StatelessWidget {

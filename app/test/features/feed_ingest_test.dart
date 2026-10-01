@@ -640,6 +640,27 @@ void main() {
       expect(await db.feedsDao.riverItems(profileId), hasLength(2));
     });
 
+    test('a fresh fetch keeps the declared language, which transcription '
+        'finds from the episode', () async {
+      var body = _rssTwo.replaceFirst(
+          '<title>The Night Sky Cast</title>',
+          '<title>The Night Sky Cast</title><language>ru-RU</language>');
+      final fetcher = ScriptedFetcher((url, headers) => textResponse(body));
+      final feed = await seedFeed();
+      final r = repo(fetcher);
+      await r.refreshFeed(feed);
+      final stored = (await db.feedsDao.feedsOf(profileId)).single;
+      expect(stored.language, 'ru-RU');
+      final episode = (await db.feedsDao.riverItems(profileId))
+          .firstWhere((e) => e.episode.enclosureUrl != null);
+      expect(await db.feedsDao.languageOfWorkFeed(episode.work.id), 'ru-RU');
+
+      // A listing that stops declaring one clears it.
+      body = _rssTwo;
+      await r.refreshFeed(stored);
+      expect((await db.feedsDao.feedsOf(profileId)).single.language, isNull);
+    });
+
     test('the same body again is not parsed again (ADR-0017)', () async {
       final fetcher =
           ScriptedFetcher((url, headers) => textResponse(_rssTwo));

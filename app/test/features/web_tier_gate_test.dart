@@ -11,6 +11,7 @@ import 'package:trellis/main.dart';
 import 'package:trellis/services/device_services.dart' show WebFetchLane;
 
 import '../support/fake_player.dart';
+import '../support/tabs.dart';
 import '../support/fake_services.dart';
 import '../support/scripted_fetcher.dart';
 import '../support/pick_reader.dart';
@@ -74,7 +75,7 @@ void main() {
       'menu items', (t) async {
     final ids = await seedEpisode();
     await pumpApp(t, localMlAvailable: false);
-    await t.tap(find.text('Inbox'));
+    await t.tap(tabLabel('Latest'));
     await t.pumpAndSettle();
 
     expect(find.byKey(Key('play-${ids.workId}')), findsOneWidget);
@@ -93,7 +94,7 @@ void main() {
       (t) async {
     final ids = await seedEpisode();
     await pumpApp(t, localMlAvailable: true);
-    await t.tap(find.text('Inbox'));
+    await t.tap(tabLabel('Latest'));
     await t.pumpAndSettle();
 
     await t.tap(find.byKey(Key('menu-${ids.workId}')));
@@ -105,6 +106,7 @@ void main() {
       (t) async {
     await seedEpisode();
     await pumpApp(t, localMlAvailable: false);
+    await toTab(t, 'Library');
     await t.tap(find.byKey(const Key('library-more')));
     await t.pumpAndSettle();
     await t.tap(find.byKey(const Key('open-models')));
@@ -120,6 +122,7 @@ void main() {
       (t) async {
     await seedEpisode();
     await pumpApp(t, localMlAvailable: true);
+    await toTab(t, 'Library');
     await t.tap(find.byKey(const Key('library-more')));
     await t.pumpAndSettle();
     await t.tap(find.byKey(const Key('open-models')));

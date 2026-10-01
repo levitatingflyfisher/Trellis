@@ -7,6 +7,7 @@ import 'package:trellis/main.dart';
 import 'package:trellis/services/device_services.dart';
 
 import '../support/fake_player.dart';
+import '../support/tabs.dart';
 import '../support/scripted_fetcher.dart';
 import '../support/pick_reader.dart';
 
@@ -40,7 +41,7 @@ void main() {
             of: reminder,
             matching: find.textContaining('save your recovery phrase')),
         findsOneWidget);
-    await tester.tap(find.text('Inbox'));
+    await tester.tap(tabLabel('Latest'));
     await tester.pumpAndSettle();
     expect(reminder, findsOneWidget);
   });

@@ -1,5 +1,5 @@
 /// Multi-select and the clean-up's bulk actions (ADR-0016 section 5), one
-/// home for every list that uses [EpisodeRow], so the Inbox, the podcast
+/// home for every list that uses [EpisodeRow], so Latest, the podcast
 /// page, History and search can't drift apart.
 ///
 /// The session it serves is "clean up what I didn't listen to". Nothing
@@ -16,7 +16,7 @@ import 'package:openhearth_design/openhearth_design.dart';
 import '../../db/bulk_episodes.dart';
 import 'episode_actions.dart';
 
-enum BulkAction { markPlayed, markUnplayed, letPass, removeDownload, addToUpNext }
+enum BulkAction { markPlayed, markUnplayed, letPass, removeDownload, addToQueue }
 
 /// Which rows are selected, and what the list on screen holds. The list
 /// that is showing sets [universe] and [reload], so a bar owned by the
@@ -150,8 +150,8 @@ class EpisodeBulk {
                   child: Text('Let it pass')),
               const PopupMenuItem(
                   key: Key('bulk-up-next'),
-                  value: BulkAction.addToUpNext,
-                  child: Text('Add to Up Next')),
+                  value: BulkAction.addToQueue,
+                  child: Text('Add to Queue')),
               if (actions.canDownload)
                 const PopupMenuItem(
                     key: Key('bulk-remove-download'),
@@ -206,7 +206,7 @@ class EpisodeBulk {
             profileId: actions.profileId),
         BulkAction.letPass => await _store
             .letPass([for (final e in chosen) e.work.id], nowMs: _nowMs),
-        BulkAction.addToUpNext => await _store.addToUpNext(_bingeOrder(audio),
+        BulkAction.addToQueue => await _store.addToQueue(_bingeOrder(audio),
             profileId: actions.profileId, nowMs: _nowMs),
         BulkAction.removeDownload => throw StateError('handled above'),
       };
@@ -223,7 +223,7 @@ class EpisodeBulk {
     _offerUndo(messenger, change, _message(action, change.count));
   }
 
-  /// Up Next from a selection plays oldest to newest by publish date,
+  /// Queueing a selection plays oldest to newest by publish date,
   /// whatever order the list shows (coordinator ruling: binge order).
   static List<int> _bingeOrder(List<EpisodeEntry> entries) {
     final sorted = [...entries]..sort((a, b) {
@@ -269,7 +269,7 @@ class EpisodeBulk {
       BulkAction.markPlayed => 'Marked $eps played',
       BulkAction.markUnplayed => 'Marked $eps unplayed',
       BulkAction.letPass => 'Let $items pass',
-      BulkAction.addToUpNext => 'Added $eps to Up Next',
+      BulkAction.addToQueue => 'Added $eps to the Queue',
       BulkAction.removeDownload => '',
     };
   }

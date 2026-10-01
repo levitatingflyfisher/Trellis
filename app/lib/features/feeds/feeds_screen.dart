@@ -56,7 +56,7 @@ Future<bool> saveOpmlWithFilePicker(
 
 /// Subscriptions (ADR-0016 section 3): every source, shelved by where it
 /// came from (Podcasts, Blogs and newsletters, Books), plus follow,
-/// unfollow (cascading unpromoted ephemera — ADR-0003 law 2) and OPML both
+/// unfollow (taking what was never kept with it — ADR-0019) and OPML both
 /// ways. Shelves are alphabetical, never ranked (ADR-0003 law 1).
 class FeedsScreen extends StatefulWidget {
   final AppDatabase db;
@@ -124,7 +124,7 @@ class _FeedsScreenState extends State<FeedsScreen> {
   }
 
   /// Leaving lets a pending unfollow go, and the cascade finishes before the
-  /// route pops: the Inbox reloads as soon as it is back and must not show
+  /// route pops: Latest reloads as soon as it is back and must not show
   /// the unfollowed feed's items.
   Future<void> _leave() async {
     await _undo.dismiss();
@@ -205,8 +205,8 @@ class _FeedsScreenState extends State<FeedsScreen> {
     final name = feed.title.isEmpty ? feed.url : feed.title;
     setState(() => _unfollowing.add(feed.id));
     _undo.show(
-      message: "Unfollowed '$name'. Its unread items go too; anything you "
-          'kept stays in the library.',
+      message: "Unfollowed '$name'. What you haven’t kept goes too; anything "
+          'you kept stays in the Library.',
       onUndo: () async {
         if (mounted) setState(() => _unfollowing.remove(feed.id));
       },
@@ -517,6 +517,7 @@ class _FeedsScreenState extends State<FeedsScreen> {
           downloadCoordinator: widget.downloadCoordinator,
           dspCoordinator: widget.dspCoordinator,
           localMlAvailable: widget.localMlAvailable,
+          readerDoors: widget.readerDoors,
         ),
       ),
     );

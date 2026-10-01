@@ -1,5 +1,5 @@
 name: loom_core
-description: The content spine — Work/Segment/Layer/Alignment/Position, the cursor law, ephemera decay. Pure Dart.
+description: The content spine — Work/Segment/Layer/Alignment/Position, the cursor law, the kept/unkept bit (nothing decays). Pure Dart.
 version: 0.1.0
 publish_to: none
 environment:

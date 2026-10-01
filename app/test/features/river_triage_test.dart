@@ -65,7 +65,7 @@ void main() {
 
       final work = await db.spineDao.workById(workId);
       expect(work!.persistence, 'ephemeron',
-          reason: 'let it pass never promotes — decay still handles aging');
+          reason: 'let it pass marks it read; only Keep promotes');
       final episode =
           (await db.feedsDao.episodesOfFeed(feedId)).single.episode;
       expect(episode.readAtMs, 5000);

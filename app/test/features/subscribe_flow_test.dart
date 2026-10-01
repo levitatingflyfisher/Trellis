@@ -6,6 +6,7 @@ import 'package:trellis/db/database.dart';
 import 'package:trellis/main.dart';
 
 import '../support/fake_player.dart';
+import '../support/tabs.dart';
 import '../support/scripted_fetcher.dart';
 import '../support/pick_reader.dart';
 
@@ -41,7 +42,7 @@ void main() {
         createPlayer: () => FakeEpisodePlayer()));
     await tester.pumpAndSettle();
     await pickReader(tester, 'Ada');
-    await tester.tap(find.text('Inbox'));
+    await tester.tap(tabLabel('Latest'));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Follow a feed'));
     await tester.pumpAndSettle();

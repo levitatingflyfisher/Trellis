@@ -148,8 +148,6 @@ void main() {
     await episode(busy);
     final heard = await episode(busy);
     await db.feedsDao.markPlayed(heard, 1);
-    final passed = await episode(busy);
-    await db.spineDao.setPersistence(passed, 'decayed');
     await db.feedsDao.markPlayed(await episode(done), 1);
     await pump(tester);
 

@@ -360,9 +360,9 @@ class PlayerController extends ChangeNotifier {
   /// first time [toggle] is tapped, so a cold boot alone never starts a
   /// download or a stream on its own.
   ///
-  /// A pref naming a work that no longer exists is the ORDINARY case, not
-  /// an edge one — this app deletes ephemera on a decay timer — so it is
-  /// cleared rather than left to dangle and re-fail every future boot.
+  /// A pref naming a work that no longer exists (its feed unfollowed, the
+  /// book removed) is cleared rather than left to dangle and re-fail every
+  /// future boot.
   ///
   /// A no-op if something is already current (a normal play already
   /// happened this session; there is nothing stale to rehydrate over).
@@ -410,7 +410,9 @@ class PlayerController extends ChangeNotifier {
   /// bouncing back into itself: [rehydrateLastPlayed] can set [_current]
   /// without ever creating a player, so `_current?.id == work.id` alone is
   /// no longer proof that toggling (rather than loading) is the right verb.
-  Future<void> playWork(Work work) async {
+  /// [startAt], when given, replaces the resume point and the intro skip,
+  /// so the first sound is from there: see [playWorkAt].
+  Future<void> playWork(Work work, {Duration? startAt}) async {
     if (_current?.id == work.id && _player != null) return toggle();
     final url = work.sourceUrl;
     if (url == null || url.isEmpty) return;
@@ -462,7 +464,9 @@ class PlayerController extends ChangeNotifier {
     }
     final resumeMs = await _resumeMs(work.id);
     final introSeconds = _currentFeed?.skipIntroSeconds;
-    if (resumeMs > 0) {
+    if (startAt != null) {
+      await p.seek(startAt);
+    } else if (resumeMs > 0) {
       await p.seek(Duration(milliseconds: resumeMs));
     } else if (introSeconds != null && introSeconds > 0) {
       // Only on a fresh start — never re-applied on a resume, so pausing
@@ -593,6 +597,25 @@ class PlayerController extends ChangeNotifier {
 
   core.Spine _spine() =>
       core.Spine(segments: const [], layers: const [], alignments: _alignments);
+
+  /// Whether [workId] is the work loaded in the player now. Not merely
+  /// [current]: a work rehydrated after a restart is current before any
+  /// audio has loaded, and a seek on it would go nowhere.
+  bool isLoaded(int workId) => _current?.id == workId && _player != null;
+
+  /// Plays [work] from [at], loading it first if it isn't the work in the
+  /// player: what tapping a transcript line does. Never a toggle, and a
+  /// paused episode resumes from [at] itself, with no smart-resume rewind.
+  Future<void> playWorkAt(Work work, Duration at) async {
+    final p = _player;
+    if (p == null || _current?.id != work.id) {
+      return playWork(work, startAt: at);
+    }
+    _pausedAtMs = null;
+    await p.seek(_clamp(at));
+    if (!p.playing) await p.play();
+    notifyListeners();
+  }
 
   /// The study crown's "Listen from here" verb: starts (or, if [work] is
   /// already playing, jumps) playback at the audio time [position] projects
@@ -803,7 +826,7 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// The Up Next law (P4 mercy #3): finishing removes the episode from the
+  /// The queue's law (P4 mercy #3): finishing removes the episode from the
   /// queue by default — a household setting can keep it instead — then
   /// auto-advances to whatever is now at the head. Playing the head goes
   /// through the ordinary [playWork], so the next episode's own per-feed

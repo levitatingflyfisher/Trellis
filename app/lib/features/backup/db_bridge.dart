@@ -177,7 +177,13 @@ class DbBridge {
         await db.into(db.profiles).insert(Profile.fromJson(cast(row)));
       }
       for (final row in t['works']!) {
-        await db.into(db.works).insert(Work.fromJson(cast(row)));
+        final work = Work.fromJson(cast(row));
+        // A backup from before ADR-0019 can carry items the old sweep hid;
+        // nothing is hidden any more, so they come back unkept, as the
+        // v27 migration brings back this device's own.
+        await db.into(db.works).insert(work.persistence == 'decayed'
+            ? work.copyWith(persistence: 'ephemeron')
+            : work);
       }
       for (final row in t['feeds']!) {
         await db.into(db.feeds).insert(Feed.fromJson(cast(row)));

@@ -2,9 +2,12 @@ import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
+import 'package:trellis/features/player/player_controller.dart';
 import 'package:trellis/features/player/queue_screen.dart';
 
-/// The Up Next queue's own small view: what's queued, in order, with a
+import '../support/fake_player.dart';
+
+/// The Queue tab: what's queued, in order, with a
 /// remove verb per row and drag to reorder (the reorder LOGIC is
 /// queue_db_test.dart's job — this pins what the screen shows and that
 /// remove actually removes).
@@ -59,5 +62,37 @@ void main() {
 
     expect(find.text('Aurora season'), findsNothing);
     expect(await db.queueDao.queueOf(profileId), isEmpty);
+  });
+
+  testWidgets('a change of what is playing reloads the list: the tab can '
+      'be on screen while an episode finishes and leaves the queue',
+      (tester) async {
+    final a = await seedWork('Aurora season');
+    final player = PlayerController(
+        db: db, profileId: profileId, createPlayer: FakeEpisodePlayer.new);
+    addTearDown(player.dispose);
+    await db.queueDao.playLast(profileId: profileId, workId: a, nowMs: 1);
+    await tester.pumpWidget(MaterialApp(
+        home: QueueScreen(
+            db: db,
+            profile: (await db.profilesDao.all()).single,
+            player: player)));
+    await tester.pumpAndSettle();
+    expect(find.text('Aurora season'), findsOneWidget);
+
+    // What the finish law does: the queue loses the episode, then the
+    // player moves on.
+    await db.queueDao.remove(profileId: profileId, workId: a);
+    final b = await db.spineDao.insertWork(
+        profileId: profileId,
+        kind: 'episode',
+        title: 'Perseid peak',
+        persistence: 'ephemeron',
+        firstSeenEpochDay: 100,
+        sourceUrl: 'https://cast.test/p.mp3');
+    await player.playWork((await db.spineDao.workById(b))!);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Aurora season'), findsNothing);
   });
 }

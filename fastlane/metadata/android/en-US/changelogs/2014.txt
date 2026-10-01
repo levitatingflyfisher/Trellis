@@ -1,0 +1,8 @@
+Trellis 1.5.3
+
+• Latest keeps everything from the shows you follow, for good, a page at a time, with a line marking what is new since your last look.
+• The Queue is a tab. Up Next is now Queue, Up Last is History, and Feeds are Subscriptions.
+• Theme is in each tab's ⋮ menu.
+• Read a transcribed episode without playing it; the reader has a Play button.
+• Faster transcription.
+• One full feed refresh after updating.

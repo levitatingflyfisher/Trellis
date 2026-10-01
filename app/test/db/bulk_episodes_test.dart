@@ -176,7 +176,7 @@ void main() {
     expect((await ep(a)).readAtMs, isNull);
   });
 
-  test('the Inbox breaks a publish-time tie by id, newest id first',
+  test('Latest breaks a publish-time tie by id, newest id first',
       () async {
     final a = await episode('a');
     final b = await episode('b');
@@ -200,14 +200,14 @@ void main() {
     expect((await ep(b)).readAtMs, 5);
   });
 
-  test('add to Up Next appends the new ones; Undo removes only those',
+  test('add to the queue appends the new ones; Undo removes only those',
       () async {
     final a = await episode('a');
     final b = await episode('b');
     final c = await episode('c');
     await db.queueDao.playLast(profileId: profileId, workId: b, nowMs: 1);
     final change =
-        await bulk.addToUpNext([a, b, c], profileId: profileId, nowMs: 2);
+        await bulk.addToQueue([a, b, c], profileId: profileId, nowMs: 2);
     expect(change.count, 2);
     expect([for (final r in await db.queueDao.queueOf(profileId)) r.workId],
         [b, a, c]);

@@ -18,7 +18,9 @@ class WhisperBindings {
 
 class WhisperTranscriber implements Transcriber {
   WhisperTranscriber(
-      {required WhisperBindings bindings, required String modelPath}) {
+      {required WhisperBindings bindings,
+      required String modelPath,
+      bool keepContext = false}) {
     throw UnsupportedError(
         'whisper.cpp transcription needs the native tier (dart:ffi); '
         'it is not available on this platform');

@@ -520,7 +520,7 @@ class _ModelsScreenState extends State<ModelsScreen> {
 }
 
 /// "Checking feeds": the device's two background-check switches. New
-/// episodes wait in the Inbox; nothing here ever notifies (ADR-0003).
+/// episodes wait in Latest; nothing here ever notifies (ADR-0003).
 class FeedCheckSection extends StatefulWidget {
   const FeedCheckSection({super.key, required this.settings});
   final FeedCheckSettings settings;
@@ -555,7 +555,7 @@ class _FeedCheckSectionState extends State<FeedCheckSection> {
               title: const Text('Check feeds in the background'),
               subtitle: const Text(
                   'About every 4 hours, when the battery isn’t low. New '
-                  'episodes wait in your Inbox; you won’t get a notification.'),
+                  'episodes wait in Latest; you won’t get a notification.'),
               value: s.background,
               onChanged: s.setBackground,
             ),

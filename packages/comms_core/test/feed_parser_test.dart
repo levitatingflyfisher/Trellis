@@ -417,6 +417,38 @@ void main() {
     });
   });
 
+  group('channel language', () {
+    test('the channel <language> is read as declared', () {
+      final feed = parseRssFeed('''
+<rss><channel><title>t</title><language> ru-RU </language></channel></rss>
+''', 'https://x.test/feed');
+      expect(feed.language, 'ru-RU');
+    });
+
+    test('no <language> (or an empty one) reads as null', () {
+      expect(
+          parseRssFeed('<rss><channel><title>t</title></channel></rss>',
+                  'https://x.test/feed')
+              .language,
+          isNull);
+      expect(
+          parseRssFeed(
+                  '<rss><channel><title>t</title><language/></channel></rss>',
+                  'https://x.test/feed')
+              .language,
+          isNull);
+    });
+
+    test('an item-level language never leaks into the channel', () {
+      final feed = parseRssFeed('''
+<rss><channel><title>t</title>
+  <item><title>i</title><language>de</language></item>
+</channel></rss>
+''', 'https://x.test/feed');
+      expect(feed.language, isNull);
+    });
+  });
+
   group('channel artwork (P6 river faces)', () {
     test('itunes:image href is read as the feed image', () {
       final feed = parseRssFeed('''

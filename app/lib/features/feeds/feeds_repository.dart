@@ -279,7 +279,8 @@ class FeedsRepository {
     // [_refreshOne].
     await _persistState(feedId, state,
         nextPageUrl: parsed.nextPageUrl, updateNextPageUrl: true,
-        imageUrl: parsed.imageUrl, updateImageUrl: true);
+        imageUrl: parsed.imageUrl, updateImageUrl: true,
+        language: parsed.language, updateLanguage: true);
     await db.feedsDao.setBodyHash(feedId, bodyHash);
     await _settleOrigin(feedId, parsed);
     if (added > 0) await _runDedupPass(profileId);
@@ -353,7 +354,8 @@ class FeedsRepository {
       // whose items never arrived.
       await _persistState(feed.id, state,
           nextPageUrl: parsed.nextPageUrl, updateNextPageUrl: true,
-          imageUrl: parsed.imageUrl, updateImageUrl: true);
+          imageUrl: parsed.imageUrl, updateImageUrl: true,
+        language: parsed.language, updateLanguage: true);
       await db.feedsDao.setBodyHash(feed.id, body.hash);
       await _adoptMove(feed, res.movedTo);
       await _maybeFetchArtwork(feed.id,
@@ -518,7 +520,9 @@ class FeedsRepository {
           {String? nextPageUrl,
           bool updateNextPageUrl = false,
           String? imageUrl,
-          bool updateImageUrl = false}) =>
+          bool updateImageUrl = false,
+          String? language,
+          bool updateLanguage = false}) =>
       db.feedsDao.updateRefreshState(feedId,
           title: s.title,
           etag: s.etag,
@@ -527,7 +531,9 @@ class FeedsRepository {
           nextPageUrl: nextPageUrl,
           updateNextPageUrl: updateNextPageUrl,
           imageUrl: imageUrl,
-          updateImageUrl: updateImageUrl);
+          updateImageUrl: updateImageUrl,
+          language: language,
+          updateLanguage: updateLanguage);
 
   /// Fetch-once, offline-first (Campaign 9 Phase 5): downloads [newUrl] to
   /// this feed's deterministic artwork file (`DeviceServices.artworkFileFor`)

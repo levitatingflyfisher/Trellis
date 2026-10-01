@@ -9,6 +9,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:jobs_core/jobs_core.dart' show JobStore;
 import 'package:ml_runtime/ml_runtime.dart';
 import 'package:trellis/features/dsp/dsp_encoder.dart';
 import 'package:trellis/features/models/model_store.dart';
@@ -283,6 +284,8 @@ DeviceServices testServices(
   DspEncoder? dspEncoder,
   JobForegroundGate? gate,
   List<String>? script,
+  String? detectedLang,
+  TranscribeExecutor? executor,
   bool localMlAvailable = true,
   DeviceTier tier = DeviceTier.t1,
 }) => DeviceServices(
@@ -291,10 +294,23 @@ DeviceServices testServices(
   registry: ModelRegistry.starter(),
   decoder: decoder ?? FakeDecoder(),
   audioFetcher: audioFetcher ?? FakeAudioFetcher(),
-  executor: InlineTranscribeExecutor(),
+  executor: executor ?? InlineTranscribeExecutor(),
   foregroundGate: gate ?? RecordingForegroundGate(),
   dspEncoder: dspEncoder,
   localMlAvailable: localMlAvailable,
   tier: tier,
-  engineFor: (_) => ScriptedEngineSpec(chunkJsons: script ?? defaultScript()),
+  engineFor: (_) => ScriptedEngineSpec(
+      chunkJsons: script ?? defaultScript(), detectedLang: detectedLang),
 );
+
+/// The inline executor, remembering every spec it was handed.
+class RecordingExecutor implements TranscribeExecutor {
+  final List<TranscribeSpec> specs = [];
+  final _inner = InlineTranscribeExecutor();
+
+  @override
+  TranscribeRun start(TranscribeSpec spec, JobStore store) {
+    specs.add(spec);
+    return _inner.start(spec, store);
+  }
+}

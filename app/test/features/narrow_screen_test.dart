@@ -7,6 +7,7 @@ import 'package:trellis/db/database.dart';
 import 'package:trellis/main.dart';
 
 import '../support/fake_player.dart';
+import '../support/tabs.dart';
 import '../support/scripted_fetcher.dart';
 import '../support/pick_reader.dart';
 
@@ -66,7 +67,6 @@ void main() {
         title: 'Episode 400: Incomprehensibilities of the Aurora Borealis '
             'Considered at Length',
         persistence: 'ephemeron',
-        // Fresh — the boot sweep (ADR-0003 law 2) must not take it.
         firstSeenEpochDay: DateTime.now().toUtc().millisecondsSinceEpoch ~/
             Duration.millisecondsPerDay,
         sourceUrl: 'https://cast.example.test/400.mp3');
@@ -131,7 +131,8 @@ void main() {
         fetcher: ScriptedFetcher((u, h) => textResponse('')),
         createPlayer: () => player));
     await tester.pumpAndSettle(); // profile picker
-    await pickReader(tester, 'Adalheidis Winterbourne'); // library list row + nav bar
+    await pickReader(tester, 'Adalheidis Winterbourne');
+    await toTab(tester, 'Library'); // library list row + nav bar
 
     await tester.tap(find.textContaining('A Rather Longer Title'));
     await tester.pumpAndSettle(); // reader, RSVP (long word incoming)
@@ -152,7 +153,7 @@ void main() {
     await tester.pumpAndSettle(); // back through the library
 
     // ── P2 screens ──
-    await tester.tap(find.text('Inbox'));
+    await tester.tap(tabLabel('Latest'));
     await tester.pumpAndSettle(); // river list + filter chips
 
     // At 2x the chips row scrolls; bring the far chip on-stage first.
@@ -184,11 +185,11 @@ void main() {
     await tester.tap(find.byType(BackButton)); // feeds → river
     await tester.pumpAndSettle();
 
-    await tester.tap(find.text('Library'));
+    await tester.tap(tabLabel('Library'));
     await tester.pumpAndSettle(); // mini bar over the library tab
 
     // ── Study screens ──
-    await tester.tap(find.text('Courses'));
+    await tester.tap(tabLabel('Courses'));
     await tester.pumpAndSettle(); // course list, verbose title + meta line
     expect(tester.takeException(), isNull, reason: 'course list');
 

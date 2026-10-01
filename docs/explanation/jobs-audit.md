@@ -12,7 +12,7 @@ still open.
 | Job | Engine | State lives in | Killed mid-job | User sees while running | User sees after failure |
 |---|---|---|---|---|---|
 | **Episode download** (`EpisodeDownloadCoordinator`) | domovoi `resumableDownload` via `AudioFetcher` | Memory only. The `.part` file beside `audio/<workId>.<ext>` is the only trace on disk. | The bytes survive: tapping Download again sends an HTTP Range request and continues. But nothing records that a download was ever under way, so after a relaunch the row just offers "Download" again. Nothing resumes by itself, and nothing says a partial exists. | **Nothing.** `stateOf()` is tracked but never shown. The menu closes and the row looks unchanged until the file lands. | **Nothing.** The error goes into `stateOf().error` and is never shown. |
-| **Transcription** (`TranscribeCoordinator`) | Model, then audio (same engine), then decode (atomic `.part` rename), then a jobs_core `JobRunner` over whisper windows | `jobs` table: `transcribe-<id>` and `translate-<id>` rows, each with a checkpoint written after every window. | Resumes from the last committed window, as the jobs_core law promises. But the orphaned `running` row comes back as a **Paused** card, and nothing moves until the user taps Resume. | A card above the Inbox list. The model stage shows bytes and an ETA, the window stage shows parts done and an ETA. The *episode audio* stage is an indeterminate bar ("Getting the episode audio…"). | "Didn't finish. Your progress is saved." The actual reason (`card.error`) is never shown, so someone who is offline and someone whose disk is full both get the same line. |
+| **Transcription** (`TranscribeCoordinator`) | Model, then audio (same engine), then decode (atomic `.part` rename), then a jobs_core `JobRunner` over whisper windows | `jobs` table: `transcribe-<id>` and `translate-<id>` rows, each with a checkpoint written after every window. | Resumes from the last committed window, as the jobs_core law promises. But the orphaned `running` row comes back as a **Paused** card, and nothing moves until the user taps Resume. | A card above the Latest list. The model stage shows bytes and an ETA, the window stage shows parts done and an ETA. The *episode audio* stage is an indeterminate bar ("Getting the episode audio…"). | "Didn't finish. Your progress is saved." The actual reason (`card.error`) is never shown, so someone who is offline and someone whose disk is full both get the same line. |
 | **Model download** (Models screen) | domovoi `resumableDownload`, sha-pinned | The `.part` files. The screen measures them on open. | Resumes by Range when the user taps Resume. The screen honestly says "Paused: X of Y". | Bytes and an ETA on the Models screen. | An error line on the Models screen. |
 | **DSP preprocess** (`DspCoordinator`) | One ffmpeg pass, promoted by atomic rename | `jobs` table, kind `dsp` | **Restarts from scratch** (a single pass has no sub-unit checkpoint). That's safe, because nothing is promoted early. | **Nothing.** Its cards are restored but never rendered anywhere. It runs silently after a Download. | **Nothing**, for the same reason. |
 | **Sentence translation** (`TranslationJobController`) | Marian or Brain, one sentence (or one batch) at a time | `translation_sentences`. Every stored sentence is the checkpoint. | Re-running continues where it stopped. Nothing re-runs by itself. | Progress inside the reader that started it. | Failed sentences are skipped, and only those sentences fall back. |
@@ -71,7 +71,7 @@ tokens does not move the `.part`.
   DSP job. Each one shows its progress or its reason, with Pause, Resume
   or Try again, and Discard. A strip above the player bar ("1 job
   working · See jobs") appears on every tab whenever a job exists, and
-  the Inbox menu has a Jobs item. Each episode row shows its own download
+  the Latest menu has a Jobs item. Each episode row shows its own download
   line while one exists.
 - **Progress is throttled.** Download progress rebuilds once per whole
   percent, not once per network chunk.
@@ -83,7 +83,7 @@ tokens does not move the `.part`.
 
 - **DSP** still restarts from scratch after a kill (one ffmpeg pass has
   no checkpoint). A download that resumes by itself after a relaunch
-  skips the DSP step, because that step is chained to the Inbox's
+  skips the DSP step, because that step is chained to Latest's
   Download tap. DSP jobs are not auto-resumed. A paused one waits in the
   Jobs screen.
 - **Model downloads** started from the Models screen keep that screen's

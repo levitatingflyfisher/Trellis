@@ -58,21 +58,30 @@ void main() {
     return (await db.spineDao.worksOf(profileId)).single;
   }
 
-  group('"Listen from here" (reader -> player)', () {
+  // Listening is a visible button on the reader, not an item behind ⋮.
+  group('Listen (reader -> player)', () {
+    Future<void> toScroll(WidgetTester tester) async {
+      await tester.tap(find.byKey(const Key('mode-toggle')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('mode-item-scroll')));
+      await tester.pumpAndSettle();
+    }
+
     testWidgets(
-        'hidden when there is no player wired in (never a dead button)',
+        'no Listen when there is no player wired in (never a dead button)',
         (tester) async {
       final work = await seedAlignedEpisode();
       await tester.pumpWidget(MaterialApp(
           home: ReaderScreen(db: db, profileId: profileId, work: work)));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('reader-overflow')));
-      await tester.pumpAndSettle();
+      await toScroll(tester);
 
-      expect(find.byKey(const Key('listen-from-here')), findsNothing);
+      expect(find.byTooltip('Listen'), findsNothing);
+      expect(find.byTooltip('Play'), findsOneWidget,
+          reason: 'the silent pacer, named as what it is');
     });
 
-    testWidgets('hidden when the work has no aligned audio', (tester) async {
+    testWidgets('no Listen when the work has no aligned audio', (tester) async {
       final workId = await db.spineDao.insertWork(
           profileId: profileId,
           kind: 'note',
@@ -86,40 +95,53 @@ void main() {
           home: ReaderScreen(
               db: db, profileId: profileId, work: work, player: controller)));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('reader-overflow')));
-      await tester.pumpAndSettle();
+      await toScroll(tester);
 
-      expect(find.byKey(const Key('listen-from-here')), findsNothing);
+      expect(find.byTooltip('Listen'), findsNothing);
     });
 
-    testWidgets(
-        'tapping it starts playback at the audio time the reading cursor '
-        'projects to', (tester) async {
+    testWidgets('Listen is on the screen, not in the menu', (tester) async {
       final work = await seedAlignedEpisode();
       await tester.pumpWidget(MaterialApp(
           home: ReaderScreen(
               db: db, profileId: profileId, work: work, player: controller)));
       await tester.pumpAndSettle();
-
-      // Move the cursor into segment 1 (scroll mode, tap the second
-      // word). Campaign 9 Phase 6: `mode-toggle` opens a labeled
-      // three-way picker rather than cycling on its own tap.
-      await tester.tap(find.byKey(const Key('mode-toggle')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('mode-item-scroll')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Second'));
-      await tester.pump();
+      expect(find.byKey(const Key('reader-play')), findsOneWidget,
+          reason: 'in RSVP too, beside its own pacer');
+      await toScroll(tester);
+      expect(find.byKey(const Key('reader-play')), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('reader-overflow')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('listen-from-here')), findsOneWidget);
-      await tester.tap(find.byKey(const Key('listen-from-here')));
+      expect(find.byKey(const Key('listen-from-here')), findsNothing);
+      expect(find.byKey(const Key('follow-along-toggle')), findsNothing);
+    });
+
+    testWidgets(
+        'Listen starts playback at the audio time the reading cursor '
+        'projects to, and then reads Pause and pauses', (tester) async {
+      final work = await seedAlignedEpisode();
+      await tester.pumpWidget(MaterialApp(
+          home: ReaderScreen(
+              db: db, profileId: profileId, work: work, player: controller)));
+      await tester.pumpAndSettle();
+      await toScroll(tester);
+      await tester.tap(find.text('Second'));
+      await tester.pump();
+
+      await tester.tap(find.byTooltip('Listen'));
       await tester.pumpAndSettle();
 
       expect(fakePlayer.loadedUrl, 'https://cast.test/1.mp3');
       expect(fakePlayer.log.last, 'seek:10000',
           reason: 'segment 1 (where the cursor landed) starts at 10000ms');
+      expect(controller.playing, isTrue);
+      expect(find.byTooltip('Listen'), findsNothing);
+
+      await tester.tap(find.byTooltip('Pause'));
+      await tester.pumpAndSettle();
+      expect(controller.playing, isFalse);
+      expect(find.byTooltip('Listen'), findsOneWidget);
     });
   });
 

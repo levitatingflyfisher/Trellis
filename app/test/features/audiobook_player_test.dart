@@ -335,7 +335,7 @@ void main() {
       expect(pos!.fileIdx, 1);
     });
 
-    test('finishing auto-advances to an audiobook at the head of Up Next '
+    test('finishing auto-advances to an audiobook at the head of the queue '
         'via playAudiobook, not playWork', () async {
       final first = await seedAudiobook(title: 'First');
       final second =

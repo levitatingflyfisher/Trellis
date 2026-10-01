@@ -20,6 +20,8 @@ Seven laws. Where a law is expressible as a test, the test is the law.
    there is nothing to A/B, nothing to tune, nothing to test but ordering.
 2. **Ephemera decay by default; works persist.** Promotion requires the
    user's hand. (Sweep behavior tested in `loom_core`.)
+   **Superseded by [ADR-0019](0019-latest-is-a-permanent-archive.md):**
+   nothing decays; Latest is a permanent archive.
 3. **Sessions are bounded.** A study session declares its size before it
    starts and has an end screen. No infinite queue exists.
 4. **The Brain never runs unprompted.** Every inference has a user gesture in

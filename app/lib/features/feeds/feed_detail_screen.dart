@@ -10,6 +10,7 @@ import '../episodes/episode_actions.dart';
 import '../episodes/episode_row.dart';
 import '../episodes/episode_selection.dart';
 import '../player/player_controller.dart';
+import '../reader/reader_doors.dart';
 import '../reader/reader_screen.dart';
 import 'episode_download_coordinator.dart';
 import 'feed_ingest.dart';
@@ -19,8 +20,8 @@ import '../shared/capped_body.dart';
 
 /// The podcast page (ADR-0016 section 2): one show's episodes, by date in
 /// the direction the listener chose, as a place to listen from. Rows play,
-/// download and queue; "Play from here" and "Add unplayed to Up Next" are
-/// the listener's own acts, so Up Next still only holds what they put
+/// download and queue; "Play from here" and "Add unplayed to Queue" are
+/// the listener's own acts, so the queue still only holds what they put
 /// there (ADR-0003 law 1 forbids ranking, not a second date-ordered list).
 ///
 /// A failing feed says why at the top, with a way to try again, and the
@@ -38,6 +39,11 @@ class FeedDetailScreen extends StatefulWidget {
   final DspCoordinator? dspCoordinator;
   final bool localMlAvailable;
 
+  /// The reader's kit (voice, dictionary, translation), the same one
+  /// Latest opens a transcript with. Null, or a kit with no player, falls
+  /// back to a bare kit around [playerController].
+  final ReaderDoors? readerDoors;
+
   const FeedDetailScreen(
       {super.key,
       required this.db,
@@ -46,7 +52,8 @@ class FeedDetailScreen extends StatefulWidget {
       this.playerController,
       this.downloadCoordinator,
       this.dspCoordinator,
-      this.localMlAvailable = true});
+      this.localMlAvailable = true,
+      this.readerDoors});
 
   @override
   State<FeedDetailScreen> createState() => _FeedDetailScreenState();
@@ -170,9 +177,9 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
       ..showSnackBar(SnackBar(
         persist: false,
         content: Text(switch (added) {
-          0 => 'Everything here is already played or in Up Next.',
-          1 => 'Added 1 episode to Up Next.',
-          _ => 'Added $added episodes to Up Next.',
+          0 => 'Everything here is already played or in the Queue.',
+          1 => 'Added 1 episode to the Queue.',
+          _ => 'Added $added episodes to the Queue.',
         }),
       ));
   }
@@ -301,7 +308,7 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
                   key: const Key('add-unplayed'),
                   onPressed: _addUnplayed,
                   icon: const Icon(Icons.playlist_add),
-                  label: const Text('Add unplayed to Up Next'),
+                  label: const Text('Add unplayed to Queue'),
                 ),
               OutlinedButton.icon(
                 key: const Key('podcast-settings'),
@@ -335,6 +342,13 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
     );
   }
 
+  ReaderDoors get _transcriptDoors {
+    final doors = widget.readerDoors;
+    return doors != null && doors.canOpenTranscript
+        ? doors
+        : ReaderDoors(player: widget.playerController);
+  }
+
   Widget _row(List<EpisodeEntry> episodes, int i) {
     final e = episodes[i];
     final isAudio = e.episode.enclosureUrl != null;
@@ -354,6 +368,13 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
       onPlay: canPlay
           ? () async {
               await _actions.play(e.work);
+              await _load();
+            }
+          : null,
+      onRead: canPlay
+          ? () async {
+              await _transcriptDoors
+                  .openTranscript(context, db: widget.db, work: e.work);
               await _load();
             }
           : null,

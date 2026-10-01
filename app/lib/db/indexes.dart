@@ -18,6 +18,12 @@ const appIndexes = <String, String>{
   'idx_episodes_feed_published':
       'CREATE INDEX IF NOT EXISTS idx_episodes_feed_published '
           'ON episodes (feed_id, published_at_ms)',
+  // Latest's page (ADR-0019): walked newest first, it stops after one
+  // page instead of sorting the whole archive. work_id is the rowid, so
+  // the index already ends in the tie-breaker.
+  'idx_episodes_published':
+      'CREATE INDEX IF NOT EXISTS idx_episodes_published '
+          'ON episodes (published_at_ms)',
   // One row per item per feed: what ingest's seen-set already promises,
   // now enforced where a concurrent refresh can't slip past it.
   'ux_episodes_feed_guid':
@@ -27,7 +33,7 @@ const appIndexes = <String, String>{
   'idx_episodes_duplicate_of':
       'CREATE INDEX IF NOT EXISTS idx_episodes_duplicate_of '
           'ON episodes (duplicate_of_work_id)',
-  // The river, the library and the sweep all start from one profile's
+  // The river and the library both start from one profile's
   // works in one persistence.
   'idx_works_profile_persistence':
       'CREATE INDEX IF NOT EXISTS idx_works_profile_persistence '

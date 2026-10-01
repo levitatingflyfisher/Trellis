@@ -1,5 +1,5 @@
 /// One episode row for every list that shows episodes (ADR-0016 section 1):
-/// the Inbox and the podcast page today, history and search later. The row
+/// Latest and the podcast page today, history and search later. The row
 /// says what state the episode is in; the screen around it decides what
 /// the row can do.
 library;
@@ -104,17 +104,18 @@ class EpisodeRow extends StatelessWidget {
   /// Already-downloaded artwork, or null. Never fetched here.
   final File? artwork;
 
-  /// Sits before the show and date (the Inbox's decay leaf).
-  final Widget? metaLead;
-
-  /// Extra lines under the markers (the Inbox's drift line, the download
-  /// line), owned by the screen.
+  /// Extra lines under the markers (the download line), owned by the
+  /// screen.
   final List<Widget> below;
 
   final VoidCallback? onTap;
 
   /// Null for a row with nothing to play (an article).
   final VoidCallback? onPlay;
+
+  /// Opens the transcript without playing. Shown only on a transcribed
+  /// row, beside Play: reading and listening are equal ways in.
+  final VoidCallback? onRead;
 
   final PopupMenuItemBuilder<String> menuBuilder;
   final PopupMenuItemSelected<String> onMenu;
@@ -135,10 +136,10 @@ class EpisodeRow extends StatelessWidget {
       required this.facts,
       this.showTitle,
       this.artwork,
-      this.metaLead,
       this.below = const [],
       this.onTap,
       this.onPlay,
+      this.onRead,
       required this.menuBuilder,
       required this.onMenu,
       this.selected,
@@ -176,7 +177,6 @@ class EpisodeRow extends StatelessWidget {
         children: [
           Row(
             children: [
-              ?metaLead,
               Expanded(
                 child: Text(
                   _meta(),
@@ -212,6 +212,15 @@ class EpisodeRow extends StatelessWidget {
           : Row(
               mainAxisSize: MainAxisSize.min,
               children: [
+                if (onRead != null && facts.transcribed)
+                  IconButton(
+                    key: Key('read-$_id'),
+                    tooltip: 'Read transcript',
+                    icon: Icon(Icons.subject,
+                        color:
+                            fade ? theme.colorScheme.onSurfaceVariant : null),
+                    onPressed: onRead,
+                  ),
                 if (onPlay != null)
                   IconButton(
                     key: Key('play-$_id'),
@@ -301,7 +310,7 @@ class EpisodeRow extends StatelessWidget {
       if (facts.queued)
         _Marker(
             key: Key('queued-$_id'),
-            label: 'In Up Next',
+            label: 'In Queue',
             icon: Icons.queue_music),
       if (facts.transcribed)
         _Marker(

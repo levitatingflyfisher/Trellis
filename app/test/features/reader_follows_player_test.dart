@@ -128,7 +128,7 @@ void main() {
     expect(cursorWordText(tester), 'Second');
   });
 
-  testWidgets("'Listen from here' also attaches following", (tester) async {
+  testWidgets("Listen also attaches following", (tester) async {
     final work = await seedAlignedEpisode();
     await openInScroll(tester, work);
     expect(find.byKey(const Key('follow-audio-chip')), findsNothing,
@@ -136,9 +136,7 @@ void main() {
 
     await tester.tap(find.text('alpha.')); // segment 0, not the drop cap
     await tester.pump();
-    await tester.tap(find.byKey(const Key('reader-overflow')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('listen-from-here')));
+    await tester.tap(find.byTooltip('Listen'));
     await tester.pumpAndSettle();
 
     expect(find.text('Following audio'), findsOneWidget);

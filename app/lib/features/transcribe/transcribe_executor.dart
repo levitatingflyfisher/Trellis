@@ -19,13 +19,14 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:jobs_core/jobs_core.dart';
 import 'package:ml_runtime/ml_runtime.dart';
 import 'package:transcribe_core/transcribe_core.dart';
 import 'package:whisper_ffi/whisper_ffi.dart';
 
 import 'file_pcm_source.dart';
+import 'whisper_library.dart';
 
 /// Which engine the far side should build. Sendable data only.
 sealed class TranscribeEngineSpec {
@@ -35,9 +36,12 @@ sealed class TranscribeEngineSpec {
       switch (m['engine'] as String) {
         'whisper' => WhisperEngineSpec(
             modelPath: m['modelPath'] as String,
-            libraryPath: m['libraryPath'] as String),
+            libraryPath: m['libraryPath'] as String,
+            libraryNote: m['libraryNote'] as String?),
         'scripted' => ScriptedEngineSpec(
-            chunkJsons: (m['chunks'] as List).cast<String>()),
+            chunkJsons: (m['chunks'] as List).cast<String>(),
+            detectedLang: m['detectedLang'] as String?,
+            throws: m['throws'] as bool? ?? false),
         final other => throw ArgumentError('unknown engine “$other”'),
       };
 
@@ -49,35 +53,97 @@ sealed class TranscribeEngineSpec {
 class WhisperEngineSpec extends TranscribeEngineSpec {
   final String modelPath;
   final String libraryPath;
-  WhisperEngineSpec({required this.modelPath, required this.libraryPath});
+
+  /// Why [libraryPath] is the baseline when dotprod was expected (see
+  /// `chooseWhisperLibrary`); only for the log line.
+  final String? libraryNote;
+
+  WhisperEngineSpec(
+      {required this.modelPath, required this.libraryPath, this.libraryNote});
 
   @override
   Map<String, Object?> toMap() => {
         'engine': 'whisper',
         'modelPath': modelPath,
         'libraryPath': libraryPath,
+        'libraryNote': libraryNote,
       };
 
   @override
-  Transcriber build() => WhisperTranscriber(
-      bindings: WhisperBindings.open(libraryPath), modelPath: modelPath);
+  Transcriber build() => transcriberFor(WhisperBindings.open(libraryPath));
+
+  /// One context for the whole job: the task asks for one window at a
+  /// time, and reloading the model for each is pure waste. [_runCore]
+  /// closes it however the job ends.
+  WhisperTranscriber transcriberFor(WhisperBindings bindings) =>
+      WhisperTranscriber(
+          bindings: bindings, modelPath: modelPath, keepContext: true);
 }
 
 /// ml_runtime's deterministic scripted engine, named by its chunk JSONs —
 /// how tests (and only tests) run the full executor path without natives.
 class ScriptedEngineSpec extends TranscribeEngineSpec {
   final List<String> chunkJsons;
-  ScriptedEngineSpec({required this.chunkJsons});
+
+  /// What the scripted engine reports having detected when asked to
+  /// auto-detect, as whisper does; null reports nothing.
+  final String? detectedLang;
+
+  /// Every transcribe call throws, to drive the failed-job path.
+  final bool throws;
+
+  ScriptedEngineSpec(
+      {required this.chunkJsons, this.detectedLang, this.throws = false});
+
+  /// How many scripted engines have been closed in this isolate, so a test
+  /// can see the executor release the engine however the job ended.
+  @visibleForTesting
+  static int closes = 0;
 
   @override
-  Map<String, Object?> toMap() =>
-      {'engine': 'scripted', 'chunks': chunkJsons};
+  Map<String, Object?> toMap() => {
+        'engine': 'scripted',
+        'chunks': chunkJsons,
+        'detectedLang': detectedLang,
+        'throws': throws,
+      };
 
   @override
-  Transcriber build() => FakeTranscriber([
+  Transcriber build() => _ScriptedTranscriber(
+      FakeTranscriber([
         for (final j in chunkJsons)
           _chunkFromJson(jsonDecode(j) as Map<String, dynamic>)
-      ]);
+      ]),
+      detectedLang,
+      throws);
+}
+
+class _ScriptedTranscriber
+    implements Transcriber, ReportsLanguage, ClosableTranscriber {
+  final FakeTranscriber inner;
+  final String? detectedLang;
+  String? _last;
+  final bool throws;
+  _ScriptedTranscriber(this.inner, this.detectedLang, this.throws);
+
+  @override
+  String? get lastLanguage => _last;
+
+  @override
+  void close() => ScriptedEngineSpec.closes++;
+
+  @override
+  Stream<TranscriptChunk> transcribe(
+    PcmChunkSource src, {
+    String? lang,
+    WhisperTask task = WhisperTask.transcribe,
+    bool wordTimings = true,
+  }) {
+    if (throws) return Stream.error(StateError('scripted engine failure'));
+    _last = lang ?? detectedLang;
+    return inner.transcribe(src,
+        lang: lang, task: task, wordTimings: wordTimings);
+  }
 }
 
 TranscriptChunk _chunkFromJson(Map<String, dynamic> m) => TranscriptChunk(
@@ -101,6 +167,10 @@ class TranscribeSpec {
   final String pcmPath;
   final WhisperTask task;
   final String? lang;
+
+  /// Where [lang] came from — `feed`, `declared` (the work's own) or
+  /// `detected` (a previous stage's lock) — for the run's log line.
+  final String? langSource;
   final TranscribeEngineSpec engine;
   final int windowMs;
   final int overlapMs;
@@ -111,6 +181,7 @@ class TranscribeSpec {
     required this.task,
     required this.engine,
     this.lang,
+    this.langSource,
     this.windowMs = 30000,
     this.overlapMs = 5000,
   });
@@ -120,6 +191,7 @@ class TranscribeSpec {
         'pcmPath': pcmPath,
         'task': task.name,
         'lang': lang,
+        'langSource': langSource,
         'engine': engine.toMap(),
         'windowMs': windowMs,
         'overlapMs': overlapMs,
@@ -130,6 +202,7 @@ class TranscribeSpec {
         pcmPath: m['pcmPath'] as String,
         task: WhisperTask.values.byName(m['task'] as String),
         lang: m['lang'] as String?,
+        langSource: m['langSource'] as String?,
         engine: TranscribeEngineSpec.fromMap(
             (m['engine'] as Map).cast<String, Object?>()),
         windowMs: (m['windowMs'] as num).toInt(),
@@ -177,6 +250,26 @@ Future<TranscribeOutcome> _runCore({
   required CancelToken cancelToken,
 }) async {
   final transcriber = spec.engine.build();
+  try {
+    return await _runTask(
+        spec: spec,
+        store: store,
+        transcriber: transcriber,
+        onProgress: onProgress,
+        cancelToken: cancelToken);
+  } finally {
+    // Done, cancelled or thrown: the engine's model goes with the job.
+    if (transcriber case final ClosableTranscriber engine) engine.close();
+  }
+}
+
+Future<TranscribeOutcome> _runTask({
+  required TranscribeSpec spec,
+  required JobStore store,
+  required Transcriber transcriber,
+  required void Function(TranscribeProgress) onProgress,
+  required CancelToken cancelToken,
+}) async {
   final task = TranscribeEpisodeTask(
     source: FilePcmSource(File(spec.pcmPath)),
     transcriber: transcriber,
@@ -227,13 +320,47 @@ Future<TranscribeOutcome> _runCore({
     // the device actually achieved (an emulator can't stand in for one).
     final windows = row.doneUnits - startedUnits;
     final perWindow = windows > 0 ? clock.elapsedMilliseconds ~/ windows : 0;
-    debugPrint('Trellis transcribe: $windows windows, $perWindow ms each, '
-        'threads ${transcriber.threads}, lang ${spec.lang ?? 'auto'}, '
-        '${spec.task.name}, ${row.state.name}');
+    debugPrint(transcribeLogLine(
+        windows: windows,
+        perWindowMs: perWindow,
+        threads: transcriber.threads,
+        lib: switch (spec.engine) {
+          WhisperEngineSpec(:final libraryPath, :final libraryNote) =>
+            whisperLibraryKind(libraryPath, libraryNote),
+          _ => 'baseline',
+        },
+        lang: task.effectiveLang,
+        langSource: transcribeLangSource(task.langSource, spec.langSource),
+        task: spec.task,
+        state: row.state));
   }
   return TranscribeOutcome(
       row.state, row.state == JobState.done ? task.buildResult() : null);
 }
+
+/// The one logcat line per run.
+/// A hint with no recorded source is the user's or the work's own, never
+/// assumed to be the feed's.
+@visibleForTesting
+String transcribeLangSource(LangSource source, String? specSource) =>
+    switch (source) {
+      LangSource.hint => specSource ?? 'declared',
+      final other => other.name,
+    };
+
+String transcribeLogLine({
+  required int windows,
+  required int perWindowMs,
+  required int threads,
+  required String lib,
+  required String? lang,
+  required String langSource,
+  required WhisperTask task,
+  required JobState state,
+}) =>
+    'Trellis transcribe: $windows windows, $perWindowMs ms each, '
+    'threads $threads, lib $lib, lang ${lang ?? 'auto'} ($langSource), '
+    '${task.name}, ${state.name}';
 
 /// Runs the core on the calling isolate.
 class InlineTranscribeExecutor implements TranscribeExecutor {

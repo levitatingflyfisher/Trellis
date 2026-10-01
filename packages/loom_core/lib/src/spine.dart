@@ -62,7 +62,8 @@ class Position {
       required this.lastModality});
 }
 
-/// Work identity + the sovereignty bit: ephemera decay, works persist.
+/// Work identity + the sovereignty bit: a work is kept (the user's hand put
+/// it in the library), an ephemeron is not. Neither ever decays (ADR-0019).
 class Work {
   final String id;
   final WorkKind kind;
@@ -136,17 +137,4 @@ class Spine {
     }
     return best.tStartMs;
   }
-}
-
-/// ADR-0003 law 2, as a pure verdict: ids of ephemera whose retention window
-/// has fully passed. Day arithmetic is whole-epoch-day (study_core
-/// convention); the boundary day itself survives.
-List<String> sweepEphemera(List<Work> works,
-    {required int todayEpochDay, int retentionDays = 30}) {
-  return [
-    for (final w in works)
-      if (w.persistence == Persistence.ephemeron &&
-          todayEpochDay - w.firstSeenEpochDay > retentionDays)
-        w.id
-  ];
 }

@@ -32,7 +32,7 @@ class Profiles extends Table {
   /// [preferSystemVoice].
   TextColumn get scheduler => text().withDefault(const Constant('fsrs'))();
 
-  /// The Up Next queue's finish law (P4 mercy #3): finishing an episode
+  /// The queue's finish law (P4 mercy #3): finishing an episode
   /// removes it from the queue by default (false); true keeps it in place
   /// instead — the AntennaPod top-2 request was having a CHOICE here.
   BoolColumn get keepFinishedInQueue =>
@@ -56,6 +56,12 @@ class Profiles extends Table {
   /// read from.
   TextColumn get readerPrefsJson =>
       text().withDefault(const Constant('{}'))();
+
+  /// When this reader last opened Latest (ADR-0019), so the next open can
+  /// mark what is new since. Null until the first open. A column of its
+  /// own, not a [readerPrefsJson] field: the reader rewrites that blob
+  /// while Latest is a tab away.
+  IntColumn get latestSeenAtMs => integer().nullable()();
 }
 
 class Works extends Table {
@@ -269,6 +275,11 @@ class Feeds extends Table {
   /// bytes is common; a matching hash skips the parse. Cleared when the
   /// feed's rules change, since the same body can then ingest differently.
   TextColumn get bodyHash => text().nullable()();
+
+  /// The channel's declared `<language>` as the last fresh parse found it
+  /// (`en-us`, `ru-RU`); null when the feed declares none. Transcription
+  /// locks whisper to it rather than detecting on every window.
+  TextColumn get language => text().nullable()();
 }
 
 /// River metadata for a feed item. The item itself IS a spine work
@@ -288,8 +299,9 @@ class Episodes extends Table {
   /// When this episode's downloaded audio FILE was evicted to reclaim
   /// storage (P4 "archive, never forget") — null means the audio, if it
   /// was ever downloaded, is still on disk (or never was). The row itself
-  /// is NEVER deleted by eviction; only [deleteWork] and the ephemera
-  /// sweep (ADR-0003's own, unrelated, age-based law) remove a row.
+  /// is NEVER deleted by eviction, nor by a Library removal (that only
+  /// demotes it). Unfollowing the feed removes an unkept row; ADR-0019 §1
+  /// lists every act that can. Nothing ages out.
   IntColumn get archivedAtMs => integer().nullable()();
 
   /// Cross-feed dedup (Campaign 5 Phase 3): why this episode is hidden
@@ -304,7 +316,7 @@ class Episodes extends Table {
   /// The OTHER episode's workId this one was judged a duplicate of (the
   /// older/canonical side of the pair) — null when [dedupReason] is null.
   /// Exists so that if the canonical work is later deleted ([deleteWork],
-  /// the ephemera sweep, unfollowing its feed), this row's suppression can
+  /// unfollowing its feed), this row's suppression can
   /// be cleared rather than left hidden with nothing left pointing at why
   /// — "hidden" must never quietly become "lost".
   IntColumn get duplicateOfWorkId =>
@@ -337,7 +349,7 @@ class Episodes extends Table {
   Set<Column> get primaryKey => {workId};
 }
 
-/// The Up Next queue (P4 mercy #3): a position-ordered, per-profile list
+/// The queue (P4 mercy #3): a position-ordered, per-profile list
 /// of works waiting to play next. Named `QueueTable`/`queue` rather than
 /// `Queue` for the same reason [JobsTable] isn't `Jobs` — `Queue` collides
 /// with `dart:collection`.
@@ -499,7 +511,7 @@ class AudiobookFiles extends Table {
 /// listening. Dedupe lives in the schema — (profileId, word) is unique with
 /// [word] carrying COLLATE NOCASE, so every code path folds case in SQLite
 /// itself. [sourceWorkId] is provenance only and declares ON DELETE SET
-/// NULL: works come and go (ephemera decay, library removal), but the
+/// NULL: works come and go (an unfollow, library removal), but the
 /// ledger is the user's own collection (the promotion principle, ADR-0003
 /// law 2) — deleting a work degrades provenance to null instead of draining
 /// the notebook the way CASCADE silently would.
@@ -1209,7 +1221,7 @@ class ProfilesDao extends DatabaseAccessor<AppDatabase>
         ProfilesCompanion(scheduler: Value(value)),
       );
 
-  /// The Up Next queue's finish law (P4 mercy #3): false — matching
+  /// The queue's finish law (P4 mercy #3): false — matching
   /// [Profiles.keepFinishedInQueue]'s own default — for a profile no row
   /// exists for yet.
   Future<bool> keepFinishedInQueue(int profileId) async {
@@ -1238,6 +1250,18 @@ class ProfilesDao extends DatabaseAccessor<AppDatabase>
       (update(profiles)..where((p) => p.id.equals(profileId))).write(
         ProfilesCompanion(dspGlobalDefault: Value(value)),
       );
+
+  /// Records an open of Latest at [nowMs] and returns the open before it
+  /// (null on the first), which is where the "new since" divider goes.
+  Future<int?> swapLatestSeen(int profileId, {required int nowMs}) =>
+      transaction(() async {
+        final row = await (select(profiles)
+              ..where((p) => p.id.equals(profileId)))
+            .getSingleOrNull();
+        await (update(profiles)..where((p) => p.id.equals(profileId)))
+            .write(ProfilesCompanion(latestSeenAtMs: Value(nowMs)));
+        return row?.latestSeenAtMs;
+      });
 
   /// The Campaign-4 prefs blob (see [Profiles.readerPrefsJson]) — all
   /// defaults for a profile no row exists for yet.
@@ -1378,8 +1402,7 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
       ..addColumns([count])
       ..where(works.profileId.equals(profileId) &
           works.kind.equals('book') &
-          works.persistence.isNotValue('ephemeron') &
-          works.persistence.isNotValue('decayed'));
+          works.persistence.isNotValue('ephemeron'));
     return [
       for (final r in await q.get())
         (
@@ -1477,8 +1500,29 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
 
   Future<void> deleteWork(int workId) => deleteWorks([workId]);
 
+  /// The Library's Remove. A feed item is demoted, never deleted: Latest
+  /// is a permanent archive (ADR-0019 §1), so it leaves the Library and
+  /// keeps its place there, with its transcript, captures and position.
+  /// Anything with no feed row is deleted outright. Returns whether the
+  /// work was deleted, so the caller knows whether files it owns on disk
+  /// must go too.
+  Future<bool> removeFromLibrary(int workId) => transaction(() async {
+        final fromFeed = await (select(episodes)
+                  ..where((e) => e.workId.equals(workId)))
+                .getSingleOrNull() !=
+            null;
+        if (!fromFeed) {
+          await deleteWorks([workId]);
+          return true;
+        }
+        await (update(works)..where((w) => w.id.equals(workId))).write(
+            const WorksCompanion(
+                persistence: Value('ephemeron'), pinned: Value(false)));
+        return false;
+      });
+
   /// Deletes [workIds] and every row hanging off them in one transaction,
-  /// one statement per table per chunk: the sweep and an unfollow can take
+  /// one statement per table per chunk: an unfollow or a fold can take
   /// thousands at once, and a per-work loop was a few dozen statements
   /// each.
   Future<void> deleteWorks(Iterable<int> workIds) {
@@ -1486,8 +1530,8 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
     if (ids.isEmpty) return Future.value();
     return transaction(() async {
       for (final c in chunksForSql(ids)) {
-        // The Up Next queue (P4 mercy #3) references works by id under
-        // `PRAGMA foreign_keys = ON` — without this line, sweeping a
+        // The queue (P4 mercy #3) references works by id under
+        // `PRAGMA foreign_keys = ON` — without this line, deleting a
         // queued ephemeron or unfollowing its feed throws a foreign-key
         // violation instead of quietly taking the row with it.
         await (delete(queueTable)..where((q) => q.workId.isIn(c))).go();
@@ -1501,8 +1545,8 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
         await (delete(audiobooks)..where((a) => a.workId.isIn(c))).go();
         // Cross-feed dedup (Campaign 5 Phase 3): if anything was
         // suppressed as a duplicate of a work about to be deleted,
-        // un-suppress it first — a canonical row can vanish (unfollow,
-        // ephemera sweep) without taking its duplicate's visibility with
+        // un-suppress it first — a canonical row can vanish (an unfollow)
+        // without taking its duplicate's visibility with
         // it. "Hidden" must never quietly become "lost".
         await _clearDedupPointingAt(c);
         await (delete(episodes)..where((e) => e.workId.isIn(c))).go();
@@ -1621,105 +1665,6 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
       ..where(translationSentences.workId.equals(workId) &
           translationSentences.lang.equals(lang));
     return ((await q.getSingle()).read(c) ?? 0) > 0;
-  }
-
-  /// Executes the pure verdict from loom_core (ADR-0003 law 2) as a SOFT
-  /// decay: each named ephemeron leaves the river (persistence `decayed`)
-  /// but keeps every row, so the River can say what left and offer it back
-  /// ([restoreDecayed]) or let it go for good ([purgeDecayed]). Decay stays
-  /// the default; only the silent, irreversible delete is gone. Items in
-  /// Up Next or with captures are held (the person's hand is on them). A
-  /// decayed item nobody restores is deleted for good one more retention
-  /// window later. Returns the number of works that decayed on this pass.
-  Future<int> sweepEphemera({
-    required int todayEpochDay,
-    int retentionDays = 30,
-  }) async {
-    // Queuing an item or capturing from it is the person's hand on it
-    // (ADR-0003 law 2), so it never decays while that is true; it can
-    // still decay later, once it is out of the queue and has no captures.
-    final held = await heldWorkIds();
-    final rows = [
-      for (final w in await (select(works)
-            ..where((w) => w.persistence.equals('ephemeron')))
-          .get())
-        if (!held.contains(w.id)) w
-    ];
-    // What decayed is kept for a second window, then deleted for good; the
-    // Inbox's notice says so. Without an end, rows nobody ever answers
-    // would pile up forever.
-    final expired = selectOnly(works)
-      ..addColumns([works.id])
-      ..where(works.persistence.equals('decayed') &
-          works.firstSeenEpochDay
-              .isSmallerThanValue(todayEpochDay - 2 * retentionDays - 1));
-    await deleteWorks([for (final r in await expired.get()) r.read(works.id)!]);
-    final verdict = core.sweepEphemera(
-      [
-        for (final w in rows)
-          core.Work(
-            id: '${w.id}',
-            kind: core.WorkKind.episode,
-            persistence: core.Persistence.ephemeron,
-            firstSeenEpochDay: w.firstSeenEpochDay,
-          ),
-      ],
-      todayEpochDay: todayEpochDay,
-      retentionDays: retentionDays,
-    );
-    final decaying = [for (final id in verdict) int.parse(id)];
-    await transaction(() async {
-      for (final c in chunksForSql(decaying)) {
-        // As deleteWorks does: a hidden duplicate must not stay hidden
-        // behind a canonical row that just left the river.
-        await _clearDedupPointingAt(c);
-        await (update(works)..where((w) => w.id.isIn(c)))
-            .write(const WorksCompanion(persistence: Value('decayed')));
-      }
-    });
-    return verdict.length;
-  }
-
-  /// Works the person's hand is on without having kept them: queued in Up
-  /// Next, or captured from. The sweep never decays these, and the Inbox
-  /// says so on their rows instead of a countdown.
-  Future<Set<int>> heldWorkIds() async {
-    final queued = selectOnly(queueTable, distinct: true)
-      ..addColumns([queueTable.workId]);
-    final captured = selectOnly(captures, distinct: true)
-      ..addColumns([captures.workId]);
-    return {
-      for (final r in await queued.get()) r.read(queueTable.workId)!,
-      for (final r in await captured.get()) r.read(captures.workId)!,
-    };
-  }
-
-  /// The profile's decayed ephemera — what the River's notice counts.
-  Future<List<Work>> decayedOf(int profileId) => (select(works)
-        ..where((w) =>
-            w.profileId.equals(profileId) & w.persistence.equals('decayed')))
-      .get();
-
-  /// Brings every decayed ephemeron of [profileId] back to the river with a
-  /// fresh retention window starting [todayEpochDay] — otherwise the next
-  /// boot's sweep would take it straight back.
-  Future<void> restoreDecayed(int profileId, {required int todayEpochDay}) =>
-      (update(works)
-            ..where((w) =>
-                w.profileId.equals(profileId) &
-                w.persistence.equals('decayed')))
-          .write(WorksCompanion(
-              persistence: const Value('ephemeron'),
-              firstSeenEpochDay: Value(todayEpochDay)));
-
-  /// The one gesture that deletes decayed ephemera: the user letting them
-  /// go from the River's notice.
-  Future<void> purgeDecayed(int profileId) async {
-    final q = selectOnly(works)
-      ..addColumns([works.id])
-      ..where(works.profileId.equals(profileId) &
-          works.persistence.equals('decayed'));
-    await deleteWorks([for (final r in await q.get()) r.read(works.id)!]);
   }
 }
 
@@ -1950,7 +1895,7 @@ class DailyReviewDao extends DatabaseAccessor<AppDatabase>
 /// second query per row.
 typedef QueueEntry = ({QueueRow row, Work work});
 
-/// The Up Next queue (P4 mercy #3): a position-ordered, per-profile list of
+/// The queue (P4 mercy #3): a position-ordered, per-profile list of
 /// works waiting to play next. Positions stay contiguous from 0 — every
 /// mutating method renumbers rather than leaving gaps, so "the head" is
 /// always simply the row at position 0.
@@ -2171,8 +2116,7 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
       leftOuterJoin(feeds, feeds.id.equalsExp(episodes.feedId)),
     ])
       ..where(works.profileId.equals(profileId) &
-          works.persistence.isNotValue('ephemeron') &
-          works.persistence.isNotValue('decayed'));
+          works.persistence.isNotValue('ephemeron'));
     final rows = await q.get();
     return [
       for (final r in rows)
@@ -2192,7 +2136,7 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
           .get();
 
   /// Appends a new saved view at the tail — the chips row grows to the
-  /// right, matching how the queue and Up Next append (P4 mercy #3).
+  /// right, matching how the queue appends (P4 mercy #3).
   Future<int> createSavedView(
       {required int profileId,
       required String name,
@@ -2320,6 +2264,16 @@ class AudiobooksDao extends DatabaseAccessor<AppDatabase>
 /// A river row: the spine work plus its river metadata and feed title.
 typedef RiverEntry = ({Work work, Episode episode, String feedTitle});
 
+/// Where a page of Latest ends: the last row's sort key.
+typedef RiverCursor = ({int publishedAtMs, int workId});
+
+/// Latest's chips. They filter; nothing here sorts (ADR-0003 law 1).
+enum RiverKind { all, text, audio }
+
+/// Rows per page of Latest: a few screens' worth on a tall phone, so one
+/// fling rarely reaches the end before the next page lands.
+const riverPageSize = 60;
+
 @DriftAccessor(
     tables: [Feeds, Episodes, Works, PlayerPositions, Positions, Alignments])
 class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
@@ -2353,6 +2307,15 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
   Future<Feed?> feedById(int id) =>
       (select(feeds)..where((f) => f.id.equals(id))).getSingleOrNull();
 
+  /// The declared language of the feed [workId]'s episode belongs to; null
+  /// when it declares none or the work is no feed episode.
+  Future<String?> languageOfWorkFeed(int workId) async {
+    final row = await (select(feeds).join([
+      innerJoin(episodes, episodes.feedId.equalsExp(feeds.id)),
+    ])..where(episodes.workId.equals(workId))).getSingleOrNull();
+    return row?.readTable(feeds).language;
+  }
+
   /// Per-podcast playback settings (P4 mercy #2) plus the storage setting
   /// (P4 "archive, never forget"). Every argument's null means "clear this
   /// back to deferring to the app / keeping everything" — none of them are
@@ -2385,7 +2348,8 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
   /// link is genuinely gone now). A non-fresh refresh (304/throttled/error)
   /// has no new body to learn that from, so it omits both and the column
   /// keeps whatever it already held. [imageUrl]/[updateImageUrl] (Campaign 9
-  /// Phase 5) follow the identical shape for the channel artwork URL.
+  /// Phase 5) follow the identical shape for the channel artwork URL, and
+  /// [language]/[updateLanguage] for the declared channel language.
   Future<void> updateRefreshState(
     int feedId, {
     required String title,
@@ -2396,6 +2360,8 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
     bool updateNextPageUrl = false,
     String? imageUrl,
     bool updateImageUrl = false,
+    String? language,
+    bool updateLanguage = false,
   }) => (update(feeds)..where((f) => f.id.equals(feedId))).write(
     FeedsCompanion(
       title: Value(title),
@@ -2406,6 +2372,7 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
           ? Value(nextPageUrl)
           : const Value.absent(),
       imageUrl: updateImageUrl ? Value(imageUrl) : const Value.absent(),
+      language: updateLanguage ? Value(language) : const Value.absent(),
     ),
   );
 
@@ -2537,7 +2504,6 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
       innerJoin(works, works.id.equalsExp(episodes.workId)),
     ])
       ..where(works.profileId.equals(profileId) &
-          works.persistence.isNotValue('decayed') &
           episodes.dedupReason.isNull());
     final rows = await q.get();
     return [
@@ -2598,20 +2564,57 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
   /// THE river query (ADR-0003 law 1): reverse-chronological by publish
   /// time, nothing else. The only other order is [episodesOfFeed]'s, one
   /// show by date in the direction the listener picked; nothing ranks.
-  Future<List<RiverEntry>> riverItems(int profileId) async {
+  /// Publish time is the feed's own date; ingest stamps first-seen only
+  /// when an item carries none, so an OPML import's one first-seen day
+  /// never decides the order.
+  ///
+  /// Latest is a permanent archive (ADR-0019), so the query is paged by
+  /// keyset: [after] continues below a loaded row, [through] re-reads
+  /// every row down to and including one (a reload of what is on screen),
+  /// and [limit] caps a page. [kind] is the text/audio chip: a filter, so
+  /// a filtered page is still a full page.
+  Future<List<RiverEntry>> riverItems(
+    int profileId, {
+    RiverCursor? after,
+    RiverCursor? through,
+    int? limit = riverPageSize,
+    RiverKind kind = RiverKind.all,
+  }) async {
     final q = select(episodes).join([
       innerJoin(works, works.id.equalsExp(episodes.workId)),
       innerJoin(feeds, feeds.id.equalsExp(episodes.feedId)),
     ])
-      ..where(works.profileId.equals(profileId) &
-          works.persistence.isNotValue('decayed') &
+      // The unary plus keeps SQLite off the works index: driven from
+      // there it must sort every one of the profile's items to find a
+      // page, where walking idx_episodes_published stops after one.
+      ..where(const CustomExpression<int>('+works.profile_id')
+              .equals(profileId) &
           episodes.dedupReason.isNull())
       // The id settles a tie, so two items published in the same second
-      // keep one order across reloads.
+      // keep one order across reloads and pages.
       ..orderBy([
         OrderingTerm.desc(episodes.publishedAtMs),
         OrderingTerm.desc(episodes.workId),
       ]);
+    switch (kind) {
+      case RiverKind.all:
+        break;
+      case RiverKind.text:
+        q.where(episodes.enclosureUrl.isNull());
+      case RiverKind.audio:
+        q.where(episodes.enclosureUrl.isNotNull());
+    }
+    if (after != null) {
+      q.where(episodes.publishedAtMs.isSmallerThanValue(after.publishedAtMs) |
+          (episodes.publishedAtMs.equals(after.publishedAtMs) &
+              episodes.workId.isSmallerThanValue(after.workId)));
+    }
+    if (through != null) {
+      q.where(episodes.publishedAtMs.isBiggerThanValue(through.publishedAtMs) |
+          (episodes.publishedAtMs.equals(through.publishedAtMs) &
+              episodes.workId.isBiggerOrEqualValue(through.workId)));
+    }
+    if (limit != null) q.limit(limit);
     final rows = await q.get();
     return [
       for (final r in rows)
@@ -2620,6 +2623,49 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
           episode: r.readTable(episodes),
           feedTitle: r.readTable(feeds).title,
         ),
+    ];
+  }
+
+  /// One row of Latest as [riverItems] would return it, or null once it
+  /// no longer belongs there: what a row action re-reads instead of the
+  /// whole list.
+  Future<RiverEntry?> riverEntryOf(int workId) async {
+    final q = select(episodes).join([
+      innerJoin(works, works.id.equalsExp(episodes.workId)),
+      innerJoin(feeds, feeds.id.equalsExp(episodes.feedId)),
+    ])
+      ..where(episodes.workId.equals(workId) & episodes.dedupReason.isNull());
+    final r = await q.getSingleOrNull();
+    if (r == null) return null;
+    return (
+      work: r.readTable(works),
+      episode: r.readTable(episodes),
+      feedTitle: r.readTable(feeds).title,
+    );
+  }
+
+  /// "Mark everything older as played" from Latest: every unplayed audio
+  /// item published strictly before [publishedBeforeMs], across the whole
+  /// archive rather than the loaded page. Strictly, as on the podcast
+  /// page, so a tie is never swept up because of where the list put it.
+  Future<List<({Work work, Episode episode})>> olderUnplayedAudio(
+      int profileId,
+      {required int publishedBeforeMs}) async {
+    final q = select(episodes).join([
+      innerJoin(works, works.id.equalsExp(episodes.workId)),
+    ])
+      ..where(works.profileId.equals(profileId) &
+          episodes.dedupReason.isNull() &
+          episodes.enclosureUrl.isNotNull() &
+          episodes.finishedAtMs.isNull() &
+          episodes.publishedAtMs.isSmallerThanValue(publishedBeforeMs))
+      ..orderBy([
+        OrderingTerm.desc(episodes.publishedAtMs),
+        OrderingTerm.desc(episodes.workId),
+      ]);
+    return [
+      for (final r in await q.get())
+        (work: r.readTable(works), episode: r.readTable(episodes)),
     ];
   }
 
@@ -2634,8 +2680,7 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
         select(
             episodes,
           ).join([innerJoin(works, works.id.equalsExp(episodes.workId))])
-          ..where(episodes.feedId.equals(feedId) &
-              works.persistence.isNotValue('decayed'))
+          ..where(episodes.feedId.equals(feedId))
           ..orderBy([
             oldestFirst
                 ? OrderingTerm.asc(episodes.publishedAtMs)
@@ -2668,7 +2713,7 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
 
   /// Unplayed episodes per feed for the Subscriptions page, keyed by feed
   /// id; a feed with none is absent. The same test as the podcast page's
-  /// "N unplayed" (audio, not finished, not let pass), so the two numbers
+  /// "N unplayed" (audio, not finished), so the two numbers
   /// always agree. One grouped query rather than one per feed.
   Future<Map<int, int>> unplayedCountsOf(int profileId) async {
     final n = episodes.workId.count();
@@ -2677,7 +2722,6 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
     ])
       ..addColumns([episodes.feedId, n])
       ..where(works.profileId.equals(profileId) &
-          works.persistence.isNotValue('decayed') &
           episodes.enclosureUrl.isNotNull() &
           episodes.finishedAtMs.isNull())
       ..groupBy([episodes.feedId]);
@@ -2829,7 +2873,7 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
   Future<List<PlayerPosition>> allPlayerPositions() =>
       select(playerPositions).get();
 
-  /// Deleting a feed takes its unpromoted ephemera with it (ADR-0003 law 2);
+  /// Deleting a feed takes its unpromoted ephemera with it (ADR-0019);
   /// a promoted work belongs to the library now — only its river metadata
   /// goes (its sourceUrl still carries the enclosure).
   Future<void> deleteFeedCascade(int feedId) => transaction(() async {
@@ -2838,7 +2882,7 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
     ])
       ..addColumns([works.id])
       ..where(episodes.feedId.equals(feedId) &
-          works.persistence.isIn(const ['ephemeron', 'decayed']));
+          works.persistence.equals('ephemeron'));
     await db.spineDao
         .deleteWorks([for (final r in await q.get()) r.read(works.id)!]);
     await (delete(episodes)..where((e) => e.feedId.equals(feedId))).go();
@@ -3094,7 +3138,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 26;
+  int get schemaVersion => 28;
   // There is no v14: it was reserved for the reader-depth campaign, which
   // landed as v18 after three sibling campaigns merged ahead of it, so the
   // guard chain skips from 13 to 15. Version gaps are harmless — an
@@ -3125,6 +3169,7 @@ class AppDatabase extends _$AppDatabase {
     for (final r in twins) {
       final id = r.read<int>('id');
       final persistence = r.read<String>('persistence');
+      // 'decayed' can still be here: the v27 hop that retires it runs later.
       if (persistence == 'ephemeron' || persistence == 'decayed') {
         unkept.add(id);
       } else {
@@ -3195,7 +3240,7 @@ class AppDatabase extends _$AppDatabase {
           }
           if (from < 12) {
             // Campaign 1 ("the player earns love"): per-podcast playback
-            // settings, the Up Next queue, and audio-only eviction that
+            // settings, the queue, and audio-only eviction that
             // never deletes an episode row.
             if (from >= 2) {
               // feeds/episodes exist from here on. A migration that starts
@@ -3403,6 +3448,30 @@ class AppDatabase extends _$AppDatabase {
             // Guarded like every feeds column: a from < 2 upgrade made
             // `feeds` fresh with this column already present.
             if (from >= 2) await m.addColumn(feeds, feeds.bodyHash);
+          }
+          if (from < 27) {
+            // ADR-0019: nothing decays any more. Whatever a past boot sweep
+            // hid comes back as an ordinary unkept item; what its second
+            // window already deleted is gone, and a feed that still lists
+            // it re-adds it on the next refresh.
+            await customStatement(
+                "UPDATE works SET persistence = 'ephemeron' "
+                "WHERE persistence = 'decayed'");
+            // Paging Latest needs its publish-time index.
+            await installIndexes(this);
+            // `profiles` is never created fresh inside onUpgrade, so the
+            // column is always new here.
+            await m.addColumn(profiles, profiles.latestSeenAtMs);
+          }
+          if (from >= 2 && from < 28) {
+            // Guarded like every feeds column (see bodyHash above).
+            await m.addColumn(feeds, feeds.language);
+            // A feed only learns its language from a fresh parse, and an
+            // unchanged feed answers 304 or matches its hash. Forgetting
+            // both makes the next refresh fetch and parse each feed once;
+            // the guid dedupe keeps the re-ingest from adding anything.
+            await customStatement('UPDATE feeds SET etag = NULL, '
+                'last_modified = NULL, body_hash = NULL');
           }
         },
         beforeOpen: (details) async {

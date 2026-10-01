@@ -2,7 +2,7 @@
 /// hands"): Keep promotes a river item into the library — the existing
 /// library-add path ([SpineDao.promoteWork]) — and marks it read, since it
 /// has left the river's unread flow. Let it pass is the explicit
-/// dismissal: marks read, nothing more; decay already handles aging.
+/// dismissal: marks read, nothing more; the item stays in the archive.
 ///
 /// Kept items live in the library, full stop — no river filter chip for
 /// "Kept" exists or should (ADR-0011): the never-pollute law cuts both

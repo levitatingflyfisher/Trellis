@@ -5,6 +5,7 @@ import 'package:trellis/db/database.dart';
 import 'package:trellis/main.dart';
 
 import '../support/fake_player.dart';
+import '../support/tabs.dart';
 import '../support/fake_services.dart';
 import '../support/scripted_fetcher.dart';
 import 'dart:io';
@@ -100,6 +101,7 @@ void main() {
             services: testServices(dir)));
         await tester.pumpAndSettle();
         await pickReader(tester, 'Ada');
+        await toTab(tester, 'Library');
 
         // RSVP controls: open the reader (default mode is RSVP).
         await tester.tap(find.text('An Entangled Bank'));
@@ -112,7 +114,7 @@ void main() {
         // mounts (home_shell.dart hosts it above every screen) — playing
         // first, then toggled to paused, both real code paths, not a
         // hand-copied re-render.
-        await tester.tap(find.text('Inbox'));
+        await tester.tap(tabLabel('Latest'));
         await tester.pumpAndSettle();
         await shoot('river_row');
 

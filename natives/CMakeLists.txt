@@ -26,8 +26,12 @@ set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
 set(GGML_OPENMP OFF CACHE BOOL "" FORCE)
 add_subdirectory(third_party/whisper.cpp EXCLUDE_FROM_ALL)
 
+# The file name is also the SONAME, and bionic dedupes loaded libraries by
+# SONAME: a variant build (libwhisper_dotprod.so) must carry its own, not
+# be a renamed copy of libwhisper.so.
+set(WFS_LIB_NAME whisper CACHE STRING "Output name (and SONAME) of the shim library")
 add_library(whisper_shim SHARED shim/wfs_shim.c)
-set_target_properties(whisper_shim PROPERTIES OUTPUT_NAME whisper)
+set_target_properties(whisper_shim PROPERTIES OUTPUT_NAME ${WFS_LIB_NAME})
 target_link_libraries(whisper_shim PRIVATE whisper)
 target_include_directories(whisper_shim
     PRIVATE third_party/whisper.cpp/include third_party/whisper.cpp/ggml/include)

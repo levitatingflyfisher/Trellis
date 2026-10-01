@@ -9,7 +9,6 @@ import '../feeds/background/feed_check_platform.dart';
 import '../feeds/background/feed_check_runner.dart';
 import '../feeds/background/feed_check_settings.dart';
 import '../feeds/feeds_repository.dart';
-import '../intake/paste_intake.dart' show epochDayUtcNow;
 import '../jobs/job_center.dart';
 import '../player/episode_player.dart';
 import 'home_shell.dart';
@@ -23,7 +22,7 @@ const defaultReaderName = 'Reader';
 
 /// The root flow, which opens into the task (operator ruling 48; audit
 /// rank 5): a first launch makes a reader called "Reader" and opens their
-/// Library, with no name to type; a later launch opens the reader this
+/// shell on Latest, with no name to type; a later launch opens the reader this
 /// device last had open (or the only one). The picker ("Who's reading?")
 /// appears only when there is a real choice: several readers and no
 /// remembered one, or the reader asked to switch. One stateful widget, no
@@ -110,13 +109,6 @@ class _HomeFlowState extends State<HomeFlow> {
       _closeFeedCheckHost = close;
     }
     _writesReady.complete();
-    // Boot-time ephemera sweep (ADR-0003 law 2): decayed feed items leave
-    // the river into a recoverable soft state the River announces
-    // (Restore / Let go), never a silent delete. Promoted works are
-    // untouchable by design. It runs before jobs resume and before the
-    // River is first opened in all but a cold start that interrupted a
-    // background check, where it lands a few seconds later.
-    await widget.db.spineDao.sweepEphemera(todayEpochDay: epochDayUtcNow());
     await _jobs.restoreAndResume();
     await _feedCheck.applyAtLaunch();
     await _feedCheckRunner?.requestAutoDownloadIfPending();

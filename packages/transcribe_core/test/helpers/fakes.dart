@@ -240,3 +240,31 @@ class _ReplaySource implements PcmChunkSource {
   @override
   Stream<Float32List> chunks() => Stream.value(window);
 }
+
+/// A [WindowScriptTranscriber] that also reports a detected language per
+/// window, the way whisper does after an auto run — but only when it was
+/// asked to detect (a locked language comes back as itself).
+class DetectingTranscriber extends WindowScriptTranscriber
+    implements ReportsLanguage {
+  final Map<int, String?> detects; // startMs -> what auto-detect finds
+  String? _last;
+
+  DetectingTranscriber(super.script, this.detects);
+
+  @override
+  String? get lastLanguage => _last;
+
+  @override
+  Stream<TranscriptChunk> transcribe(
+    PcmChunkSource src, {
+    String? lang,
+    WhisperTask task = WhisperTask.transcribe,
+    bool wordTimings = true,
+  }) async* {
+    await for (final c
+        in super.transcribe(src, lang: lang, task: task, wordTimings: wordTimings)) {
+      yield c;
+    }
+    _last = lang ?? detects[seen.last.startMs];
+  }
+}

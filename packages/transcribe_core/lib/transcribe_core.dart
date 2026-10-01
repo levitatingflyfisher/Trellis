@@ -7,4 +7,5 @@ library;
 export 'src/pcm_source.dart';
 export 'src/segmentize.dart';
 export 'src/transcribe_task.dart';
+export 'src/whisper_languages.dart';
 export 'src/window_plan.dart';

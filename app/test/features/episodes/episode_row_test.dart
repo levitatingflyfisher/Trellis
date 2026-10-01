@@ -145,7 +145,7 @@ void main() {
     for (final label in [
       'New',
       'Downloaded',
-      'In Up Next',
+      'In Queue',
       'Transcript',
       'Video'
     ]) {
@@ -161,7 +161,7 @@ void main() {
     for (final label in [
       'New',
       'Downloaded',
-      'In Up Next',
+      'In Queue',
       'Transcript',
       'Video'
     ]) {

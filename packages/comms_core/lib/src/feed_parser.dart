@@ -397,13 +397,17 @@ ParsedFeed parseRssFeed(String xml, String feedUrl) {
 
   final c = containerSeen ? container : null;
   final nextPage = _findNextPage(c, feedUrl);
+  final language = c == null
+      ? null
+      : _firstLocal(c.childElements, 'language')?.innerText.trim();
 
   return ParsedFeed(
       title: feedTitle,
       items: items,
       nextPageUrl: nextPage.url,
       nextPageRel: nextPage.rel,
-      imageUrl: _findChannelImageUrl(c, feedUrl));
+      imageUrl: _findChannelImageUrl(c, feedUrl),
+      language: language == null || language.isEmpty ? null : language);
 }
 
 /// Common named HTML entities (the full HTML5 table has ~2200; feeds in the

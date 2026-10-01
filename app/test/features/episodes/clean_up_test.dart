@@ -18,6 +18,7 @@ import 'package:trellis/main.dart';
 import 'package:trellis/services/device_services.dart';
 
 import '../../support/fake_player.dart';
+import '../../support/tabs.dart';
 import '../../support/fake_services.dart';
 import '../../support/pick_reader.dart';
 import '../../support/scripted_fetcher.dart';
@@ -271,7 +272,7 @@ void main() {
       expect((await ep(ids['Echo']!)).readAtMs, isNull);
     });
 
-    testWidgets('Add to Up Next, then Undo takes out only what it added',
+    testWidgets('Add to Queue, then Undo takes out only what it added',
         (tester) async {
       await db.queueDao
           .playLast(profileId: profileId, workId: ids['Dawn']!, nowMs: 1);
@@ -280,7 +281,7 @@ void main() {
       await more(tester, const Key('bulk-up-next'));
       expect([for (final r in await db.queueDao.queueOf(profileId)) r.workId],
           [ids['Dawn'], ids['Echo']]);
-      expect(find.text('Added 1 episode to Up Next'), findsOneWidget);
+      expect(find.text('Added 1 episode to the Queue'), findsOneWidget);
       expect(player.loadedUrl, isNull, reason: 'queueing never plays');
 
       await undo(tester);
@@ -398,7 +399,7 @@ void main() {
       expect((await ep(ids['Alpha']!)).finishedAtMs, isNull);
     });
 
-    testWidgets('Add to Up Next queues oldest to newest, whatever the sort',
+    testWidgets('Add to Queue queues oldest to newest, whatever the sort',
         (tester) async {
       await pumpPage(tester);
       await select(tester, ['Echo', 'Alpha', 'Bravo']);
@@ -470,7 +471,7 @@ void main() {
     });
   });
 
-  group('the Inbox', () {
+  group('Latest', () {
     late Map<String, int> ids;
 
     setUp(() async {
@@ -485,14 +486,14 @@ void main() {
       await db.feedsDao.markPlayed(ids['Old']!, 7);
     });
 
-    Future<void> pumpInbox(WidgetTester tester) async {
+    Future<void> pumpLatest(WidgetTester tester) async {
       await tester.pumpWidget(TrellisApp(
           db: db,
           fetcher: ScriptedFetcher((u, h) => textResponse('')),
           createPlayer: () => player));
       await tester.pumpAndSettle();
       await pickReader(tester, 'Ada');
-      await tester.tap(find.text('Inbox'));
+      await tester.tap(tabLabel('Latest'));
       await tester.pumpAndSettle();
     }
 
@@ -504,7 +505,7 @@ void main() {
     for (final filter in ['chip-all', 'chip-audio']) {
       testWidgets('older means below in the list ($filter): unplayed audio '
           'only', (tester) async {
-        await pumpInbox(tester);
+        await pumpLatest(tester);
         await tester.tap(find.byKey(Key(filter)));
         await tester.pumpAndSettle();
         await menu(tester, 'Newest');
@@ -527,7 +528,7 @@ void main() {
       final feedId = (await db.feedsDao.feedsOf(profileId)).single.id;
       // Same moment as Middle, newer id, so it lists just above Middle.
       ids['Twin'] = await seedEpisode(feedId, 'Twin', 3000);
-      await pumpInbox(tester);
+      await pumpLatest(tester);
       final twinY = tester.getTopLeft(find.text('Twin')).dy;
       expect(twinY, lessThan(tester.getTopLeft(find.text('Middle')).dy));
       await menu(tester, 'Twin');
@@ -539,7 +540,7 @@ void main() {
 
     testWidgets('the Text filter offers no mark-older (nothing there plays)',
         (tester) async {
-      await pumpInbox(tester);
+      await pumpLatest(tester);
       await tester.tap(find.byKey(const Key('chip-text')));
       await tester.pumpAndSettle();
       await menu(tester, 'Article');
@@ -548,7 +549,7 @@ void main() {
 
     testWidgets('Select from More, select all, swipes are off, filter '
         'changes keep only rows on screen', (tester) async {
-      await pumpInbox(tester);
+      await pumpLatest(tester);
       await tester.tap(find.byKey(const Key('river-more')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('river-select')));
@@ -571,9 +572,9 @@ void main() {
       expect(find.byKey(const Key('selection-bar')), findsNothing);
     });
 
-    testWidgets('a bulk Mark played over the Inbox leaves History alone',
+    testWidgets('a bulk Mark played over Latest leaves History alone',
         (tester) async {
-      await pumpInbox(tester);
+      await pumpLatest(tester);
       await tester.longPress(find.text('Newest'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Middle'));

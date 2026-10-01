@@ -36,6 +36,25 @@ abstract class Transcriber {
   });
 }
 
+/// A [Transcriber] that can say which language its most recent window was
+/// decoded in — whisper reports it after an auto-detect run, which lets a
+/// job detect once and lock the language for every later window instead of
+/// paying for detection (a second encoder pass) on each one.
+abstract interface class ReportsLanguage {
+  /// The ISO 639-1-ish code of the last decoded window, or null when the
+  /// engine can't tell (nothing decoded yet, or the native build is too old
+  /// to report it).
+  String? get lastLanguage;
+}
+
+/// A [Transcriber] that keeps engine state (a loaded model) across
+/// [Transcriber.transcribe] calls. Whoever built it calls [close] once the
+/// job is over, however it ended.
+abstract interface class ClosableTranscriber {
+  /// Releases the held engine state. Idempotent.
+  void close();
+}
+
 /// A synthesis voice: an engine-scoped id plus the language it speaks.
 class Voice {
   final String id;

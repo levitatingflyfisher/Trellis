@@ -45,9 +45,14 @@ void main() {
         fetcher: ScriptedFetcher((u, h) => textResponse('')),
         createPlayer: () => FakeEpisodePlayer()));
     await tester.pumpAndSettle();
-    if (tab != null) {
-      await tester.tap(find.descendant(
-          of: find.byType(NavigationBar), matching: find.text(tab)));
+    // The sweep re-pumps the same app, so a pushed screen (the reader) can
+    // still cover the tabs; it is already where this pump wants to be.
+    final label = tab == null
+        ? null
+        : find.descendant(
+            of: find.byType(NavigationBar), matching: find.text(tab));
+    if (label != null && label.hitTestable().evaluate().isNotEmpty) {
+      await tester.tap(label);
       await tester.pumpAndSettle();
     }
   }
@@ -56,7 +61,7 @@ void main() {
     await seedReader(withWork: true);
     await runPrimaryActionSweep(tester,
         pumpScreen: () async {
-          await app(tester);
+          await app(tester, tab: 'Library');
           expect(find.byType(LibraryScreen), findsOneWidget);
         },
         primaryAction: find.widgetWithText(FloatingActionButton, 'Add'));
@@ -66,7 +71,7 @@ void main() {
     await seedReader();
     await runPrimaryActionSweep(tester,
         pumpScreen: () async {
-          await app(tester);
+          await app(tester, tab: 'Library');
           expect(find.byType(LibraryScreen), findsOneWidget);
         },
         primaryAction: find.text('Paste text'));
@@ -76,7 +81,7 @@ void main() {
     await seedReader();
     await runPrimaryActionSweep(tester,
         pumpScreen: () async {
-          await app(tester, tab: 'Inbox');
+          await app(tester, tab: 'Latest');
           expect(find.byType(RiverScreen), findsOneWidget);
         },
         primaryAction: find.text('Follow a feed'));
@@ -95,7 +100,7 @@ void main() {
   testWidgets('ReaderScreen: Play', (tester) async {
     await seedReader(withWork: true);
     await runPrimaryActionSweep(tester, pumpScreen: () async {
-      await app(tester);
+      await app(tester, tab: 'Library');
       await tester.tap(find.text('A Rather Longer Title Than Any Row Would Prefer'));
       await tester.pumpAndSettle();
       expect(find.byType(ReaderScreen), findsOneWidget);

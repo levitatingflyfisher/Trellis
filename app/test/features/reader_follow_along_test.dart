@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/main.dart';
 import '../support/pick_reader.dart';
+import '../support/tabs.dart';
 
 /// Campaign 4 Phase 2: follow-along guided pacing for scroll mode — the
 /// speak-mode karaoke path (per-segment GlobalKeys + Scrollable.
@@ -49,6 +50,7 @@ void main() {
     await tester.pumpWidget(TrellisApp(db: db));
     await tester.pumpAndSettle();
     await pickReader(tester, 'Ada');
+    await toTab(tester, 'Library');
     await tester.tap(find.text(title));
     await tester.pumpAndSettle();
     await switchMode(tester, 'mode-item-scroll');
@@ -58,34 +60,32 @@ void main() {
   /// plenty of words left, so an un-stopped `_step()` Timer would still be
   /// pending at teardown ("A Timer is still pending even after the widget
   /// tree was disposed"). Only ever called once follow-along is on, so the
-  /// menu always reads "Stop following along" here.
+  /// button always reads "Pause" here.
   Future<void> stopFollowing(WidgetTester tester) async {
-    await tester.tap(find.byKey(const Key('reader-overflow')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Stop following along'));
+    await tester.tap(find.byTooltip('Pause'));
     await tester.pumpAndSettle();
   }
 
-  testWidgets('the overflow menu offers Follow along only in scroll mode',
+  // Pacing is a visible Play button in Scroll, not an item behind ⋮.
+  // RSVP has its own Play in its controls, so no second one there.
+  testWidgets('a Play button paces Scroll; RSVP keeps its own',
       (tester) async {
     await seedMultiSegment('Along');
     await tester.pumpWidget(TrellisApp(db: db));
     await tester.pumpAndSettle();
     await pickReader(tester, 'Ada');
+    await toTab(tester, 'Library');
     await tester.tap(find.text('Along'));
     await tester.pumpAndSettle();
-    // Still RSVP mode — no Follow along entry yet.
+    expect(find.byKey(const Key('reader-play')), findsNothing);
+    expect(find.byKey(const Key('play-toggle')), findsOneWidget);
+
+    await switchMode(tester, 'mode-item-scroll');
+    expect(find.byKey(const Key('reader-play')), findsOneWidget);
+    expect(find.byTooltip('Play'), findsOneWidget);
     await tester.tap(find.byKey(const Key('reader-overflow')));
     await tester.pumpAndSettle();
     expect(find.text('Follow along'), findsNothing);
-    // Close the menu without selecting anything.
-    await tester.tapAt(const Offset(10, 10));
-    await tester.pumpAndSettle();
-
-    await switchMode(tester, 'mode-item-scroll');
-    await tester.tap(find.byKey(const Key('reader-overflow')));
-    await tester.pumpAndSettle();
-    expect(find.text('Follow along'), findsOneWidget);
   });
 
   /// Tap the "Follow along" menu item WITHOUT `pumpAndSettle` — the shared
@@ -95,9 +95,7 @@ void main() {
   /// INCREMENTAL advance. A bounded pump is enough for the popup's own
   /// dismiss animation.
   Future<void> startFollowing(WidgetTester tester) async {
-    await tester.tap(find.byKey(const Key('reader-overflow')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('Follow along'));
+    await tester.tap(find.byTooltip('Play'));
     await tester.pump(const Duration(milliseconds: 300));
   }
 
@@ -163,10 +161,8 @@ void main() {
     // Off the drop cap so cursor-word exists to compare against below.
     await tester.pump(const Duration(milliseconds: 250));
 
-    await tester.tap(find.byKey(const Key('reader-overflow')));
-    await tester.pumpAndSettle();
-    expect(find.text('Stop following along'), findsOneWidget);
-    await tester.tap(find.text('Stop following along'));
+    expect(find.byTooltip('Pause'), findsOneWidget);
+    await tester.tap(find.byTooltip('Pause'));
     // Stopping cancels the Timer outright — nothing left to run away with,
     // so settling here is safe.
     await tester.pumpAndSettle();
