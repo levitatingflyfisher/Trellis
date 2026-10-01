@@ -8,12 +8,15 @@
 /// work, so coming back is one tap from where it was left.
 library;
 
+export '../transcribe/job_cards.dart' show transcribeEstimate;
+
 import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:openhearth_design/openhearth_design.dart';
 
+import '../transcribe/job_cards.dart';
 import '../../db/database.dart' hide Alignment;
 import '../episodes/episode_actions.dart';
 import '../models/format.dart';
@@ -93,18 +96,6 @@ String languageNameOf(String? code) {
   if (code == null || code.trim().isEmpty) return 'Unknown';
   final base = code.trim().toLowerCase().split(RegExp('[-_]')).first;
   return languageDisplayName(base);
-}
-
-/// What transcribing will roughly cost, in words: `about N min` from the
-/// episode's length and this phone's measured speed, or an honest
-/// "time unknown" when either is missing.
-String transcribeEstimate(int? durationMs, double? realtimeFraction) {
-  if (durationMs == null || durationMs <= 0 || realtimeFraction == null) {
-    return 'time unknown';
-  }
-  final minutes = (durationMs * realtimeFraction / 60000).ceil();
-  // Words, not the approximately sign: no bundled font draws it (C7).
-  return 'about ${minutes < 1 ? 1 : minutes} min';
 }
 
 class WorkPage extends StatefulWidget {
@@ -372,6 +363,9 @@ class _WorkPageState extends State<WorkPage> {
 
   // ───── language ─────
 
+  /// Picking a language remembers it ([Works.readLang]); picking a
+  /// translation also opens Read in it, since reading it is what the tap
+  /// asks for. The original just becomes the choice.
   Future<void> _pickLanguage(WorkLanguage l) async {
     final id = _work.id;
     await _db.spineDao.setReadLang(id, l.tag);
@@ -381,11 +375,14 @@ class _WorkPageState extends State<WorkPage> {
       // The reader shows the chosen translation under each sentence.
       await _db.spineDao.setActiveTranslationLang(id, l.tag!);
     }
-    if (mounted) setState(() => _language = l);
+    if (!mounted) return;
+    setState(() => _language = l);
+    if (!l.isOriginal && _readBlocked == null) await _read();
   }
 
-  /// Today's translate entry points: the reader's picker for anything
-  /// with text, transcribe-and-translate for an episode without.
+  /// Today's translate entry points: the reader's Translate sheet for
+  /// anything with text (it downloads what's missing), and
+  /// transcribe-and-translate for an episode without a transcript.
   VoidCallback? get _translate {
     if (_isAudiobook) return null;
     if (_isAudio && !_transcribed) {
@@ -399,7 +396,7 @@ class _WorkPageState extends State<WorkPage> {
         ), translate: true);
       };
     }
-    if (_doors.readerDoors.availableTranslationTargets == null) return null;
+    if (_doors.readerDoors.translation == null) return null;
     return () async {
       await _doors.read(context, _entry, openTranslatePicker: true);
       await _load();
@@ -718,6 +715,21 @@ class _WorkPageState extends State<WorkPage> {
               ),
             ),
           ),
+        // A running transcription shows here, beside Read, not only on
+        // the main screen's strip.
+        if (_actions?.transcriber case final t?)
+          ListenableBuilder(
+            listenable: t,
+            builder: (context, _) =>
+                t.cards.any((c) => c.workId == _work.id)
+                    ? Padding(
+                        key: Key('page-transcribe-progress-${_work.id}'),
+                        padding: const EdgeInsets.only(top: 8),
+                        child: TranscribeJobCards(
+                            coordinator: t, workId: _work.id),
+                      )
+                    : const SizedBox.shrink(),
+          ),
       ],
     );
   }
@@ -775,7 +787,7 @@ class _WorkPageState extends State<WorkPage> {
               _isAudio && !_transcribed
                   ? 'Translating needs a transcript, and this device can’t '
                         'transcribe.'
-                  : 'Translating needs a downloaded language pair (Models).',
+                  : 'This device can’t translate offline.',
               style: theme.textTheme.bodySmall,
             ),
           ),

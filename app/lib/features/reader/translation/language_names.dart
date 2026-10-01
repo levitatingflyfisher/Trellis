@@ -15,6 +15,12 @@ const Map<String, String> _kLanguageNames = {
   'pt': 'Portuguese',
   'fr': 'French',
   'ko': 'Korean',
+  'it': 'Italian',
+  'nl': 'Dutch',
+  'ar': 'Arabic',
+  'hi': 'Hindi',
+  'uk': 'Ukrainian',
+  'pl': 'Polish',
 };
 
 /// The display name for ISO-639-1 [code] — falls back to the code itself,
@@ -26,8 +32,12 @@ String languageDisplayName(String code) => _kLanguageNames[code] ?? code.toUpper
 /// The calm per-work source-language selector's own options (Campaign 8
 /// "Babel widens" Phase 1's "no auto-detection" ceiling: a curated list,
 /// never a free-text field or a guess) — every code [languageDisplayName]
-/// names, English first since it is the declared default for a work with
-/// nothing set.
+/// names: English first, the rest in the order their English names sort.
 const List<String> selectableWorkLanguages = [
-  'en', 'es', 'de', 'ru', 'zh', 'ja', 'pt', 'fr', 'ko',
+  'en', 'ar', 'zh', 'nl', 'fr', 'de', 'hi', 'it', 'ja', 'ko', 'pl', 'pt',
+  'ru', 'es', 'uk',
 ];
+
+/// Whether [code]'s script runs right to left. Of the languages a pair
+/// covers, only Arabic does.
+bool isRightToLeft(String? code) => const {'ar', 'he', 'fa', 'ur'}.contains(code);

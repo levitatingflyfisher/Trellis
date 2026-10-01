@@ -104,7 +104,7 @@ void main() {
     // The reader's title (a book's name) cannot be whole beside its
     // commands, so the bar keeps it a floor and folds right to left.
     final shown = [
-      for (final w in ['Words', 'Read aloud', 'More'])
+      for (final w in ['RSVP', 'Read aloud', 'More'])
         find
             .descendant(of: find.byType(AppBar), matching: find.text(w))
             .evaluate()

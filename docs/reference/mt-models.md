@@ -529,3 +529,66 @@ that matches BOTH fields — `pickModel` itself is untouched, so every
 existing ASR/TTS caller (and the existing es translation call sites,
 migrated to the new method in the same pass) keeps its exact prior
 behavior.
+
+
+## Trellis 1.5.5: the English-first catalog (2026-10-25)
+
+Checked 2026-10-25. The two ONNX graphs per pair were pinned from Hugging
+Face's tree API (`lfs.oid` and `size`, the method validated above). The
+four small files per pair (`source.spm`, `vocab.json`, `config.json`,
+`tokenizer_config.json`) carry no `lfs` block, so they were downloaded
+(kilobytes to about 2.7 MB each) and hashed. Only one pair's weights were
+downloaded: Xenova `opus-mt-en-ROMANCE`, to run it. The local sha256 of
+both graphs matched the tree API.
+
+Every pair has 6 decoder layers, 8 heads, `d_model` 512 and
+`separate_vocabs: false`. The vocab size and the pad/decoder-start id
+differ per pair, from 58,100 (de) to 80,378 (it-en). That is why the loop
+now reads them. Xenova's configs carry `bad_words_ids: [[pad]]`;
+onnx-community's carry none.
+
+| Pair | Repo | MB | License on the ONNX card | Upstream Helsinki-NLP card | Target token |
+|---|---|---|---|---|---|
+| en->es | `onnx-community/opus-mt-en-es` | 248.7 | cc-by-4.0 (own card) | apache-2.0 |  |
+| en->de | `onnx-community/opus-mt-en-de` | 227.1 | cc-by-4.0 (own card) | cc-by-4.0 |  |
+| de->en | `onnx-community/opus-mt-de-en` | 227.1 | cc-by-4.0 (own card) | apache-2.0 |  |
+| en->ru | `onnx-community/opus-mt-en-ru` | 242.1 | cc-by-4.0 (own card) | apache-2.0 |  |
+| ru->en | `onnx-community/opus-mt-ru-en` | 242.3 | cc-by-4.0 (own card) | cc-by-4.0 |  |
+| zh->en | `onnx-community/opus-mt-zh-en` | 248.7 | cc-by-4.0 (own card) | cc-by-4.0 |  |
+| es->en | `Xenova/opus-mt-es-en` | 115.7 | none on card | apache-2.0 |  |
+| en->fr | `Xenova/opus-mt-en-fr` | 109.7 | none on card | apache-2.0 |  |
+| fr->en | `Xenova/opus-mt-fr-en` | 109.7 | none on card | apache-2.0 |  |
+| en->it | `Xenova/opus-mt-en-it` | 131.9 | none on card | apache-2.0 |  |
+| it->en | `Xenova/opus-mt-it-en` | 132.3 | none on card | apache-2.0 |  |
+| en->pt | `Xenova/opus-mt-en-ROMANCE` | 115.5 | none on card | apache-2.0 | `>>pt<<` |
+| pt->en | `Xenova/opus-mt-ROMANCE-en` | 115.5 | none on card | apache-2.0 |  |
+| en->nl | `Xenova/opus-mt-en-nl` | 117.8 | none on card | apache-2.0 |  |
+| nl->en | `Xenova/opus-mt-nl-en` | 117.8 | none on card | apache-2.0 |  |
+| ja->en | `Xenova/opus-mt-ja-en` | 111.1 | none on card | apache-2.0 |  |
+| ko->en | `Xenova/opus-mt-ko-en` | 115.8 | none on card | apache-2.0 |  |
+| en->zh | `Xenova/opus-mt-en-zh` | 115.7 | none on card | apache-2.0 | `>>cmn_Hans<<` |
+| en->ar | `Xenova/opus-mt-en-ar` | 113.9 | none on card | apache-2.0 | `>>ara<<` |
+| ar->en | `Xenova/opus-mt-ar-en` | 114.1 | none on card | apache-2.0 |  |
+| en->hi | `Xenova/opus-mt-en-hi` | 113.0 | none on card | apache-2.0 |  |
+| hi->en | `Xenova/opus-mt-hi-en` | 112.4 | none on card | apache-2.0 |  |
+| en->uk | `Xenova/opus-mt-en-uk` | 112.9 | none on card | apache-2.0 |  |
+| uk->en | `Xenova/opus-mt-uk-en` | 113.1 | none on card | apache-2.0 |  |
+| pl->en | `Xenova/opus-mt-pl-en` | 114.0 | none on card | apache-2.0 |  |
+
+Pt rides on the multi-target `en-ROMANCE` / `ROMANCE-en` models, with
+`>>pt<<` selecting the language. No bilingual pt ONNX export exists at a
+trusted org (see the Portuguese section above). The model can produce
+Brazilian or European forms; `>>pt_BR<<` exists but wasn't evaluated.
+
+**Not registered:**
+
+| Wanted | Why |
+|---|---|
+| en->ja | No `ja` export exists; `en-jap` (Xenova) is incoherent (see the Japanese section). ja->en is now registered from `onnx-community/opus-mt-ja-en`, a different, newer model than `jap-en`. Its quality has not been checked. |
+| en->ko | `Helsinki-NLP/opus-mt-tc-big-en-ko` exists upstream, but no ONNX conversion exists at onnx-community or Xenova. |
+| en->pl | No `opus-mt-en-pl`; `opus-mt-en-zlw` (West Slavic) exists upstream with no trusted ONNX conversion. |
+
+**Licenses.** OPUS-MT weights are CC-BY 4.0 (some upstream cards say
+apache-2.0). The Models screen's translation section carries the credit:
+"Translation models: OPUS-MT by Helsinki-NLP (University of Helsinki),
+licensed CC-BY 4.0. Converted to ONNX by Xenova and onnx-community."

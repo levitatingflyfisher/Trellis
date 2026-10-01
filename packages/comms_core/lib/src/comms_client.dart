@@ -17,6 +17,7 @@ import 'exceptions.dart';
 import 'feed_fetch_result.dart';
 import 'http_date.dart';
 import 'http_fetcher.dart';
+import 'known_feeds.dart';
 import 'limits.dart';
 import 'safe_url.dart';
 
@@ -270,7 +271,7 @@ class CommsClient {
   /// caller's parse produces a specific error.
   Future<String> discoverFeedUrl(String url) async {
     // If it already looks like a feed URL, use it directly
-    if (_feedPathRe.hasMatch(url) || _feedExtRe.hasMatch(url)) return url;
+    if (looksLikeFeedUrl(url)) return url;
     // Try fetching the URL — if it's XML, great
     String body;
     try {
@@ -280,19 +281,8 @@ class CommsClient {
     }
     if (_looksLikeXml(body)) return url;
     // It's HTML — look for RSS/Atom link discovery
-    final match = _feedLinkRe.firstMatch(body);
-    if (match != null) {
-      final href = _hrefRe.firstMatch(match.group(0)!);
-      if (href != null) {
-        final discovered = href.group(1)!;
-        // Resolve relative URLs
-        try {
-          return Uri.parse(url).resolve(discovered).toString();
-        } catch (_) {
-          return discovered;
-        }
-      }
-    }
+    final advertised = advertisedFeedIn(body, url);
+    if (advertised != null) return advertised;
     // Build guesses including known-host patterns (Substack, WP, Ghost,
     // Medium, YouTube).
     final guesses = <String>[];
@@ -348,15 +338,6 @@ class CommsClient {
         t.startsWith('<feed');
   }
 
-  static final _feedPathRe =
-      RegExp(r'/(feed|rss|atom)(\.xml)?$', caseSensitive: false);
-  static final _feedExtRe =
-      RegExp(r'\.(rss|atom|xml)$', caseSensitive: false);
-  static final _feedLinkRe = RegExp(
-      '<link[^>]+type=["\']application/(rss|atom)\\+xml["\'][^>]*>',
-      caseSensitive: false);
-  static final _hrefRe =
-      RegExp('href=["\']([^"\']+)["\']', caseSensitive: false);
   static final _youtubeChannelRe = RegExp(r'/channel/([A-Za-z0-9_-]+)');
 
   /// Donor `fetchBinaryWithProxies`: direct (15 s) → consent gate → binary

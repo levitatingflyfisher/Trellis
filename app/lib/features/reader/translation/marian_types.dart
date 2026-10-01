@@ -6,22 +6,40 @@
 /// conditional export (`marian_engine.dart`).
 library;
 
-/// Which files make up one downloaded opus-mt-en-es model — resolved
-/// from the model store (Phase 2's registry wiring), never guessed. All
-/// four files ship loose under the model's own directory: no archive to
+/// Which files make up one downloaded opus-mt model — resolved from the
+/// model store through the registry's [MarianModelLayout], never guessed.
+/// Every file ships loose under the model's own directory: no archive to
 /// extract, same as the Supertonic rung's files.
 class MarianTranslatorFiles {
   final String encoderPath;
   final String decoderMergedPath;
   final String sourceSpmPath;
   final String vocabPath;
+  final String configPath;
+  final String tokenizerConfigPath;
+
+  /// A multi-target export's `>>xx<<` token, from the layout; null for a
+  /// bilingual pair.
+  final String? targetToken;
 
   const MarianTranslatorFiles({
     required this.encoderPath,
     required this.decoderMergedPath,
     required this.sourceSpmPath,
     required this.vocabPath,
+    required this.configPath,
+    required this.tokenizerConfigPath,
+    this.targetToken,
   });
+
+  List<String> get allPaths => [
+        encoderPath,
+        decoderMergedPath,
+        sourceSpmPath,
+        vocabPath,
+        configPath,
+        tokenizerConfigPath,
+      ];
 }
 
 /// A dtype tag for [MTensor] — the real adapter needs this to build the
@@ -42,13 +60,33 @@ class MTensor {
   final List<int> shape;
   final MTensorType type;
 
-  const MTensor(this.data, this.shape, [this.type = MTensorType.float32]);
+  /// A value still living on the runtime's side (an `OrtValue`), when the
+  /// runner left it there: the decoder's growing self-attention cache and
+  /// the frozen cross-attention cache go straight back into the next step
+  /// as handles. Copying them through the platform channel each step was
+  /// most of the per-token cost; only `logits` needs to reach Dart.
+  /// [data] is empty for a handle.
+  final Object? handle;
+
+  const MTensor(this.data, this.shape, [this.type = MTensorType.float32])
+      : handle = null;
+
+  const MTensor.handle(Object this.handle, this.shape,
+      [this.type = MTensorType.float32])
+      : data = const [];
 }
 
 /// What the generation loop needs from an ONNX session — real code wraps
 /// `OrtSession.run`; tests inject a deterministic fake script.
 abstract interface class MarianSessionRunner {
-  Future<Map<String, MTensor>> run(Map<String, MTensor> feeds);
+  /// Runs the session. Outputs named in [fetch] come back as plain data;
+  /// the rest may come back as [MTensor.handle]s (a fake may return data
+  /// for everything). A null [fetch] fetches every output.
+  Future<Map<String, MTensor>> run(Map<String, MTensor> feeds,
+      {Set<String>? fetch});
+
+  /// Frees handles this runner returned. Plain-data tensors are ignored.
+  Future<void> release(Iterable<MTensor> tensors);
 }
 
 /// The open handle: tokenizer + vocabulary + the two sessions, ready to
@@ -58,9 +96,9 @@ abstract interface class MarianSessionRunner {
 /// build the engine with a fake factory and never touch a platform
 /// channel.
 abstract interface class MarianModelHandle {
-  /// Translates ONE English sentence (already split — Phase 3 calls this
+  /// Translates ONE sentence (already split — the batch calls this
   /// per-sentence via loom_core's splitter, the same lookahead law the
-  /// speech pipeline follows) into Spanish.
+  /// speech pipeline follows) from the pair's source into its target.
   Future<String> translate(String sentence);
 
   /// Releases both native ONNX sessions this handle opened.

@@ -54,8 +54,8 @@ void main() {
 
   /// Campaign 9 Phase 6: `mode-toggle` now opens a labeled three-way
   /// picker (Scroll / Words / Lines) rather than cycling on its own tap —
-  /// [itemKey] names the destination explicitly (`mode-item-words`,
-  /// `mode-item-scroll`, `mode-item-lines`).
+  /// [itemKey] names the destination explicitly (`mode-item-rsvp`,
+  /// `mode-item-page`, `highlight-item-line`).
   Future<void> switchMode(WidgetTester tester, String itemKey) async {
     await tester.tap(find.byKey(const Key('mode-toggle')));
     await tester.pumpAndSettle();
@@ -125,7 +125,7 @@ void main() {
     expect(rsvpWord(tester), 'three');
 
     // → scroll: the same word is the cursor, highlighted in flowing text.
-    await switchMode(tester, 'mode-item-scroll');
+    await switchMode(tester, 'mode-item-page');
     expect(
         tester.widget<Text>(find.byKey(const Key('cursor-word'))).data, 'three');
 
@@ -138,7 +138,7 @@ void main() {
     // → Words (RSVP), named explicitly rather than "toggled back" — the
     // picker is a labeled three-way choice, not a binary cycle
     // (Campaign 9 Phase 6): the tapped word is what renders.
-    await switchMode(tester, 'mode-item-words');
+    await switchMode(tester, 'mode-item-rsvp');
     expect(rsvpWord(tester), 'five.');
   });
 
@@ -202,7 +202,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.byKey(const Key('parafoveal-toggle')));
     await tester.pumpAndSettle();
-    await switchMode(tester, 'mode-item-scroll');
+    await switchMode(tester, 'mode-item-page');
 
     // Leave and come back.
     // Back lands on the work page (1.5.4); its Read reopens the reader.
@@ -214,10 +214,10 @@ void main() {
     expect(
         find.descendant(
             of: find.byKey(const Key('mode-toggle')),
-            matching: find.text('Scroll')),
+            matching: find.text('Page')),
         findsOneWidget,
         reason: 'opens in the mode it was left in, named as a word');
-    await switchMode(tester, 'mode-item-words');
+    await switchMode(tester, 'mode-item-rsvp');
     expect(tester.widget<Slider>(find.byKey(const Key('wpm-slider'))).value,
         450);
     expect(

@@ -21,7 +21,7 @@ import '../reader/reader_logic.dart' show ledgerWord;
 import '../reader/reader_screen.dart' show ReaderScreen;
 import '../reader/speech/speech_engine.dart';
 import '../reader/speech/speech_temp_files.dart';
-import '../reader/translation/marian_engine.dart';
+import '../reader/translation/translation_service.dart';
 import '../../services/device_services.dart' show TtsSpeaker;
 import '../transcribe/transcript_writer.dart' show decodeWordTimingBlob;
 import 'player_controller.dart';
@@ -49,21 +49,9 @@ class KaraokeScreen extends StatefulWidget {
   /// `LibraryScreen.createSpeechTempFiles`.
   final SpeechTempFiles Function()? createSpeechTempFiles;
 
-  /// Resolves a translator for a specific (source, target) pair (Campaign
-  /// 8 "Babel widens" Phase 1, generalizing ADR-0008 "Babel" Phase 3) for
-  /// the reader "Read from here" opens — see
-  /// `LibraryScreen.resolveTranslator`. Null keeps that reader without a
-  /// "Translate…" action, the same built-but-unreachable gap library/
-  /// river-opened readers had before that threading landed; this closes
-  /// the SAME gap for this third entry point.
-  final Future<MarianTranslator?> Function(
-      {required String sourceLang, required String targetLang})?
-      resolveTranslator;
-
-  /// The picker's own data source, threaded the same way — see
-  /// `LibraryScreen.availableTranslationTargets`.
-  final Future<List<String>> Function({required String sourceLang})?
-      availableTranslationTargets;
+  /// Translation for the readers this opens (1.5.5); null hides
+  /// Translate. See [TranslationService].
+  final TranslationService? translation;
 
   const KaraokeScreen(
       {super.key,
@@ -73,8 +61,7 @@ class KaraokeScreen extends StatefulWidget {
       this.tts,
       this.resolveSpeechEngine,
       this.createSpeechTempFiles,
-      this.resolveTranslator,
-      this.availableTranslationTargets});
+      this.translation});
 
   @override
   State<KaraokeScreen> createState() => _KaraokeScreenState();
@@ -182,8 +169,7 @@ class _KaraokeScreenState extends State<KaraokeScreen> {
             tts: widget.tts,
             resolveSpeechEngine: widget.resolveSpeechEngine,
             createSpeechTempFiles: widget.createSpeechTempFiles,
-            resolveTranslator: widget.resolveTranslator,
-            availableTranslationTargets: widget.availableTranslationTargets)));
+            translation: widget.translation)));
   }
 
   @override

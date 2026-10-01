@@ -303,7 +303,11 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
                 ),
               Expanded(
                 child: Text(
-                  episodes.length == 1
+                  isSharedFeed(_feed)
+                      ? (episodes.length == 1
+                          ? '1 shared item'
+                          : '${episodes.length} shared items')
+                      : episodes.length == 1
                       ? '1 episode · $unplayed unplayed'
                       : '${episodes.length} episodes · $unplayed unplayed',
                   style: theme.textTheme.bodyMedium,
@@ -323,6 +327,9 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
                   icon: const Icon(Icons.playlist_add),
                   label: const Text('Add unplayed to Queue'),
                 ),
+              // The Shared source is no podcast: nothing to fetch, skip
+              // or tune.
+              if (!isSharedFeed(_feed))
               OutlinedButton.icon(
                 key: const Key('podcast-settings'),
                 onPressed: _openSettings,
@@ -355,13 +362,6 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
     );
   }
 
-  ReaderDoors get _transcriptDoors {
-    final doors = widget.readerDoors;
-    return doors != null && doors.canOpenTranscript
-        ? doors
-        : ReaderDoors(player: widget.playerController);
-  }
-
   Widget _row(List<EpisodeEntry> episodes, int i) {
     final e = episodes[i];
     final isAudio = e.episode.enclosureUrl != null;
@@ -386,10 +386,7 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
           : null,
       onRead: canPlay || !isAudio
           ? () async {
-              await (isAudio
-                  ? _transcriptDoors
-                      .openTranscript(context, db: widget.db, work: e.work)
-                  : _workDoors.readFromRow(context, e));
+              await _workDoors.readFromRow(context, e);
               await _load();
             }
           : null,
@@ -432,6 +429,7 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
   }
 
   Widget _footer() {
+    if (isSharedFeed(_feed)) return const SizedBox(height: 24);
     if (_feed.nextPageUrl != null) {
       return ListTile(
         key: const Key('fetch-older-episodes'),

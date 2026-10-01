@@ -32,7 +32,8 @@ class Sentence {
   String toString() => 'Sentence("$text", @$firstWordIdx)';
 }
 
-/// Terminal punctuation: group 1 is one or more of ASCII `.!?`, followed
+/// Terminal punctuation: group 1 is one or more of ASCII `.!?`, the
+/// Arabic question mark `؟` or the Devanagari danda `।`/`॥`, followed
 /// by whitespace or end-of-string (deliberately does NOT match punctuation
 /// immediately followed by a closing quote/paren — an embedded "quoted!"
 /// exclamation stays inside its sentence rather than risking a mid-quote
@@ -48,7 +49,7 @@ class Sentence {
 /// a predicate — kept next to that function so the two can be reviewed
 /// together; `sentence_splitter_test.dart`'s CJK group is what actually
 /// guards them from drifting apart.
-final _sentenceEndRe = RegExp(r'([.!?]+)(?=\s|$)|([。！？]+)');
+final _sentenceEndRe = RegExp(r'([.!?؟।॥]+)(?=\s|$)|([。！？]+)');
 final _whitespaceRe = RegExp(r'\s+');
 
 /// Common abbreviations whose trailing period is not a sentence end.
@@ -97,7 +98,9 @@ List<Sentence> splitSentences(String text) {
     // single-letter/abbreviation heuristic (built for ASCII initials)
     // must never run against a CJK clause, where a one-character
     // sentence is ordinary, not an abbreviation.
-    if (m.group(1) != null) {
+    // Only a period can be an abbreviation's; a danda after a one-letter
+    // Hindi word is a sentence end.
+    if (m.group(1)?.contains('.') ?? false) {
       final beforePunct = trimmed.substring(start, m.start);
       final lastWord =
           beforePunct.trim().split(_whitespaceRe).lastOrNull ?? '';

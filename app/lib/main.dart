@@ -7,8 +7,11 @@ import 'bootstrap/bootstrap.dart';
 import 'db/database.dart';
 import 'features/feeds/background/feed_check_platform.dart';
 import 'features/feeds/background/feed_check_settings.dart';
+import 'features/home_widget/home_widget_host.dart';
+import 'features/intake/share_source.dart';
 import 'features/player/episode_player.dart';
 import 'features/player/just_audio_player.dart';
+import 'features/player/mini_player_host.dart';
 import 'features/profiles/home_flow.dart';
 import 'features/settings/theme_preference.dart';
 import 'net/io_fetcher.dart';
@@ -68,6 +71,8 @@ Future<void> main() async {
     bootNotes: bootNotes,
     initialTheme: theme,
     feedCheckScheduler: createFeedCheckScheduler(),
+    shareSource: createShareSource(),
+    homeWidget: createHomeWidgetHost(),
   ));
 }
 
@@ -94,6 +99,14 @@ class TrellisApp extends StatefulWidget {
   /// Background feed checks (ADR-0018); never available in widget tests.
   final FeedCheckScheduler feedCheckScheduler;
 
+  /// The Android share sheet (1.5.5); never available in widget tests
+  /// unless one hands in a fake.
+  final ShareSource shareSource;
+
+  /// The home-screen widget (1.5.5); never available in widget tests
+  /// unless one hands in a fake.
+  final HomeWidgetHost homeWidget;
+
   TrellisApp(
       {super.key,
       required this.db,
@@ -102,7 +115,9 @@ class TrellisApp extends StatefulWidget {
       DeviceServices? services,
       this.bootNotes = const [],
       this.initialTheme,
-      this.feedCheckScheduler = const UnavailableFeedCheckScheduler()})
+      this.feedCheckScheduler = const UnavailableFeedCheckScheduler(),
+      this.shareSource = const UnavailableShareSource(),
+      this.homeWidget = const UnavailableHomeWidgetHost()})
       : fetcher = fetcher ?? IoHttpFetcher(),
         createPlayer = createPlayer ?? (() => JustAudioEpisodePlayer()),
         services = services ?? DeviceServices.detached();
@@ -115,6 +130,11 @@ class _TrellisAppState extends State<TrellisApp> {
   late final ThemePreferenceController _theme = ThemePreferenceController(
       widget.db, widget.initialTheme ?? OhThemeModePreference.system);
 
+  /// For the mini player on every page (1.5.5): which pages are pushed,
+  /// and the Navigator its sheets open from. Owned here, per app.
+  final _routes = MiniPlayerRoutes();
+  final _navigatorKey = GlobalKey<NavigatorState>();
+
   @override
   void initState() {
     super.initState();
@@ -124,6 +144,7 @@ class _TrellisAppState extends State<TrellisApp> {
   @override
   void dispose() {
     _theme.dispose();
+    _routes.dispose();
     super.dispose();
   }
 
@@ -137,6 +158,10 @@ class _TrellisAppState extends State<TrellisApp> {
           title: 'Trellis',
           // The ribbon overlapped the appbar's profile chip (visual tour).
           debugShowCheckedModeBanner: false,
+          navigatorKey: _navigatorKey,
+          navigatorObservers: [_routes],
+          builder: (context, child) => MiniPlayerHost(
+              routes: _routes, navigatorKey: _navigatorKey, child: child!),
           // The wall by day and at dusk (proposal-2 §12): hearth
           // terracotta on warm linen, from the canonical tokens (C1). Light,
           // dark or follow the phone, the person's choice (fleet ruling).
@@ -150,7 +175,9 @@ class _TrellisAppState extends State<TrellisApp> {
                 fetcher: widget.fetcher,
                 createPlayer: widget.createPlayer,
                 services: widget.services,
-                feedCheckScheduler: widget.feedCheckScheduler),
+                feedCheckScheduler: widget.feedCheckScheduler,
+                shareSource: widget.shareSource,
+                homeWidget: widget.homeWidget),
           ),
         ),
       ),

@@ -1,4 +1,4 @@
-/// The Marian rung (ADR-0008 "Babel"): opus-mt-en-es over
+/// The Marian rung (ADR-0008 "Babel"): opus-mt pairs over
 /// `flutter_onnxruntime`, behind [MarianTranslator]. No phonemizer, no
 /// beam search — greedy decode over a real encoder-once, decoder-with-
 /// past generation loop.
@@ -12,5 +12,6 @@ library;
 
 export 'marian_generation_loop.dart';
 export 'marian_types.dart';
+export 'translator.dart';
 export 'src/marian_translator.dart'
     if (dart.library.js_interop) 'src/marian_translator_unsupported.dart';

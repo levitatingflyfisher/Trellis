@@ -23,6 +23,7 @@ import 'media_item_mapping.dart';
 import 'shake_detector.dart';
 import 'sleep_timer.dart';
 import 'smart_resume.dart';
+import 'speed_control.dart' show clampSpeed, maxSpeed, minSpeed;
 
 class PlayerController extends ChangeNotifier {
   PlayerController({
@@ -73,8 +74,6 @@ class PlayerController extends ChangeNotifier {
   /// Never called until a duration-mode timer actually arms, so no test
   /// that doesn't ask for it ever touches a platform channel.
   final Stream<AccelerationSample> Function()? _accelerometerSamples;
-
-  static const List<double> speeds = [1.0, 1.25, 1.5, 1.75, 2.0];
 
   EpisodePlayer? _player;
   final List<StreamSubscription<Object?>> _subs = [];
@@ -704,8 +703,11 @@ class PlayerController extends ChangeNotifier {
     return d;
   }
 
-  Future<void> cycleSpeed() async {
-    _speed = speeds[(speeds.indexOf(_speed) + 1) % speeds.length];
+  /// The one speed setter: clamped to [minSpeed]..[maxSpeed] in tenths.
+  /// ExoPlayer keeps pitch at any speed (just_audio's default), so 4× is
+  /// fast, not chipmunk.
+  Future<void> setSpeed(double speed) async {
+    _speed = clampSpeed(speed);
     await _player?.setSpeed(_speed);
     notifyListeners();
   }

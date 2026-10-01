@@ -40,7 +40,7 @@ void main() {
     // rather than cycling on its own tap.
     await tester.tap(find.byKey(const Key('mode-toggle')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('mode-item-scroll')));
+    await tester.tap(find.byKey(const Key('mode-item-page')));
     await tester.pumpAndSettle();
   }
 
@@ -122,7 +122,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('mode-toggle')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('mode-item-scroll')));
+    await tester.tap(find.byKey(const Key('mode-item-page')));
     await tester.pumpAndSettle();
     wrap = tester.widget<Wrap>(find.byType(Wrap).first);
     expect(wrap.alignment, WrapAlignment.spaceBetween);

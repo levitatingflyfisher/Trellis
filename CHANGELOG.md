@@ -7,6 +7,27 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.5.5 — 2026-10-25
+
+### Added
+- **Share to Trellis.** Share a link, text or a file from any app. Links
+  and text land in Latest under "Shared" straight away; books go to the
+  Library. A Bluesky, Mastodon or Substack link offers to subscribe.
+- **A home-screen widget**: what's playing, with Play/Pause and skips, and
+  the book or article you were reading.
+- **Translation for real languages.** 25 language pairs with English,
+  downloaded from the Translate sheet when you pick one; other pairs go
+  via English. A translation picks up where it stopped.
+
+### Changed
+- **Two ways to read:** RSVP (one word at a time, eyes still) and Page,
+  whose highlight follows along word by word or by line. Tap a word to
+  play from there. Scroll is gone.
+- **Speed goes from 0.5× to 4×.** Swipe up or down on it, or tap for
+  presets.
+- **The mini player stays on every screen** while something is loaded.
+- **Starting a transcription says so** at once, with its progress.
+
 ## 1.5.4 — 2026-10-25
 
 ### Changed

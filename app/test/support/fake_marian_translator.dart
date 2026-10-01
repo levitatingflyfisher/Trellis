@@ -27,7 +27,7 @@ class FakeMarianModelHandle implements MarianModelHandle {
   Future<void> dispose() async => disposed = true;
 }
 
-/// Writes the four placeholder files [MarianTranslator]'s presence check
+/// Writes the six placeholder files [MarianTranslator]'s presence check
 /// needs under [dir] (content is irrelevant — the fake handle factory
 /// never parses them) and returns the paths.
 MarianTranslatorFiles fakeMarianTranslatorFiles(Directory dir) {
@@ -36,6 +36,8 @@ MarianTranslatorFiles fakeMarianTranslatorFiles(Directory dir) {
     'decoder_model_merged_quantized.onnx',
     'source.spm',
     'vocab.json',
+    'config.json',
+    'tokenizer_config.json',
   ]) {
     File('${dir.path}/$name').writeAsBytesSync(const [1, 2, 3]);
   }
@@ -44,6 +46,8 @@ MarianTranslatorFiles fakeMarianTranslatorFiles(Directory dir) {
     decoderMergedPath: '${dir.path}/decoder_model_merged_quantized.onnx',
     sourceSpmPath: '${dir.path}/source.spm',
     vocabPath: '${dir.path}/vocab.json',
+    configPath: '${dir.path}/config.json',
+    tokenizerConfigPath: '${dir.path}/tokenizer_config.json',
   );
 }
 

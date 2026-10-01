@@ -188,16 +188,20 @@ void main() {
           31 * 60 * 1000);
     });
 
-    test('speed cycles 1.0 → 1.25 → 1.5 → 1.75 → 2.0 → 1.0', () async {
+    test('setSpeed clamps to 0.5-4.0 in tenths and reaches the player',
+        () async {
       final work = await seedEpisode();
       await controller.playWork(work);
-      final seen = <double>[];
-      for (var i = 0; i < 5; i++) {
-        await controller.cycleSpeed();
-        seen.add(controller.speed);
-      }
-      expect(seen, [1.25, 1.5, 1.75, 2.0, 1.0]);
-      expect(player.lastSpeed, 1.0);
+      await controller.setSpeed(4.0);
+      expect(controller.speed, 4.0);
+      expect(player.lastSpeed, 4.0);
+      await controller.setSpeed(9);
+      expect(controller.speed, 4.0);
+      await controller.setSpeed(0.1);
+      expect(controller.speed, 0.5);
+      // Tenths, never float drift: 1.2 + 0.1 is 1.3, not 1.3000000000000003.
+      await controller.setSpeed(1.2 + 0.1);
+      expect(controller.speed, 1.3);
     });
 
     test('seekBy clamps into [0, duration]', () async {
@@ -1213,9 +1217,11 @@ void main() {
       await tester.tap(find.byKey(const Key('player-fwd30')));
       await tester.pump();
 
-      await tester.tap(find.byKey(const Key('player-speed')));
+      await tester.drag(
+          find.byKey(const Key('player-speed')), const Offset(0, -60));
       await tester.pump();
-      expect(find.text('1.25×'), findsOneWidget);
+      expect(controller.speed, 1.2);
+      expect(find.text('1.2×'), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('player-close')));
       await tester.pump();

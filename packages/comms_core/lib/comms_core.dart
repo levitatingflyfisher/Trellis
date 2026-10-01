@@ -15,6 +15,7 @@ export 'src/feed_parser.dart';
 export 'src/feed_refresh_state.dart';
 export 'src/http_date.dart';
 export 'src/http_fetcher.dart';
+export 'src/known_feeds.dart';
 export 'src/limits.dart';
 export 'src/opml.dart';
 export 'src/podcast_search.dart';

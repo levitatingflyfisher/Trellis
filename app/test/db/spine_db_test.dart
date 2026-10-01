@@ -503,8 +503,10 @@ void main() {
       expect(existing[(0, 0)]!.body, 'Hola.');
       // …a pre-v19 row reads `engine` as null, not a thrown error…
       expect(existing[(0, 0)]!.engine, isNull);
-      // …Works.activeTranslationLang reads null too, and is settable…
-      expect(await migrated.spineDao.activeTranslationLang(workId), isNull);
+      // …Works.activeTranslationLang reads 'es' (v31 writes down that
+      // stored Spanish from before the column was the active one), and is
+      // settable…
+      expect(await migrated.spineDao.activeTranslationLang(workId), 'es');
       await migrated.spineDao.setActiveTranslationLang(workId, 'de');
       expect(await migrated.spineDao.activeTranslationLang(workId), 'de');
 

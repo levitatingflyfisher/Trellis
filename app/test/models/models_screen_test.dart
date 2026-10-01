@@ -43,7 +43,11 @@ void main() {
       store: FakeModelStore(downloadedIds: {'whisper-tiny-ggml'}),
     );
 
-    for (final spec in registry.specs) {
+    final listed = [
+      for (final s in registry.specs)
+        if (s.task != ModelTask.translation) s,
+    ];
+    for (final spec in listed) {
       expect(find.text(modelLabel(spec.id)), findsOneWidget);
       expect(find.textContaining(formatBytes(spec.sizeBytes)), findsWidgets);
     }
@@ -53,7 +57,7 @@ void main() {
           .widgetList(find.byType(Text))
           .map((w) => (w as Text).data)
           .where((t) => t == 'Not downloaded'),
-      hasLength(registry.specs.length - 1),
+      hasLength(listed.length - 1),
       reason: 'every starter model but the one downloaded id is absent — '
           'derived from the registry itself (Campaign 8 "Babel widens" '
           'added six more entries) rather than a count that goes stale '
@@ -135,5 +139,42 @@ void main() {
       find.byKey(const Key('model-download-whisper-tiny-ggml')),
       findsOneWidget,
     );
+  });
+
+  testWidgets('translation pairs fold into one section that names each '
+      'pair by its languages and credits OPUS-MT', (tester) async {
+    await pump(tester,
+        store: FakeModelStore(downloadedIds: {'opus-mt-en-de'}));
+    expect(find.byKey(const Key('model-download-opus-mt-en-ROMANCE')),
+        findsNothing, reason: 'folded until opened');
+    expect(find.textContaining('1 of 25 downloaded'), findsOneWidget);
+
+    await tester.scrollUntilVisible(
+        find.byKey(const Key('models-translation')), 200);
+    await tester.tap(find.byKey(const Key('models-translation')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('opus-mt-credit')), findsOneWidget);
+    expect(opusMtCredit, contains('CC-BY 4.0'));
+    expect(opusMtCredit, contains('Apache-2.0'));
+    expect(opusMtCredit, contains('https://github.com/Helsinki-NLP/Opus-MT'));
+
+    final pt = find.text('English to Portuguese translation, offline');
+    await tester.scrollUntilVisible(pt, 200);
+    expect(pt, findsOneWidget);
+  });
+
+  testWidgets('a pair downloaded before its config files were registered '
+      'fetches them quietly on open and reads as downloaded', (tester) async {
+    final spec = ModelRegistry.starter().byId('opus-mt-en-de')!;
+    final store = FakeModelStore();
+    store.partial[spec.id] = spec.sizeBytes - 2000; // only the configs missing
+    await pump(tester, store: store);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+
+    expect(store.downloadsStarted, [spec.id],
+        reason: 'no consent dialog for a few KB of an already-kept model');
+    expect(find.byKey(const Key('consent-dialog')), findsNothing);
+    expect(find.textContaining('1 of 25 downloaded'), findsOneWidget);
   });
 }

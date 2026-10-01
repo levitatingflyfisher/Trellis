@@ -428,10 +428,9 @@ void main() {
         isNull,
       );
       expect(
-        starter.pickModel(ModelTask.translation, DeviceTier.t2, langHint: 'fr'),
+        starter.pickModel(ModelTask.translation, DeviceTier.t2, langHint: 'ko'),
         isNull,
-        reason: 'the starter catalog has no fr pair yet — other pairs are '
-            'registry data, not an engine change (ADR-0008)',
+        reason: 'no trusted en-ko ONNX export exists (task-C pair table)',
       );
     });
 
@@ -603,156 +602,6 @@ void main() {
             420510,
           ),
         ],
-        // Verified 2026-08-14/15: downloaded all four files directly from
-        // onnx-community/opus-mt-en-es on Hugging Face and hashed them
-        // locally (docs/reference/mt-models.md has the CC-BY-4.0 license
-        // text, verbatim, with fetch date, plus the upstream Helsinki-NLP
-        // Apache-2.0 claim recorded alongside it).
-        'opus-mt-en-es': [
-          (
-            'https://huggingface.co/onnx-community/opus-mt-en-es/resolve/main/onnx/encoder_model_quantized.onnx',
-            '13ec84a3afebfe97cae004a5f39881ea38541308514ec26c18a0b807476d6fba',
-            52875078,
-          ),
-          (
-            'https://huggingface.co/onnx-community/opus-mt-en-es/resolve/main/onnx/decoder_model_merged_quantized.onnx',
-            '832c4e0c1630a401f3115f0fcb08922f473b7f4996a5371d02ff880dc55f9399',
-            193290224,
-          ),
-          (
-            'https://huggingface.co/onnx-community/opus-mt-en-es/resolve/main/source.spm',
-            '4dd547c24816a335e7b0b2e63376a8f1b3cbfc671eda5ab808dd44fdadaa8791',
-            801636,
-          ),
-          (
-            'https://huggingface.co/onnx-community/opus-mt-en-es/resolve/main/vocab.json',
-            'b074b4cca0036ade5a39ea97faabd534e1015482c480fc2cb02c6481983eb163',
-            1720044,
-          ),
-        ],
-        // Campaign 8 "Babel widens" Phase 0: verified 2026-08-15 —
-        // encoder/decoder hashes cross-checked THREE ways (a real local
-        // download's sha256sum, Hugging Face's tree API `lfs.oid`, and
-        // the already-shipped es entry's own ground truth used to
-        // validate that API in the first place); source.spm/vocab.json
-        // (below Hugging Face's LFS threshold) downloaded directly and
-        // hashed locally. Full record, real-inference quality check per
-        // pair, and why en-pt/pt-en and en-jap/jap-en are NOT here:
-        // docs/reference/mt-models.md.
-        'opus-mt-en-de': [
-          (
-            'https://huggingface.co/onnx-community/opus-mt-en-de/resolve/main/onnx/encoder_model_quantized.onnx',
-            '94ae6a9149aca29ef31a58bb8ccc1c3df3720840caef890ccc6cde73c94cb0f4',
-            49342278,
-          ),
-          (
-            'https://huggingface.co/onnx-community/opus-mt-en-de/resolve/main/onnx/decoder_model_merged_quantized.onnx',
-            '492004d70327f4552fbddba033f8d8ce946edb87b66cbf8f9a7b41d14fe683cc',
-            175598624,
-          ),
-          (
-            'https://huggingface.co/onnx-community/opus-mt-en-de/resolve/main/source.spm',
-            '678f2a1177d8389f67b66299762dcc4fc567e89b07e212ba91b0c56daecf47ce',
-            768489,
-          ),
-          (
-            'https://huggingface.co/onnx-community/opus-mt-en-de/resolve/main/vocab.json',
-            'd5acea957b265a78554999144459c5e391e0df525864edc8287bc090290baa44',
-            1389436,
-          ),
-        ],
-        'opus-mt-de-en': [
-          (
-            'https://huggingface.co/onnx-community/opus-mt-de-en/resolve/main/onnx/encoder_model_quantized.onnx',
-            '3e7b95246cf1885b5c6c123a36818a417c3ef6f500d4c17e030fef427fff7a74',
-            49342278,
-          ),
-          (
-            'https://huggingface.co/onnx-community/opus-mt-de-en/resolve/main/onnx/decoder_model_merged_quantized.onnx',
-            'd789d6a132d540fa40d6fa5901c3ba1e6209c69bf201ffef54f73833fa9b5a6c',
-            175598624,
-          ),
-          (
-            'https://huggingface.co/onnx-community/opus-mt-de-en/resolve/main/source.spm',
-            'bbd1f495eea99c8e21ae086d9146e0fa7b096c3dfdd9ba07ab8b631889df5c9b',
-            796845,
-          ),
-          (
-            'https://huggingface.co/onnx-community/opus-mt-de-en/resolve/main/vocab.json',
-            'd5acea957b265a78554999144459c5e391e0df525864edc8287bc090290baa44',
-            1389436,
-          ),
-        ],
-        'opus-mt-en-ru': [
-          (
-            'https://huggingface.co/onnx-community/opus-mt-en-ru/resolve/main/onnx/encoder_model_quantized.onnx',
-            'b8b4f72528c0da92e579af8a739f97fa2f792d73527ba2fee786fa7286c4055b',
-            51603782,
-          ),
-          (
-            'https://huggingface.co/onnx-community/opus-mt-en-ru/resolve/main/onnx/decoder_model_merged_quantized.onnx',
-            '5d15c48566e60dcaa5af7422bcceca24ccc8f3eaa8f1b3aedc5d6170e6c232f3',
-            186923812,
-          ),
-          (
-            'https://huggingface.co/onnx-community/opus-mt-en-ru/resolve/main/source.spm',
-            '16bebef1389a0b8ab452772c4e35b9e605e5713f8ac7baa71ca701394eaa086d',
-            802781,
-          ),
-          (
-            'https://huggingface.co/onnx-community/opus-mt-en-ru/resolve/main/vocab.json',
-            '5cf0d95d930d8d3e783c9e2f46a72f08b43a18060dab4ddefbcb66a733efedcb',
-            2726796,
-          ),
-        ],
-        'opus-mt-ru-en': [
-          (
-            'https://huggingface.co/onnx-community/opus-mt-ru-en/resolve/main/onnx/encoder_model_quantized.onnx',
-            'fdd4d1de9cb02feaae8bc892e0e21b1bfd1741fa43a2895d471ee5f53ae260c4',
-            51603782,
-          ),
-          (
-            'https://huggingface.co/onnx-community/opus-mt-ru-en/resolve/main/onnx/decoder_model_merged_quantized.onnx',
-            '0fef11505dc0564d0d6d54e37529d7ba949826fe19fd7193052610989fccbf28',
-            186923812,
-          ),
-          (
-            'https://huggingface.co/onnx-community/opus-mt-ru-en/resolve/main/source.spm',
-            '745998e51ba5b058e38b7ac7765c25c43ed5c1c39cc92b27163b9b2e323c9d7c',
-            1080169,
-          ),
-          (
-            'https://huggingface.co/onnx-community/opus-mt-ru-en/resolve/main/vocab.json',
-            '5cf0d95d930d8d3e783c9e2f46a72f08b43a18060dab4ddefbcb66a733efedcb',
-            2726796,
-          ),
-        ],
-        // opus-mt-en-zh is deliberately NOT in this closed-world table —
-        // it is not registered (demoted: no verified way to display the
-        // Chinese output; see registry.dart's own comment and
-        // mt-models.md). zh-en (below) stays; it outputs English.
-        'opus-mt-zh-en': [
-          (
-            'https://huggingface.co/onnx-community/opus-mt-zh-en/resolve/main/onnx/encoder_model_quantized.onnx',
-            '86b0dc5a1d5d8062583800654864aae1311fce2172bba80910d02020d3693577',
-            52875078,
-          ),
-          (
-            'https://huggingface.co/onnx-community/opus-mt-zh-en/resolve/main/onnx/decoder_model_merged_quantized.onnx',
-            '714881fafd326c8cb56bc6e3e542d1d106a5acf90e6abb71e20423ebf1b47875',
-            193290224,
-          ),
-          (
-            'https://huggingface.co/onnx-community/opus-mt-zh-en/resolve/main/source.spm',
-            'e27a3a1b539f4959ec72ea60e453f49156289f95d4e6000b29332efc45616203',
-            804677,
-          ),
-          (
-            'https://huggingface.co/onnx-community/opus-mt-zh-en/resolve/main/vocab.json',
-            '08a119a1defd522fa047cb5e3bfe3e89633e96caa38ced0dc9cee7ef1021a011',
-            1747906,
-          ),
-        ],
         // Campaign 4 Phase 3: verified 2026-08-15 by downloading directly
         // and hashing locally (docs/reference/dictionaries.md has the
         // dual CC-BY-SA/GFDL license text, verbatim, with fetch date and
@@ -766,10 +615,15 @@ void main() {
           ),
         ],
       };
-      expect(starter.specs.map((s) => s.id).toSet(), verified.keys.toSet(),
+      // Translation pairs are pinned in translation_catalog.dart and
+      // checked by their own group below: 25 pairs x 6 files would make
+      // this double entry longer than the catalog it guards.
+      final nonTranslation =
+          starter.specs.where((s) => s.task != ModelTask.translation);
+      expect(nonTranslation.map((s) => s.id).toSet(), verified.keys.toSet(),
           reason: 'the starter catalog and the verified-pins table must '
               'cover exactly the same models');
-      for (final s in starter.specs) {
+      for (final s in nonTranslation) {
         final want = verified[s.id]!;
         expect(s.files.length, want.length, reason: '${s.id}: file count');
         for (var i = 0; i < want.length; i++) {
@@ -782,6 +636,113 @@ void main() {
           expect(f.bytes, bytes, reason: '${s.id}[$i]: exact bytes');
         }
       }
+    });
+  });
+
+  group('the translation catalog (Trellis 1.5.5)', () {
+    final starter = ModelRegistry.starter();
+    final pairs = starter.translationPairsAt(DeviceTier.t3);
+
+    test('every pair has pinned https files, a license, a source and a '
+        'target, and a layout whose every role names a registered file', () {
+      expect(pairs, isNotEmpty);
+      for (final s in pairs) {
+        expect(s.licenses, isNotEmpty, reason: s.id);
+        expect(s.sourceLang, isNotNull, reason: s.id);
+        expect(s.langs, hasLength(1), reason: s.id);
+        expect(s.langs!.single, isNot(s.sourceLang), reason: s.id);
+        expect(s.sizeBytes, greaterThan(50000000), reason: s.id);
+        for (final f in s.files) {
+          expect(f.url, startsWith('https://huggingface.co/'), reason: s.id);
+          expect(f.isPinned, isTrue, reason: '${s.id} ${f.url}');
+          expect(f.bytes, greaterThan(0), reason: '${s.id} ${f.url}');
+        }
+        final layout = s.marianLayout;
+        expect(layout, isNotNull, reason: s.id);
+        final names = {
+          for (final f in s.files) Uri.parse(f.url).pathSegments.last
+        };
+        expect(
+          names,
+          containsAll([
+            layout!.encoderFileName,
+            layout.decoderMergedFileName,
+            layout.sourceSpmFileName,
+            layout.vocabFileName,
+            layout.configFileName,
+            layout.tokenizerConfigFileName,
+          ]),
+          reason: s.id,
+        );
+        expect(s.files, hasLength(6), reason: s.id);
+        for (final f in s.files) {
+          expect(f.url, matches(RegExp(r'/resolve/[0-9a-f]{40}/')),
+              reason: '${s.id}: pinned to a commit, never main');
+        }
+      }
+    });
+
+    test('hub and spoke: every pair has English on exactly one end', () {
+      for (final s in pairs) {
+        expect((s.sourceLang == 'en') != (s.langs!.single == 'en'), isTrue,
+            reason: s.id);
+      }
+    });
+
+    test('one pair per direction: no two specs claim the same route', () {
+      final routes = [for (final s in pairs) '${s.sourceLang}>${s.langs!.single}'];
+      expect(routes.toSet(), hasLength(routes.length));
+    });
+
+    test('the English-first set: both directions where a trusted export '
+        'exists, one-way where only X->en does', () {
+      String? route(String src, String tgt) => starter
+          .pickTranslationPair(DeviceTier.t2, sourceLang: src, targetLang: tgt)
+          ?.id;
+      for (final lang in [
+        'fr', 'de', 'es', 'it', 'pt', 'nl', 'ru', 'zh', 'ar', 'hi', 'uk'
+      ]) {
+        expect(route('en', lang), isNotNull, reason: 'en->$lang');
+        expect(route(lang, 'en'), isNotNull, reason: '$lang->en');
+      }
+      for (final lang in ['ja', 'ko', 'pl']) {
+        expect(route(lang, 'en'), isNotNull, reason: '$lang->en');
+        expect(route('en', lang), isNull,
+            reason: 'no trusted en->$lang ONNX export (en-jap is incoherent)');
+      }
+    });
+
+    test('multi-target exports carry the >>xx<< token that selects the '
+        'language; bilingual ones carry none', () {
+      expect(starter.byId('opus-mt-en-ROMANCE')!.marianLayout!.targetToken,
+          '>>pt<<');
+      expect(starter.byId('opus-mt-en-zh')!.marianLayout!.targetToken,
+          '>>cmn_Hans<<');
+      expect(starter.byId('opus-mt-en-ar')!.marianLayout!.targetToken,
+          '>>ara<<');
+      expect(starter.byId('opus-mt-en-de')!.marianLayout!.targetToken, isNull);
+    });
+
+    test('spot pins: the shipped en-es files are unchanged (a phone that '
+        'has them must not re-download 246 MB) and en-ROMANCE matches the '
+        'files downloaded and hashed for this pass', () {
+      final es = starter.byId('opus-mt-en-es')!;
+      expect(es.files[0].sha256,
+          '13ec84a3afebfe97cae004a5f39881ea38541308514ec26c18a0b807476d6fba');
+      expect(es.files[1].sha256,
+          '832c4e0c1630a401f3115f0fcb08922f473b7f4996a5371d02ff880dc55f9399');
+      expect(
+          es.files[0].url,
+          matches(RegExp(r'^https://huggingface\.co/onnx-community/'
+              r'opus-mt-en-es/resolve/[0-9a-f]{40}/onnx/'
+              r'encoder_model_quantized\.onnx$')));
+      final pt = starter.byId('opus-mt-en-ROMANCE')!;
+      expect(pt.files[0].sha256,
+          'b4ddfd9338ba3d7c6b9c2d1410ed94fb7e06741226918cef6148031101bbd019');
+      expect(pt.files[0].bytes, 52899742);
+      expect(pt.files[1].sha256,
+          'b5f6d442da7fa69f9d500df90373d2fdca4f799c43696b41888353b5c3c8eb13');
+      expect(pt.files[1].bytes, 60212804);
     });
   });
 }

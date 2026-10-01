@@ -5,11 +5,10 @@ import 'package:ml_runtime/ml_runtime.dart';
 
 import '../support/fake_services.dart';
 
-/// DeviceServices.translatorFor / resolveTranslator (ADR-0008 "Babel" Phase
-/// 3): the same download-honesty gate `speechEngineFor`/`resolveSpeechEngine`
-/// already applies to the Supertonic voice, now for the Marian translator —
-/// so the reader's "Translate to Spanish" action can offer itself only when
-/// the model is actually there to run.
+/// DeviceServices.translatorFor and .translation (ADR-0008 "Babel"; 1.5.5):
+/// the same download-honesty gate `speechEngineFor` applies to the
+/// Supertonic voice, now for the Marian translator, plus the service that
+/// plans routes and downloads over the real catalog.
 void main() {
   late Directory dir;
   setUp(() => dir =
@@ -63,113 +62,51 @@ void main() {
     // law: construct, never touch).
   });
 
-  group('resolveTranslator — the registry selection law, one call for '
-      'ReaderScreen to close over', () {
-    test('resolves the starter model once downloaded', () async {
+  group('translation — the service every reader is handed (1.5.5)', () {
+    test('none where local ML can\'t run, so Translate stays hidden', () {
       final services = testServices(dir,
-          modelStore: FakeModelStore(downloadedIds: {'opus-mt-en-es'}),
-          tier: DeviceTier.t2);
-      expect(await services.resolveTranslator(), isNotNull);
+          localMlAvailable: false, tier: DeviceTier.t2);
+      expect(services.translation, isNull);
     });
 
-    test('below t2 the registry has nothing to pick', () async {
-      final services = testServices(dir,
-          modelStore: FakeModelStore(downloadedIds: {'opus-mt-en-es'}),
-          tier: DeviceTier.t1);
-      expect(await services.resolveTranslator(), isNull);
-    });
-
-    test('no model downloaded resolves to null, the same honesty gate as '
-        'translatorFor', () async {
+    test('lists every language the real catalog reaches, downloaded or not, '
+        'each with its real download size', () async {
       final services =
           testServices(dir, modelStore: FakeModelStore(), tier: DeviceTier.t2);
-      expect(await services.resolveTranslator(), isNull);
+      final routes = await services.translation!.routesFrom('en');
+      final targets = {for (final r in routes) r.target};
+      expect(targets,
+          containsAll(['fr', 'de', 'es', 'it', 'pt', 'nl', 'ru', 'zh', 'ar',
+              'hi', 'uk']));
+      expect(targets, isNot(contains('en')));
+      expect(targets, isNot(contains('ja')), reason: 'no en->ja pair');
+      final de = routes.firstWhere((r) => r.target == 'de');
+      expect(de.missingBytes,
+          ModelRegistry.starter().byId('opus-mt-en-de')!.sizeBytes);
     });
 
-    test('a target language the starter catalog has no model for resolves '
-        'to null', () async {
-      final services = testServices(dir,
-          modelStore: FakeModelStore(downloadedIds: {'opus-mt-en-es'}),
-          tier: DeviceTier.t2);
-      expect(await services.resolveTranslator(targetLang: 'pt'), isNull);
-    });
-
-    test('Campaign 8 "Babel widens": sourceLang disambiguates pairs that '
-        'share a target language — de-en/ru-en/zh-en all produce en, '
-        'pickModel could not tell them apart', () async {
-      final services = testServices(dir,
-          modelStore: FakeModelStore(downloadedIds: {
-            'opus-mt-de-en',
-            'opus-mt-ru-en',
-            'opus-mt-zh-en',
-          }),
-          tier: DeviceTier.t2);
-      final fromDe =
-          await services.resolveTranslator(sourceLang: 'de', targetLang: 'en');
-      final fromZh =
-          await services.resolveTranslator(sourceLang: 'zh', targetLang: 'en');
-      expect(fromDe, isNotNull);
-      expect(fromZh, isNotNull);
-      // Each resolved to a DIFFERENT downloaded pair's files, not the
-      // same one twice by accident — verified indirectly: a pair NOT
-      // downloaded for a given source still refuses.
-      final fromRuNotDownloaded = await services.resolveTranslator(
-          sourceLang: 'ru', targetLang: 'en');
-      expect(fromRuNotDownloaded, isNotNull); // ru-en IS downloaded above
-      final fromJaNotRegistered = await services.resolveTranslator(
-          sourceLang: 'ja', targetLang: 'en');
-      expect(fromJaNotRegistered, isNull,
-          reason: 'no ja-en pair is registered at all (Japanese is the '
-              'Phase 5 Brain-lane language, see docs/reference/'
-              'mt-models.md)');
-    });
-
-    test('sourceLang defaults to en, matching the declared-source-'
-        'language default', () async {
-      final services = testServices(dir,
-          modelStore: FakeModelStore(downloadedIds: {'opus-mt-en-es'}),
-          tier: DeviceTier.t2);
-      expect(await services.resolveTranslator(targetLang: 'es'), isNotNull,
-          reason: 'sourceLang defaults to en; opus-mt-en-es carries '
-              'sourceLang: en');
-    });
-  });
-
-  group('availableTranslationTargets — the picker\'s data source '
-      '(Campaign 8 "Babel widens" Phase 1)', () {
-    test('lists only DOWNLOADED pairs for the given source language, '
-        'never the un-downloaded rest of the catalog', () async {
-      final services = testServices(dir,
-          modelStore: FakeModelStore(downloadedIds: {
-            'opus-mt-en-es',
-            'opus-mt-en-de',
-            // en-ru NOT downloaded — must be excluded.
-          }),
-          tier: DeviceTier.t2);
-      final targets = await services.availableTranslationTargets(
-          sourceLang: 'en');
-      expect(targets, containsAll(['es', 'de']));
-      expect(targets, isNot(contains('ru')));
-    });
-
-    test('never lists the source language itself as a target, even if '
-        'somehow downloaded', () async {
+    test('German to Spanish goes via English, both legs from the catalog',
+        () async {
       final services = testServices(dir,
           modelStore: FakeModelStore(downloadedIds: {'opus-mt-de-en'}),
           tier: DeviceTier.t2);
-      // de-en produces 'en' FROM 'de' — asking for en's own targets
-      // must never offer 'en' back to itself.
-      final targets =
-          await services.availableTranslationTargets(sourceLang: 'de');
-      expect(targets, isNot(contains('de')));
+      final r = (await services.translation!.route('de', 'es'))!;
+      expect(r.viaEnglish, isTrue);
+      expect([for (final l in r.legs) l.spec.id],
+          ['opus-mt-de-en', 'opus-mt-en-es']);
+      expect([for (final l in r.missing) l.spec.id], ['opus-mt-en-es']);
     });
 
-    test('nothing downloaded means an empty list, not null or a throw',
-        () async {
-      final services =
-          testServices(dir, modelStore: FakeModelStore(), tier: DeviceTier.t2);
-      expect(await services.availableTranslationTargets(sourceLang: 'en'),
-          isEmpty);
+    test('opens a downloaded pair through translatorFor, and nothing for '
+        'one that isn\'t', () async {
+      final services = testServices(dir,
+          modelStore: FakeModelStore(downloadedIds: {'opus-mt-en-es'}),
+          tier: DeviceTier.t2);
+      final registry = ModelRegistry.starter();
+      expect(await services.translation!.open(registry.byId('opus-mt-en-es')!),
+          isNotNull);
+      expect(await services.translation!.open(registry.byId('opus-mt-en-de')!),
+          isNull);
     });
   });
 }

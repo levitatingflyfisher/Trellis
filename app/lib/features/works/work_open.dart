@@ -79,6 +79,7 @@ class WorkDoors {
     bool speakTranslation = false,
     String? layerLang,
     bool openTranslatePicker = false,
+    bool openOnPage = false,
   }) async {
     final work = e.work;
     if (e.episode != null) {
@@ -105,6 +106,7 @@ class WorkDoors {
       speakTranslation: speakTranslation,
       layerLang: layerLang,
       openTranslatePicker: openTranslatePicker,
+      openOnPage: openOnPage,
     );
   }
 
@@ -113,12 +115,12 @@ class WorkDoors {
   bool canRead(WorkEntry e) =>
       isTextWork(e.work, e.episode) || readerDoors.canOpenTranscript;
 
-  /// The row's Read button: a text in the reader, a transcribed episode
-  /// in its transcript.
+  /// The row's Read button: the reader, on Page for a transcribed episode
+  /// (1.5.5: Page replaced the separate transcript view).
   Future<void> readFromRow(BuildContext context, WorkEntry e) =>
       isTextWork(e.work, e.episode)
       ? read(context, e)
-      : readerDoors.openTranscript(context, db: db, work: e.work);
+      : read(context, e, openOnPage: true);
 
   /// The row's Play button.
   Future<void> play(Work work) async {

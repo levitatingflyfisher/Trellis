@@ -150,7 +150,7 @@ void main() {
     // rather than cycling on its own tap.
     await tester.tap(find.byKey(const Key('mode-toggle')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('mode-item-scroll')));
+    await tester.tap(find.byKey(const Key('mode-item-page')));
     await tester.pumpAndSettle(); // scroll mode with heading + code tile
 
     await tester.tap(find.byType(BackButton));

@@ -10,10 +10,10 @@ import 'package:trellis/features/feeds/feeds_repository.dart';
 import 'package:trellis/features/feeds/feeds_screen.dart';
 
 import 'package:trellis/features/feeds/feed_settings_screen.dart';
-import 'package:trellis/features/player/karaoke_screen.dart';
 import 'package:trellis/features/player/player_controller.dart';
 
 import 'package:trellis/features/reader/reader_doors.dart';
+import 'package:trellis/features/reader/reader_screen.dart';
 
 import '../support/fake_player.dart';
 import '../support/fake_tts.dart';
@@ -92,8 +92,13 @@ void main() {
 
     await tester.tap(find.byKey(Key('read-${work.id}')));
     await tester.pumpAndSettle();
-    expect(find.byType(KaraokeScreen), findsOneWidget);
-    expect(find.text('Lights overhead.'), findsOneWidget);
+    // On Page, the reader (1.5.5: Page replaced the transcript view).
+    expect(find.byType(ReaderScreen), findsOneWidget);
+    expect(
+        find.descendant(
+            of: find.byKey(const Key('mode-toggle')),
+            matching: find.text('Page')),
+        findsOneWidget);
     expect(fake.loadedUrl, isNull);
   });
 
@@ -121,7 +126,7 @@ void main() {
 
     await tester.tap(find.byKey(Key('read-${work.id}')));
     await tester.pumpAndSettle();
-    expect(tester.widget<KaraokeScreen>(find.byType(KaraokeScreen)).tts,
+    expect(tester.widget<ReaderScreen>(find.byType(ReaderScreen)).tts,
         same(tts));
   });
 

@@ -952,6 +952,37 @@ void main() {
       expect(await db.feedsDao.riverItems(profileId), hasLength(2));
     });
 
+    test('a pasted Mastodon profile follows its .rss, with no discovery '
+        'fetch of the page', () async {
+      final fetcher = ScriptedFetcher((url, headers) => textResponse(_rssBlog));
+      final result = await repo(fetcher)
+          .subscribe(profileId: profileId, rawUrl: 'mastodon.social/@alice');
+      expect(result, isA<SubscribeSuccess>());
+      expect(fetcher.calls.map((c) => c.url.toString()),
+          ['https://mastodon.social/@alice.rss']);
+      expect((await db.feedsDao.feedsOf(profileId)).single.url,
+          'https://mastodon.social/@alice.rss');
+    });
+
+    test('a /@user page that is not Mastodon falls back to discovery when '
+        'the .rss guess fails', () async {
+      final fetcher = ScriptedFetcher((url, headers) => switch (url.toString()) {
+            'https://blog.example/@bob.rss' =>
+              textResponse('not here', status: 404),
+            'https://blog.example/@bob' => textResponse(
+                '<html><head><link rel="alternate" '
+                'type="application/rss+xml" href="/rss.xml"></head></html>',
+                headers: {'content-type': 'text/html'}),
+            'https://blog.example/rss.xml' => textResponse(_rssBlog),
+            _ => textResponse('nope', status: 404),
+          });
+      final result = await repo(fetcher)
+          .subscribe(profileId: profileId, rawUrl: 'https://blog.example/@bob');
+      expect(result, isA<SubscribeSuccess>());
+      expect((await db.feedsDao.feedsOf(profileId)).single.url,
+          'https://blog.example/rss.xml');
+    });
+
     test('a fresh fetch keeps the declared language, which transcription '
         'finds from the episode', () async {
       var body = _rssTwo.replaceFirst(

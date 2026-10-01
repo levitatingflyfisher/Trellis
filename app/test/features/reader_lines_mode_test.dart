@@ -2,6 +2,7 @@ import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
+import 'package:trellis/features/reader/reader_prefs.dart';
 import 'package:trellis/features/reader/reader_screen.dart';
 import 'package:trellis/main.dart';
 import '../support/pick_reader.dart';
@@ -76,27 +77,64 @@ void main() {
         at(const Key('rsvp-aft'));
   }
 
-  testWidgets(
-      'the mode picker offers three labeled choices; Words is checked on '
-      'open', (tester) async {
+  // 1.5.5 user ruling: two modes, RSVP and Page, and Page's highlight —
+  // every option offered at phone width too, never gated by screen size.
+  testWidgets('the picker offers RSVP and Page, and Page highlights Follow '
+      'along and Line, at 320dp', (tester) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
     await seedMultiSegment('Along');
     await openReader(tester, title: 'Along');
 
     await tester.tap(find.byKey(const Key('mode-toggle')));
     await tester.pumpAndSettle();
 
-    // The menu names all three; the bar's face also names the current
-    // one, so "Words" is on screen twice while the menu is open.
-    expect(find.text('Scroll'), findsOneWidget);
-    expect(find.text('Words'), findsNWidgets(2));
-    expect(find.text('Lines'), findsOneWidget);
-    final wordsItem = tester.widget<CheckedPopupMenuItem<ReaderMode>>(
-        find.byKey(const Key('mode-item-words')));
-    expect(wordsItem.checked, isTrue);
+    // The bar's face may name the current mode too.
+    expect(find.text('RSVP'), findsWidgets);
+    expect(find.text('Page'), findsOneWidget);
+    expect(find.text('Follow along'), findsOneWidget);
+    expect(find.text('Line'), findsOneWidget);
+    expect(find.text('Scroll'), findsNothing);
+    expect(find.text('Words'), findsNothing);
+    expect(
+        find.text('Rapid serial visual presentation: one word at a time, '
+            'eyes still (foveal reading).'),
+        findsOneWidget);
+    final rsvpItem = tester.widget<CheckedPopupMenuItem<ReaderMode>>(
+        find.byKey(const Key('mode-item-rsvp')));
+    expect(rsvpItem.checked, isTrue);
 
     await tester.tapAt(const Offset(10, 10)); // dismiss without selecting
     await tester.pumpAndSettle();
   });
+
+  for (final (wire, highlight) in [
+    ('scroll', 'highlight-item-follow'),
+    ('lines', 'highlight-item-line'),
+  ]) {
+    testWidgets('a reader saved in "$wire" opens on Page with $highlight',
+        (tester) async {
+      final profileId = await seedMultiSegment('Along');
+      await db.profilesDao.setReaderPrefs(
+          profileId, ReaderPrefs(session: ReaderSession(mode: wire)));
+      await openReader(tester, title: 'Along');
+      expect(
+          find.descendant(
+              of: find.byKey(const Key('mode-toggle')),
+              matching: find.text('Page')),
+          findsOneWidget);
+      await tester.tap(find.byKey(const Key('mode-toggle')));
+      await tester.pumpAndSettle();
+      expect(
+          tester
+              .widget<CheckedPopupMenuItem<ReaderMode>>(find.byKey(Key(highlight)))
+              .checked,
+          isTrue);
+      await tester.tapAt(const Offset(10, 10));
+      await tester.pumpAndSettle();
+    });
+  }
 
   testWidgets(
       'the cursor survives a round trip through Lines mode, both '
@@ -108,8 +146,8 @@ void main() {
     await tapZone(tester, 5 / 6);
     final before = rsvpWord(tester);
 
-    await switchMode(tester, 'mode-item-lines');
-    await switchMode(tester, 'mode-item-words');
+    await switchMode(tester, 'highlight-item-line');
+    await switchMode(tester, 'mode-item-rsvp');
 
     expect(rsvpWord(tester), before);
   });
@@ -130,7 +168,7 @@ void main() {
       await tapZone(tester, 5 / 6);
     }
 
-    await switchMode(tester, 'mode-item-lines');
+    await switchMode(tester, 'highlight-item-line');
 
     // Word 91 (0-based) sits in segment 45 (2 words/segment) — nowhere
     // near the SliverList's own lazy build-ahead cache from position 0.
@@ -142,53 +180,5 @@ void main() {
     expect(find.byKey(const Key('segment-tile-0')), findsNothing,
         reason: 'and the top of the document is nowhere near the '
             'lazily-built window from a segment-45 anchor');
-  });
-
-  testWidgets(
-      'follow-along also drives Lines mode — the viewport scrolls to '
-      'follow the cursor', (tester) async {
-    // Short (2-word) segments, many of them, and a long pump budget: the
-    // cursor must cross enough segments to outgrow the FIRST viewportful
-    // regardless of a mode's own per-block height (Lines runs shorter
-    // than Scroll's Wrap — no runSpacing, no drop-cap sizing; see
-    // reader_line_paced_test.dart's Stack-sizing check for that
-    // distinction in isolation) — otherwise every segment the cursor
-    // reaches is already on screen and the assertion below would pass
-    // vacuously with nothing actually exercising ensureVisible.
-    final profileId = await db.profilesDao.create('Ada');
-    final workId = await db.spineDao.insertWork(
-        profileId: profileId,
-        kind: 'note',
-        title: 'Along',
-        persistence: 'work',
-        firstSeenEpochDay: 100,
-        lang: 'en');
-    await db.spineDao.insertSegments(workId, [
-      for (var i = 0; i < 30; i++) (idx: i, kind: 'prose', text: 'Paragraph $i.')
-    ]);
-
-    await openReader(tester, title: 'Along');
-    await switchMode(tester, 'mode-item-lines');
-
-    final scrollable = find.byType(Scrollable).first;
-    final before = tester.state<ScrollableState>(scrollable).position.pixels;
-
-    expect(find.byTooltip('Play'), findsOneWidget,
-        reason: 'Lines is scroll-family (Campaign 9 Phase 6) — pacing is '
-            'offered here too, not just in Scroll');
-    await tester.tap(find.byTooltip('Play'));
-    await tester.pump(const Duration(milliseconds: 300));
-
-    for (var i = 0; i < 60; i++) {
-      await tester.pump(const Duration(milliseconds: 250));
-    }
-
-    final after = tester.state<ScrollableState>(scrollable).position.pixels;
-    expect(after, greaterThan(before),
-        reason: 'ensureVisible followed the cursor into later segments '
-            'in Lines mode too');
-
-    await tester.tap(find.byTooltip('Pause'));
-    await tester.pumpAndSettle();
   });
 }

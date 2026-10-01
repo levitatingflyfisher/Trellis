@@ -2,44 +2,56 @@ import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
-import 'package:trellis/main.dart';
-import '../support/pick_reader.dart';
-import '../support/tabs.dart';
-import '../support/open_work.dart';
+import 'package:trellis/features/reader/reader_screen.dart';
+import '../support/fake_tts.dart';
 
-/// Campaign 4 Phase 2: follow-along guided pacing for scroll mode — the
-/// speak-mode karaoke path (per-segment GlobalKeys + Scrollable.
-/// ensureVisible, borrowed from karaoke_screen.dart's _followPlayback,
-/// since no auto-scroll of any kind existed anywhere in reader_screen.dart
-/// before this) driven by the SAME cursor/timer RSVP already uses
-/// (_wordIdx/_step/_play/_pause), not a second highlighter or a second
-/// dwell path. Reuses the existing cursor-word highlight
-/// (`reader_screen.dart`'s `Key('cursor-word')`) untouched.
+/// Page's follow along (1.5.5): Page's Play reads a text aloud, and the
+/// view follows the spoken cursor — the cursor-word highlight moves and
+/// the viewport scrolls with it (Campaign 4 Phase 2's follow-along, now
+/// driven by speech rather than a silent pacer; RSVP keeps the pacer).
 void main() {
   late AppDatabase db;
-  setUp(() => db = AppDatabase.forTesting(NativeDatabase.memory()));
+  late FakeTtsSpeaker tts;
+  setUp(() {
+    db = AppDatabase.forTesting(NativeDatabase.memory());
+    tts = FakeTtsSpeaker(utteranceLength: const Duration(milliseconds: 400));
+  });
   tearDown(() => db.close());
 
-  Future<int> seedMultiSegment(String title) async {
+  const firsts = [
+    'Alpha',
+    'Bravo',
+    'Charlie',
+    'Delta',
+    'Echo',
+    'Foxtrot',
+    'Golf',
+    'Hotel',
+  ];
+
+  Future<Work> seedMultiSegment(String title) async {
     final profileId = await db.profilesDao.create('Ada');
     final workId = await db.spineDao.insertWork(
-        profileId: profileId,
-        kind: 'note',
-        title: title,
-        persistence: 'work',
-        firstSeenEpochDay: 100,
-        lang: 'en');
+      profileId: profileId,
+      kind: 'note',
+      title: title,
+      persistence: 'work',
+      firstSeenEpochDay: 100,
+      lang: 'en',
+    );
     await db.spineDao.insertSegments(workId, [
       for (var i = 0; i < 8; i++)
-        (idx: i, kind: 'prose', text: 'Paragraph number $i has a few words.')
+        (
+          idx: i,
+          kind: 'prose',
+          text:
+              '${firsts[i]} paragraph number $i has a few more words in '
+              'it, enough to fill a line or two of the page at this size.',
+        ),
     ]);
-    return profileId;
+    return (await db.spineDao.workById(workId))!;
   }
 
-  /// Campaign 9 Phase 6: `mode-toggle` now opens a labeled three-way
-  /// picker (Scroll / Words / Lines) rather than cycling on its own tap —
-  /// [itemKey] names the destination explicitly (`mode-item-words`,
-  /// `mode-item-scroll`, `mode-item-lines`).
   Future<void> switchMode(WidgetTester tester, String itemKey) async {
     await tester.tap(find.byKey(const Key('mode-toggle')));
     await tester.pumpAndSettle();
@@ -47,55 +59,35 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Future<void> openInScroll(WidgetTester tester, {required String title}) async {
-    await tester.pumpWidget(TrellisApp(db: db));
-    await tester.pumpAndSettle();
-    await pickReader(tester, 'Ada');
-    await toTab(tester, 'Library');
-    await openToRead(tester, title);
-    await switchMode(tester, 'mode-item-scroll');
-  }
-
-  /// Stop the shared cursor timer before the test ends — the doc has
-  /// plenty of words left, so an un-stopped `_step()` Timer would still be
-  /// pending at teardown ("A Timer is still pending even after the widget
-  /// tree was disposed"). Only ever called once follow-along is on, so the
-  /// button always reads "Pause" here.
-  Future<void> stopFollowing(WidgetTester tester) async {
-    await tester.tap(find.byTooltip('Pause'));
+  Future<void> openReader(WidgetTester tester, Work work) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: ReaderScreen(
+          db: db,
+          profileId: work.profileId,
+          work: work,
+          tts: tts,
+        ),
+      ),
+    );
     await tester.pumpAndSettle();
   }
 
-  // Pacing is a visible Play button in Scroll, not an item behind ⋮.
-  // RSVP has its own Play in its controls, so no second one there.
-  testWidgets('a Play button paces Scroll; RSVP keeps its own',
-      (tester) async {
-    await seedMultiSegment('Along');
-    await tester.pumpWidget(TrellisApp(db: db));
-    await tester.pumpAndSettle();
-    await pickReader(tester, 'Ada');
-    await toTab(tester, 'Library');
-    await openToRead(tester, 'Along');
-    expect(find.byKey(const Key('reader-play')), findsNothing);
-    expect(find.byKey(const Key('play-toggle')), findsOneWidget);
+  Future<void> openOnPage(WidgetTester tester) async {
+    await openReader(tester, await seedMultiSegment('Along'));
+    await switchMode(tester, 'mode-item-page');
+  }
 
-    await switchMode(tester, 'mode-item-scroll');
-    expect(find.byKey(const Key('reader-play')), findsOneWidget);
-    expect(find.byTooltip('Play'), findsOneWidget);
-    await tester.tap(find.byKey(const Key('reader-overflow')));
-    await tester.pumpAndSettle();
-    expect(find.text('Follow along'), findsNothing);
-  });
+  Future<void> startListening(WidgetTester tester) async {
+    await tester.tap(find.byKey(const Key('reader-play')));
+    await tester.pump(const Duration(milliseconds: 100));
+  }
 
-  /// Tap the "Follow along" menu item WITHOUT `pumpAndSettle` — the shared
-  /// `_step()` Timer keeps rescheduling itself while playing, so settling
-  /// after starting it runs the fake clock all the way to the end of the
-  /// document in one call, defeating any test that wants to observe an
-  /// INCREMENTAL advance. A bounded pump is enough for the popup's own
-  /// dismiss animation.
-  Future<void> startFollowing(WidgetTester tester) async {
-    await tester.tap(find.byTooltip('Play'));
-    await tester.pump(const Duration(milliseconds: 300));
+  Future<void> stopListening(WidgetTester tester) async {
+    if (find.byTooltip('Stop reading').evaluate().isNotEmpty) {
+      await tester.tap(find.byKey(const Key('reader-play')));
+    }
+    await tester.pumpAndSettle();
   }
 
   String? cursorWordText(WidgetTester tester) {
@@ -104,106 +96,94 @@ void main() {
     return tester.widget<Text>(finder).data;
   }
 
-  testWidgets(
-      'follow along reuses _wordIdx/_play — the cursor-word highlight moves',
-      (tester) async {
-    await seedMultiSegment('Along');
-    await openInScroll(tester, title: 'Along');
-    await startFollowing(tester);
+  // A Play that makes sound, visible on Page, not an item behind ⋮. RSVP
+  // has its own Play in its controls, so no second one there.
+  testWidgets('Page has a Play that reads aloud; RSVP keeps its own', (
+    tester,
+  ) async {
+    await openReader(tester, await seedMultiSegment('Along'));
+    expect(find.byKey(const Key('reader-play')), findsNothing);
+    expect(find.byKey(const Key('play-toggle')), findsOneWidget);
 
-    // Word 0 is the drop cap (no `cursor-word` key even while current —
-    // see _flowWord); advance once to land on a plain flowing word first.
-    await tester.pump(const Duration(milliseconds: 250));
+    expect(find.byKey(const Key('speak-toggle')), findsOneWidget);
+    await switchMode(tester, 'mode-item-page');
+    expect(find.byKey(const Key('reader-play')), findsOneWidget);
+    expect(find.byKey(const Key('speak-toggle')), findsNothing,
+        reason: 'Page’s Play already reads aloud; no second Read aloud');
+    await startListening(tester);
+    expect(tts.utterances, isNotEmpty);
+    await stopListening(tester);
+  });
+
+  testWidgets('Line highlight has the same Play', (tester) async {
+    await openReader(tester, await seedMultiSegment('Along'));
+    await switchMode(tester, 'highlight-item-line');
+    expect(find.byKey(const Key('reader-play')), findsOneWidget);
+  });
+
+  testWidgets('listening moves the cursor-word highlight', (tester) async {
+    await openOnPage(tester);
+    await startListening(tester);
+    for (var i = 0; i < 3; i++) {
+      await tester.pump(const Duration(milliseconds: 400));
+    }
     final earlyWord = cursorWordText(tester);
     expect(earlyWord, isNotNull);
-
-    for (var i = 0; i < 15; i++) {
-      await tester.pump(const Duration(milliseconds: 250));
+    for (var i = 0; i < 3; i++) {
+      await tester.pump(const Duration(milliseconds: 400));
     }
-
-    final laterWord = cursorWordText(tester);
-    expect(laterWord, isNot(earlyWord),
-        reason: 'the shared cursor advanced under follow-along play');
-
-    await stopFollowing(tester);
+    expect(
+      cursorWordText(tester),
+      isNot(earlyWord),
+      reason: 'the shared cursor advanced under speech',
+    );
+    await stopListening(tester);
   });
 
-  testWidgets('the viewport actually scrolls to follow the cursor across a '
-      'segment boundary', (tester) async {
-    await seedMultiSegment('Along');
-    await openInScroll(tester, title: 'Along');
+  for (final item in ['mode-item-page', 'highlight-item-line']) {
+    testWidgets('the viewport scrolls to follow the spoken cursor ($item)', (
+      tester,
+    ) async {
+      await openReader(tester, await seedMultiSegment('Along'));
+      await switchMode(tester, item);
+      final scrollable = find.byType(Scrollable).first;
+      final before = tester.state<ScrollableState>(scrollable).position.pixels;
+      await startListening(tester);
+      for (var i = 0; i < 12; i++) {
+        await tester.pump(const Duration(milliseconds: 400));
+      }
+      final after = tester.state<ScrollableState>(scrollable).position.pixels;
+      expect(
+        after,
+        greaterThan(before),
+        reason: 'ensureVisible followed the cursor into later segments',
+      );
+      await stopListening(tester);
+    });
+  }
 
-    final scrollable = find.byType(Scrollable).first;
-    final before = tester.state<ScrollableState>(scrollable).position.pixels;
-
-    await startFollowing(tester);
-
-    // Each seeded segment is short (a handful of words) — well under 20
-    // dwells crosses several segment boundaries at the default wpm.
-    for (var i = 0; i < 20; i++) {
-      await tester.pump(const Duration(milliseconds: 250));
-    }
-
-    final after = tester.state<ScrollableState>(scrollable).position.pixels;
-    expect(after, greaterThan(before),
-        reason: 'ensureVisible followed the cursor into later segments');
-
-    await stopFollowing(tester);
-  });
-
-  testWidgets('a manual tap-to-seek pauses nothing on its own, but the '
-      'follow-along toggle itself is a pause/resume switch',
-      (tester) async {
-    await seedMultiSegment('Along');
-    await openInScroll(tester, title: 'Along');
-    await startFollowing(tester);
-    // Off the drop cap so cursor-word exists to compare against below.
-    await tester.pump(const Duration(milliseconds: 250));
-
-    expect(find.byTooltip('Pause'), findsOneWidget);
-    await tester.tap(find.byTooltip('Pause'));
-    // Stopping cancels the Timer outright — nothing left to run away with,
-    // so settling here is safe.
-    await tester.pumpAndSettle();
-
+  testWidgets('Stop stops the cursor', (tester) async {
+    await openOnPage(tester);
+    await startListening(tester);
+    await tester.pump(const Duration(milliseconds: 900));
+    await stopListening(tester);
     final word = cursorWordText(tester);
     await tester.pump(const Duration(seconds: 2));
-    final wordAfterPause = cursorWordText(tester);
-    expect(wordAfterPause, word,
-        reason: 'stopping follow-along actually stops the shared timer');
+    expect(cursorWordText(tester), word);
   });
 
-  testWidgets('long-pressing a word during follow-along pauses the cursor '
-      '— the dictionary sheet must not compete with an advancing document',
-      (tester) async {
-    await seedMultiSegment('Along');
-    await openInScroll(tester, title: 'Along');
-    await startFollowing(tester);
-    // Off the drop cap so cursor-word exists to compare against below.
-    await tester.pump(const Duration(milliseconds: 250));
-
-    // tester.longPress itself pumps ~500ms of virtual time to register the
-    // gesture — the shared _step Timer keeps running during that window
-    // (it's only cancelled once _openDefinitionSheet's callback fires), so
-    // the word the cursor lands on right as the sheet opens, NOT the word
-    // captured before the press, is the correct baseline for "did it move
-    // AFTER this."
+  testWidgets('long-pressing a word stops speech — the dictionary sheet '
+      'must not compete with an advancing document', (tester) async {
+    await openOnPage(tester);
+    await startListening(tester);
     await tester.longPress(find.text('number').first);
     await tester.pump(const Duration(milliseconds: 300));
     expect(find.byKey(const Key('dictionary-sheet')), findsOneWidget);
     final wordAtSheetOpen = cursorWordText(tester);
-    expect(wordAtSheetOpen, isNotNull);
-
-    for (var i = 0; i < 10; i++) {
-      await tester.pump(const Duration(milliseconds: 250));
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 400));
     }
-
-    final wordWhileSheetOpen = cursorWordText(tester);
-    expect(wordWhileSheetOpen, wordAtSheetOpen,
-        reason: 'opening the definition sheet paused the shared timer '
-            'instead of letting it race an ensureVisible call underneath '
-            'a modal route');
-
+    expect(cursorWordText(tester), wordAtSheetOpen);
     await tester.tap(find.byKey(const Key('definition-sheet-close')));
     await tester.pumpAndSettle();
   });

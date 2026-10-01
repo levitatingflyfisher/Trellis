@@ -20,9 +20,31 @@ void main() {
       expect(languageDisplayName('ko'), 'Korean');
     });
 
+    test('names every language a 1.5.5 pair covers, and the work-language '
+        'picker offers each of them', () {
+      const names = {
+        'it': 'Italian',
+        'nl': 'Dutch',
+        'ar': 'Arabic',
+        'hi': 'Hindi',
+        'uk': 'Ukrainian',
+        'pl': 'Polish',
+      };
+      names.forEach((code, name) {
+        expect(languageDisplayName(code), name);
+        expect(selectableWorkLanguages, contains(code));
+      });
+    });
+
     test('an unknown code falls back to the code itself, uppercased — '
         'never a blank or a crash', () {
       expect(languageDisplayName('xx'), 'XX');
     });
+  });
+
+  test('Arabic reads right to left; the others and null do not', () {
+    expect(isRightToLeft('ar'), isTrue);
+    expect(isRightToLeft('de'), isFalse);
+    expect(isRightToLeft(null), isFalse);
   });
 }

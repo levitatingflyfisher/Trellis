@@ -4,6 +4,7 @@ import '../../db/database.dart';
 import '../models/consent.dart';
 import 'auto_download.dart';
 import 'feed_rules.dart';
+import '../player/speed_control.dart';
 import '../shared/capped_body.dart';
 
 /// One feed's playback settings (P4 mercy #2): a speed override for its
@@ -36,7 +37,6 @@ class FeedSettingsScreen extends StatefulWidget {
 }
 
 class _FeedSettingsScreenState extends State<FeedSettingsScreen> {
-  static const _speeds = [1.0, 1.25, 1.5, 1.75, 2.0];
 
   double? _speedOverride;
   late final TextEditingController _introController;
@@ -142,9 +142,6 @@ class _FeedSettingsScreenState extends State<FeedSettingsScreen> {
         FeedRuleAction.autoKeep => 'Auto-keep: straight to the library',
       };
 
-  String _speedLabel(double s) =>
-      '${s.toStringAsFixed(2).replaceFirst(RegExp(r'0$'), '')}×';
-
   @override
   Widget build(BuildContext context) {
     final feedName = widget.feed.title.isEmpty
@@ -187,7 +184,7 @@ class _FeedSettingsScreenState extends State<FeedSettingsScreen> {
                     child: const Text('Use app default'),
                   ),
                 ),
-                for (final s in _speeds)
+                for (final s in speedPresets)
                   SizedBox(
                     width: 72,
                     height: 48,
@@ -199,9 +196,16 @@ class _FeedSettingsScreenState extends State<FeedSettingsScreen> {
                             : null,
                       ),
                       onPressed: () => setState(() => _speedOverride = s),
-                      child: Text(_speedLabel(s)),
+                      child: Text(speedLabel(s)),
                     ),
                   ),
+                // The same swipe control as the player, for anything
+                // between the presets.
+                SpeedControl(
+                  key: const Key('feed-settings-speed-wheel'),
+                  speed: _speedOverride ?? 1.0,
+                  onChanged: (s) => setState(() => _speedOverride = s),
+                ),
               ],
             ),
             const SizedBox(height: 24),

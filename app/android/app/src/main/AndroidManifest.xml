@@ -22,12 +22,12 @@
     <application
         android:label="Trellis"
         android:allowBackup="false"
-        android:name="${applicationName}"
+        android:name=".TrellisApplication"
         android:icon="@mipmap/ic_launcher">
         <activity
             android:name=".MainActivity"
             android:exported="true"
-            android:launchMode="singleTop"
+            android:launchMode="singleTask"
             android:taskAffinity=""
             android:theme="@style/LaunchTheme"
             android:configChanges="orientation|keyboardHidden|keyboard|screenSize|smallestScreenSize|locale|layoutDirection|fontScale|screenLayout|density|uiMode"
@@ -44,6 +44,37 @@
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
                 <category android:name="android.intent.category.LAUNCHER"/>
+            </intent-filter>
+            <!-- Share to Trellis (1.5.5): links and text, and the files the
+                 reader takes (EPUB, audio, text, markdown, HTML). Exactly
+                 these, never a wildcard: Trellis is offered only for what
+                 it can open, and no PDF, which the reader can't.
+                 singleTask above sends a share from another app's task to
+                 the one activity holding audio_service's cached engine,
+                 through onNewIntent, rather than making a second one that
+                 would attach the same engine again (the 1.4.0 family).
+                 Its known cost: coming back through the launcher icon
+                 clears what sat above MainActivity in its task, so a file
+                 picker left open behind another app is closed. -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+                <data android:mimeType="text/markdown"/>
+                <data android:mimeType="text/x-markdown"/>
+                <data android:mimeType="text/html"/>
+                <data android:mimeType="application/epub+zip"/>
+                <data android:mimeType="audio/*"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.SEND_MULTIPLE"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:mimeType="text/plain"/>
+                <data android:mimeType="text/markdown"/>
+                <data android:mimeType="text/x-markdown"/>
+                <data android:mimeType="text/html"/>
+                <data android:mimeType="application/epub+zip"/>
+                <data android:mimeType="audio/*"/>
             </intent-filter>
         </activity>
         <!-- Don't delete the meta-data below.
@@ -66,6 +97,25 @@
                 <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
+        <!-- The home-screen widget (1.5.5). The provider is exported only
+             because the launcher delivers APPWIDGET_UPDATE; it takes no
+             other action. Its taps go to WidgetTapReceiver, which is not
+             exported, or to MainActivity. No permission of its own: it
+             reads the snapshot the app left and draws it. -->
+        <receiver
+            android:name=".TrellisWidget"
+            android:exported="true"
+            android:label="@string/widget_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/trellis_widget_info" />
+        </receiver>
+        <receiver
+            android:name=".WidgetTapReceiver"
+            android:exported="false" />
         <receiver
             android:name="com.ryanheise.audioservice.MediaButtonReceiver"
             android:exported="true"

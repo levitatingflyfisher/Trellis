@@ -56,6 +56,8 @@ void main() {
       'decoder_model_merged_quantized.onnx',
       'source.spm',
       'vocab.json',
+      'config.json',
+      'tokenizer_config.json',
     ]) {
       File('${dir.path}/$name').writeAsBytesSync([1, 2, 3]);
     }
@@ -64,6 +66,8 @@ void main() {
       decoderMergedPath: '${dir.path}/decoder_model_merged_quantized.onnx',
       sourceSpmPath: '${dir.path}/source.spm',
       vocabPath: '${dir.path}/vocab.json',
+      configPath: '${dir.path}/config.json',
+      tokenizerConfigPath: '${dir.path}/tokenizer_config.json',
     );
   });
   tearDown(() {
@@ -167,6 +171,8 @@ void main() {
       decoderMergedPath: files.decoderMergedPath,
       sourceSpmPath: files.sourceSpmPath,
       vocabPath: files.vocabPath,
+      configPath: files.configPath,
+      tokenizerConfigPath: files.tokenizerConfigPath,
     );
     final engine = MarianTranslator(
       files: missing,

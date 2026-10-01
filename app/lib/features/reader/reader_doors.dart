@@ -9,7 +9,7 @@ import 'reader_logic.dart' show shouldOfferRecap;
 import 'reader_screen.dart';
 import 'speech/speech_engine.dart';
 import 'speech/speech_temp_files.dart';
-import 'translation/marian_engine.dart';
+import 'translation/translation_service.dart';
 
 /// The seams a reader needs, carried as one value so every screen that
 /// opens a book opens it the same way: the Library and the Subscriptions
@@ -22,8 +22,7 @@ class ReaderDoors {
     this.lookupDefinition,
     this.createSpeechTempFiles,
     this.player,
-    this.resolveTranslator,
-    this.availableTranslationTargets,
+    this.translation,
   });
 
   final TtsSpeaker? tts;
@@ -33,11 +32,9 @@ class ReaderDoors {
   final Future<String?> Function(String word)? lookupDefinition;
   final SpeechTempFiles Function()? createSpeechTempFiles;
   final PlayerController? player;
-  final Future<MarianTranslator?> Function(
-      {required String sourceLang, required String targetLang})?
-      resolveTranslator;
-  final Future<List<String>> Function({required String sourceLang})?
-      availableTranslationTargets;
+  /// Translation for the readers this opens (1.5.5); null hides
+  /// Translate. See [TranslationService].
+  final TranslationService? translation;
 
   /// Pushes the reader for [work] and completes when it pops. The voice
   /// and the recap offer are settled before the push (ADR-0006): the
@@ -54,6 +51,7 @@ class ReaderDoors {
     bool speakTranslation = false,
     String? layerLang,
     bool openTranslatePicker = false,
+    bool openOnPage = false,
   }) async {
     final resolver = resolveSpeechEngine;
     final hasVoice =
@@ -78,14 +76,14 @@ class ReaderDoors {
           lookupDefinition: lookupDefinition,
           createSpeechTempFiles: createSpeechTempFiles,
           player: player,
-          resolveTranslator: resolveTranslator,
-          availableTranslationTargets: availableTranslationTargets,
+          translation: translation,
           offerRecap: offerRecap,
           startSegmentIdx: startSegmentIdx,
           startSpeaking: startSpeaking,
           speakTranslation: speakTranslation,
           layerLang: layerLang,
-          openTranslatePicker: openTranslatePicker),
+          openTranslatePicker: openTranslatePicker,
+          openOnPage: openOnPage),
     ));
   }
 
@@ -106,8 +104,7 @@ class ReaderDoors {
           tts: tts,
           resolveSpeechEngine: resolveSpeechEngine,
           createSpeechTempFiles: createSpeechTempFiles,
-          resolveTranslator: resolveTranslator,
-          availableTranslationTargets: availableTranslationTargets),
+          translation: translation),
     ));
   }
 }

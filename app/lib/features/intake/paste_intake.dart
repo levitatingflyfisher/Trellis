@@ -8,6 +8,30 @@ int epochDayUtcNow() =>
     DateTime.now().toUtc().millisecondsSinceEpoch ~/
     Duration.millisecondsPerDay;
 
+/// The paste intake's storing half: [text] through the donor
+/// `parseTextFile` heuristics (a null [title] lets it pick one) into one
+/// note work. The share sheet stores through here too.
+Future<int> storePastedText(AppDatabase db,
+    {required int profileId,
+    required String text,
+    String? title,
+    String? sourceUrl,
+    String persistence = 'work'}) async {
+  final parsed = core.parseTextFile(text, title);
+  final workId = await db.spineDao.insertWork(
+      profileId: profileId,
+      kind: 'note',
+      title: parsed.title,
+      persistence: persistence,
+      firstSeenEpochDay: epochDayUtcNow(),
+      sourceUrl: sourceUrl);
+  await db.spineDao.insertSegments(workId, [
+    for (final s in parsed.segments)
+      (idx: s.idx, kind: s.kind.name, text: s.text)
+  ]);
+  return workId;
+}
+
 /// Paste intake: text/markdown through the donor `parseTextFile` heuristics
 /// into one spine work. Returns the new work id, or null on cancel/empty.
 ///
@@ -51,18 +75,11 @@ class _PasteDialogState extends State<_PasteDialog> {
       return;
     }
     final title = _title.text.trim();
-    final parsed = core.parseTextFile(text, title.isEmpty ? null : title);
-    final workId = await widget.db.spineDao.insertWork(
+    final workId = await storePastedText(widget.db,
         profileId: widget.profileId,
-        kind: 'note',
-        title: parsed.title,
-        persistence: 'work',
-        firstSeenEpochDay: epochDayUtcNow(),
+        text: text,
+        title: title.isEmpty ? null : title,
         sourceUrl: widget.sourceUrl);
-    await widget.db.spineDao.insertSegments(workId, [
-      for (final s in parsed.segments)
-        (idx: s.idx, kind: s.kind.name, text: s.text)
-    ]);
     if (!mounted) return;
     Navigator.pop(context, workId);
   }

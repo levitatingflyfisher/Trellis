@@ -29,6 +29,16 @@
 ///    `present.*.encoder.*` and feed those same tensors on every later
 ///    step, never the current step's own (broken) output for that slot.
 ///
+/// Re-verified for Xenova's smaller export of the same graphs (1.5.5,
+/// en-ROMANCE): identical input/output names, the same degenerate
+/// `(0, 8, 1, 64)` cached-branch output, and naive threading there
+/// crashes ORT outright instead of drifting.
+///
+/// Every per-model number (layer count, heads, head width, the decoder
+/// start id, EOS, the ids greedy decoding must never pick) comes from
+/// the model's own config ([MarianModelConfig]); a multi-target export
+/// is steered by prepending its `>>xx<<` token id to the source ids.
+///
 /// Verified end-to-end in Python against the real graphs before this
 /// file was written (see the campaign report for the transcript):
 ///   "Hello, world!" -> "¡Hola, mundo!"
@@ -41,21 +51,24 @@ import 'package:ml_runtime/ml_runtime.dart';
 
 import 'marian_types.dart';
 
-const int marianNumLayers = 6;
-const int marianNumHeads = 8;
-const int marianHeadDim = 64;
-
 class MarianGenerationLoop {
   final MarianSessionRunner encoderRunner;
   final MarianSessionRunner decoderRunner;
   final MarianUnigramTokenizer tokenizer;
   final MarianVocabulary vocab;
+  final MarianModelConfig config;
+
+  /// The `>>xx<<` token's id for a multi-target export, prepended to
+  /// every source sentence; null for a bilingual pair.
+  final int? targetTokenId;
 
   const MarianGenerationLoop({
     required this.encoderRunner,
     required this.decoderRunner,
     required this.tokenizer,
     required this.vocab,
+    required this.config,
+    this.targetTokenId,
   });
 
   /// Translates one sentence. Length is capped at 3x the input token
@@ -63,9 +76,14 @@ class MarianGenerationLoop {
   /// short enough that a stuck decode cannot run away).
   Future<String> translate(String sentence) async {
     final pieces = tokenizer.encodeToPieces(sentence);
-    final inputIds = [...vocab.encodeIds(pieces), vocab.eosId];
+    final inputIds = [
+      ?targetTokenId,
+      ...vocab.encodeIds(pieces),
+      config.eosTokenId,
+    ];
     final encSeqLen = inputIds.length;
     final maxLen = 3 * inputIds.length + 16;
+    final layers = config.decoderLayers;
 
     final encOut = await encoderRunner.run({
       'input_ids': MTensor(inputIds, [1, encSeqLen], MTensorType.int64),
@@ -73,78 +91,101 @@ class MarianGenerationLoop {
         1,
         encSeqLen,
       ], MTensorType.int64),
-    });
+    }, fetch: const {});
     final encoderHiddenStates = encOut['last_hidden_state']!;
     final attentionMask = MTensor(List.filled(encSeqLen, 1), [
       1,
       encSeqLen,
     ], MTensorType.int64);
 
-    // Step 1: fresh. See the trap note above for why every past_key_values
-    // input — including the cross-attention ones — is a true zero-length
-    // dummy here, never omitted and never a guessed non-zero shape.
-    final step1Feeds = <String, MTensor>{
-      'input_ids': MTensor([vocab.padId], [1, 1], MTensorType.int64),
-      'encoder_hidden_states': encoderHiddenStates,
-      'encoder_attention_mask': attentionMask,
-      'use_cache_branch': const MTensor([0], [1], MTensorType.boolean),
-    };
-    for (var l = 0; l < marianNumLayers; l++) {
-      for (final kind in const ['decoder', 'encoder']) {
-        for (final kv in const ['key', 'value']) {
-          step1Feeds['past_key_values.$l.$kind.$kv'] = const MTensor([], [
-            1,
-            marianNumHeads,
-            0,
-            marianHeadDim,
-          ]);
-        }
-      }
-    }
-    var out = await decoderRunner.run(step1Feeds);
-
-    // Freeze the ONLY real cross-attention KV this translation will ever
-    // have — see the trap note.
-    final frozenEncoderKv = <String, MTensor>{
-      for (var l = 0; l < marianNumLayers; l++)
-        for (final kv in const ['key', 'value'])
-          'past_key_values.$l.encoder.$kv': out['present.$l.encoder.$kv']!,
-    };
-
-    final generated = <int>[];
-    for (var step = 0; step < maxLen; step++) {
-      final nextId = _argmaxLastRow(out['logits']!);
-      generated.add(nextId);
-      if (nextId == vocab.eosId) break;
-      if (step == maxLen - 1) break; // length cap reached, no next call
-
-      final nextFeeds = <String, MTensor>{
-        'input_ids': MTensor([nextId], [1, 1], MTensorType.int64),
+    // Whatever is still held on the runtime's side is freed in
+    // `finally`: a decode that throws mid-sentence must not leak.
+    var frozenEncoderKv = const <String, MTensor>{};
+    var out = const <String, MTensor>{};
+    try {
+      // Step 1: fresh. See the trap note above for why every
+      // past_key_values input — including the cross-attention ones — is
+      // a true zero-length dummy here, never omitted and never a guessed
+      // non-zero shape.
+      final step1Feeds = <String, MTensor>{
+        'input_ids': MTensor(
+            [config.decoderStartTokenId], [1, 1], MTensorType.int64),
         'encoder_hidden_states': encoderHiddenStates,
         'encoder_attention_mask': attentionMask,
-        'use_cache_branch': const MTensor([1], [1], MTensorType.boolean),
-        ...frozenEncoderKv,
+        'use_cache_branch': const MTensor([0], [1], MTensorType.boolean),
       };
-      for (var l = 0; l < marianNumLayers; l++) {
-        for (final kv in const ['key', 'value']) {
-          nextFeeds['past_key_values.$l.decoder.$kv'] =
-              out['present.$l.decoder.$kv']!;
+      for (var l = 0; l < layers; l++) {
+        for (final kind in const ['decoder', 'encoder']) {
+          for (final kv in const ['key', 'value']) {
+            step1Feeds['past_key_values.$l.$kind.$kv'] = MTensor(const [], [
+              1,
+              config.decoderHeads,
+              0,
+              config.headDim,
+            ]);
+          }
         }
       }
-      out = await decoderRunner.run(nextFeeds);
+      out = await decoderRunner.run(step1Feeds, fetch: const {'logits'});
+
+      // Freeze the ONLY real cross-attention KV this translation will
+      // ever have — see the trap note.
+      frozenEncoderKv = <String, MTensor>{
+        for (var l = 0; l < layers; l++)
+          for (final kv in const ['key', 'value'])
+            'past_key_values.$l.encoder.$kv': out['present.$l.encoder.$kv']!,
+      };
+
+      final generated = <int>[];
+      for (var step = 0; step < maxLen; step++) {
+        final nextId = _argmaxLastRow(out['logits']!);
+        generated.add(nextId);
+        if (nextId == config.eosTokenId || step == maxLen - 1) break;
+
+        final nextFeeds = <String, MTensor>{
+          'input_ids': MTensor([nextId], [1, 1], MTensorType.int64),
+          'encoder_hidden_states': encoderHiddenStates,
+          'encoder_attention_mask': attentionMask,
+          'use_cache_branch': const MTensor([1], [1], MTensorType.boolean),
+          ...frozenEncoderKv,
+        };
+        for (var l = 0; l < layers; l++) {
+          for (final kv in const ['key', 'value']) {
+            nextFeeds['past_key_values.$l.decoder.$kv'] =
+                out['present.$l.decoder.$kv']!;
+          }
+        }
+        final next =
+            await decoderRunner.run(nextFeeds, fetch: const {'logits'});
+        // The previous step's cache was just consumed; the frozen
+        // cross-attention values live on until the sentence ends.
+        await decoderRunner.release(_unfrozen(out, frozenEncoderKv));
+        out = next;
+      }
+      return vocab.decodeIds(generated);
+    } finally {
+      await decoderRunner.release(_unfrozen(out, frozenEncoderKv));
+      await decoderRunner.release(frozenEncoderKv.values);
+      await encoderRunner.release([encoderHiddenStates]);
     }
-    return vocab.decodeIds(generated);
   }
+
+  /// [out]'s tensors other than the frozen cross-attention values.
+  Iterable<MTensor> _unfrozen(
+          Map<String, MTensor> out, Map<String, MTensor> frozen) =>
+      out.values.where((t) => !frozen.values.any((f) => identical(f, t)));
 
   int _argmaxLastRow(MTensor logits) {
     final seq = logits.shape[1];
     final vocabSize = logits.shape[2];
     final rowStart = (seq - 1) * vocabSize;
-    var bestIdx = 0;
-    var bestVal = logits.data[rowStart].toDouble();
-    for (var i = 1; i < vocabSize; i++) {
+    final banned = config.suppressedTokenIds;
+    var bestIdx = -1;
+    var bestVal = double.negativeInfinity;
+    for (var i = 0; i < vocabSize; i++) {
+      if (banned.contains(i)) continue;
       final v = logits.data[rowStart + i].toDouble();
-      if (v > bestVal) {
+      if (bestIdx < 0 || v > bestVal) {
         bestVal = v;
         bestIdx = i;
       }

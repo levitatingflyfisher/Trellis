@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Material Icons "replay", the glyph the app's own player shows, taken
+     from the Material Icons font Flutter ships (Apache-2.0). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M12.0 5.015625V0.984375L6.984375 6.0L12.0 11.015625V6.984375C15.328125 6.984375 18.0 9.703125 18.0 12.984375C18.0 16.3125 15.328125 18.984375 12.0 18.984375C8.671875 18.984375 6.0 16.3125 6.0 12.984375H3.984375C3.984375 17.4375 7.59375 21.0 12.0 21.0C16.40625 21.0 20.015625 17.4375 20.015625 12.984375C20.015625 8.578125 16.40625 5.015625 12.0 5.015625Z" />
+</vector>

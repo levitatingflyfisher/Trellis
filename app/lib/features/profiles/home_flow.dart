@@ -10,6 +10,10 @@ import '../feeds/background/feed_check_platform.dart';
 import '../feeds/background/feed_check_runner.dart';
 import '../feeds/background/feed_check_settings.dart';
 import '../feeds/feeds_repository.dart';
+import '../home_widget/home_widget_host.dart';
+import '../home_widget/widget_snapshot.dart';
+import '../intake/share_queue.dart';
+import '../intake/share_source.dart';
 import '../jobs/job_center.dart';
 import '../player/episode_player.dart';
 import 'home_shell.dart';
@@ -37,13 +41,23 @@ class HomeFlow extends StatefulWidget {
   /// The system scheduler behind background feed checks; unavailable by
   /// default, so widget tests never reach a platform channel.
   final FeedCheckScheduler feedCheckScheduler;
+
+  /// Shares from other apps; the shell of whichever reader is open takes
+  /// them, so a share waits behind the picker and the PIN.
+  final ShareSource shareSource;
+
+  /// The home-screen widget's door; the open reader's shell writes its
+  /// card and takes its taps.
+  final HomeWidgetHost homeWidget;
   const HomeFlow(
       {super.key,
       required this.db,
       required this.fetcher,
       required this.createPlayer,
       required this.services,
-      this.feedCheckScheduler = const UnavailableFeedCheckScheduler()});
+      this.feedCheckScheduler = const UnavailableFeedCheckScheduler(),
+      this.shareSource = const UnavailableShareSource(),
+      this.homeWidget = const UnavailableHomeWidgetHost()});
 
   @override
   State<HomeFlow> createState() => _HomeFlowState();
@@ -91,6 +105,13 @@ class _HomeFlowState extends State<HomeFlow> {
   /// so it waits for the hand-over like every cold-start write.
   late final SearchBackfill _searchBackfill = SearchBackfill(widget.db);
 
+  /// Shares from other apps, each bound to the reader open when it came.
+  late final ShareQueue _shares = ShareQueue(
+      db: widget.db,
+      source: widget.shareSource,
+      activeProfileId: () => _active?.id,
+      writesReady: _writesReady.future);
+
   @override
   void initState() {
     super.initState();
@@ -101,6 +122,7 @@ class _HomeFlowState extends State<HomeFlow> {
     // The readers render at once; only what writes waits for the hand-over.
     unawaited(_load());
     unawaited(_searchBackfill.run(after: _writesReady.future));
+    unawaited(_shares.start());
     final runner = _feedCheckRunner;
     if (runner != null) {
       // A check running headless winds down first (a few seconds at most):
@@ -123,6 +145,7 @@ class _HomeFlowState extends State<HomeFlow> {
   @override
   void dispose() {
     _searchBackfill.stop();
+    _shares.dispose();
     _closeFeedCheckHost?.call();
     _feedCheck.dispose();
     _jobs.dispose();
@@ -156,6 +179,17 @@ class _HomeFlowState extends State<HomeFlow> {
   }
 
   bool _firstLoad = true;
+
+  /// Leaving a reader empties the home-screen widget at once, before the
+  /// picker or the PIN: the next person to pick up the phone must not see
+  /// the last reader's listening and reading. The next reader's shell
+  /// writes their own card when it opens.
+  void _clearWidget() {
+    final host = widget.homeWidget;
+    if (host.available) {
+      unawaited(host.push(const WidgetSnapshot(profileId: 0)));
+    }
+  }
 
   /// Opens [p]'s shell and remembers it for the next launch.
   void _open(Profile p) {
@@ -195,7 +229,10 @@ class _HomeFlowState extends State<HomeFlow> {
       // The active reader was removed from the dashboard — walk back to
       // the picker rather than sit on a dangling id.
       _active = null;
+      _clearWidget();
     }
+    // A removed reader's waiting shares go with them.
+    await _shares.purgeMissingProfiles();
     await _load();
   }
 
@@ -226,7 +263,10 @@ class _HomeFlowState extends State<HomeFlow> {
     return HomeShell(
       db: widget.db,
       profile: active,
-      onSwitchProfile: () => setState(() => _active = null),
+      onSwitchProfile: () {
+        _clearWidget();
+        setState(() => _active = null);
+      },
       fetcher: widget.fetcher,
       createPlayer: widget.createPlayer,
       services: widget.services,
@@ -234,6 +274,8 @@ class _HomeFlowState extends State<HomeFlow> {
       feedCheck: _feedCheck,
       writesReady: _writesReady.future,
       afterFeedsChecked: _feedCheckRunner?.requestAutoDownloadIfPending,
+      shares: _shares,
+      homeWidget: widget.homeWidget,
     );
   }
 }

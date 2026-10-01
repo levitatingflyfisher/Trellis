@@ -21,7 +21,9 @@ import '../models/models_screen.dart' show modelLabel;
 import '../player/player_controller.dart';
 import '../search/search_store.dart' show SearchItem;
 import '../search/share_item.dart';
+import '../transcribe/job_cards.dart';
 import '../transcribe/transcribe_coordinator.dart';
+import '../works/device_hooks.dart' show deviceTranscribeRate;
 import '../works/work_row.dart' show WorkEntry;
 import '../../services/device_services.dart';
 
@@ -54,6 +56,10 @@ class EpisodeActions {
   final ShowOpener? openShow;
   final int Function() _nowMs;
 
+  /// The share of an episode's length transcribing takes here, for the
+  /// "about N min" when a transcription starts; null when unknown.
+  final double? Function() transcribeRate;
+
   EpisodeActions({
     required this.db,
     required this.profileId,
@@ -67,6 +73,7 @@ class EpisodeActions {
     this.localMlAvailable = true,
     this.openShow,
     int Function()? nowMs,
+    this.transcribeRate = deviceTranscribeRate,
   }) : services = localMlAvailable ? services : null,
        shareText = shareText ?? (useDefaultShare ? defaultShareText : null),
        _nowMs = nowMs ?? (() => DateTime.now().millisecondsSinceEpoch);
@@ -418,6 +425,33 @@ class EpisodeActions {
       lang: e.work.lang,
       translate: translate,
     ));
+    // Said at once, wherever the tap was (user: "it wasn't obvious it had
+    // started"); the action shows this job's card right here.
+    if (!context.mounted) return;
+    final estimate = transcribeEstimate(e.episode.durationMs, transcribeRate());
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+        // A convenience: the job also shows on the page and in Jobs.
+        persist: false,
+        content: Text(estimate == 'time unknown'
+            ? 'Transcribing…'
+            : 'Transcribing… $estimate'),
+        action: SnackBarAction(
+          label: 'See progress',
+          onPressed: () {
+            if (!context.mounted) return;
+            showModalBottomSheet<void>(
+              context: context,
+              showDragHandle: true,
+              builder: (_) => SafeArea(
+                child: TranscribeJobCards(
+                    coordinator: coordinator, workId: e.work.id),
+              ),
+            );
+          },
+        ),
+      ));
   }
 
   /// Runs a [commonMenuItems] choice; false when [choice] isn't one, so

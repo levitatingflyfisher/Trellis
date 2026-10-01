@@ -1,5 +1,5 @@
-/// The real Marian implementation (ADR-0008 "Babel"): opus-mt-en-es over
-/// `flutter_onnxruntime`, behind [MarianTranslator]. Must stay the
+/// The real Marian implementation (ADR-0008 "Babel"): any registered
+/// opus-mt pair over `flutter_onnxruntime`, behind [MarianTranslator]. Must stay the
 /// DEFAULT branch of `marian_engine.dart`'s conditional export — never
 /// imported directly by app code; always through the barrel. Mirrors
 /// `supertonic_speech_engine.dart`'s shape (residency, serialized-call,
@@ -15,6 +15,7 @@ import 'package:ml_runtime/ml_runtime.dart';
 
 import '../marian_generation_loop.dart';
 import '../marian_types.dart';
+import '../translator.dart';
 
 // ---------------------------------------------------------------------
 // The MTensor <-> OrtValue adapter — the ONLY place this file's own
@@ -60,21 +61,49 @@ class _OrtSessionRunner implements MarianSessionRunner {
   _OrtSessionRunner(this.session);
 
   @override
-  Future<Map<String, MTensor>> run(Map<String, MTensor> feeds) async {
-    final ortFeeds = <String, OrtValue>{
-      for (final e in feeds.entries) e.key: await _toOrtValue(e.value),
-    };
-    final ortResult = await session.run(ortFeeds);
-    final result = <String, MTensor>{
-      for (final e in ortResult.entries) e.key: await _fromOrtValue(e.value),
-    };
-    for (final v in ortFeeds.values) {
-      await v.dispose();
+  Future<Map<String, MTensor>> run(Map<String, MTensor> feeds,
+      {Set<String>? fetch}) async {
+    // Handles go back in as they are; only plain data is uploaded, and
+    // only what this call uploaded is freed after it.
+    final uploaded = <OrtValue>[];
+    final ortFeeds = <String, OrtValue>{};
+    for (final e in feeds.entries) {
+      final handle = e.value.handle;
+      if (handle is OrtValue) {
+        ortFeeds[e.key] = handle;
+      } else {
+        final v = await _toOrtValue(e.value);
+        uploaded.add(v);
+        ortFeeds[e.key] = v;
+      }
     }
-    for (final v in ortResult.values) {
-      await v.dispose();
+    final Map<String, OrtValue> ortResult;
+    try {
+      ortResult = await session.run(ortFeeds);
+    } finally {
+      for (final v in uploaded) {
+        await v.dispose();
+      }
+    }
+    final result = <String, MTensor>{};
+    for (final e in ortResult.entries) {
+      if (fetch == null || fetch.contains(e.key)) {
+        result[e.key] = await _fromOrtValue(e.value);
+        await e.value.dispose();
+      } else {
+        result[e.key] = MTensor.handle(
+            e.value, e.value.shape, _fromOrtDataType(e.value.dataType));
+      }
     }
     return result;
+  }
+
+  @override
+  Future<void> release(Iterable<MTensor> tensors) async {
+    for (final t in tensors.toList()) {
+      final handle = t.handle;
+      if (handle is OrtValue) await handle.dispose();
+    }
   }
 }
 
@@ -91,6 +120,8 @@ Future<MarianModelHandle> _openRealMarianHandle(
 
   final List<SpmPiece> pieces;
   final MarianVocabulary vocab;
+  final MarianModelConfig config;
+  int? targetTokenId;
   try {
     pieces = parseSpmPieceTable(
       Uint8List.fromList(await File(files.sourceSpmPath).readAsBytes()),
@@ -98,6 +129,17 @@ Future<MarianModelHandle> _openRealMarianHandle(
     vocab = MarianVocabulary.fromJsonBytes(
       Uint8List.fromList(await File(files.vocabPath).readAsBytes()),
     );
+    config = MarianModelConfig.fromJsonBytes(
+      config: Uint8List.fromList(await File(files.configPath).readAsBytes()),
+      tokenizerConfig: Uint8List.fromList(
+          await File(files.tokenizerConfigPath).readAsBytes()),
+    );
+    final token = files.targetToken;
+    if (token != null) {
+      // Without its token a multi-target model picks a language itself.
+      targetTokenId = vocab.directiveId(token) ??
+          (throw FormatException('vocab.json has no $token'));
+    }
   } catch (e) {
     await encoderSession.close();
     await decoderSession.close();
@@ -116,6 +158,8 @@ Future<MarianModelHandle> _openRealMarianHandle(
       decoderRunner: _OrtSessionRunner(decoderSession),
       tokenizer: MarianUnigramTokenizer(pieces),
       vocab: vocab,
+      config: config,
+      targetTokenId: targetTokenId,
     ),
   );
 }
@@ -147,7 +191,7 @@ class _RealMarianModelHandle implements MarianModelHandle {
 // dispose waits for the in-flight call before releasing sessions).
 // ---------------------------------------------------------------------
 
-class MarianTranslator {
+class MarianTranslator implements SentenceTranslator {
   final MarianTranslatorFiles files;
   final MarianModelHandleFactory _openHandle;
 
@@ -157,11 +201,13 @@ class MarianTranslator {
   MarianTranslator({required this.files, MarianModelHandleFactory? openHandle})
     : _openHandle = openHandle ?? _openRealMarianHandle;
 
-  /// Translates one English sentence into Spanish. Concurrent calls are
-  /// serialized one at a time — the same law [SupertonicSpeechEngine]
+  /// Translates one sentence from the pair's source into its target.
+  /// Concurrent calls are serialized one at a time — the same law
+  /// [SupertonicSpeechEngine]
   /// follows, for the same reason: concurrent `session.run` calls against
   /// the same sessions are unproven, and Phase 3's translate-ahead
   /// lookahead can have more than one call in flight.
+  @override
   Future<String> translate(String sentence) {
     final result = _translationQueue.then((_) async {
       final handle = await (_handleFuture ??= _open());
@@ -189,21 +235,17 @@ class MarianTranslator {
   }
 
   void _checkFilesPresent() {
-    for (final path in [
-      files.encoderPath,
-      files.decoderMergedPath,
-      files.sourceSpmPath,
-      files.vocabPath,
-    ]) {
+    for (final path in files.allPaths) {
       if (!File(path).existsSync()) {
-        throw MarianModelMissingFilesException(
-          'The Spanish translator is missing a file it needs. Try '
-          'downloading it again in Models.',
+        throw const MarianModelMissingFilesException(
+          'The translator is missing a file it needs. Try downloading '
+          'its language again.',
         );
       }
     }
   }
 
+  @override
   Future<void> dispose() async {
     final f = _handleFuture;
     _handleFuture = null;

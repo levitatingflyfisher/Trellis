@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The home-screen widget (1.5.5), in the app's own tokens (ohStyle's
+     openhearth_design): hearth terracotta on warm linen by day; the
+     hearthDark evening palette in values-night. -->
+<resources>
+    <string name="widget_label">Trellis</string>
+    <string name="widget_description">Resume listening and reading</string>
+    <string name="widget_nothing_playing">Nothing playing yet</string>
+    <string name="widget_continue_reading">Continue reading</string>
+    <string name="widget_play">Play</string>
+    <string name="widget_pause">Pause</string>
+    <string name="widget_back">Back 15 seconds</string>
+    <string name="widget_forward">Forward 30 seconds</string>
+    <string name="widget_open_work">Open what was playing</string>
+    <string name="widget_open_app">Open Trellis</string>
+    <string name="widget_preview_title">The harbour at dawn</string>
+    <string name="widget_preview_show">A podcast</string>
+    <string name="widget_preview_reading">On hedges</string>
+
+    <!-- linen100, linen900, linen600, hearth500, white, linen200 -->
+    <color name="widget_surface">#FFF5EFE6</color>
+    <color name="widget_text">#FF2C1810</color>
+    <color name="widget_text_secondary">#FF6E5F4C</color>
+    <color name="widget_warmth">#FF9E4D2C</color>
+    <color name="widget_on_warmth">#FFFFFFFF</color>
+    <color name="widget_track">#FFEAE1D4</color>
+
+    <!-- Before Android 12 there is no system radius to follow. -->
+    <dimen name="widget_radius">16dp</dimen>
+</resources>

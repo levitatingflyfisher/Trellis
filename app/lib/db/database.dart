@@ -107,6 +107,13 @@ class Works extends Table {
   /// falls back to the reader's and the player's places.
   TextColumn get lastMode => text().nullable()();
   IntColumn get lastModeAtMs => integer().nullable()();
+
+  /// The target of a translation run that started and has not yet
+  /// finished or been cancelled (1.5.5). A run the system killed leaves
+  /// it set, and the reader resumes the run the next time the work is
+  /// opened; the stored sentences are the progress, so nothing else
+  /// needs keeping.
+  TextColumn get translationRunLang => text().nullable()();
 }
 
 /// An item's full show notes (1.5.4), sanitized before they are stored
@@ -384,6 +391,12 @@ class Episodes extends Table {
   /// The item's own artwork URL, when the feed gives one. Only fetched
   /// when it differs from the show's; see `FeedsRepository`.
   TextColumn get imageUrl => text().nullable()();
+
+  /// Who handed this item in, when it was shared rather than fetched
+  /// (1.5.5): the sharing app's name, shown where a feed item shows its
+  /// show. Null for every feed item, and for a share Android named no
+  /// app for, which shows its source's title ("Shared").
+  TextColumn get sourceLabel => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {workId};
@@ -1365,6 +1378,23 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
     ),
   );
 
+  /// A work's body replaced whole, keeping its id and every row that
+  /// points at it (Latest, the queue): a shared link becoming the article
+  /// it links to. The reading place goes with the old body.
+  Future<void> replaceBody(
+    int workId, {
+    required String kind,
+    required String title,
+    required List<({int idx, String kind, String text})> rows,
+  }) => transaction(() async {
+    await (delete(positions)..where((p) => p.workId.equals(workId))).go();
+    await (delete(segments)..where((x) => x.workId.equals(workId))).go();
+    await insertSegments(workId, rows);
+    await (update(works)..where((w) => w.id.equals(workId))).write(
+      WorksCompanion(kind: Value(kind), title: Value(title)),
+    );
+  });
+
   Future<void> insertSegments(
     int workId,
     List<({int idx, String kind, String text})> rows,
@@ -1496,6 +1526,37 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
           .getSingleOrNull();
 
   Future<List<Position>> allPositions() => select(positions).get();
+
+  /// Fires whenever anyone's place in anything moves: the home-screen
+  /// widget's "Continue reading" follows it (1.5.5). A bare table signal,
+  /// not a watched query: nothing is re-read until the listener asks.
+  Stream<void> positionsMoved() =>
+      db.tableUpdates(TableUpdateQuery.onTable(positions)).map((_) {});
+
+  /// The text this reader was in last, with its place and length: a work
+  /// whose position moved most recently and that is read, not listened
+  /// to (isTextWork's rule: no audiobook, no episode with audio). Null
+  /// when nothing has been read.
+  Future<({Work work, Position position, int segmentCount})?>
+      lastReadText(int profileId) async {
+    final q = select(positions).join([
+      innerJoin(works, works.id.equalsExp(positions.workId)),
+      leftOuterJoin(episodes, episodes.workId.equalsExp(positions.workId)),
+    ])
+      ..where(positions.profileId.equals(profileId) &
+          works.kind.isNotValue('audiobook') &
+          episodes.enclosureUrl.isNull())
+      ..orderBy([OrderingTerm.desc(positions.updatedAtMs)])
+      ..limit(1);
+    final row = await q.getSingleOrNull();
+    if (row == null) return null;
+    final work = row.readTable(works);
+    return (
+      work: work,
+      position: row.readTable(positions),
+      segmentCount: await segmentCount(work.id),
+    );
+  }
 
   /// Every place this reader has in a text, by work: one query for a
   /// whole list's progress bars.
@@ -1687,6 +1748,18 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
           const WorksCompanion(
               activeTranslationLang: Value(null),
               showTranslationLayer: Value(false)));
+
+  /// The target of this work's unfinished translation run, if any. See
+  /// [Works.translationRunLang].
+  Future<String?> translationRunLang(int workId) async {
+    final row = await (select(works)..where((w) => w.id.equals(workId)))
+        .getSingleOrNull();
+    return row?.translationRunLang;
+  }
+
+  Future<void> setTranslationRunLang(int workId, String? lang) =>
+      (update(works)..where((w) => w.id.equals(workId)))
+          .write(WorksCompanion(translationRunLang: Value(lang)));
 
   /// The languages this work has translated sentences in: what the work
   /// page lists beside the original.
@@ -2418,6 +2491,13 @@ enum RiverKind { all, text, audio }
 /// fling rarely reaches the end before the next page lands.
 const riverPageSize = 60;
 
+/// The local Shared source's address (1.5.5): not a web address, so no
+/// fetch, guard or follow by URL can ever reach or match it.
+const sharedFeedUrl = 'trellis:shared';
+
+/// Whether [feed] is the local Shared source rather than a followed show.
+bool isSharedFeed(Feed feed) => feed.url == sharedFeedUrl;
+
 @DriftAccessor(
     tables: [Feeds, Episodes, Works, PlayerPositions, Positions, Alignments,
         WorkNotes])
@@ -2443,6 +2523,81 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
             ..where((f) => f.profileId.equals(profileId))
             ..orderBy([(f) => OrderingTerm.asc(f.id)]))
           .get();
+
+  /// [feedsOf] minus the local Shared source: the shows this reader
+  /// follows, for every list, refresh and export of them.
+  Future<List<Feed>> subscriptionsOf(int profileId) =>
+      (select(feeds)
+            ..where((f) =>
+                f.profileId.equals(profileId) &
+                f.url.equals(sharedFeedUrl).not())
+            ..orderBy([(f) => OrderingTerm.asc(f.id)]))
+          .get();
+
+  /// The profile's Shared source (1.5.5), made on the first share. A blog
+  /// by origin: what is shared is mostly text.
+  Future<int> sharedFeedId(int profileId) => transaction(() async {
+        final existing = await feedByUrl(profileId, sharedFeedUrl);
+        if (existing != null) return existing.id;
+        final id = await insertFeed(
+            profileId: profileId, url: sharedFeedUrl, title: 'Shared');
+        await setOrigin(id, 'blog');
+        return id;
+      });
+
+  /// The work a share of [url] already made, or any work kept from that
+  /// address: sharing it again opens that one rather than add a twin.
+  Future<int?> workBySharedUrl(int profileId, String url) async {
+    final byWork = await (selectOnly(works)
+          ..addColumns([works.id])
+          ..where(works.profileId.equals(profileId) &
+              works.sourceUrl.equals(url))
+          ..orderBy([OrderingTerm.asc(works.id)])
+          ..limit(1))
+        .map((r) => r.read(works.id))
+        .getSingleOrNull();
+    if (byWork != null) return byWork;
+    final shared = await feedByUrl(profileId, sharedFeedUrl);
+    if (shared == null) return null;
+    return (selectOnly(episodes)
+          ..addColumns([episodes.workId])
+          ..where(episodes.feedId.equals(shared.id) & episodes.guid.equals(url))
+          ..limit(1))
+        .map((r) => r.read(episodes.workId))
+        .getSingleOrNull();
+  }
+
+  /// The address a shared link row still waits on: set while the row is
+  /// the bare link a share saved first (its page not read yet, or not
+  /// readable when it was tried), null once the page has filled it.
+  Future<String?> sharedLinkOnlyUrl(int workId) async {
+    final row = await (select(episodes).join([
+      innerJoin(works, works.id.equalsExp(episodes.workId)),
+      innerJoin(feeds, feeds.id.equalsExp(episodes.feedId)),
+    ])
+          ..where(episodes.workId.equals(workId) &
+              feeds.url.equals(sharedFeedUrl) &
+              works.kind.equals('note') &
+              works.sourceUrl.equalsExp(episodes.guid)))
+        .getSingleOrNull();
+    return row?.readTable(works).sourceUrl;
+  }
+
+  /// The work a share of the same text (by [hash]) made at or after
+  /// [sinceMs], if any: a double tap on Share is one share.
+  Future<int?> sharedTextSince(int profileId, String hash, int sinceMs) async {
+    final shared = await feedByUrl(profileId, sharedFeedUrl);
+    if (shared == null) return null;
+    return (selectOnly(episodes)
+          ..addColumns([episodes.workId])
+          ..where(episodes.feedId.equals(shared.id) &
+              episodes.guid.like('text:$hash:%') &
+              episodes.publishedAtMs.isBiggerOrEqualValue(sinceMs))
+          ..orderBy([OrderingTerm.desc(episodes.publishedAtMs)])
+          ..limit(1))
+        .map((r) => r.read(episodes.workId))
+        .getSingleOrNull();
+  }
 
   Future<Feed?> feedByUrl(int profileId, String url) =>
       (select(feeds)
@@ -2567,6 +2722,7 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
     int? durationMs,
     String? imageUrl,
     required int publishedAtMs,
+    String? sourceLabel,
   }) => into(episodes).insert(
     EpisodesCompanion.insert(
       workId: Value(workId),
@@ -2576,6 +2732,7 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
       durationMs: Value(durationMs),
       imageUrl: Value(imageUrl),
       publishedAtMs: publishedAtMs,
+      sourceLabel: Value(sourceLabel),
     ),
   );
 
@@ -2676,6 +2833,7 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
       int publishedAtMs})>> dedupCandidatesOf(int profileId) async {
     final q = selectOnly(episodes).join([
       innerJoin(works, works.id.equalsExp(episodes.workId)),
+      innerJoin(feeds, feeds.id.equalsExp(episodes.feedId)),
     ])
       ..addColumns([
         works.id,
@@ -2684,8 +2842,11 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
         works.title,
         episodes.publishedAtMs,
       ])
+      // A shared item was handed in on purpose: it is never hidden behind
+      // a followed show's copy, nor hides one.
       ..where(works.profileId.equals(profileId) &
-          episodes.dedupReason.isNull());
+          episodes.dedupReason.isNull() &
+          feeds.url.equals(sharedFeedUrl).not());
     final rows = await q.get();
     return [
       for (final r in rows)
@@ -2798,6 +2959,10 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
     return {for (final r in rows) r.read(episodes.guid)!};
   }
 
+  /// What a Latest row names as its source: who shared it, else its show.
+  String _sourceTitle(TypedResult r) =>
+      r.readTable(episodes).sourceLabel ?? r.readTable(feeds).title;
+
   /// THE river query (ADR-0003 law 1): reverse-chronological by publish
   /// time, nothing else. The only other order is [episodesOfFeed]'s, one
   /// show by date in the direction the listener picked; nothing ranks.
@@ -2858,7 +3023,7 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
         (
           work: r.readTable(works),
           episode: r.readTable(episodes),
-          feedTitle: r.readTable(feeds).title,
+          feedTitle: _sourceTitle(r),
         ),
     ];
   }
@@ -2877,7 +3042,7 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
     return (
       work: r.readTable(works),
       episode: r.readTable(episodes),
-      feedTitle: r.readTable(feeds).title,
+      feedTitle: _sourceTitle(r),
     );
   }
 
@@ -3383,7 +3548,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 29;
+  int get schemaVersion => 31;
   // There is no v14: it was reserved for the reader-depth campaign, which
   // landed as v18 after three sibling campaigns merged ahead of it, so the
   // guard chain skips from 13 to 15. Version gaps are harmless — an
@@ -3761,6 +3926,32 @@ class AppDatabase extends _$AppDatabase {
               await customStatement('UPDATE feeds SET notes_fill_pending = 1 '
                   'WHERE EXISTS (SELECT 1 FROM episodes e '
                   'WHERE e.feed_id = feeds.id AND e.enclosure_url IS NOT NULL)');
+            });
+          }
+          if (from >= 2 && from < 30) {
+            // 1.5.5, the share sheet: who shared an item. Guarded like
+            // every episodes column (the from < 2 block creates the table
+            // with it), and in one transaction for the reason v29's is.
+            await transaction(() async {
+              await m.addColumn(episodes, episodes.sourceLabel);
+            });
+          }
+          if (from < 31) {
+            await transaction(() async {
+              // 1.5.5, translation: the run marker, unconditional because
+              // `works` is never created inside onUpgrade.
+              await m.addColumn(works, works.translationRunLang);
+              // Before v19 the only language a work could be translated
+              // into was Spanish, and the reader guessed "Spanish rows
+              // with no active language means Spanish". Written down here
+              // so the reader no longer carries the guess. The display
+              // toggle is left as the reader set it.
+              await customStatement('''
+                UPDATE works SET active_translation_lang = 'es'
+                WHERE active_translation_lang IS NULL
+                  AND EXISTS (SELECT 1 FROM translation_sentences t
+                              WHERE t.work_id = works.id AND t.lang = 'es')
+              ''');
             });
           }
         },

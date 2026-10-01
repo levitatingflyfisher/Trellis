@@ -33,6 +33,12 @@ Seven laws. Where a law is expressible as a test, the test is the law.
 6. **One egress chokepoint.** Cloud LLM, web-surface proxies, and model
    downloads all pass one consent gate with a WeatherGlass-style "what leaves
    your device" screen. Local/LAN endpoints are exempt by definition.
+   **Amended 1.5.5:** a link shared into Trellis from another app (the
+   Android share sheet) is fetched without a second dialog. The share
+   itself names the one address that leaves the device and is the
+   person's own gesture, so it is the consent. The SSRF guard still runs
+   first, and nothing beyond that one page is fetched; following a feed
+   still takes its own tap.
 7. **The permission surface is a test** (conformance C4, both directions,
    release merged manifest): INTERNET, FOREGROUND_SERVICE(dataSync,
    mediaPlayback), POST_NOTIFICATIONS, WAKE_LOCK — and nothing else.

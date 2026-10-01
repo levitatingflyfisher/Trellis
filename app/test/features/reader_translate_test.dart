@@ -1,29 +1,28 @@
 import 'dart:async';
-import 'dart:io';
 
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ml_runtime/ml_runtime.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/reader/reader_screen.dart';
-import 'package:trellis/features/reader/translation/marian_engine.dart';
+import 'package:trellis/features/reader/translation/translation_service.dart';
+import 'package:trellis/features/reader/translation/translator.dart';
 
-import '../support/fake_marian_translator.dart';
+import '../support/fake_translation_service.dart';
 
-/// The "Translate…" batch action, wired into the reader (ADR-0008 "Babel"
-/// Phase 3; generalized to any (source, target) pair by Campaign 8 "Babel
-/// widens" Phase 1): the model gate, the target-language picker, the
-/// cancellable/resumable run, and the "Show ⟨language⟩" toggle it unlocks.
-/// Speak-in-⟨language⟩ and the scroll-mode dual display are covered in
-/// their own test files.
+/// Translate, wired into the reader (ADR-0008 "Babel"; Campaign 8 "Babel
+/// widens"; 1.5.5): the sheet lists every language the work can go into
+/// with what each would download, one confirmation fetches the missing
+/// legs, and the run translates directly or via English. Speak-in-
+/// ⟨language⟩ and the dual display have their own test files.
 void main() {
-  late Directory dir;
   late AppDatabase db;
   late int profileId;
   late int workId;
 
   setUp(() async {
-    dir = Directory.systemTemp.createTempSync('trellis-reader-translate');
     db = AppDatabase.forTesting(NativeDatabase.memory());
     profileId = await db.profilesDao.create('Ada');
     workId = await db.spineDao.insertWork(
@@ -38,28 +37,32 @@ void main() {
       (idx: 1, kind: 'prose', text: 'Goodbye now.'),
     ]);
   });
-  tearDown(() {
-    db.close();
-    if (dir.existsSync()) dir.deleteSync(recursive: true);
-  });
+  tearDown(() => db.close());
 
-  Future<void> pumpReader(
-    WidgetTester tester, {
-    List<String> targets = const [],
-    Future<MarianTranslator?> Function({
-      required String sourceLang,
-      required String targetLang,
-    })? resolveTranslator,
-  }) async {
-    final work =
-        (await db.spineDao.worksOf(profileId)).firstWhere((w) => w.id == workId);
+  Future<int> otherWork(String? lang, List<String> paragraphs) async {
+    final id = await db.spineDao.insertWork(
+        profileId: profileId,
+        kind: 'article',
+        title: 'Other',
+        persistence: 'work',
+        firstSeenEpochDay: 100,
+        lang: lang);
+    await db.spineDao.insertSegments(id, [
+      for (final (i, p) in paragraphs.indexed)
+        (idx: i, kind: 'prose', text: p),
+    ]);
+    return id;
+  }
+
+  Future<void> pumpReader(WidgetTester tester,
+      {TranslationService? translation, int? id}) async {
+    final work = (await db.spineDao.workById(id ?? workId))!;
     await tester.pumpWidget(MaterialApp(
         home: ReaderScreen(
             db: db,
             profileId: profileId,
             work: work,
-            availableTranslationTargets: ({required sourceLang}) async => targets,
-            resolveTranslator: resolveTranslator)));
+            translation: translation)));
     await tester.pumpAndSettle();
   }
 
@@ -68,219 +71,316 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  /// Opens the overflow menu, taps "Translate…", then taps the picker
-  /// option for [lang] — the full path a real reader takes.
-  Future<void> pickTranslateTarget(WidgetTester tester, String lang) async {
+  Future<void> openSheet(WidgetTester tester) async {
     await openOverflow(tester);
     await tester.tap(find.byKey(const Key('translate-action')));
     await tester.pumpAndSettle();
+  }
+
+  Future<void> pick(WidgetTester tester, String lang) async {
+    await openSheet(tester);
     await tester.tap(find.byKey(Key('translate-target-$lang')));
     await tester.pumpAndSettle();
   }
 
-  group('the model gate', () {
-    testWidgets('no availableTranslationTargets at all: no Translate '
-        'action ever offered', (tester) async {
+  /// The fake store's downloads beat on 100ms timers, which
+  /// pumpAndSettle doesn't wait for once the bar stops animating.
+  Future<void> settleDownloads(WidgetTester tester) async {
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> scrollMode(WidgetTester tester) async {
+    await tester.tap(find.byKey(const Key('mode-toggle')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('mode-item-page')));
+    await tester.pumpAndSettle();
+  }
+
+  String tileLine(WidgetTester tester, String lang) {
+    final tile = tester.widget<ListTile>(find.byKey(Key('translate-target-$lang')));
+    return (tile.subtitle! as Text).data!;
+  }
+
+  group('the sheet', () {
+    testWidgets('no translation service (the web tier): no Translate action',
+        (tester) async {
       await pumpReader(tester);
       await openOverflow(tester);
       expect(find.byKey(const Key('translate-action')), findsNothing);
     });
 
-    testWidgets('availableTranslationTargets resolving to an empty list: '
-        'no Translate action', (tester) async {
-      await pumpReader(tester, targets: const []);
-      await openOverflow(tester);
-      expect(find.byKey(const Key('translate-action')), findsNothing);
+    testWidgets('offered with nothing downloaded: every reachable language, '
+        'each with its download size, and never the work\'s own language',
+        (tester) async {
+      await pumpReader(tester, translation: FakeTranslation().service);
+      await openSheet(tester);
+
+      expect(find.text('Translate from English to…'), findsOneWidget);
+      expect(tileLine(tester, 'de'), 'Download 200.0 MB');
+      expect(tileLine(tester, 'es'), 'Download 100.0 MB');
+      expect(tileLine(tester, 'ar'), 'Download 120.0 MB');
+      expect(find.byKey(const Key('translate-target-en')), findsNothing,
+          reason: 'never English to English');
+      expect(find.byKey(const Key('translate-target-ja')), findsNothing,
+          reason: 'no en->ja model exists');
     });
 
-    testWidgets('a non-empty target list offers the action, and the '
-        'picker lists each one', (tester) async {
-      await pumpReader(tester, targets: const ['es', 'de']);
-      await openOverflow(tester);
-      expect(find.byKey(const Key('translate-action')), findsOneWidget);
-
-      await tester.tap(find.byKey(const Key('translate-action')));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('translate-target-es')), findsOneWidget);
-      expect(find.byKey(const Key('translate-target-de')), findsOneWidget);
-      expect(find.text('Spanish'), findsOneWidget);
-      expect(find.text('German'), findsOneWidget);
+    testWidgets('an installed pair reads Ready', (tester) async {
+      await pumpReader(tester,
+          translation: FakeTranslation(installed: {'opus-mt-en-de'}).service);
+      await openSheet(tester);
+      expect(tileLine(tester, 'de'), 'Ready');
     });
 
-    testWidgets('Campaign 8 "Babel widens": the work\'s own declared '
-        'source language is never offered as a target, even if somehow '
-        'present in the list', (tester) async {
-      // A misbehaving caller passing 'en' back for an 'en'-source work —
-      // the picker itself is the reader's defense either way, but this
-      // proves availableTranslationTargets is exactly what gates the
-      // picker's OWN option list end to end.
-      await pumpReader(tester, targets: const ['en', 'es']);
+    testWidgets('a work in no known language asks first, then lists from '
+        'the answer', (tester) async {
+      final id = await otherWork(null, ['Guten Tag.']);
+      await pumpReader(tester, translation: FakeTranslation().service, id: id);
       await openOverflow(tester);
+      expect(find.text('Language: not set'), findsOneWidget,
+          reason: 'never assumed to be English');
       await tester.tap(find.byKey(const Key('translate-action')));
       await tester.pumpAndSettle();
-      // The picker renders exactly what it's given — the REAL guard
-      // against en->en lives one layer down, in resolveTranslator's own
-      // refusal (see the next test) and in DeviceServices
-      // .availableTranslationTargets (device_services_translation_test
-      // .dart), which never returns the source language in the first
-      // place. This test documents that even if the list were somehow
-      // wrong, starting a translate for the source language itself is
-      // refused.
+
+      expect(find.text('What language is this in?'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('work-language-de')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Translate from German to…'), findsOneWidget);
       expect(find.byKey(const Key('translate-target-en')), findsOneWidget);
-      await tester.tap(find.byKey(const Key('translate-target-en')));
-      await tester.pumpAndSettle();
-      // Refused silently — no progress card, nothing stored.
-      expect(find.byKey(const Key('translation-progress')), findsNothing);
+      expect((await db.spineDao.workById(id))!.lang, 'de');
+    });
+
+    testWidgets('a feed\'s declared language stands in for a work with '
+        'none', (tester) async {
+      final id = await otherWork(null, ['Guten Tag.']);
+      final feed = await db.feedsDao
+          .insertFeed(profileId: profileId, url: 'https://f', title: 'Show');
+      await (db.update(db.feeds)..where((f) => f.id.equals(feed)))
+          .write(const FeedsCompanion(language: Value('de-DE')));
+      await db.feedsDao.insertEpisode(
+          workId: id, feedId: feed, guid: 'g', publishedAtMs: 1);
+      await pumpReader(tester, translation: FakeTranslation().service, id: id);
+      await openSheet(tester);
+      expect(find.text('Translate from German to…'), findsOneWidget);
+    });
+  });
+
+  group('download, then translate', () {
+    testWidgets('the sheet offers the download with its size; one '
+        'confirmation downloads it with progress, then it translates',
+        (tester) async {
+      final fake = FakeTranslation(beats: 3);
+      await pumpReader(tester, translation: fake.service);
+      await pick(tester, 'de');
+
+      expect(find.byKey(const Key('consent-dialog')), findsOneWidget);
+      expect(find.text('• English to German translator, 200.0 MB'),
+          findsOneWidget);
+      await tester.tap(find.byKey(const Key('consent-accept')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
+      final card = find.byKey(const Key('translation-download'));
+      expect(card, findsOneWidget);
       expect(
-          await db.spineDao.hasTranslationSentences(workId, lang: 'en'),
+          find.descendant(
+              of: card,
+              matching: find.textContaining('English to German translator')),
+          findsOneWidget);
+      await settleDownloads(tester);
+
+      expect(fake.store.downloadsStarted, ['opus-mt-en-de']);
+      expect(find.byKey(const Key('translation-download')), findsNothing);
+      final stored = await db.spineDao.translationSentencesOf(workId, lang: 'de');
+      expect(stored[(0, 0)]!.body, 'de:Hello there.');
+      expect(stored[(1, 0)]!.body, 'de:Goodbye now.');
+      expect(await db.spineDao.activeTranslationLang(workId), 'de');
+      expect(fake.opened.single.disposed, isTrue,
+          reason: 'the model is freed when the run ends');
+      await scrollMode(tester);
+      expect(find.byKey(const Key('translation-0-0')), findsOneWidget,
+          reason: 'the translation shows under its sentence');
+    });
+
+    testWidgets('declining the download starts nothing', (tester) async {
+      final fake = FakeTranslation();
+      await pumpReader(tester, translation: fake.service);
+      await pick(tester, 'de');
+      await tester.tap(find.byKey(const Key('consent-cancel')));
+      await tester.pumpAndSettle();
+
+      expect(fake.store.downloadsStarted, isEmpty);
+      expect(await db.spineDao.activeTranslationLang(workId), isNull);
+    });
+
+    testWidgets('cancelling the download keeps what arrived and translates '
+        'nothing', (tester) async {
+      final fake = FakeTranslation(beats: 5);
+      await pumpReader(tester, translation: fake.service);
+      await pick(tester, 'de');
+      await tester.tap(find.byKey(const Key('consent-accept')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 150));
+      await tester.tap(find.byKey(const Key('translation-download-cancel')));
+      await settleDownloads(tester);
+
+      expect(find.byKey(const Key('translation-download')), findsNothing);
+      expect(fake.store.partial['opus-mt-en-de'], greaterThan(0));
+      expect(await db.spineDao.hasTranslationSentences(workId, lang: 'de'),
           isFalse);
     });
 
-    testWidgets('resolveTranslator resolving to null for the chosen '
-        'target: no batch starts, no progress card', (tester) async {
-      await pumpReader(tester,
-          targets: const ['es'],
-          resolveTranslator: ({required sourceLang, required targetLang}) async =>
-              null);
-      await pickTranslateTarget(tester, 'es');
-      expect(find.byKey(const Key('translation-progress')), findsNothing);
+    testWidgets('via English: the sheet says so, one confirmation names '
+        'both legs and the total, and the run goes through English',
+        (tester) async {
+      final id = await otherWork('de', ['Guten Tag.']);
+      final fake = FakeTranslation(installed: {'opus-mt-de-en'});
+      await pumpReader(tester, translation: fake.service, id: id);
+      await openSheet(tester);
+      expect(tileLine(tester, 'es'), 'Via English · Download 100.0 MB',
+          reason: 'only the missing leg counts');
+      expect(tileLine(tester, 'en'), 'Ready');
+      await tester.tap(find.byKey(const Key('translate-target-es')));
+      await tester.pumpAndSettle();
+      expect(find.text('• English to Spanish translator, 100.0 MB'),
+          findsOneWidget);
+      await tester.tap(find.byKey(const Key('consent-accept')));
+      await settleDownloads(tester);
+
+      final es = await db.spineDao.translationSentencesOf(id, lang: 'es');
+      expect(es[(0, 0)]!.body, 'es:en:Guten Tag.');
+      expect(es[(0, 0)]!.sourceText, 'Guten Tag.');
+      expect(await db.spineDao.activeTranslationLang(id), 'es');
+    });
+
+    testWidgets('both legs missing: both listed, with the total',
+        (tester) async {
+      final id = await otherWork('ja', ['こんにちは。']);
+      await pumpReader(tester, translation: FakeTranslation().service, id: id);
+      await pick(tester, 'de');
+      expect(find.text('• Japanese to English translator, 300.0 MB'),
+          findsOneWidget);
+      expect(find.text('• English to German translator, 200.0 MB'),
+          findsOneWidget);
+      expect(find.text('• 500.0 MB in all, to translate via English'),
+          findsOneWidget);
     });
   });
 
-  group('running the batch', () {
-    testWidgets('picking a target runs to completion, persists every '
-        'sentence, and shows a calm progress card meanwhile', (tester) async {
-      final gate = <Completer<String>>[];
-      final handle = _GatedHandle(gate);
-      final gatedTranslator = MarianTranslator(
-        files: fakeMarianTranslatorFiles(dir),
-        openHandle: (_) async => handle,
-      );
-
-      await pumpReader(tester,
-          targets: const ['es'],
-          resolveTranslator: ({required sourceLang, required targetLang}) async {
-            expect(sourceLang, 'en');
-            expect(targetLang, 'es');
-            return gatedTranslator;
-          });
-      await pickTranslateTarget(tester, 'es');
+  group('running', () {
+    testWidgets('a calm progress card while it runs; Cancel keeps what is '
+        'done', (tester) async {
+      final gate = _Gate();
+      final fake = FakeTranslation(installed: {'opus-mt-en-es'});
+      final service = TranslationService(
+          registry: fakeTranslationRegistry,
+          tier: DeviceTier.t2,
+          store: fake.store,
+          openSpec: (_) async => gate);
+      await pumpReader(tester, translation: service);
+      await pick(tester, 'es');
       await tester.pump();
 
       expect(find.byKey(const Key('translation-progress')), findsOneWidget);
-
-      gate[0].complete('ES: Hello there.');
+      gate.next('ES: Hello there.');
       await tester.pump();
       await tester.pump();
-      gate[1].complete('ES: How are you?');
-      await tester.pump();
-      await tester.pump();
-      gate[2].complete('ES: Goodbye now.');
-      await tester.pump();
-      await tester.pump();
-
-      expect(find.byKey(const Key('translation-progress')), findsNothing,
-          reason: 'the card clears once the run is done');
-
-      final stored = await db.spineDao.translationSentencesOf(workId, lang: 'es');
-      expect(stored.length, 3);
-      expect(stored[(0, 0)]!.body, 'ES: Hello there.');
-      expect(stored[(0, 1)]!.body, 'ES: How are you?');
-      expect(stored[(1, 0)]!.body, 'ES: Goodbye now.');
-      expect(await db.spineDao.activeTranslationLang(workId), 'es',
-          reason: 'picking a target persists it as the one active layer');
-    });
-
-    testWidgets('cancel keeps what is done and clears the progress card',
-        (tester) async {
-      final gate = <Completer<String>>[];
-      final handle = _GatedHandle(gate);
-      final translator = MarianTranslator(
-        files: fakeMarianTranslatorFiles(dir),
-        openHandle: (_) async => handle,
-      );
-
-      await pumpReader(tester,
-          targets: const ['es'],
-          resolveTranslator: ({required sourceLang, required targetLang}) async =>
-              translator);
-      await pickTranslateTarget(tester, 'es');
-      await tester.pump();
-
-      // Cancel is checked at the top of each iteration — a sentence
-      // already in flight still finishes; only the NEXT one never starts.
-      gate[0].complete('ES: Hello there.');
-      await tester.pump();
-      await tester.pump();
-
-      expect(find.byKey(const Key('translation-cancel')), findsOneWidget);
       await tester.tap(find.byKey(const Key('translation-cancel')));
       await tester.pump();
-      gate[1].complete('ES: How are you?');
-      await tester.pump();
-      await tester.pump();
+      gate.next('ES: How are you?');
+      await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('translation-progress')), findsNothing);
       final stored = await db.spineDao.translationSentencesOf(workId, lang: 'es');
-      expect(stored.length, 2);
-      expect(stored.containsKey((0, 0)), isTrue);
-      expect(stored.containsKey((0, 1)), isTrue);
-      expect(stored.containsKey((1, 0)), isFalse,
-          reason: 'the third sentence never started');
-      expect(gate.length, 2, reason: 'translate() was never called a third time');
+      expect(stored.keys.toSet(), {(0, 0), (0, 1)});
+      expect(gate.calls, 2, reason: 'the third sentence never started');
+      expect(gate.disposed, isTrue);
+      expect(await db.spineDao.translationRunLang(workId), isNull,
+          reason: 'a cancelled run is not resumed');
     });
 
-    testWidgets('picking a SECOND target replaces the active layer — one '
-        'active translation layer per work at a time', (tester) async {
-      await pumpReader(tester,
-          targets: const ['es', 'de'],
-          resolveTranslator: ({required sourceLang, required targetLang}) async =>
-              fakeMarianTranslator(dir,
-                  translateFn: (s) => '$targetLang: $s'));
-      await pickTranslateTarget(tester, 'es');
+    testWidgets('a run the system killed resumes on the next open, '
+        'translating only what is missing', (tester) async {
+      await db.spineDao.setActiveTranslationLang(workId, 'es');
+      await db.spineDao.setTranslationRunLang(workId, 'es');
+      await db.spineDao.upsertTranslationSentence(
+          workId: workId,
+          segmentIdx: 0,
+          sentenceIdx: 0,
+          lang: 'es',
+          sourceText: 'Hello there.',
+          body: 'es:Hello there.');
+      final fake = FakeTranslation(installed: {'opus-mt-en-es'});
+      await pumpReader(tester, translation: fake.service);
       await tester.pumpAndSettle();
-      expect(await db.spineDao.activeTranslationLang(workId), 'es');
 
-      await pickTranslateTarget(tester, 'de');
+      expect(fake.opened.single.calls, ['How are you?', 'Goodbye now.']);
+      expect(
+          (await db.spineDao.translationSentencesOf(workId, lang: 'es')).length,
+          3);
+      expect(await db.spineDao.translationRunLang(workId), isNull);
+    });
+
+    testWidgets('leaving the reader mid-run keeps the run for next time',
+        (tester) async {
+      final gate = _Gate();
+      final fake = FakeTranslation(installed: {'opus-mt-en-es'});
+      final service = TranslationService(
+          registry: fakeTranslationRegistry,
+          tier: DeviceTier.t2,
+          store: fake.store,
+          openSpec: (_) async => gate);
+      await pumpReader(tester, translation: service);
+      await pick(tester, 'es');
+      await tester.pump();
+      await tester.pumpWidget(const SizedBox());
+      gate.next('ES: Hello there.');
       await tester.pumpAndSettle();
-      expect(await db.spineDao.activeTranslationLang(workId), 'de',
-          reason: 'the slot holds exactly one language, never both');
-      // The 'es' rows are NOT deleted — just no longer active.
+
+      expect(await db.spineDao.translationRunLang(workId), 'es');
+      expect(gate.calls, 1);
+      expect(gate.disposed, isTrue, reason: 'the model is freed on leaving');
+    });
+
+    testWidgets('picking a second language replaces the active one; the '
+        'first one\'s rows stay', (tester) async {
+      final fake =
+          FakeTranslation(installed: {'opus-mt-en-es', 'opus-mt-en-de'});
+      await pumpReader(tester, translation: fake.service);
+      await pick(tester, 'es');
+      await tester.pumpAndSettle();
+      await pick(tester, 'de');
+      await tester.pumpAndSettle();
+
+      expect(await db.spineDao.activeTranslationLang(workId), 'de');
       expect(await db.spineDao.hasTranslationSentences(workId, lang: 'es'),
           isTrue);
     });
+
+    testWidgets('an Arabic translation reads right to left', (tester) async {
+      final fake = FakeTranslation(installed: {'opus-mt-en-ar'});
+      await pumpReader(tester, translation: fake.service);
+      await pick(tester, 'ar');
+      await tester.pumpAndSettle();
+      await scrollMode(tester);
+
+      final line =
+          tester.widget<Text>(find.byKey(const Key('translation-0-0')));
+      expect(line.textDirection, TextDirection.rtl);
+    });
   });
 
-  group('the calm per-work language selector (Campaign 8 "Babel '
-      'widens" Phase 1)', () {
-    testWidgets('always offered, labeled with the current language, '
-        'defaulting to English for a work with none declared',
+  group('the per-work language selector', () {
+    testWidgets('picking a language persists it and re-labels the item',
         (tester) async {
-      final noLangWorkId = await db.spineDao.insertWork(
-          profileId: profileId,
-          kind: 'article',
-          title: 'B',
-          persistence: 'work',
-          firstSeenEpochDay: 100);
-      await db.spineDao.insertSegments(noLangWorkId, const [
-        (idx: 0, kind: 'prose', text: 'Hi.'),
-      ]);
-      final work = (await db.spineDao.worksOf(profileId))
-          .firstWhere((w) => w.id == noLangWorkId);
-      await tester.pumpWidget(MaterialApp(
-          home: ReaderScreen(db: db, profileId: profileId, work: work)));
-      await tester.pumpAndSettle();
-      await openOverflow(tester);
-      expect(find.text('Language: English'), findsOneWidget);
-    });
-
-    testWidgets('picking a language persists it through the DAO and '
-        're-labels the menu item', (tester) async {
       await pumpReader(tester);
       await openOverflow(tester);
+      expect(find.text('Language: English'), findsOneWidget);
       await tester.tap(find.byKey(const Key('work-language-action')));
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('work-language-de')), findsOneWidget);
       await tester.tap(find.byKey(const Key('work-language-de')));
       await tester.pumpAndSettle();
 
@@ -289,51 +389,29 @@ void main() {
       expect(find.text('Language: German'), findsOneWidget);
     });
 
-    testWidgets('re-derives the "Translate…" picker\'s options for the '
-        'NEW source language — a language change is not a stale cache',
-        (tester) async {
-      final sourceLangCalls = <String>[];
-      final work =
-          (await db.spineDao.worksOf(profileId)).firstWhere((w) => w.id == workId);
-      await tester.pumpWidget(MaterialApp(
-          home: ReaderScreen(
-              db: db,
-              profileId: profileId,
-              work: work,
-              availableTranslationTargets: ({required sourceLang}) async {
-                sourceLangCalls.add(sourceLang);
-                return const [];
-              })));
-      await tester.pumpAndSettle();
-      expect(sourceLangCalls, ['en']);
-
+    testWidgets('the sheet follows a changed language', (tester) async {
+      await pumpReader(tester, translation: FakeTranslation().service);
       await openOverflow(tester);
       await tester.tap(find.byKey(const Key('work-language-action')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('work-language-de')));
       await tester.pumpAndSettle();
+      await openSheet(tester);
 
-      expect(sourceLangCalls, ['en', 'de'],
-          reason: 'picking a new language triggers a fresh _load(), which '
-              'asks availableTranslationTargets again with the NEW '
-              'sourceLang — the options are re-derived, not cached from '
-              'the first load');
+      expect(find.text('Translate from German to…'), findsOneWidget);
+      expect(find.byKey(const Key('translate-target-de')), findsNothing);
     });
   });
 
   group('Show ⟨language⟩', () {
-    testWidgets('the toggle is absent until a translation layer is '
-        'active', (tester) async {
-      await pumpReader(tester,
-          targets: const ['es'],
-          resolveTranslator: ({required sourceLang, required targetLang}) async =>
-              fakeMarianTranslator(dir));
+    testWidgets('absent until a translation is stored', (tester) async {
+      await pumpReader(tester, translation: FakeTranslation().service);
       await openOverflow(tester);
       expect(find.byKey(const Key('show-translation-toggle')), findsNothing);
     });
 
-    testWidgets('once a target is active, the toggle appears labeled with '
-        'that language and persists through the DAO', (tester) async {
+    testWidgets('labeled with the active language, persisted through the DAO',
+        (tester) async {
       await db.spineDao.setActiveTranslationLang(workId, 'de');
       await db.spineDao.upsertTranslationSentence(
           workId: workId,
@@ -344,138 +422,88 @@ void main() {
           body: 'Hallo.');
       await pumpReader(tester);
       await openOverflow(tester);
-      expect(find.byKey(const Key('show-translation-toggle')), findsOneWidget);
       expect(find.text('Show German'), findsOneWidget);
-      // setActiveTranslationLang already turns the legacy show-toggle on
-      // (see SpineDao's own sync law) — starts checked.
       expect(await db.spineDao.showTranslationLayer(workId), isTrue);
 
       await tester.tap(find.byKey(const Key('show-translation-toggle')));
       await tester.pumpAndSettle();
-
       expect(await db.spineDao.showTranslationLayer(workId), isFalse);
     });
 
-    testWidgets('an active language with ZERO stored rows offers no '
-        'toggle — no dead settings. setActiveTranslationLang runs before '
-        'a batch produces its first sentence (so the progress card can '
-        'show right away); a batch cancelled at zero rows, or a work '
-        'reopened mid-run, must not leave a control with nothing behind '
-        'it', (tester) async {
+    testWidgets('an active language with no stored rows offers no toggle — '
+        'no dead settings', (tester) async {
       await db.spineDao.setActiveTranslationLang(workId, 'de');
-      // No upsertTranslationSentence call — the slot is claimed, nothing
-      // is stored yet.
       await pumpReader(tester);
       await openOverflow(tester);
       expect(find.byKey(const Key('show-translation-toggle')), findsNothing);
       expect(find.byKey(const Key('speak-translation-toggle')), findsNothing);
     });
-
-    testWidgets('a pre-campaign work with stored Spanish but the display '
-        'toggled OFF still offers the toggle on reopen — turning display '
-        'off must never look like "no translation exists"', (tester) async {
-      // Simulates 1.3.0 data: rows exist under 'es', activeTranslationLang
-      // was never written (the column postdates this data), and the user
-      // had switched the legacy show-toggle off before this campaign
-      // shipped.
-      await db.spineDao.upsertTranslationSentence(
-          workId: workId,
-          segmentIdx: 0,
-          sentenceIdx: 0,
-          lang: 'es',
-          sourceText: 'Hello there.',
-          body: 'Hola.');
-      await db.spineDao.setShowTranslationLayer(workId, false);
-      expect(await db.spineDao.activeTranslationLang(workId), isNull,
-          reason: 'this column never got written by the pre-campaign flow');
-
-      await pumpReader(tester);
-      await openOverflow(tester);
-      expect(find.byKey(const Key('show-translation-toggle')), findsOneWidget,
-          reason: 'the stored Spanish is still there — only its display '
-              'was off, which is not the same as not existing');
-      expect(find.text('Show Spanish'), findsOneWidget);
-    });
   });
 
-  group('Campaign 8 "Babel widens" Phase 4: the X->en secondary '
-      'direction, end to end (Phase 1 generalized the picker by '
-      'sourceLang; device_services_translation_test.dart already proves '
-      'the registry resolves de-en/ru-en/zh-en correctly — this closes '
-      'the claim by proving the FULL reader flow, not just the lookup)',
-      () {
-    testWidgets('a German-sourced work offers English as a translate '
-        'target, and the picker -> batch -> display -> active-lang flow '
-        'works the SAME way the forward direction does', (tester) async {
-      final deWorkId = await db.spineDao.insertWork(
-          profileId: profileId,
-          kind: 'article',
-          title: 'Eine Geschichte',
-          persistence: 'work',
-          firstSeenEpochDay: 100,
-          lang: 'de');
-      await db.spineDao.insertSegments(deWorkId, const [
-        (idx: 0, kind: 'prose', text: 'Hallo dort. Wie geht es dir?'),
-      ]);
-      final work =
-          (await db.spineDao.worksOf(profileId)).firstWhere((w) => w.id == deWorkId);
+  testWidgets('X->en end to end: a German work translates into English and '
+      'offers Show English', (tester) async {
+    final id = await otherWork('de', ['Hallo dort. Wie geht es dir?']);
+    final fake = FakeTranslation(installed: {'opus-mt-de-en'});
+    await pumpReader(tester, translation: fake.service, id: id);
+    await pick(tester, 'en');
+    await tester.pumpAndSettle();
 
-      final sourceLangCalls = <String>[];
-      await tester.pumpWidget(MaterialApp(
-          home: ReaderScreen(
-              db: db,
-              profileId: profileId,
-              work: work,
-              availableTranslationTargets: ({required sourceLang}) async {
-                sourceLangCalls.add(sourceLang);
-                return sourceLang == 'de' ? const ['en'] : const [];
-              },
-              resolveTranslator: ({required sourceLang, required targetLang}) async {
-                expect(sourceLang, 'de');
-                expect(targetLang, 'en');
-                return fakeMarianTranslator(dir,
-                    translateFn: (s) => 'EN: $s');
-              })));
-      await tester.pumpAndSettle();
-      expect(sourceLangCalls, ['de'],
-          reason: 'the picker\'s options are derived from the WORK\'S OWN '
-              'declared source language, de here — never hardcoded en');
-
-      await openOverflow(tester);
-      await tester.tap(find.byKey(const Key('translate-action')));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('translate-target-en')), findsOneWidget);
-      expect(find.text('English'), findsOneWidget);
-      await tester.tap(find.byKey(const Key('translate-target-en')));
-      await tester.pumpAndSettle();
-
-      final stored =
-          await db.spineDao.translationSentencesOf(deWorkId, lang: 'en');
-      expect(stored.length, 2);
-      expect(stored[(0, 0)]!.body, 'EN: Hallo dort.');
-      expect(stored[(0, 1)]!.body, 'EN: Wie geht es dir?');
-      expect(await db.spineDao.activeTranslationLang(deWorkId), 'en');
-
-      await openOverflow(tester);
-      expect(find.text('Show English'), findsOneWidget);
-    });
+    final stored = await db.spineDao.translationSentencesOf(id, lang: 'en');
+    expect(stored[(0, 1)]!.body, 'en:Wie geht es dir?');
+    await openOverflow(tester);
+    expect(find.text('Show English'), findsOneWidget);
   });
+
+  testWidgets('a via-English run says so and counts each step\'s sentences, '
+      'not a doubled total', (tester) async {
+    final id = await otherWork('de', ['Eins. Zwei.']);
+    final gate = _Gate();
+    final fake = FakeTranslation(installed: {'opus-mt-de-en', 'opus-mt-en-es'});
+    final service = TranslationService(
+        registry: fakeTranslationRegistry,
+        tier: DeviceTier.t2,
+        store: fake.store,
+        openSpec: (_) async => gate);
+    await pumpReader(tester, translation: service, id: id);
+    await pick(tester, 'es');
+    await tester.pump();
+    gate.next('One.');
+    await tester.pump();
+    await tester.pump();
+
+    expect(find.text('Translating to Spanish via English, step 1 of 2: '
+        '1 of 2 sentences'), findsOneWidget);
+    gate.next('Two.');
+    await tester.pump();
+    await tester.pump();
+    await tester.pump();
+    expect(find.textContaining('step 2 of 2: 0 of 2 sentences'),
+        findsOneWidget);
+    gate.next('Uno.');
+    await tester.pump();
+    gate.next('Dos.');
+    await tester.pumpAndSettle();
+  });
+
 }
 
-/// A translator whose translate() suspends on a per-call Completer, so a
-/// test can watch the batch mid-run and control exactly how many
-/// sentences complete before cancelling.
-class _GatedHandle implements MarianModelHandle {
-  final List<Completer<String>> gate;
-  _GatedHandle(this.gate);
+/// A model whose every sentence waits for [next]: a test can watch a run
+/// mid-sentence and decide how far it gets.
+class _Gate implements SentenceTranslator {
+  final _pending = <Completer<String>>[];
+  int calls = 0;
+  bool disposed = false;
+
+  void next(String body) => _pending.removeAt(0).complete(body);
 
   @override
   Future<String> translate(String sentence) {
+    calls++;
     final c = Completer<String>();
-    gate.add(c);
+    _pending.add(c);
     return c.future;
   }
 
   @override
-  Future<void> dispose() async {}
+  Future<void> dispose() async => disposed = true;
 }

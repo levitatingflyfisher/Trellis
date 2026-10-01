@@ -29,6 +29,7 @@ import '../features/reader/speech/speech_temp_files.dart';
 import '../features/dsp/dsp_encoder.dart';
 import '../features/dsp/dsp_ffmpeg_encoder.dart';
 import '../features/reader/translation/marian_engine.dart';
+import '../features/reader/translation/translation_service.dart';
 import '../features/transcribe/audio_fetcher.dart';
 import '../features/transcribe/decoder.dart';
 import '../features/transcribe/ffmpeg_decoder.dart';
@@ -375,8 +376,7 @@ class DeviceServices {
   /// The Marian translator (ADR-0008 "Babel" Phase 3) for [modelSpec], if
   /// it's actually usable right now — [speechEngineFor]'s same
   /// download-honesty gate, one layer deeper: even on a tier that CAN run
-  /// local ML, the model must be DOWNLOADED before the reader's "Translate
-  /// to Spanish" action may offer itself. Returns null (never throws) when
+  /// local ML, the model must be DOWNLOADED before a run may open it. Returns null (never throws) when
   /// it isn't. Cheap: [MarianTranslator] opens its ONNX Runtime sessions
   /// lazily on first `translate()`, so this call never touches a file.
   Future<MarianTranslator?> translatorFor(ModelSpec modelSpec) async {
@@ -392,52 +392,26 @@ class DeviceServices {
             _pathForNamedFile(modelSpec, layout.decoderMergedFileName),
         sourceSpmPath: _pathForNamedFile(modelSpec, layout.sourceSpmFileName),
         vocabPath: _pathForNamedFile(modelSpec, layout.vocabFileName),
+        configPath: _pathForNamedFile(modelSpec, layout.configFileName),
+        tokenizerConfigPath:
+            _pathForNamedFile(modelSpec, layout.tokenizerConfigFileName),
+        targetToken: layout.targetToken,
       ),
     );
   }
 
-  /// The ONE call a `ReaderScreen` closes over for translation (mirrors
-  /// [resolveSpeechEngine]): the registry's (source, target) selection law
-  /// ([ModelRegistry.pickTranslationPair] — Campaign 8 "Babel widens",
-  /// since [ModelRegistry.pickModel]'s single `langHint` cannot
-  /// disambiguate `de-en`/`ru-en`/`zh-en`, which all produce `en`) picks
-  /// the pair at this device's tier, then [translatorFor] applies the
-  /// download-honesty gate. Null either way means the reader's translate
-  /// action stays hidden — this never throws. [sourceLang] defaults to
-  /// `'en'`, matching the spec's declared-source-language default for a
-  /// work with none set.
-  Future<MarianTranslator?> resolveTranslator({
-    String sourceLang = 'en',
-    String targetLang = 'es',
-  }) async {
-    final spec = registry.pickTranslationPair(tier,
-        sourceLang: sourceLang, targetLang: targetLang);
-    if (spec == null) return null;
-    return translatorFor(spec);
-  }
-
-  /// Every target language this device can ACTUALLY translate [sourceLang]
-  /// into right now — a downloaded pair, not merely a registered one
-  /// (Campaign 8 "Babel widens" Phase 1: "list ONLY downloaded+openable
-  /// pairs"). [sourceLang] itself is never included even if a pair
-  /// somehow claims it (X->X is never offered). This is the "Translate…"
-  /// picker's data source.
-  Future<List<String>> availableTranslationTargets({
-    required String sourceLang,
-  }) async {
-    final targets = <String>[];
-    for (final spec in registry.translationPairsAt(tier)) {
-      if (spec.sourceLang != sourceLang) continue;
-      final langs = spec.langs;
-      if (langs == null) continue;
-      if (!await modelStore.isDownloaded(spec)) continue;
-      for (final lang in langs) {
-        if (lang == sourceLang) continue;
-        if (!targets.contains(lang)) targets.add(lang);
-      }
-    }
-    return targets;
-  }
+  /// Translation for every screen that opens a reader (1.5.5): routes
+  /// from any language with their download sizes, the download, and
+  /// [translatorFor] behind it. Null where local ML can't run (the web
+  /// tier), which hides Translate rather than offering a dead end.
+  late final TranslationService? translation = localMlAvailable
+      ? TranslationService(
+          registry: registry,
+          tier: tier,
+          store: modelStore,
+          openSpec: translatorFor,
+        )
+      : null;
 
   /// Campaign 4 Phase 3's own version of [resolveSpeechEngine]: the ONE
   /// call `ReaderScreen` closes over for the definition sheet. Parses the

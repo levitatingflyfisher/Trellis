@@ -47,23 +47,53 @@ Future<ArticleFetchOutcome> fetchArticle({
   required Uri url,
   Duration timeout = const Duration(seconds: 30),
 }) async {
+  final page = await fetchPage(fetcher: fetcher, url: url, timeout: timeout);
+  return switch (page) {
+    PageFetched(html: final html) => articleFromHtml(html, url),
+    PageRefused(message: final message) => ArticleRefused(message),
+  };
+}
+
+/// What one page fetch came to, before any extraction.
+sealed class PageFetchOutcome {
+  const PageFetchOutcome();
+}
+
+final class PageFetched extends PageFetchOutcome {
+  final String html;
+  const PageFetched(this.html);
+}
+
+final class PageRefused extends PageFetchOutcome {
+  final String message;
+  const PageRefused(this.message);
+}
+
+/// The fetching half of [fetchArticle]: the page's decoded text, so the
+/// share sheet can both look for a feed in it and extract it from one
+/// fetch. Never throws.
+Future<PageFetchOutcome> fetchPage({
+  required HttpFetcher fetcher,
+  required Uri url,
+  Duration timeout = const Duration(seconds: 30),
+}) async {
   final FetchResponse response;
   try {
     response = await fetcher.get(url,
         headers: const {'accept': 'text/html, application/xhtml+xml, */*'},
         timeout: timeout);
   } on TimeoutException {
-    return const ArticleRefused(
+    return const PageRefused(
         'The site took too long to answer. Try again later.');
   } on CommsException catch (e) {
     // Donor-verbatim user-facing messages (redirect refusals, hop SSRF).
-    return ArticleRefused(e.message);
+    return PageRefused(e.message);
   } catch (_) {
-    return const ArticleRefused("That address couldn’t be reached.");
+    return const PageRefused("That address couldn’t be reached.");
   }
 
   if (response.statusCode < 200 || response.statusCode >= 300) {
-    return ArticleRefused(
+    return PageRefused(
         'The site answered with an error (${response.statusCode}).');
   }
 
@@ -73,19 +103,27 @@ Future<ArticleFetchOutcome> fetchArticle({
         maxBytes: maxTextFetchBytes,
         message: 'That page is too large to bring in.');
   } on SizeCapException catch (e) {
-    return ArticleRefused(e.message);
+    return PageRefused(e.message);
   } on TimeoutException {
-    return const ArticleRefused(
+    return const PageRefused(
         'The site took too long to answer. Try again later.');
   } catch (_) {
-    return const ArticleRefused(
+    return const PageRefused(
         'The page stopped arriving before it finished.');
   }
 
-  final html =
-      decodeResponseBytes(bytes, response.headers['content-type'] ?? '');
-  final article = extractArticle(html, baseUrl: url.toString());
+  return PageFetched(
+      decodeResponseBytes(bytes, response.headers['content-type'] ?? ''));
+}
 
+/// The extracting half of [fetchArticle], for a page already in hand (a
+/// fetched one, or an HTML file shared in).
+ArticleFetchOutcome articleFromHtml(String html, Uri url) =>
+    articleFromExtraction(extractArticle(html, baseUrl: url.toString()));
+
+/// [articleFromHtml] after the extraction, for a caller that also read
+/// the extraction itself (is it a feed?).
+ArticleFetchOutcome articleFromExtraction(ArticleResult article) {
   if (article.isFeedXml) {
     return const ArticleRefused(
         'That address is a feed of episodes. Follow it from Subscriptions '

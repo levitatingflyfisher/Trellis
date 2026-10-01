@@ -32,7 +32,15 @@ String get stripV29 => [
       'ALTER TABLE works DROP COLUMN last_mode_at_ms;',
       'ALTER TABLE feeds DROP COLUMN subscribed_url;',
       'ALTER TABLE feeds DROP COLUMN notes_fill_pending;',
+      stripV30,
     ].join('\n');
+
+/// What v30 added, for a fixture stamped v29.
+String get stripV30 =>
+    ['ALTER TABLE episodes DROP COLUMN source_label;', stripV31].join('\n');
+
+/// What v31 added, for a fixture stamped v30.
+String get stripV31 => 'ALTER TABLE works DROP COLUMN translation_run_lang;';
 
 /// v28's search index, verbatim: no stemming, two columns, no shows
 /// table, and a show trigger with no WHEN guard. Frozen here so the v29

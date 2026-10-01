@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Material Icons "headphones", the glyph the app's own player shows, taken
+     from the Material Icons font Flutter ships (Apache-2.0). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="@color/widget_text_secondary"
+        android:pathData="M12.0 3.0C7.03125 3.0 3.0 7.03125 3.0 12.0V18.984375C3.0 20.109375 3.890625 21.0 5.015625 21.0H9.0V12.984375H5.015625V12.0C5.015625 8.109375 8.109375 5.015625 12.0 5.015625C15.890625 5.015625 18.984375 8.109375 18.984375 12.0V12.984375H15.0V21.0H18.984375C20.109375 21.0 21.0 20.109375 21.0 18.984375V12.0C21.0 7.03125 16.96875 3.0 12.0 3.0Z" />
+</vector>

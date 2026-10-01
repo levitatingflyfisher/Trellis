@@ -1,6 +1,7 @@
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:trellis/features/reader/reader_screen.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/player/karaoke_screen.dart';
 import 'package:trellis/features/player/player_controller.dart';
@@ -175,8 +176,9 @@ void main() {
       expect(find.byKey(Key('read-$id')), findsNothing);
     });
 
-    testWidgets('Read opens the transcript without playing, and a line '
-        'plays from there', (tester) async {
+    // 1.5.5: Read opens Page, the reader, which replaced this view.
+    testWidgets('Read opens the transcript on Page without playing, and its '
+        'Play plays', (tester) async {
       final id = await seedFeedEpisode(transcribed: true);
       final player = await openLatest(tester);
 
@@ -184,14 +186,18 @@ void main() {
       await tester.tap(find.byKey(Key('read-$id')));
       await tester.pumpAndSettle();
 
-      expect(find.byType(KaraokeScreen), findsOneWidget);
-      expect(find.text('Second sentence.'), findsOneWidget);
+      expect(find.byType(ReaderScreen), findsOneWidget);
+      expect(
+          find.descendant(
+              of: find.byKey(const Key('mode-toggle')),
+              matching: find.text('Page')),
+          findsOneWidget);
+      expect(find.text('Second'), findsOneWidget);
       expect(player.loadedUrl, isNull, reason: 'reading plays nothing');
 
-      await tester.tap(find.text('Second sentence.'));
+      await tester.tap(find.byKey(const Key('reader-play')));
       await tester.pumpAndSettle();
       expect(player.loadedUrl, 'https://cast.test/1.mp3');
-      expect(player.log.where((l) => l.startsWith('seek:')), ['seek:10000']);
     });
   });
 }

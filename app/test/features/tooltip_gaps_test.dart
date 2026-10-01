@@ -114,7 +114,7 @@ void main() {
     ));
     await tester.pump();
 
-    final tooltip = tester.widget<Tooltip>(find.ancestor(
+    final tooltip = tester.widget<Tooltip>(find.descendant(
         of: find.byKey(const Key('player-speed')),
         matching: find.byType(Tooltip)));
     expect(tooltip.message, 'Playback speed');

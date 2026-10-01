@@ -5,6 +5,7 @@ import 'package:trellis/db/database.dart';
 import 'package:trellis/features/reader/reader_screen.dart';
 
 import '../support/fake_speech_audio_queue.dart';
+import '../support/fake_translation_service.dart';
 import '../support/fake_tts.dart';
 
 /// The work page (1.5.4) opens the reader already in a mode and a
@@ -47,8 +48,7 @@ void main() {
             work: work,
             tts: tts,
             createSpeechAudioQueue: FakeSpeechAudioQueue.new,
-            availableTranslationTargets: ({required sourceLang}) async =>
-                const ['es'],
+            translation: FakeTranslation().service,
             startSpeaking: startSpeaking,
             speakTranslation: speakTranslation,
             layerLang: layerLang,

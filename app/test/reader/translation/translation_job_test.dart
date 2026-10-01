@@ -6,9 +6,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/reader/translation/brain_translator.dart';
 import 'package:trellis/features/reader/translation/sentence_units.dart';
+import 'package:trellis/features/reader/translation/marian_types.dart';
 import 'package:trellis/features/reader/translation/translation_job.dart';
 
 import '../../support/fake_brain.dart';
+import '../../support/fake_sentence_translator.dart';
 
 /// TranslationJobController (ADR-0008 "Babel" Phase 3): the cancellable,
 /// resumable batch that fills in a work's TranslationSentence rows.
@@ -39,6 +41,7 @@ void main() {
     final controller = TranslationJobController(
       dao: db.spineDao,
       workId: workId,
+      lang: 'es',
       units: units(['One.', 'Two.', 'Three.']),
       translate: (s) async {
         calls.add(s);
@@ -65,6 +68,7 @@ void main() {
     final controller = TranslationJobController(
       dao: db.spineDao,
       workId: workId,
+      lang: 'es',
       units: units(['One.']),
       translate: (s) async => 'es:$s',
     );
@@ -75,6 +79,7 @@ void main() {
     final brainController = TranslationJobController(
       dao: db.spineDao,
       workId: workId,
+      lang: 'es',
       units: units(['Two.'], segIdx: 1),
       translate: (s) async => 'es:$s',
       engine: 'domovoi:stove',
@@ -95,6 +100,7 @@ void main() {
     final first = TranslationJobController(
         dao: db.spineDao,
         workId: workId,
+        lang: 'es',
         units: units(['One.', 'Two.']),
         translate: translate);
     await first.start();
@@ -104,6 +110,7 @@ void main() {
     final second = TranslationJobController(
         dao: db.spineDao,
         workId: workId,
+        lang: 'es',
         units: units(['One.', 'Two.']),
         translate: translate);
     await second.start();
@@ -119,6 +126,7 @@ void main() {
     final controller = TranslationJobController(
       dao: db.spineDao,
       workId: workId,
+      lang: 'es',
       units: units(['One.', 'Two.', 'Three.', 'Four.']),
       translate: (s) {
         final c = Completer<String>();
@@ -155,6 +163,7 @@ void main() {
     final controller = TranslationJobController(
       dao: db.spineDao,
       workId: workId,
+      lang: 'es',
       units: units(['One.', 'Two.', 'Three.']),
       translate: (s) async {
         if (s == 'Two.') throw StateError('the model choked on this one');
@@ -177,6 +186,7 @@ void main() {
     final controller = TranslationJobController(
       dao: db.spineDao,
       workId: workId,
+      lang: 'es',
       units: units(['One.', 'Two.']),
       translate: (s) async => 'es:$s',
     );
@@ -194,6 +204,7 @@ void main() {
     final controller = TranslationJobController(
       dao: db.spineDao,
       workId: workId,
+      lang: 'es',
       units: const [],
       translate: (s) async => 'es:$s',
     );
@@ -214,6 +225,7 @@ void main() {
       final controller = TranslationJobController(
         dao: db.spineDao,
         workId: workId,
+        lang: 'es',
         units: units(['One.', 'Two.', 'Three.', 'Four.', 'Five.']),
         // Never called on this path — proves translateBatch takes over
         // entirely rather than falling through to the per-sentence path.
@@ -247,6 +259,7 @@ void main() {
       final controller = TranslationJobController(
         dao: db.spineDao,
         workId: workId,
+        lang: 'es',
         units: units(['One.', 'Two.', 'Three.']),
         translate: (s) async => throw StateError('must not be called'),
         translateBatch: (sentences) async =>
@@ -272,6 +285,7 @@ void main() {
       final controller = TranslationJobController(
         dao: db.spineDao,
         workId: workId,
+        lang: 'es',
         units: units(['One.', 'Two.', 'Three.', 'Four.']),
         translate: (s) async => throw StateError('must not be called'),
         translateBatch: (sentences) async {
@@ -314,6 +328,7 @@ void main() {
       final controller = TranslationJobController(
         dao: db.spineDao,
         workId: workId,
+        lang: 'es',
         units: units(['One.', 'Two.', 'Three.']),
         translate: (s) async => throw StateError('must not be called'),
         translateBatch: (sentences) async {
@@ -340,6 +355,7 @@ void main() {
       final controller = TranslationJobController(
         dao: db.spineDao,
         workId: workId,
+        lang: 'es',
         units: units(['One.', 'Two.', 'Three.', 'Four.']),
         translate: (s) async => throw StateError('must not be called'),
         translateBatch: (sentences) {
@@ -370,6 +386,7 @@ void main() {
       final controller = TranslationJobController(
         dao: db.spineDao,
         workId: workId,
+        lang: 'es',
         units: const [],
         translate: (s) async => throw StateError('must not be called'),
         translateBatch: (sentences) async =>
@@ -396,6 +413,7 @@ void main() {
       final controller = TranslationJobController(
         dao: db.spineDao,
         workId: workId,
+        lang: 'es',
         units: units(['Hello.', 'Goodbye.']),
         translate: (s) async => throw StateError('must not be called'),
         translateBatch: translator.translateBatch,
@@ -431,6 +449,7 @@ void main() {
       final controller = TranslationJobController(
         dao: db.spineDao,
         workId: workId,
+        lang: 'es',
         units: units(['One.', 'Two.', 'Three.']),
         translate: (s) async => throw StateError('must not be called'),
         translateBatch: translator.translateBatch,
@@ -455,6 +474,223 @@ void main() {
               'the "doneUnits counts processed, not stored" law');
     });
   });
+
+  group('TranslationRun (1.5.5): one or two passes, resumable after a kill',
+      () {
+    /// A translator a test can stop mid-sentence: [hold] makes the Nth
+    /// call (0-based) never complete, the way a killed process leaves it.
+    FakeSentenceTranslator translator(String tag, {int? hold}) =>
+        FakeSentenceTranslator((s) => '$tag:$s', holdAt: hold);
+
+    test('a direct run translates, writes the target, frees the model and '
+        'clears the run marker', () async {
+      final t = translator('de');
+      final run = TranslationRun(
+        dao: db.spineDao,
+        workId: workId,
+        units: units(['One.', 'Two.']),
+        target: 'de',
+        steps: [TranslationStep(lang: 'de', open: () async => t)],
+      );
+
+      await run.start();
+
+      expect(run.state.phase, TranslationJobPhase.done);
+      final stored = await db.spineDao.translationSentencesOf(workId, lang: 'de');
+      expect(stored[(0, 1)]!.body, 'de:Two.');
+      expect(t.disposed, isTrue, reason: 'the ONNX sessions are freed');
+      expect(await db.spineDao.translationRunLang(workId), isNull);
+    });
+
+    test('via English: pass 1 writes English, pass 2 translates the '
+        'English while keeping the ORIGINAL sentence as the row\'s source, '
+        'one model open at a time', () async {
+      final toEn = translator('en');
+      final toEs = translator('es');
+      final opened = <String>[];
+      final run = TranslationRun(
+        dao: db.spineDao,
+        workId: workId,
+        units: units(['Eins.', 'Zwei.']),
+        target: 'es',
+        steps: [
+          TranslationStep(
+              lang: 'en',
+              open: () async {
+                opened.add('de-en');
+                return toEn;
+              }),
+          TranslationStep(
+              lang: 'es',
+              open: () async {
+                expect(toEn.disposed, isTrue,
+                    reason: 'the first leg is freed before the second opens');
+                opened.add('en-es');
+                return toEs;
+              }),
+        ],
+      );
+      final totals = <int>{};
+      run.addListener(() => totals.add(run.state.totalUnits));
+
+      await run.start();
+
+      expect(opened, ['de-en', 'en-es']);
+      expect(totals, {4}, reason: 'progress covers both passes');
+      final es = await db.spineDao.translationSentencesOf(workId, lang: 'es');
+      expect(es[(0, 0)]!.body, 'es:en:Eins.');
+      expect(es[(0, 0)]!.sourceText, 'Eins.',
+          reason: 'the staleness law keys off the original sentence');
+      expect(toEs.disposed, isTrue);
+    });
+
+    test('a kill partway through: the marker stays, and the next run '
+        'translates only what is missing', () async {
+      final killed = translator('de', hold: 2); // the 3rd call never returns
+      final first = TranslationRun(
+        dao: db.spineDao,
+        workId: workId,
+        units: units(['A.', 'B.', 'C.', 'D.']),
+        target: 'de',
+        steps: [TranslationStep(lang: 'de', open: () async => killed)],
+      );
+      unawaited(first.start());
+      await pumpEventQueue();
+      expect(killed.calls, ['A.', 'B.', 'C.']);
+      expect(await db.spineDao.translationRunLang(workId), 'de',
+          reason: 'a killed run is still marked as running');
+
+      final again = translator('de');
+      final second = TranslationRun(
+        dao: db.spineDao,
+        workId: workId,
+        units: units(['A.', 'B.', 'C.', 'D.']),
+        target: 'de',
+        steps: [TranslationStep(lang: 'de', open: () async => again)],
+      );
+      await second.start();
+
+      expect(again.calls, ['C.', 'D.']);
+      expect(second.state.phase, TranslationJobPhase.done);
+      expect(
+          (await db.spineDao.translationSentencesOf(workId, lang: 'de')).length,
+          4);
+      expect(await db.spineDao.translationRunLang(workId), isNull);
+    });
+
+    test('resuming a pivot run with pass 1 complete never opens the first '
+        'model again', () async {
+      for (final (i, s) in ['Eins.', 'Zwei.'].indexed) {
+        await db.spineDao.upsertTranslationSentence(
+            workId: workId,
+            segmentIdx: 0,
+            sentenceIdx: i,
+            lang: 'en',
+            sourceText: s,
+            body: 'en:$s');
+      }
+      var openedFirst = false;
+      final run = TranslationRun(
+        dao: db.spineDao,
+        workId: workId,
+        units: units(['Eins.', 'Zwei.']),
+        target: 'es',
+        steps: [
+          TranslationStep(
+              lang: 'en',
+              open: () async {
+                openedFirst = true;
+                return translator('en');
+              }),
+          TranslationStep(lang: 'es', open: () async => translator('es')),
+        ],
+      );
+
+      await run.start();
+
+      expect(openedFirst, isFalse);
+      expect(
+          (await db.spineDao.translationSentencesOf(workId, lang: 'es'))[(0, 1)]!
+              .body,
+          'es:en:Zwei.');
+    });
+
+    test('cancel stops at a sentence boundary, frees the model and clears '
+        'the marker', () async {
+      late TranslationRun run;
+      final t = FakeSentenceTranslator((s) {
+        if (s == 'A.') run.cancel();
+        return 'de:$s';
+      });
+      run = TranslationRun(
+        dao: db.spineDao,
+        workId: workId,
+        units: units(['A.', 'B.']),
+        target: 'de',
+        steps: [TranslationStep(lang: 'de', open: () async => t)],
+      );
+
+      await run.start();
+
+      expect(run.state.phase, TranslationJobPhase.cancelled);
+      expect(t.calls, ['A.']);
+      expect(t.disposed, isTrue);
+      expect(await db.spineDao.translationRunLang(workId), isNull);
+    });
+
+    test('a model that fails to start inside translate (the real lazy '
+        'open) fails the run instead of skipping every sentence', () async {
+      final t = FakeSentenceTranslator((_) => throw const MarianModelInitException(
+          'The downloaded translator couldn’t be started.'));
+      final run = TranslationRun(
+        dao: db.spineDao,
+        workId: workId,
+        units: units(['A.', 'B.', 'C.']),
+        target: 'de',
+        steps: [TranslationStep(lang: 'de', open: () async => t)],
+      );
+
+      await run.start();
+
+      expect(run.state.phase, TranslationJobPhase.failed);
+      expect(t.calls, ['A.'], reason: 'it stops at the first sentence');
+      expect(t.disposed, isTrue);
+      expect(await db.spineDao.hasTranslationSentences(workId, lang: 'de'),
+          isFalse);
+      expect(await db.spineDao.translationRunLang(workId), isNull);
+    });
+
+    test('missing model files fail the run the same way', () async {
+      final t = FakeSentenceTranslator(
+          (_) => throw const MarianModelMissingFilesException('gone'));
+      final run = TranslationRun(
+        dao: db.spineDao,
+        workId: workId,
+        units: units(['A.']),
+        target: 'de',
+        steps: [TranslationStep(lang: 'de', open: () async => t)],
+      );
+      await run.start();
+      expect(run.state.phase, TranslationJobPhase.failed);
+    });
+
+    test('a model that will not open fails the run calmly and clears the '
+        'marker', () async {
+      final run = TranslationRun(
+        dao: db.spineDao,
+        workId: workId,
+        units: units(['A.']),
+        target: 'de',
+        steps: [TranslationStep(lang: 'de', open: () async => null)],
+      );
+
+      await run.start();
+
+      expect(run.state.phase, TranslationJobPhase.failed);
+      expect(await db.spineDao.translationRunLang(workId), isNull);
+    });
+  });
+
 }
 
 /// Stands in for `UnavailableTierBrain` (brain_wiring's real stove/

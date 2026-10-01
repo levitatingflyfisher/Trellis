@@ -9,9 +9,9 @@ import 'package:trellis/features/player/player_controller.dart';
 import 'package:trellis/features/reader/reader_screen.dart';
 import 'package:trellis/features/reader/speech/speech_engine.dart';
 import 'package:trellis/features/reader/speech/speech_temp_files.dart';
-import 'package:trellis/features/reader/translation/marian_engine.dart';
 
 import '../support/fake_player.dart';
+import '../support/fake_translation_service.dart';
 import '../support/fake_tts.dart';
 
 /// The study crown, Phase 3: read<->listen handoff verbs. Both directions'
@@ -63,7 +63,7 @@ void main() {
     Future<void> toScroll(WidgetTester tester) async {
       await tester.tap(find.byKey(const Key('mode-toggle')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('mode-item-scroll')));
+      await tester.tap(find.byKey(const Key('mode-item-page')));
       await tester.pumpAndSettle();
     }
 
@@ -77,8 +77,8 @@ void main() {
       await toScroll(tester);
 
       expect(find.byTooltip('Listen'), findsNothing);
-      expect(find.byTooltip('Play'), findsOneWidget,
-          reason: 'the silent pacer, named as what it is');
+      expect(find.byTooltip('Read aloud'), findsWidgets,
+          reason: 'without a player, Page’s Play reads the text aloud');
     });
 
     testWidgets('no Listen when the work has no aligned audio', (tester) async {
@@ -184,7 +184,7 @@ void main() {
 
     testWidgets(
         'threads tts/resolveSpeechEngine/createSpeechTempFiles/'
-        'resolveTranslator through to the reader it opens — the same '
+        'translation through to the reader it opens — the same '
         'reachability library/river-opened readers already have '
         '(ADR-0008 Babel Phase 3)', (tester) async {
       final work = await seedAlignedEpisode();
@@ -194,12 +194,7 @@ void main() {
           null;
       SpeechTempFiles createSpeechTempFiles() =>
           DiskSpeechTempFiles(dir: Directory.systemTemp);
-      Future<MarianTranslator?> resolveTranslator(
-              {required String sourceLang, required String targetLang}) async =>
-          null;
-      Future<List<String>> availableTranslationTargets(
-              {required String sourceLang}) async =>
-          const [];
+      final translation = FakeTranslation().service;
 
       await tester.pumpWidget(MaterialApp(
           home: KaraokeScreen(
@@ -209,8 +204,7 @@ void main() {
               tts: tts,
               resolveSpeechEngine: resolveSpeechEngine,
               createSpeechTempFiles: createSpeechTempFiles,
-              resolveTranslator: resolveTranslator,
-              availableTranslationTargets: availableTranslationTargets)));
+              translation: translation)));
       await tester.pumpAndSettle();
 
       await tester.tap(find.byKey(const Key('read-from-here')));
@@ -220,9 +214,7 @@ void main() {
       expect(reader.tts, same(tts));
       expect(reader.resolveSpeechEngine, same(resolveSpeechEngine));
       expect(reader.createSpeechTempFiles, same(createSpeechTempFiles));
-      expect(reader.resolveTranslator, same(resolveTranslator));
-      expect(reader.availableTranslationTargets,
-          same(availableTranslationTargets));
+      expect(reader.translation, same(translation));
     });
   });
 }

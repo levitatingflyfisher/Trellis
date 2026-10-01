@@ -111,7 +111,7 @@ void main() {
       // picker rather than cycling on its own tap.
       await tester.tap(find.byKey(const Key('mode-toggle')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('mode-item-scroll')));
+      await tester.tap(find.byKey(const Key('mode-item-page')));
       await tester.pumpAndSettle();
       await shoot('reader_scroll');
       await tester.pageBack();

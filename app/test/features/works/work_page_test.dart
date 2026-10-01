@@ -7,6 +7,7 @@ import 'package:trellis/db/database.dart';
 import 'package:trellis/features/episodes/episode_actions.dart';
 import 'package:trellis/features/player/player_controller.dart';
 import 'package:trellis/features/reader/reader_doors.dart';
+import 'package:trellis/features/reader/reader_screen.dart';
 import 'package:trellis/features/transcribe/transcribe_coordinator.dart';
 import 'package:trellis/features/works/work_open.dart';
 import 'package:trellis/features/works/work_page.dart';
@@ -208,7 +209,8 @@ void main() {
           profileId: profileId,
           player: controller,
           transcriber: TranscribeCoordinator(db: db, services: services),
-          services: services);
+          services: services,
+          transcribeRate: () => 1 / 12);
       final doors = WorkDoors(
           db: db,
           profileId: profileId,
@@ -295,6 +297,31 @@ void main() {
       expect(find.text('Transcribe (about 5 min)'), findsOneWidget);
     });
 
+    testWidgets('tapping Transcribe says so at once, with its estimate, and '
+        'shows the job on the page', (tester) async {
+      await pumpPage(tester, episode);
+      await tester.tap(find.byKey(const Key('mode-read')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('transcribe-now')));
+      await tester.pumpAndSettle();
+      if (find.byKey(const Key('consent-accept')).evaluate().isNotEmpty) {
+        await tester.tap(find.byKey(const Key('consent-accept')));
+      }
+      await tester.pump();
+      await tester.pump();
+      expect(find.text('Transcribing… about 5 min'), findsOneWidget);
+      expect(find.text('See progress'), findsOneWidget);
+      // The page under the notes shows the job while it runs (the fake
+      // engine here finishes within a few frames).
+      expect(
+          find.byKey(Key('page-transcribe-progress-$episode'),
+              skipOffstage: false),
+          findsOneWidget);
+      await tester.pumpAndSettle();
+      await tester.pump(const Duration(seconds: 10));
+      await tester.pumpAndSettle();
+    });
+
     testWidgets('a timestamp in the notes plays from there', (tester) async {
       await pumpPage(tester, episode);
       await tester.tapOnText(find.textRange.ofSubstring('12:34'));
@@ -346,6 +373,32 @@ void main() {
       await tester.pumpAndSettle();
       expect((await db.spineDao.workById(article))!.readLang, 'es');
       expect(await db.spineDao.activeTranslationLang(article), 'es');
+    });
+
+    testWidgets('picking a translation opens Read in it', (tester) async {
+      await db.spineDao.upsertTranslationSentence(
+          workId: article,
+          segmentIdx: 0,
+          sentenceIdx: 0,
+          lang: 'es',
+          sourceText: 'The marsh at dawn.',
+          body: 'El pantano al alba.');
+      await db.spineDao.setShowTranslationLayer(article, false);
+      await pumpPage(tester, article);
+      await tester.tap(find.byKey(const Key('lang-es')));
+      await tester.pumpAndSettle();
+
+      expect(find.byType(ReaderScreen), findsOneWidget);
+      expect(await db.spineDao.showTranslationLayer(article), isTrue,
+          reason: 'the reader shows the picked translation even if its '
+              'display was turned off before');
+    });
+
+    testWidgets('picking the original opens nothing', (tester) async {
+      await pumpPage(tester, article);
+      await tester.tap(find.byKey(const Key('lang-original')));
+      await tester.pumpAndSettle();
+      expect(find.byType(ReaderScreen), findsNothing);
     });
 
     Future<void> transcribeEpisode() async {
@@ -440,6 +493,8 @@ void main() {
           body: 'El pantano al alba.');
       await pumpPage(tester, article);
       await tester.tap(find.byKey(const Key('lang-es')));
+      await tester.pumpAndSettle();
+      await tester.pageBack(); // the reader the pick opened
       await tester.pumpAndSettle();
       await reopen(tester);
       expect(

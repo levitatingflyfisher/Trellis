@@ -93,7 +93,7 @@ void main() {
     // so the place is saved there.
     await tester.tap(find.byKey(const Key('mode-toggle')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('mode-item-scroll')));
+    await tester.tap(find.byKey(const Key('mode-item-page')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Second'));
     await tester.pump();

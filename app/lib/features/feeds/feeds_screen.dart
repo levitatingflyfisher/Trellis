@@ -196,7 +196,7 @@ class _FeedsScreenState extends State<FeedsScreen> {
 
   Future<void> _load() async {
     final profileId = widget.profile.id;
-    final feeds = await widget.db.feedsDao.feedsOf(profileId);
+    final feeds = await widget.db.feedsDao.subscriptionsOf(profileId);
     final unplayed = await widget.db.feedsDao.unplayedCountsOf(profileId);
     final books = await widget.db.spineDao.booksOf(profileId);
     // The books' row facts read every position and the queue; a list of
@@ -398,7 +398,7 @@ class _FeedsScreenState extends State<FeedsScreen> {
     }
     if (!mounted) return;
     final wanted = {for (final f in added) f.id};
-    final failed = (await widget.db.feedsDao.feedsOf(widget.profile.id))
+    final failed = (await widget.db.feedsDao.subscriptionsOf(widget.profile.id))
         .where((f) => wanted.contains(f.id))
         .map(stateOfFeed)
         .where((s) => s.consecutiveFailures > 0 || s.broken)
@@ -418,7 +418,7 @@ class _FeedsScreenState extends State<FeedsScreen> {
   }
 
   Future<void> _exportOpml() async {
-    final feeds = await widget.db.feedsDao.feedsOf(widget.profile.id);
+    final feeds = await widget.db.feedsDao.subscriptionsOf(widget.profile.id);
     if (feeds.isEmpty) {
       _toast('Nothing to export yet.');
       return;

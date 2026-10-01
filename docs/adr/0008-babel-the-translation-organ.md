@@ -8,7 +8,8 @@
   the ONNX Runtime sessions actually opening on a device, and — a
   separate, more pointed gap — nobody has HEARD the Spanish speech this
   pass makes possible (see the Phase 4 section's honesty accounting).
-- Date: 2026-08-15 (Phases 1-2); amended 2026-08-15 (Phases 3-4)
+- Date: 2026-08-15 (Phases 1-2); amended 2026-08-15 (Phases 3-4);
+  amended 2026-10-25 (1.5.5: real languages, see the last section)
 
 ## Context
 
@@ -390,3 +391,90 @@ the fallback law Phase 3 already established for the batch job.
   reflect Phases 3-4 shipping — see the campaign report and CHANGELOG for
   the precise wording; the wrong "translation runs through a Brain LLM
   call" claim this ADR's first acceptance caught stays corrected.
+
+## 1.5.5: Babel for real languages (amended 2026-10-25)
+
+The organ worked for one pair at a time, if that pair was already
+downloaded and the work's language was right. 1.5.5 makes it work for the
+languages people read in.
+
+- **Per-model numbers are read, not assumed.** The loop hard-coded the
+  first pair's 6 layers, 8 heads, head width 64, pad as decoder start, and
+  never masked `bad_words_ids`. Each pair now registers its `config.json`
+  and `tokenizer_config.json` beside the weights. The loop reads layers,
+  heads, `d_model`, `decoder_start_token_id`, EOS, pad and the banned ids
+  from them (`MarianModelConfig`). Pad is always masked, as upstream
+  `MarianMTModel` does; the en-jap collapse ADR-0014 recorded was an
+  unmasked pad. A pair with `separate_vocabs: true` is refused, because
+  the decode path reverses one joint vocab.
+- **Multi-target exports.** en-ROMANCE (for Portuguese), en-zh and en-ar
+  only write the intended language when told by a `>>xx<<` token. The
+  layout carries the token, and the engine prepends its vocab id before
+  the SentencePiece ids. The token never goes through SentencePiece,
+  which would shred it. The engine fails closed if the vocab lacks it.
+- **The cache stays native.** The decoder's growing cache and the frozen
+  cross-attention values go back into each step as `OrtValue` handles.
+  Only `logits` crosses the platform channel. Every handle is released by
+  the end of the sentence, including on a throw. The trap fix above holds
+  through the handles (`marian_generation_loop_test.dart`).
+- **25 pairs, English on one end of each.** fr, de, es, it, pt, nl, ru,
+  zh, ar, hi and uk go both ways; ja, ko and pl go into English only. No
+  trusted en->ja, en->ko or en->pl ONNX export exists. en-jap exists and
+  is incoherent (ADR-0014). The six earlier pairs keep their
+  onnx-community pins, so a phone that has them fetches only the two
+  config files. Every new pair is Xenova's export, about 110 MB a
+  direction against about 240 MB. One of them (en-ROMANCE) was run for
+  real to check it: same input and output names, same degenerate cached
+  branch, fluent Portuguese.
+- **Via English.** X->Y with no direct pair runs X->en, then en->Y, as
+  Firefox does: one pivot, English only. This amends ADR-0014's "a
+  Russian-to-German request has no path, by construction". The registry
+  stays hub and spoke (2N pairs); the pivot lives in the planner
+  (`translation_route.dart`), not the catalog. The run makes two passes
+  with one model resident at a time. Pass 1 stores English rows. Pass 2
+  translates the stored English, and each row keeps the original
+  sentence as `sourceText`, so the staleness law still holds.
+- **Download from the Translate sheet.** The reader's Translate sheet
+  lists every language the work can reach, ready or with its download
+  size, and says "Via English" where it pivots. One confirmation names
+  each missing leg and the total; the download runs through the same
+  resumable engine, with progress and Cancel. The two old callbacks gave
+  way to one `TranslationService`.
+- **The source language is resolved, never assumed English.** The order
+  is `works.lang`, then the feed's language, then the language whisper
+  reported for the transcript. With none of those, Translate asks first.
+- **A killed run resumes.** `works.translationRunLang` (schema v31) is set
+  for the length of a run. A run the system kills leaves it set, and the
+  next open of the work resumes the run; the stored sentences are the
+  progress. Cancel clears it. Leaving the reader stops the run, frees the
+  model and keeps the marker. The same migration writes down the old
+  "stored Spanish with no active language means Spanish" guess as data,
+  so the reader no longer carries it.
+- **Display.** ADR-0014 withheld en-zh because the bundled fonts have no
+  CJK glyphs. Its own note says C7 bounds authored strings, and model
+  output is runtime text. On Android, Flutter falls back to the system's
+  Noto fonts for CJK, Arabic and Devanagari, so en-zh, en-ar and en-hi
+  are registered now. Golden tests still render tofu, because they load
+  bundled fonts only. **Nobody has seen these scripts rendered on a
+  device.** Arabic lines are laid out right to left.
+
+What 1.5.5 leaves open:
+
+- No pair has run on a phone. The ONNX sessions opening on Android, and
+  the native-handle path, are proven only against fakes. The engine's
+  logic was proven in Python against one real model.
+- The job runs on the UI isolate. `flutter_onnxruntime` works through
+  platform channels, so inference already runs on the native side; only
+  tensor bookkeeping and the argmax run in Dart. Moving the job to a
+  background isolate would need the plugin to work from a background
+  isolate, which hasn't been checked.
+- **Next step, Bergamot.** Mozilla's Bergamot models are about 25 to
+  37 MB a direction, against about 110 MB here, with equal or better
+  quality on most English pairs (COMET; see
+  `research-notes/2026-10-24-trellis-engines-and-sources.md`). They are
+  Marian binaries with an SSRU decoder, not ONNX. The plan is to convert
+  them once, offline, to int8 ONNX; a public conversion of en<->de/es/fr
+  exists to compare against. Then measure COMET parity, register them,
+  and add the lexical shortlist as a vocabulary mask in this loop. Their
+  license is MPL-2.0: the app ships the license and links the source.
+

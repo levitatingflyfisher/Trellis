@@ -1,5 +1,7 @@
 package com.openhearth.trellis
 
+import android.content.Intent
+import android.os.Bundle
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
 
@@ -16,5 +18,26 @@ class MainActivity : AudioServiceActivity() {
         super.configureFlutterEngine(flutterEngine)
         // The background feed check's scheduling door (ADR-0018).
         FeedCheckScheduler.attach(flutterEngine.dartExecutor.binaryMessenger, this)
+        // Share to Trellis (1.5.5).
+        ShareInbox.attach(flutterEngine.dartExecutor.binaryMessenger, this)
+        // The home-screen widget (1.5.5).
+        WidgetBridge.attach(flutterEngine, this)
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        // A restored activity is handed its old intent again; that share
+        // was already taken.
+        if (savedInstanceState == null) {
+            ShareInbox.receive(this, intent)
+            WidgetBridge.receive(this, intent)
+        }
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        ShareInbox.receive(this, intent)
+        WidgetBridge.receive(this, intent)
     }
 }

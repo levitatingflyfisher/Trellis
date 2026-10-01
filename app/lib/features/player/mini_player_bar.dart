@@ -3,16 +3,18 @@ import 'package:openhearth_design/openhearth_design.dart';
 
 import '../models/format.dart' show formatClock;
 import 'player_controller.dart';
+import 'mini_player_host.dart' show sheetContextFor;
 import 'sleep_timer_sheet.dart';
+import 'speed_control.dart';
 
-/// The persistent playback bar: play/pause, ±15/+30, speed cycling
-/// (1.0–2.0×), a seek slider — and, when the playing work has synced text
+/// The persistent playback bar: play/pause, ±15/+30, the swipe speed
+/// control (0.5–4×), a seek slider — and, when the playing work has synced text
 /// (alignments), the door to the karaoke view. Compact enough for 320dp at
 /// 2× text scale — the fleet's sweep pins that.
 class MiniPlayerBar extends StatelessWidget {
   final PlayerController controller;
 
-  /// Opens the synced-text (karaoke) view; the shell wires it. The button
+  /// Opens the playing work's text on Page; the shell wires it. The button
   /// only shows when the current work HAS alignments — the promise is never
   /// dangled before it can be kept.
   final VoidCallback? onOpenSyncedText;
@@ -46,9 +48,6 @@ class MiniPlayerBar extends StatelessWidget {
       this.onOpenCaptures,
       this.onOpenQueue,
       this.onOpenChapters});
-
-  String _speedLabel(double s) =>
-      '${s.toStringAsFixed(2).replaceFirst(RegExp(r'0$'), '')}×';
 
   @override
   Widget build(BuildContext context) {
@@ -94,8 +93,10 @@ class MiniPlayerBar extends StatelessWidget {
                           onOpenSyncedText != null)
                         IconButton(
                           key: const Key('open-karaoke'),
-                          tooltip: 'Synced text',
-                          icon: const Icon(Icons.subtitles_outlined),
+                          // The playing work's text on Page, lit as it
+                          // plays (1.5.5: "hard to get to").
+                          tooltip: 'Page',
+                          icon: const Icon(Icons.article_outlined),
                           onPressed: onOpenSyncedText,
                         ),
                       if (onCapture != null)
@@ -138,7 +139,7 @@ class MiniPlayerBar extends StatelessWidget {
                             ? Icons.bedtime_outlined
                             : Icons.bedtime),
                         onPressed: () => showModalBottomSheet<void>(
-                          context: context,
+                          context: sheetContextFor(context),
                           builder: (_) => SleepTimerSheet(controller: controller),
                         ),
                       ),
@@ -210,15 +211,10 @@ class MiniPlayerBar extends StatelessWidget {
                         onPressed: () =>
                             controller.seekBy(const Duration(seconds: 30)),
                       ),
-                      Tooltip(
-                        message: 'Playback speed',
-                        child: TextButton(
-                          key: const Key('player-speed'),
-                          onPressed: controller.cycleSpeed,
-                          child: FittedBox(
-                              fit: BoxFit.scaleDown,
-                              child: Text(_speedLabel(controller.speed))),
-                        ),
+                      SpeedControl(
+                        key: const Key('player-speed'),
+                        speed: controller.speed,
+                        onChanged: controller.setSpeed,
                       ),
                     ],
                   ),

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- hearthDark: darkSurfaceCard, linen100, linen300, hearth400,
+     linen900 (the theme's onPrimary), darkBorderSubtle. -->
+<resources>
+    <color name="widget_surface">#FF2A1A0D</color>
+    <color name="widget_text">#FFF5EFE6</color>
+    <color name="widget_text_secondary">#FFC7B9A0</color>
+    <color name="widget_warmth">#FFCD8366</color>
+    <color name="widget_on_warmth">#FF2C1810</color>
+    <color name="widget_track">#FF5A3A28</color>
+</resources>

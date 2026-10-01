@@ -48,8 +48,8 @@ void main() {
 
   /// Campaign 9 Phase 6: `mode-toggle` opens a labeled three-way picker
   /// rather than cycling on its own tap — [itemKey] names the
-  /// destination explicitly (`mode-item-words`, `mode-item-scroll`,
-  /// `mode-item-lines`).
+  /// destination explicitly (`mode-item-rsvp`, `mode-item-page`,
+  /// `highlight-item-line`).
   Future<void> switchMode(WidgetTester tester, String itemKey) async {
     await tester.tap(find.byKey(const Key('mode-toggle')));
     await tester.pumpAndSettle();
@@ -58,7 +58,7 @@ void main() {
   }
 
   Future<void> toScroll(WidgetTester tester) =>
-      switchMode(tester, 'mode-item-scroll');
+      switchMode(tester, 'mode-item-page');
 
   String rsvpWord(WidgetTester tester) {
     String at(Key k) => tester.widget<Text>(find.byKey(k)).data!;
@@ -122,7 +122,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.byKey(const Key('drop-cap')));
     await tester.pump();
-    await switchMode(tester, 'mode-item-words'); // → RSVP
+    await switchMode(tester, 'mode-item-rsvp'); // → RSVP
     expect(rsvpWord(tester), 'One');
   });
 

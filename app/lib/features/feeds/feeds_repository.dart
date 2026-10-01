@@ -241,13 +241,28 @@ class FeedsRepository {
       return SubscribeFailure(e.message);
     }
 
-    String feedUrl;
+    // A profile or front page whose feed sits at a fixed address tries
+    // that first: a Bluesky profile is a script-built page with no
+    // advertised feed to find. The rule is only a guess for a /@user page
+    // (Hashnode and others look like Mastodon), so a guess that fails
+    // falls back to discovery.
+    final known = knownFeedOf(Uri.parse(input));
+    if (known != null) {
+      final guessed = await _subscribeAt(profileId, known.feedUrl);
+      if (guessed is! SubscribeFailure) return guessed;
+    }
+    final String feedUrl;
     try {
       feedUrl = await client.discoverFeedUrl(input);
     } on CommsException catch (e) {
       return SubscribeFailure(e.message);
     }
+    return _subscribeAt(profileId, feedUrl);
+  }
 
+  /// [subscribe] once the feed's address is settled.
+  Future<SubscribeResult> _subscribeAt(int profileId, String url) async {
+    var feedUrl = url;
     final existing = await db.feedsDao.feedByAnyUrl(profileId, feedUrl);
     if (existing != null) {
       return AlreadySubscribed(
@@ -332,6 +347,8 @@ class FeedsRepository {
   /// so stored items get the show notes a 304 would never bring.
   Future<RefreshOutcome> _refreshOne(Feed feed,
       {bool force = false, bool fillNotes = false}) async {
+    // The Shared source has nothing to fetch; its address isn't one.
+    if (isSharedFeed(feed)) return (status: RefreshStatus.skipped, newItems: 0);
     final nowMs = _nowMs;
     var state = stateOfFeed(feed);
     if (shouldSkipRefresh(state, nowMs: nowMs, force: force) !=
@@ -434,7 +451,7 @@ class FeedsRepository {
   /// Returns the total number of new items.
   Future<int> refreshAll(int profileId,
       {bool force = false, bool Function()? shouldStop}) async {
-    final outcomes = await refreshMany(await db.feedsDao.feedsOf(profileId),
+    final outcomes = await refreshMany(await db.feedsDao.subscriptionsOf(profileId),
         force: force, shouldStop: shouldStop);
     if (!(shouldStop?.call() ?? false)) {
       await db.deviceSettingsDao

@@ -41,6 +41,12 @@ class FakeModelStore implements ModelStore {
   Future<int> partialBytes(ModelSpec spec) async => partial[spec.id] ?? 0;
 
   @override
+  Future<int> missingBytes(ModelSpec spec) async => downloadedIds
+          .contains(spec.id)
+      ? 0
+      : spec.sizeBytes - (partial[spec.id] ?? 0);
+
+  @override
   Future<void> delete(ModelSpec spec) async {
     downloadedIds.remove(spec.id);
     partial.remove(spec.id);

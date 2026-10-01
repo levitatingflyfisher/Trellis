@@ -96,7 +96,7 @@ void main() {
     await openToRead(tester, 'Columns');
     await tester.tap(find.byKey(const Key('mode-toggle')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('mode-item-scroll')));
+    await tester.tap(find.byKey(const Key('mode-item-page')));
     await tester.pumpAndSettle();
 
     final onSurface =

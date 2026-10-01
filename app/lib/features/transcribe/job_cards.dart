@@ -10,16 +10,35 @@ import 'package:flutter/material.dart';
 import '../models/format.dart';
 import 'transcribe_coordinator.dart';
 
+/// What transcribing will roughly cost, in words: `about N min` from the
+/// episode's length and this phone's measured speed, or an honest
+/// "time unknown" when either is missing.
+String transcribeEstimate(int? durationMs, double? realtimeFraction) {
+  if (durationMs == null || durationMs <= 0 || realtimeFraction == null) {
+    return 'time unknown';
+  }
+  final minutes = (durationMs * realtimeFraction / 60000).ceil();
+  // Words, not the approximately sign: no bundled font draws it (C7).
+  return 'about ${minutes < 1 ? 1 : minutes} min';
+}
+
 class TranscribeJobCards extends StatelessWidget {
   final TranscribeCoordinator coordinator;
-  const TranscribeJobCards({super.key, required this.coordinator});
+
+  /// Only this work's card, for a screen about one work.
+  final int? workId;
+  const TranscribeJobCards(
+      {super.key, required this.coordinator, this.workId});
 
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
       listenable: coordinator,
       builder: (context, _) {
-        final cards = coordinator.cards;
+        final cards = [
+          for (final c in coordinator.cards)
+            if (workId == null || c.workId == workId) c
+        ];
         if (cards.isEmpty) return const SizedBox.shrink();
         return Column(
           mainAxisSize: MainAxisSize.min,

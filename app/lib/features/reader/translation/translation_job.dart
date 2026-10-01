@@ -1,5 +1,6 @@
-/// The "Translate to Spanish" batch action (ADR-0008 "Babel" Phase 3): a
-/// cancellable, resumable run over one work's sentences.
+/// The Translate batch (ADR-0008 "Babel" Phase 3; any pair, and via
+/// English, since 1.5.5): a cancellable, resumable run over one work's
+/// sentences.
 ///
 /// Resumability is free — the [TranslationSentence] store itself IS the
 /// checkpoint. Unlike transcription (jobs_core's [JobRunner] over a
@@ -14,9 +15,12 @@ library;
 import 'package:flutter/foundation.dart';
 
 import '../../../db/database.dart';
+import 'marian_types.dart';
 import 'sentence_units.dart';
+import 'translator.dart';
 
-enum TranslationJobPhase { idle, running, done, cancelled }
+/// [failed]: a model that would not open; nothing ran.
+enum TranslationJobPhase { idle, running, done, cancelled, failed }
 
 /// One progress beat: [doneUnits] counts sentences PROCESSED — already
 /// stored, newly translated, or failed and skipped — out of [totalUnits],
@@ -40,6 +44,13 @@ class TranslationJobController extends ChangeNotifier {
   final List<TranslatableSentence> units;
   final Future<String> Function(String sentence) translate;
   final String lang;
+
+  /// The text handed to [translate] for unit `u`, when it isn't `u.text`
+  /// itself: a pivot's second pass translates the stored English, while
+  /// the row it writes still names the original sentence as its source
+  /// (the staleness law). Null skips the unit, storing nothing, the same
+  /// fallback a failed sentence gets.
+  final String? Function(TranslatableSentence u)? inputOf;
 
   /// The chunked-request path (Campaign 8 "Babel widens" Phase 5): when
   /// set, [start] groups not-already-stored units into [chunkSize]-sized
@@ -74,7 +85,8 @@ class TranslationJobController extends ChangeNotifier {
     required this.translate,
     this.translateBatch,
     this.chunkSize = 15,
-    this.lang = 'es',
+    required this.lang,
+    this.inputOf,
     this.engine = 'marian',
   }) : _state = TranslationJobState(
             phase: TranslationJobPhase.idle,
@@ -131,9 +143,10 @@ class TranslationJobController extends ChangeNotifier {
               sentenceIdx: u.sentenceIdx,
               currentSourceText: u.text) !=
           null;
-      if (!already) {
+      final input = already ? null : (inputOf == null ? u.text : inputOf!(u));
+      if (input != null) {
         try {
-          final body = await translate(u.text);
+          final body = await translate(input);
           await dao.upsertTranslationSentence(
               workId: workId,
               segmentIdx: u.segIdx,
@@ -142,6 +155,10 @@ class TranslationJobController extends ChangeNotifier {
               sourceText: u.text,
               body: body,
               engine: engine);
+        } on MarianModelInitException {
+          rethrow; // the model itself is broken: every sentence would fail
+        } on MarianModelMissingFilesException {
+          rethrow;
         } catch (_) {
           // The fallback law: nothing stored for this index, keep going.
         }
@@ -243,5 +260,165 @@ class TranslationJobController extends ChangeNotifier {
         phase: TranslationJobPhase.done,
         doneUnits: done,
         totalUnits: units.length));
+  }
+}
+
+
+/// One pass of a [TranslationRun]: the language it writes, and how to
+/// open the model that writes it. Opened only if the pass has anything
+/// left to do, so a resumed pivot never loads its finished first leg.
+class TranslationStep {
+  final String lang;
+  final Future<SentenceTranslator?> Function() open;
+  const TranslationStep({required this.lang, required this.open});
+}
+
+/// A whole translation into [target]: one pass for a direct pair, two
+/// via English (X->en, then en->Y over the stored English). Passes run
+/// one after the other with one model resident at a time, each freed as
+/// its pass ends.
+///
+/// The work's run marker ([SpineDao.setTranslationRunLang]) is set for
+/// the length of the run and cleared when it finishes, is cancelled or
+/// fails. A process the system kills leaves it set, and the reader
+/// starts the same run again on the next open; the stored sentences are
+/// the progress, so the new run picks up where the old one stopped.
+class TranslationRun extends ChangeNotifier {
+  final SpineDao dao;
+  final int workId;
+  final List<TranslatableSentence> units;
+  final String target;
+  final List<TranslationStep> steps;
+
+  TranslationRun({
+    required this.dao,
+    required this.workId,
+    required this.units,
+    required this.target,
+    required this.steps,
+  }) : _state = TranslationJobState(
+            phase: TranslationJobPhase.idle,
+            doneUnits: 0,
+            totalUnits: units.length * steps.length);
+
+  TranslationJobState _state;
+
+  /// Progress across every pass: a two-pass run over 100 sentences
+  /// counts to 200. [pass] and [passDone] say where it is in words.
+  TranslationJobState get state => _state;
+
+  int _passIndex = 0;
+
+  /// The pass running now, 0-based; [steps].length passes in all.
+  int get pass => _passIndex;
+  int get passCount => steps.length;
+
+  /// Sentences done in the current pass, out of `units.length`.
+  int get passDone =>
+      (_state.doneUnits - _passIndex * units.length).clamp(0, units.length);
+
+  TranslationJobController? _pass;
+  bool _cancelled = false;
+  bool _keepMarker = false;
+
+  /// The reader's Cancel: stops at the next sentence and forgets the run.
+  void cancel() {
+    _cancelled = true;
+    _pass?.cancel();
+  }
+
+  /// Leaving the reader: stops at the next sentence like [cancel], frees
+  /// the model, but keeps the run marker so the next open resumes.
+  void stop() {
+    _keepMarker = true;
+    cancel();
+  }
+
+  void _set(TranslationJobPhase phase, int done) {
+    _state = TranslationJobState(
+        phase: phase, doneUnits: done, totalUnits: _state.totalUnits);
+    notifyListeners();
+  }
+
+  Future<void> start() async {
+    await dao.setTranslationRunLang(workId, target);
+    _set(TranslationJobPhase.running, 0);
+    var before = 0;
+    for (var i = 0; i < steps.length; i++) {
+      _passIndex = i;
+      final step = steps[i];
+      final previous = i == 0
+          ? null
+          : await dao.translationSentencesOf(workId, lang: steps[i - 1].lang);
+      String? inputOf(TranslatableSentence u) => previous == null
+          ? u.text
+          : translatedTextFor(
+              stored: previous,
+              segIdx: u.segIdx,
+              sentenceIdx: u.sentenceIdx,
+              currentSourceText: u.text);
+
+      final stored = await dao.translationSentencesOf(workId, lang: step.lang);
+      final pending = units.any((u) =>
+          inputOf(u) != null &&
+          translatedTextFor(
+                  stored: stored,
+                  segIdx: u.segIdx,
+                  sentenceIdx: u.sentenceIdx,
+                  currentSourceText: u.text) ==
+              null);
+      if (pending && !_cancelled) {
+        SentenceTranslator? translator;
+        try {
+          translator = await step.open();
+        } catch (_) {
+          translator = null;
+        }
+        if (translator == null) {
+          await dao.setTranslationRunLang(workId, null);
+          _set(TranslationJobPhase.failed, before);
+          return;
+        }
+        final pass = TranslationJobController(
+          dao: dao,
+          workId: workId,
+          units: units,
+          lang: step.lang,
+          translate: translator.translate,
+          inputOf: previous == null ? null : inputOf,
+        );
+        final offset = before;
+        pass.addListener(() =>
+            _set(TranslationJobPhase.running, offset + pass.state.doneUnits));
+        _pass = pass;
+        var broken = false;
+        try {
+          await pass.start();
+        } on MarianModelInitException {
+          broken = true;
+        } on MarianModelMissingFilesException {
+          broken = true;
+        } finally {
+          _pass = null;
+          await translator.dispose().catchError((Object _) {});
+        }
+        // The real translator opens its sessions on the first sentence,
+        // so a model that can't start shows up here, not in open().
+        if (broken) {
+          await dao.setTranslationRunLang(workId, null);
+          _set(TranslationJobPhase.failed, _state.doneUnits);
+          return;
+        }
+      }
+      if (_cancelled) {
+        if (!_keepMarker) await dao.setTranslationRunLang(workId, null);
+        _set(TranslationJobPhase.cancelled, _state.doneUnits);
+        return;
+      }
+      before += units.length;
+      _set(TranslationJobPhase.running, before);
+    }
+    await dao.setTranslationRunLang(workId, null);
+    _set(TranslationJobPhase.done, before);
   }
 }

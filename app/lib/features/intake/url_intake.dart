@@ -9,6 +9,23 @@ import 'article_fetch.dart';
 import 'paste_intake.dart' show epochDayUtcNow, showPasteIntakeDialog;
 import '../shared/capped_body.dart';
 
+/// The URL intake's storing half: an extracted article as one article
+/// work. The share sheet stores through here too.
+Future<int> storeArticle(AppDatabase db,
+    {required int profileId,
+    required ArticleFetched fetched,
+    String persistence = 'work'}) async {
+  final workId = await db.spineDao.insertWork(
+      profileId: profileId,
+      kind: 'article',
+      title: fetched.article.title,
+      persistence: persistence,
+      firstSeenEpochDay: epochDayUtcNow(),
+      sourceUrl: fetched.article.url);
+  await db.spineDao.insertSegments(workId, fetched.rows);
+  return workId;
+}
+
 /// "From the web": paste a URL, pass the ONE consent chokepoint, preview the
 /// extracted article, confirm — and it lands as a persistent spine work.
 ///
@@ -114,15 +131,8 @@ class _UrlIntakeScreenState extends State<UrlIntakeScreen> {
   }
 
   Future<void> _add() async {
-    final preview = _preview!;
-    final workId = await widget.db.spineDao.insertWork(
-        profileId: widget.profileId,
-        kind: 'article',
-        title: preview.article.title,
-        persistence: 'work',
-        firstSeenEpochDay: epochDayUtcNow(),
-        sourceUrl: preview.article.url);
-    await widget.db.spineDao.insertSegments(workId, preview.rows);
+    final workId = await storeArticle(widget.db,
+        profileId: widget.profileId, fetched: _preview!);
     if (!mounted) return;
     Navigator.of(context).pop(workId);
   }

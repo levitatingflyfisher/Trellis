@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The home-screen widget (1.5.5). One layout for every size: the
+     provider (TrellisWidget.kt) shows or hides parts per size, which
+     RemoteViews can do in any launcher. The texts and visibilities here
+     are the widget picker's preview (previewLayout); a real card always
+     sets every one of them. -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:id="@android:id/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_background"
+    android:clipToOutline="true"
+    android:padding="4dp"
+    tools:targetApi="s">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center_vertical"
+        android:orientation="vertical">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal">
+
+            <LinearLayout
+                android:id="@+id/widget_audio"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_weight="1"
+                android:contentDescription="@string/widget_open_work"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:paddingStart="4dp"
+                android:paddingEnd="4dp">
+
+                <ImageView
+                    android:id="@+id/widget_art"
+                    android:layout_width="40dp"
+                    android:layout_height="40dp"
+                    android:background="@drawable/widget_art_placeholder"
+                    android:importantForAccessibility="no"
+                    android:padding="8dp"
+                    android:scaleType="centerCrop"
+                    android:src="@drawable/ic_widget_headphones" />
+
+                <LinearLayout
+                    android:layout_width="0dp"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="8dp"
+                    android:layout_weight="1"
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:id="@+id/widget_title"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:maxLines="1"
+                        android:text="@string/widget_preview_title"
+                        android:textColor="@color/widget_text"
+                        android:textSize="14sp"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:id="@+id/widget_show"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:ellipsize="end"
+                        android:maxLines="1"
+                        android:text="@string/widget_preview_show"
+                        android:textColor="@color/widget_text_secondary"
+                        android:textSize="12sp" />
+
+                    <ProgressBar
+                        android:id="@+id/widget_progress"
+                        style="?android:attr/progressBarStyleHorizontal"
+                        android:layout_width="match_parent"
+                        android:layout_height="3dp"
+                        android:layout_marginTop="4dp"
+                        android:indeterminate="false"
+                        android:max="1000"
+                        android:progress="400"
+                        android:progressDrawable="@drawable/widget_progress" />
+                </LinearLayout>
+            </LinearLayout>
+
+            <ImageButton
+                android:id="@+id/widget_back"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@android:color/transparent"
+                android:contentDescription="@string/widget_back"
+                android:scaleType="center"
+                android:src="@drawable/ic_widget_replay"
+                android:tint="@color/widget_text"
+                android:visibility="gone" />
+
+            <ImageButton
+                android:id="@+id/widget_play"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@drawable/widget_play_circle"
+                android:contentDescription="@string/widget_play"
+                android:scaleType="center"
+                android:src="@drawable/ic_widget_play"
+                android:tint="@color/widget_on_warmth" />
+
+            <ImageButton
+                android:id="@+id/widget_forward"
+                android:layout_width="48dp"
+                android:layout_height="48dp"
+                android:background="@android:color/transparent"
+                android:contentDescription="@string/widget_forward"
+                android:scaleType="center"
+                android:src="@drawable/ic_widget_forward_30"
+                android:tint="@color/widget_text"
+                android:visibility="gone" />
+
+            <LinearLayout
+                android:id="@+id/widget_reading_side"
+                android:layout_width="0dp"
+                android:layout_height="match_parent"
+                android:layout_marginStart="4dp"
+                android:layout_weight="1"
+                android:gravity="center_vertical"
+                android:orientation="vertical"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp">
+
+                <TextView
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="@string/widget_continue_reading"
+                    android:textColor="@color/widget_text_secondary"
+                    android:textSize="12sp" />
+
+                <TextView
+                    android:id="@+id/widget_reading_side_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="@string/widget_preview_reading"
+                    android:textColor="@color/widget_text"
+                    android:textSize="14sp" />
+
+                <ProgressBar
+                    android:id="@+id/widget_reading_side_progress"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="match_parent"
+                    android:layout_height="3dp"
+                    android:layout_marginTop="4dp"
+                    android:indeterminate="false"
+                    android:max="1000"
+                    android:progress="650"
+                    android:progressDrawable="@drawable/widget_progress" />
+            </LinearLayout>
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/widget_reading_below"
+            android:layout_width="match_parent"
+            android:layout_height="48dp"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingStart="4dp"
+            android:paddingEnd="8dp"
+            android:visibility="gone">
+
+            <ImageView
+                android:layout_width="40dp"
+                android:layout_height="24dp"
+                android:importantForAccessibility="no"
+                android:src="@drawable/ic_widget_book"
+                android:tint="@color/widget_text_secondary" />
+
+            <LinearLayout
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginStart="8dp"
+                android:layout_weight="1"
+                android:orientation="vertical">
+
+                <TextView
+                    android:id="@+id/widget_reading_below_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:ellipsize="end"
+                    android:maxLines="1"
+                    android:text="@string/widget_preview_reading"
+                    android:textColor="@color/widget_text"
+                    android:textSize="14sp" />
+
+                <ProgressBar
+                    android:id="@+id/widget_reading_below_progress"
+                    style="?android:attr/progressBarStyleHorizontal"
+                    android:layout_width="match_parent"
+                    android:layout_height="3dp"
+                    android:layout_marginTop="4dp"
+                    android:indeterminate="false"
+                    android:max="1000"
+                    android:progress="650"
+                    android:progressDrawable="@drawable/widget_progress" />
+            </LinearLayout>
+        </LinearLayout>
+    </LinearLayout>
+</FrameLayout>

@@ -66,7 +66,7 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('mode-toggle')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('mode-item-scroll')));
+    await tester.tap(find.byKey(const Key('mode-item-page')));
     await tester.pumpAndSettle();
   }
 
@@ -147,25 +147,26 @@ void main() {
     expect(cursorWordText(tester), 'Second');
   });
 
-  testWidgets(
-      'a manual tap-to-seek detaches — the chip reads "Resume following" '
-      'and further ticks stop moving the cursor', (tester) async {
+  // 1.5.5 ruling: on Page a tapped word seeks the audio there and keeps
+  // following, as the transcript view did.
+  testWidgets('tapping a word on Page seeks the audio there and keeps '
+      'following', (tester) async {
     final work = await seedAlignedEpisode();
     await controller.playWork(work);
     await openInScroll(tester, work);
     expect(find.text('Following audio'), findsOneWidget);
+    fakePlayer.log.clear();
 
     await tester.tap(find.text('alpha.')); // segment 0, not the drop cap
     await tester.pump();
 
-    expect(find.text('Resume following'), findsOneWidget);
+    expect(find.text('Following audio'), findsOneWidget);
+    expect(fakePlayer.log.where((l) => l.startsWith('seek:')), isNotEmpty);
 
     fakePlayer.emitPosition(const Duration(seconds: 15)); // segment 1
     await tester.pump();
-
-    expect(cursorWordText(tester), 'alpha.',
-        reason: 'the manual seek detached following — the tick must not '
-            'have moved the cursor');
+    expect(cursorWordText(tester), 'Second',
+        reason: 'still following: the next tick moves the cursor');
   });
 
   testWidgets(
@@ -190,7 +191,8 @@ void main() {
     final work = await seedAlignedEpisode();
     await controller.playWork(work);
     await openInScroll(tester, work);
-    await tester.tap(find.text('alpha.')); // segment 0, not the drop cap
+    // The chip itself detaches (a word tap no longer does on Page).
+    await tester.tap(find.byKey(const Key('follow-audio-chip')));
     await tester.pump();
     expect(find.text('Resume following'), findsOneWidget);
 

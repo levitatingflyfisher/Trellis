@@ -58,7 +58,7 @@ void main() {
   Future<void> seekIntoSegmentTwo(WidgetTester tester) async {
     await tester.tap(find.byKey(const Key('mode-toggle')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('mode-item-scroll')));
+    await tester.tap(find.byKey(const Key('mode-item-page')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('spy.'));
     await tester.pumpAndSettle();

@@ -159,4 +159,19 @@ void main() {
       expect(doc.words[idx], '再');
     });
   });
+
+  group('Arabic and Devanagari terminators (1.5.5: those languages are '
+      'now translated from)', () {
+    test('the Arabic question mark ends a sentence', () {
+      final s = splitSentences('كيف حالك؟ أنا بخير.');
+      expect(s.map((x) => x.text), ['كيف حالك؟', 'أنا بخير.']);
+    });
+
+    test('the danda ends a Hindi sentence, even after a one-letter word', () {
+      final s = splitSentences('यह एक किताब है। मैं पढ़ता हूँ। वह न।  ठीक है।');
+      expect(s.map((x) => x.text),
+          ['यह एक किताब है।', 'मैं पढ़ता हूँ।', 'वह न।', 'ठीक है।']);
+      expect(s[1].firstWordIdx, 4);
+    });
+  });
 }

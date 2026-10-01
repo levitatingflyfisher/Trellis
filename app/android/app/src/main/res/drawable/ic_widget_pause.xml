@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Material Icons "pause", the glyph the app's own player shows, taken
+     from the Material Icons font Flutter ships (Apache-2.0). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <path
+        android:fillColor="#FF000000"
+        android:pathData="M6.0 18.984375H9.984375V5.015625H6.0V18.984375ZM14.015625 5.015625V18.984375H18.0V5.015625H14.015625Z" />
+</vector>

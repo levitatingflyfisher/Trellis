@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:trellis/features/works/work_page.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/main.dart';
 import 'package:trellis/services/device_services.dart';
@@ -348,6 +349,48 @@ void main() {
 
     // The bar lives in the shell: still there on the Library tab.
     await tester.tap(tabLabel('Library'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('mini-player')), findsOneWidget);
+  });
+
+  // 1.5.5 (user: "I'd like the little pop up of play controls to exist
+  // wherever I am in the app"): pushed pages carry the bar too, once,
+  // and a popup over the shell never adds a second.
+  testWidgets('the mini bar shows on a pushed page while playing',
+      (tester) async {
+    final profileId = await seedProfile();
+    final feedId = await db.feedsDao.insertFeed(
+      profileId: profileId,
+      url: 'https://a/f',
+    );
+    final workId = await seedRiverItem(
+      profileId: profileId,
+      feedId: feedId,
+      title: 'An audio item',
+      publishedAtMs: 1000,
+      enclosureUrl: 'https://a/1.mp3',
+    );
+
+    await pumpApp(tester, ScriptedFetcher((u, h) => textResponse(_rssOne)));
+    await openRiver(tester);
+    await tester.tap(find.byKey(Key('play-$workId')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('mini-player')), findsOneWidget);
+
+    // The work page, a pushed route.
+    await tester.tap(find.text('An audio item').first);
+    await tester.pumpAndSettle();
+    expect(find.byType(WorkPage), findsOneWidget);
+    expect(find.byKey(const Key('mini-player')), findsOneWidget);
+
+    // Its sleep timer opens from the bar above the Navigator.
+    await tester.tap(find.byKey(const Key('open-sleep-timer')));
+    await tester.pumpAndSettle();
+    expect(find.byType(BottomSheet), findsOneWidget);
+    await tester.tapAt(const Offset(10, 10));
+    await tester.pumpAndSettle();
+
+    await tester.pageBack();
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('mini-player')), findsOneWidget);
   });

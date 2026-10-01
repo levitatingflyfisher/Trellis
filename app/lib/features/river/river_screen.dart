@@ -24,7 +24,7 @@ import '../reader/speech/speech_engine.dart';
 import '../search/search_entry.dart';
 import '../search/search_screen.dart';
 import '../reader/speech/speech_temp_files.dart';
-import '../reader/translation/marian_engine.dart';
+import '../reader/translation/translation_service.dart';
 import '../transcribe/job_cards.dart';
 import '../transcribe/transcribe_coordinator.dart';
 import 'river_triage.dart';
@@ -75,16 +75,9 @@ class RiverScreen extends StatefulWidget {
   /// See `LibraryScreen.createSpeechTempFiles`.
   final SpeechTempFiles Function()? createSpeechTempFiles;
 
-  /// Resolves a translator for a specific (source, target) pair (Campaign
-  /// 8 "Babel widens" Phase 1, generalizing ADR-0008 "Babel" Phase 3) —
-  /// see `LibraryScreen.resolveTranslator`.
-  final Future<MarianTranslator?> Function(
-      {required String sourceLang, required String targetLang})?
-      resolveTranslator;
-
-  /// See `LibraryScreen.availableTranslationTargets`.
-  final Future<List<String>> Function({required String sourceLang})?
-      availableTranslationTargets;
+  /// Translation for the readers this opens (1.5.5); null hides
+  /// Translate. See [TranslationService].
+  final TranslationService? translation;
 
   /// The speak-mode voice, only for books the Subscriptions page opens;
   /// see `LibraryScreen.tts`.
@@ -94,9 +87,19 @@ class RiverScreen extends StatefulWidget {
   /// under the other tabs; coming back re-reads what is loaded, in place.
   final bool active;
 
+  /// Bumped by the shell when something lands in Latest from outside this
+  /// screen (a share); a change re-reads the list in place.
+  final int changes;
+
+  /// Told when a row is opened, before its page shows: a shared link
+  /// that was never read gets its page tried again.
+  final void Function(int workId)? onOpenWork;
+
   const RiverScreen(
       {super.key,
       this.active = true,
+      this.changes = 0,
+      this.onOpenWork,
       required this.db,
       required this.profile,
       required this.repository,
@@ -109,8 +112,7 @@ class RiverScreen extends StatefulWidget {
       this.resolveSpeechEngine,
       this.lookupDefinition,
       this.createSpeechTempFiles,
-      this.resolveTranslator,
-      this.availableTranslationTargets,
+      this.translation,
       this.tts});
 
   @override
@@ -211,7 +213,9 @@ class _RiverScreenState extends State<RiverScreen>
     super.didUpdateWidget(old);
     // Back from another tab, where any loaded row may have changed (kept,
     // played, queued); the re-read keeps the list's length, so its place.
-    if (widget.active && !old.active) _reloadLoaded();
+    if ((widget.active && !old.active) || widget.changes != old.changes) {
+      _reloadLoaded();
+    }
   }
 
   Future<void> _markVisit() async {
@@ -420,8 +424,7 @@ class _RiverScreenState extends State<RiverScreen>
       lookupDefinition: widget.lookupDefinition,
       createSpeechTempFiles: widget.createSpeechTempFiles,
       player: widget.playerController,
-      resolveTranslator: widget.resolveTranslator,
-      availableTranslationTargets: widget.availableTranslationTargets);
+      translation: widget.translation);
 
   SearchDoors get _searchDoors => SearchDoors(
       db: widget.db,
@@ -462,6 +465,7 @@ class _RiverScreenState extends State<RiverScreen>
       actions: _actions);
 
   Future<void> _openItem(RiverEntry e) async {
+    widget.onOpenWork?.call(e.work.id);
     final removal = await _workDoors.open(
         context, (work: e.work, episode: e.episode),
         showTitle: e.feedTitle);

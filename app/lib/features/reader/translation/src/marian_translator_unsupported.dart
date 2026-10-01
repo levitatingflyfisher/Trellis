@@ -9,20 +9,23 @@
 library;
 
 import '../marian_types.dart';
+import '../translator.dart';
 
-class MarianTranslator {
+class MarianTranslator implements SentenceTranslator {
   MarianTranslator({
     required MarianTranslatorFiles files,
     MarianModelHandleFactory? openHandle,
   }) {
     throw UnsupportedError(
-      'the Spanish translator needs the native tier; it is not '
+      'the offline translator needs the native tier; it is not '
       'available on this platform yet',
     );
   }
 
+  @override
   Future<String> translate(String sentence) =>
       throw UnsupportedError('unreachable: the constructor refuses');
 
+  @override
   Future<void> dispose() async {}
 }

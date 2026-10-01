@@ -17,7 +17,7 @@ import '../player/player_controller.dart';
 import '../reader/reader_doors.dart';
 import '../reader/speech/speech_engine.dart';
 import '../reader/speech/speech_temp_files.dart';
-import '../reader/translation/marian_engine.dart';
+import '../reader/translation/translation_service.dart';
 import '../settings/theme_preference.dart';
 import '../episodes/episode_actions.dart';
 import '../works/work_menu.dart';
@@ -88,20 +88,9 @@ class LibraryScreen extends StatefulWidget {
   /// (existing call sites) just hides the button.
   final PlayerController? player;
 
-  /// Resolves a translator for a specific (source, target) pair (Campaign
-  /// 8 "Babel widens" Phase 1, generalizing ADR-0008 "Babel" Phase 3) —
-  /// the shell closes over `DeviceServices.resolveTranslator`; null keeps
-  /// every reader this screen opens without a "Translate…" action, the
-  /// same shape as [resolveSpeechEngine].
-  final Future<MarianTranslator?> Function(
-      {required String sourceLang, required String targetLang})?
-      resolveTranslator;
-
-  /// The picker's own data source (Campaign 8 "Babel widens" Phase 1) —
-  /// the shell closes over `DeviceServices.availableTranslationTargets`;
-  /// null (or an empty result) keeps the "Translate…" action hidden.
-  final Future<List<String>> Function({required String sourceLang})?
-      availableTranslationTargets;
+  /// Translation for the readers this opens (1.5.5); null hides
+  /// Translate. See [TranslationService].
+  final TranslationService? translation;
 
   /// The audiobook door (Campaign 7, ADR-0013): pick, confirm a title,
   /// copy. Null hides the "Audiobook" option — the shell only wires this
@@ -135,8 +124,7 @@ class LibraryScreen extends StatefulWidget {
       this.lookupDefinition,
       this.createSpeechTempFiles,
       this.player,
-      this.resolveTranslator,
-      this.availableTranslationTargets,
+      this.translation,
       this.onImportAudiobook,
       this.onDeleteAudiobookFiles,
       this.actions});
@@ -464,8 +452,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       lookupDefinition: widget.lookupDefinition,
       createSpeechTempFiles: widget.createSpeechTempFiles,
       player: widget.player,
-      resolveTranslator: widget.resolveTranslator,
-      availableTranslationTargets: widget.availableTranslationTargets);
+      translation: widget.translation);
 
   WorkDoors get _doors => WorkDoors(
       db: widget.db,

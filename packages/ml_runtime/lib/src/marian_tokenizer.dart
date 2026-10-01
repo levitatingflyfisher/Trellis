@@ -325,6 +325,12 @@ class MarianVocabulary {
     });
   }
 
+  /// The id of a multi-target model's `>>xx<<` target-language token,
+  /// or null when this vocabulary has none by that name. Looked up here,
+  /// never through SentencePiece: the piece table has no such piece and
+  /// would shred it into `▁>`, `>`, `pt`, ... (docs/reference/mt-models.md).
+  int? directiveId(String token) => _idByPiece[token];
+
   /// [piece]'s id, or [unkId] when it is not a vocabulary entry.
   int idOf(String piece) => _idByPiece[piece] ?? unkId;
 

@@ -39,7 +39,7 @@ void main() {
     // rather than cycling on its own tap.
     await tester.tap(find.byKey(const Key('mode-toggle')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('mode-item-scroll')));
+    await tester.tap(find.byKey(const Key('mode-item-page')));
     await tester.pumpAndSettle();
   }
 
@@ -70,7 +70,7 @@ void main() {
         lang: 'es',
         sourceText: 'Hello there.',
         body: 'Hola.');
-    await db.spineDao.setShowTranslationLayer(workId, true);
+    await db.spineDao.setActiveTranslationLang(workId, 'es');
     await openScroll(tester);
 
     expect(find.text('Hola.'), findsOneWidget);
@@ -88,7 +88,7 @@ void main() {
         lang: 'es',
         sourceText: 'A completely different sentence.',
         body: 'Hola.');
-    await db.spineDao.setShowTranslationLayer(workId, true);
+    await db.spineDao.setActiveTranslationLang(workId, 'es');
     await openScroll(tester);
 
     expect(find.text('Hola.'), findsNothing);
@@ -104,7 +104,7 @@ void main() {
         lang: 'es',
         sourceText: 'Hello there.',
         body: 'Hola.');
-    await db.spineDao.setShowTranslationLayer(workId, true);
+    await db.spineDao.setActiveTranslationLang(workId, 'es');
     await openScroll(tester);
 
     // Tap a word in the SECOND sentence; the cursor must land exactly on
@@ -117,7 +117,7 @@ void main() {
 
   testWidgets('the drop cap still renders on the work\'s opening word under '
       'dual display', (tester) async {
-    await db.spineDao.setShowTranslationLayer(workId, true);
+    await db.spineDao.setActiveTranslationLang(workId, 'es');
     await openScroll(tester);
     expect(find.byKey(const Key('drop-cap')), findsOneWidget);
   });

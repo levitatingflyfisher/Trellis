@@ -97,6 +97,11 @@ abstract class ModelStore {
   /// Bytes already resting in `.part` files — the "Paused — X of Y" state.
   Future<int> partialBytes(ModelSpec spec);
 
+  /// Bytes a download of [spec] would still fetch: zero once installed.
+  /// Files already complete are skipped by [download], so a spec that
+  /// gained a small file (1.5.5's translation configs) costs only that.
+  Future<int> missingBytes(ModelSpec spec);
+
   Future<void> delete(ModelSpec spec);
 
   /// Where [file] of [spec] lives once installed (engines load from here).
@@ -253,6 +258,22 @@ class DiskModelStore implements ModelStore {
     for (final f in spec.files) {
       final part = File('${pathOf(spec, f)}.part');
       if (part.existsSync()) sum += part.lengthSync();
+    }
+    return sum;
+  }
+
+  @override
+  Future<int> missingBytes(ModelSpec spec) async {
+    if (await isDownloaded(spec)) return 0;
+    if (spec.archiveLayout != null || spec.dictionaryArchiveLayout != null) {
+      return spec.sizeBytes - await partialBytes(spec);
+    }
+    var sum = 0;
+    for (final f in spec.files) {
+      final file = File(pathOf(spec, f));
+      if (file.existsSync() && file.lengthSync() == f.bytes) continue;
+      final part = File('${file.path}.part');
+      sum += f.bytes - (part.existsSync() ? part.lengthSync() : 0);
     }
     return sum;
   }

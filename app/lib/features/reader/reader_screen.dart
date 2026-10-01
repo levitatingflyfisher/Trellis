@@ -15,6 +15,9 @@ import '../../services/device_services.dart';
 import '../brain/brain_store.dart';
 import '../brain/distill_screen.dart';
 import '../intake/paste_intake.dart' show epochDayUtcNow;
+import '../models/consent.dart';
+import '../models/format.dart';
+import '../models/model_store.dart';
 import '../player/player_controller.dart';
 import 'dictionary_sheet.dart';
 import 'ledger_screen.dart';
@@ -24,6 +27,7 @@ import 'reader_logic.dart';
 import 'reader_prefs.dart';
 import 'reader_typography_settings_screen.dart';
 import 'recap_sheet.dart';
+import '../player/speed_control.dart';
 import 'speech/just_audio_speech_queue.dart';
 import 'speech/speech_audio_queue.dart';
 import 'speech/speech_engine.dart';
@@ -31,9 +35,10 @@ import 'speech/speech_playback_pipeline.dart';
 import 'speech/speech_temp_files.dart';
 import 'speech/supertonic_voice_handle.dart' show supertonicSupportedLangs;
 import 'translation/language_names.dart';
-import 'translation/marian_engine.dart';
 import 'translation/sentence_units.dart';
 import 'translation/translation_job.dart';
+import 'translation/translation_route.dart';
+import 'translation/translation_service.dart';
 
 /// The hearth red — the heritage ORP pivot color carried from both donors,
 /// which is the fleet's own hearth500 (C1: from the tokens, not retyped).
@@ -45,20 +50,38 @@ const Color kPivotColor = OhColors.hearth500;
 /// one word ([rsvp]) or nothing beyond the current segment ([scroll]).
 enum ReaderMode { rsvp, scroll, lines }
 
-/// The mode picker's own public label — distinct from the internal
-/// [ReaderMode] names the same way "Parafoveal" is the public name for
-/// what this file's own tests call "ticker" (see [_parafoveal]'s doc
-/// comment): [ReaderMode.rsvp] reads "Words" to a reader, never "RSVP".
+/// The mode picker's public label (1.5.5 user ruling: two modes, RSVP
+/// and Page; "three screens for 'read this text' is insane"). Scroll and
+/// Lines are both Page; what differs is Page's highlight, see
+/// [pageHighlightLabel]. No highlight label reuses a mode's name.
 String readerModeLabel(ReaderMode m) => switch (m) {
-      ReaderMode.rsvp => 'Words',
-      ReaderMode.scroll => 'Scroll',
-      ReaderMode.lines => 'Lines',
+      ReaderMode.rsvp => 'RSVP',
+      ReaderMode.scroll || ReaderMode.lines => 'Page',
+    };
+
+String readerModeDescription(ReaderMode m) => switch (m) {
+      // The user's wording; the house copy rule forbids a spaced em dash.
+      ReaderMode.rsvp => 'Rapid serial visual presentation: one word at a '
+          'time, eyes still (foveal reading).',
+      ReaderMode.scroll ||
+      ReaderMode.lines =>
+        'The whole text, lit as it is read or heard.',
+    };
+
+/// Page's highlight: Follow along (word by word, the default) or Line.
+String pageHighlightLabel(ReaderMode m) => switch (m) {
+      ReaderMode.lines => 'Line',
+      _ => 'Follow along',
+    };
+
+String pageHighlightDescription(ReaderMode m) => switch (m) {
+      ReaderMode.lines => 'Lights one line of text at a time.',
+      _ => 'Lights each word as it is spoken.',
     };
 
 IconData readerModeIcon(ReaderMode m) => switch (m) {
       ReaderMode.rsvp => Icons.center_focus_strong,
-      ReaderMode.scroll => Icons.notes,
-      ReaderMode.lines => Icons.view_stream_outlined,
+      ReaderMode.scroll || ReaderMode.lines => Icons.article_outlined,
     };
 
 /// The alpha reader: RSVP (donor pacing + ORP pivot) and Scroll (flowing
@@ -128,31 +151,10 @@ class ReaderScreen extends StatefulWidget {
   /// never a dead one dangled where playback can't actually start.
   final PlayerController? player;
 
-  /// Resolves a translator for a specific (source, target) pair (Campaign
-  /// 8 "Babel widens" Phase 1, generalizing ADR-0008 "Babel" Phase 3's
-  /// fixed-Spanish version) — the shell closes over
-  /// `DeviceServices.resolveTranslator`. Null (or a call that resolves to
-  /// null, meaning that pair isn't downloaded) keeps the "Translate…"
-  /// action hidden for a work whose declared language has NO downloaded
-  /// pair, and keeps the specific target refused if picked anyway. Called
-  /// once per target chosen, not once per screen session — unlike
-  /// [resolveSpeechEngine], a work can pick a NEW target at any time, so
-  /// there is nothing to cache until a target is actually chosen (see
-  /// [ReaderScreen.availableTranslationTargets] for the picker's own,
-  /// once-per-session resolution).
-  final Future<MarianTranslator?> Function(
-      {required String sourceLang, required String targetLang})?
-      resolveTranslator;
-
-  /// Every target language this device can actually translate a work's
-  /// declared source language into RIGHT NOW — a downloaded pair, never
-  /// merely a registered one (Campaign 8 "Babel widens" Phase 1). Null
-  /// (or an empty list) keeps the "Translate…" action hidden entirely.
-  /// Resolved once, in [_load], the same residency law
-  /// [resolveSpeechEngine] follows — the picker's OPTIONS don't change
-  /// mid-session even though which one is ACTIVE can.
-  final Future<List<String>> Function({required String sourceLang})?
-      availableTranslationTargets;
+  /// Translation (1.5.5): every language this work can go into, what
+  /// each costs to download, the download, and the models. Null (the web
+  /// tier) hides Translate.
+  final TranslationService? translation;
 
   /// Campaign 4 Phase 4: true when this work was reopened untouched for
   /// more than 3 UTC days with real progress already made
@@ -179,6 +181,10 @@ class ReaderScreen extends StatefulWidget {
   final String? layerLang;
   final bool openTranslatePicker;
 
+  /// Opens on Page even if RSVP was last used: the door from a transcribed
+  /// episode's Read and from the player.
+  final bool openOnPage;
+
   const ReaderScreen(
       {super.key,
       required this.db,
@@ -192,14 +198,14 @@ class ReaderScreen extends StatefulWidget {
       this.createSpeechAudioQueue,
       this.createSpeechTempFiles,
       this.player,
-      this.resolveTranslator,
-      this.availableTranslationTargets,
+      this.translation,
       this.offerRecap = false,
       this.startSegmentIdx,
       this.startSpeaking = false,
       this.speakTranslation = false,
       this.layerLang,
-      this.openTranslatePicker = false});
+      this.openTranslatePicker = false,
+      this.openOnPage = false});
 
   @override
   State<ReaderScreen> createState() => _ReaderScreenState();
@@ -222,6 +228,9 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// is still to be carried out: once, after the first load.
   bool _entryPending = true;
   ReaderMode _mode = ReaderMode.rsvp;
+
+  /// Page's last highlight, so RSVP then Page comes back to it.
+  ReaderMode _pageMode = ReaderMode.scroll;
   int _scrollAnchor = 0; // segment the scroll view opens around
 
   /// Campaign 4 Phase 2 follow-along: one [GlobalKey] per built segment
@@ -348,24 +357,18 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// only while [_activeLang] is null (guards against numbering under a
   /// language-swapped projection, whose own `splitSentences` boundaries
   /// can differ from the English original's).
-  MarianTranslator? _translatorHolder;
-  TranslationJobController? _translationJob;
+  TranslationRun? _translationJob;
 
-  /// Every target this work's declared source language can actually
-  /// translate into right now (a downloaded pair) — the "Translate…"
-  /// picker's own options, resolved once in [_load]. Empty hides the
-  /// action entirely.
-  List<String> _availableTargets = const [];
+  /// The legs being downloaded for a translation the reader just picked,
+  /// with their progress; null when nothing is downloading.
+  ModelDownload? _download;
+  ModelDownloadProgress? _downloadProgress;
+  String? _downloadLabel;
 
   /// The one active translation target for this work (`null` = none
   /// chosen yet), mirroring [Works.activeTranslationLang] — "one active
   /// translation layer per work at a time" made literal: picking a new
-  /// target REPLACES this, never adds to a set. A LEGACY fallback: a work
-  /// translated before this campaign has `showTranslationLayer=true` and
-  /// `activeTranslationLang=null` (the column didn't exist yet) — 'es'
-  /// was the only language that could have written it, so [_load] reads
-  /// that case as an implicit 'es' rather than showing nothing for data
-  /// that was genuinely there.
+  /// target REPLACES this, never adds to a set.
   String? _activeTranslationLang;
   bool _showTranslation = false;
   Map<(int, int), TranslationSentence> _translatedSentences = const {};
@@ -400,13 +403,11 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// read picks that up. `null` until the first [_load] completes.
   String? _workLang;
 
-  /// The work's declared source language (Campaign 8 "Babel widens" Phase
-  /// 1) — defaults to 'en' when nothing was declared at intake time
-  /// (most intake paths never populate [Work.lang]; see
-  /// docs/reference/mt-models.md). A UI-layer convention, not a DB-layer
-  /// one: the row itself stays honestly null until a reader corrects it
-  /// through the calm per-work selector.
-  String get _sourceLang => _workLang ?? widget.work.lang ?? 'en';
+  /// What the work is written in (1.5.5, [resolveSourceLanguage]): its
+  /// own language, else its feed's, else what whisper heard in its
+  /// transcript. Null when nobody knows; Translate then asks first, and
+  /// never assumes English.
+  String? _sourceLang;
 
   @override
   void initState() {
@@ -438,8 +439,10 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (queue != null) unawaited(queue.dispose().catchError((_) {}));
     final synthEngine = _synthEngineHolder;
     if (synthEngine != null) unawaited(synthEngine.dispose().catchError((_) {}));
-    final translator = _translatorHolder;
-    if (translator != null) unawaited(translator.dispose().catchError((_) {}));
+    // Leaving mid-translation stops the run at the next sentence and frees
+    // its model, but keeps the run marker: the next open picks it up.
+    _translationJob?.stop();
+    _download?.cancel();
     // Backstop save; the deterministic paths are pause/back/background. The
     // app may already be tearing this db down (tests do), hence best-effort.
     unawaited(_savePosition().catchError((_) {}));
@@ -536,40 +539,25 @@ class _ReaderScreenState extends State<ReaderScreen>
                   tStartMs: a.tStartMs,
                   tEndMs: a.tEndMs),
           ]);
-    // The translation store (Campaign 8 "Babel widens" Phase 1,
-    // generalizing ADR-0008 "Babel" Phase 3): the picker's OPTIONS,
-    // resolved once, the same residency law the neural voice follows
-    // above; WHICH ONE is active, and its translator/stored sentences.
-    final sourceLang = workLang ?? 'en';
-    final targetsResolver = widget.availableTranslationTargets;
-    final availableTargets = targetsResolver == null
-        ? const <String>[]
-        : await targetsResolver(sourceLang: sourceLang);
-    var activeLang =
+    // The translation store: which language is active, and its sentences.
+    final feedLang =
+        await widget.db.feedsDao.languageOfWorkFeed(widget.work.id);
+    final transcriptLangs = await widget.db.spineDao
+        .layerLangsOf(widget.work.id, kind: 'transcript');
+    final sourceLang = resolveSourceLanguage(
+        workLang: workLang,
+        feedLang: feedLang,
+        transcriptLang: transcriptLangs.isEmpty ? null : transcriptLangs.first);
+    final activeLang =
         await widget.db.spineDao.activeTranslationLang(widget.work.id);
     final showTranslation =
         await widget.db.spineDao.showTranslationLayer(widget.work.id);
-    // Legacy fallback: a work translated before this campaign has
-    // activeTranslationLang=null (the column didn't exist yet) — 'es' was
-    // the only language that could have written it. This probe is
-    // independent of showTranslation's current value: a 1.3.0 user who
-    // had stored Spanish but had toggled the display OFF must still see
-    // the "Show Spanish" control on reopen, not lose it because the bool
-    // that gates DISPLAY got conflated with the probe for EXISTENCE.
-    if (activeLang == null) {
-      final hasEs = await widget.db.spineDao
-          .hasTranslationSentences(widget.work.id, lang: 'es');
-      if (hasEs) activeLang = 'es';
-    }
-    final translatorResolver = widget.resolveTranslator;
-    final translator = translatorResolver == null || activeLang == null
-        ? null
-        : await translatorResolver(
-            sourceLang: sourceLang, targetLang: activeLang);
     final translatedSentences = activeLang == null
         ? const <(int, int), TranslationSentence>{}
         : await widget.db.spineDao
             .translationSentencesOf(widget.work.id, lang: activeLang);
+    final unfinishedRun =
+        await widget.db.spineDao.translationRunLang(widget.work.id);
     final readerPrefs = await widget.db.profilesDao.readerPrefs(widget.profileId);
     if (!mounted) return;
     setState(() {
@@ -585,9 +573,8 @@ class _ReaderScreenState extends State<ReaderScreen>
       _synthEngineHolder = synthEngine;
       _hasAlignedAudio = hasAlignedAudio;
       _workLang = workLang;
-      _availableTargets = availableTargets;
+      _sourceLang = sourceLang;
       _spine = spine;
-      _translatorHolder = translator;
       _activeTranslationLang = activeLang;
       _showTranslation = showTranslation;
       _translatedSentences = translatedSentences;
@@ -596,6 +583,10 @@ class _ReaderScreenState extends State<ReaderScreen>
       // "the reader forgets their settings" was a reason to quit).
       final session = readerPrefs.session;
       _mode = _modeFromWire(session.mode);
+      if (_mode != ReaderMode.rsvp) _pageMode = _mode;
+      // Read on a transcribed episode, or the player's Page door, opens
+      // on Page whatever was last used.
+      if (widget.openOnPage && _mode == ReaderMode.rsvp) _mode = _pageMode;
       _wpm = session.wpm;
       _parafoveal = session.nearbyWords;
       _sigma = session.focusSpread;
@@ -616,6 +607,10 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (_entryPending) {
       _entryPending = false;
       _applyEntry();
+    }
+    // A run the system killed (its marker outlived it) carries on.
+    if (unfinishedRun != null && _translationJob == null && mounted) {
+      unawaited(_resumeTranslation(unfinishedRun));
     }
   }
 
@@ -997,30 +992,21 @@ class _ReaderScreenState extends State<ReaderScreen>
     await widget.db.profilesDao.setPreferSystemVoice(widget.profileId, next);
   }
 
-  // ───── translation (ADR-0008 "Babel" Phase 3; Campaign 8 "Babel
-  // widens" Phase 1 generalizes it to any registered, downloaded pair) ─────
+  // ───── translation (ADR-0008 "Babel"; Campaign 8 "Babel widens"; any
+  // registered language, downloaded on demand and via English, 1.5.5) ─────
 
-  /// Opens the "Translate…" picker and, if the reader picks a target,
-  /// starts translating into it. A no-op if there is nothing to offer —
-  /// the menu item itself is hidden in that case (see the overflow menu's
-  /// `itemBuilder`), so this is a second, defensive gate, not the only
-  /// one.
   /// The calm per-work source-language selector (Campaign 8 "Babel
-  /// widens" Phase 1) — most intake paths never populate [Work.lang] at
-  /// import time (see docs/reference/mt-models.md), so a reader who knows
-  /// better corrects it here. No auto-detection — a curated list, never a
-  /// guess. Reloads the whole screen afterward: a language change can
-  /// change [_availableTargets], which voice [_synthEngineHolder] should
-  /// even be, and whether an already-active translation still makes
-  /// sense — simplest and safest to re-derive all of it through the same
-  /// [_load] every other state field already trusts, rather than
-  /// hand-patching each one here.
-  Future<void> _openWorkLanguagePicker() async {
+  /// widens" Phase 1): a curated list, never a guess. Returns the chosen
+  /// language (or the current one if the reader backs out). Reloads the
+  /// whole screen after a change: a language change can change which
+  /// voice [_synthEngineHolder] should be and whether an active
+  /// translation still makes sense, and [_load] re-derives all of it.
+  Future<String?> _openWorkLanguagePicker({String? title}) async {
     final chosen = await showDialog<String>(
       context: context,
       builder: (ctx) => SimpleDialog(
         key: const Key('work-language-picker'),
-        title: const Text('This work is in…'),
+        title: Text(title ?? 'This work is in…'),
         children: [
           for (final lang in selectableWorkLanguages)
             SimpleDialogOption(
@@ -1031,80 +1017,199 @@ class _ReaderScreenState extends State<ReaderScreen>
         ],
       ),
     );
-    if (chosen == null || chosen == _sourceLang) return;
+    if (chosen == null || chosen == _sourceLang) return _sourceLang;
     await widget.db.spineDao.setWorkLang(widget.work.id, chosen);
-    if (!mounted) return;
+    if (!mounted) return chosen;
     await _load();
+    return chosen;
   }
 
+  /// The Translate sheet (1.5.5): every language this work can go into,
+  /// each marked ready or with what it would download (both legs, via
+  /// English, when there is no direct pair). Picking one downloads what
+  /// is missing after one confirmation, then translates. Asks what the
+  /// work is written in first when nobody knows.
   Future<void> _openTranslatePicker() async {
-    if (_availableTargets.isEmpty || _activeLang != null) return;
-    final chosen = await showDialog<String>(
+    final service = widget.translation;
+    if (service == null || _activeLang != null) return;
+    if (_translationJob != null || _download != null) return;
+    final source = _sourceLang ??
+        await _openWorkLanguagePicker(title: 'What language is this in?');
+    if (source == null || !mounted) return;
+    final routes = await service.routesFrom(source);
+    routes.sort((a, b) =>
+        languageDisplayName(a.target).compareTo(languageDisplayName(b.target)));
+    if (!mounted) return;
+    final chosen = await showModalBottomSheet<TranslationRoute>(
       context: context,
-      builder: (ctx) => SimpleDialog(
-        key: const Key('translate-picker'),
-        title: const Text('Translate to…'),
-        children: [
-          for (final lang in _availableTargets)
-            SimpleDialogOption(
-              key: Key('translate-target-$lang'),
-              onPressed: () => Navigator.of(ctx).pop(lang),
-              child: Text(languageDisplayName(lang)),
-            ),
-        ],
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (ctx) => SafeArea(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+              maxHeight: MediaQuery.sizeOf(ctx).height * 0.75),
+          child: ListView(
+            key: const Key('translate-picker'),
+            shrinkWrap: true,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text(
+                    'Translate from ${languageDisplayName(source)} to…',
+                    style: Theme.of(ctx).textTheme.titleMedium),
+              ),
+              if (routes.isEmpty)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+                  child: Text(
+                      'There’s no offline translator for '
+                      '${languageDisplayName(source)} yet.',
+                      key: const Key('translate-none')),
+                ),
+              for (final r in routes)
+                ListTile(
+                  key: Key('translate-target-${r.target}'),
+                  minTileHeight: 56,
+                  title: Text(languageDisplayName(r.target)),
+                  subtitle: Text(_routeLine(r)),
+                  trailing: Icon(r.ready
+                      ? Icons.chevron_right
+                      : Icons.download_outlined),
+                  onTap: () => Navigator.of(ctx).pop(r),
+                ),
+            ],
+          ),
+        ),
       ),
     );
-    if (chosen != null) await _startTranslation(chosen);
+    if (chosen == null || !mounted) return;
+    if (!chosen.ready && !await _downloadLegs(chosen)) return;
+    final fresh = await service.route(source, chosen.target);
+    if (fresh == null || !fresh.ready || !mounted) return;
+    await _startTranslation(fresh);
   }
 
-  /// Runs the cancellable, resumable Translate-to-[targetLang] batch over
-  /// [_original] — never [_blocks], which under [_activeLang] is a
+  /// "Ready", "Via English · Ready", "Download 113 MB", ...
+  static String _routeLine(TranslationRoute r) {
+    final how = r.ready ? 'Ready' : 'Download ${formatBytes(r.missingBytes)}';
+    return r.viaEnglish ? 'Via English · $how' : how;
+  }
+
+  /// Downloads every missing leg of [route] after ONE confirmation that
+  /// names each leg and its size (the consent chokepoint, ADR-0003 law
+  /// 6). Shows progress in the body with a Cancel; returns true only once
+  /// every leg is installed.
+  Future<bool> _downloadLegs(TranslationRoute route) async {
+    final service = widget.translation!;
+    final missing = route.missing;
+    final ok = await confirmDownload(context, items: [
+      for (final l in missing)
+        DownloadItem('${languageDisplayName(l.source)} to '
+            '${languageDisplayName(l.target)} translator, '
+            '${formatBytes(l.missingBytes)}'),
+      if (missing.length > 1)
+        DownloadItem('${formatBytes(route.missingBytes)} in all, to '
+            'translate via English'),
+    ]);
+    if (!ok || !mounted) return false;
+    for (final leg in missing) {
+      final download = service.download(leg.spec);
+      setState(() {
+        _download = download;
+        _downloadProgress = null;
+        _downloadLabel = '${languageDisplayName(leg.source)} to '
+            '${languageDisplayName(leg.target)}';
+      });
+      final sub = download.progress.listen((p) {
+        if (mounted) setState(() => _downloadProgress = p);
+      });
+      ModelInstallOutcome outcome;
+      try {
+        outcome = await download.done;
+      } catch (_) {
+        outcome = ModelInstallOutcome.cancelled;
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('The download didn’t finish. Try again '
+                  'later; what arrived is kept.')));
+        }
+      }
+      // The stream is over by now; waiting on the cancel only delays the
+      // next leg.
+      unawaited(sub.cancel());
+      if (!mounted) return false;
+      setState(() {
+        _download = null;
+        _downloadProgress = null;
+      });
+      if (outcome != ModelInstallOutcome.installed) return false;
+    }
+    return true;
+  }
+
+  /// Picks up a run the system killed, if its models are still there;
+  /// otherwise drops the marker so the reader isn't left waiting.
+  Future<void> _resumeTranslation(String target) async {
+    final service = widget.translation;
+    final source = _sourceLang;
+    final route = service == null || source == null
+        ? null
+        : await service.route(source, target);
+    if (!mounted) return;
+    if (route == null || !route.ready) {
+      await widget.db.spineDao.setTranslationRunLang(widget.work.id, null);
+      return;
+    }
+    await _startTranslation(route);
+  }
+
+  /// Runs the cancellable, resumable translation into [route]'s target
+  /// over [_original] — never [_blocks], which under [_activeLang] is a
   /// language-swapped projection whose own `splitSentences` boundaries
   /// would disagree with the store's numbering. Already-stored sentences
-  /// are skipped inside [TranslationJobController] itself; this method
-  /// resolves the translator for [targetLang] (never cached across
-  /// targets — a work can pick a NEW one at any time), starts the batch,
-  /// listens for the progress card, and reloads this screen's translation
-  /// state once the run lands (done or cancelled). Refuses [targetLang]
-  /// == the work's own declared source language even if somehow reached
-  /// (the picker itself never offers it — [DeviceServices
-  /// .availableTranslationTargets] excludes it at the source) — a second,
-  /// defensive gate, the same "never trust a single chokepoint" shape
-  /// [_openTranslatePicker]'s own emptiness check follows.
-  Future<void> _startTranslation(String targetLang) async {
-    if (targetLang == _sourceLang) return;
+  /// are skipped, so this is also how an interrupted run resumes. Each
+  /// leg's model opens when its pass starts and is freed when it ends.
+  /// Refuses a target equal to the work's own language, a second gate
+  /// behind the planner's.
+  Future<void> _startTranslation(TranslationRoute route) async {
+    final service = widget.translation;
+    if (service == null) return;
+    if (route.target == _sourceLang || route.target == route.source) return;
     if (_activeLang != null || _translationJob != null) return;
-    final resolver = widget.resolveTranslator;
-    if (resolver == null) return;
-    final translator = await resolver(
-        sourceLang: _sourceLang, targetLang: targetLang);
-    if (translator == null || !mounted) return;
     await widget.db.spineDao
-        .setActiveTranslationLang(widget.work.id, targetLang);
-    setState(() {
-      _translatorHolder = translator;
-      _activeTranslationLang = targetLang;
-      _showTranslation = true;
-    });
-    final controller = TranslationJobController(
+        .setActiveTranslationLang(widget.work.id, route.target);
+    if (!mounted) return;
+    final run = TranslationRun(
       dao: widget.db.spineDao,
       workId: widget.work.id,
       units: sentenceUnitsOf(_original),
-      translate: translator.translate,
-      lang: targetLang,
+      target: route.target,
+      steps: [
+        for (final leg in route.legs)
+          TranslationStep(lang: leg.target, open: () => service.open(leg.spec)),
+      ],
     );
-    controller.addListener(_onTranslationProgress);
-    setState(() => _translationJob = controller);
-    await controller.start();
-    controller.removeListener(_onTranslationProgress);
+    run.addListener(_onTranslationProgress);
+    setState(() {
+      _activeTranslationLang = route.target;
+      _showTranslation = true;
+      _translationJob = run;
+    });
+    await run.start();
+    run.removeListener(_onTranslationProgress);
     if (!mounted) return;
     final translatedSentences = await widget.db.spineDao
-        .translationSentencesOf(widget.work.id, lang: targetLang);
+        .translationSentencesOf(widget.work.id, lang: route.target);
     if (!mounted) return;
     setState(() {
       _translatedSentences = translatedSentences;
       _translationJob = null;
     });
+    if (run.state.phase == TranslationJobPhase.failed) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('The translator couldn’t start. Try downloading '
+              'its language again in Models.')));
+    }
   }
 
   void _onTranslationProgress() {
@@ -1194,6 +1299,22 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (doc == null || doc.words.isEmpty) return;
     _timer?.cancel();
     unawaited(_stopSpeak());
+    // 1.5.5 ruling: on Page, a tapped word while following audio seeks the
+    // audio there and keeps following, as the transcript view did.
+    final player = widget.player;
+    if (_followingAudio && _mode != ReaderMode.rsvp && player != null) {
+      final blocks = _blocks!;
+      final idx = globalIdx.clamp(0, doc.words.length - 1);
+      setState(() => _wordIdx = idx);
+      final c = cursorAt(doc, idx);
+      unawaited(player.listenFrom(
+          widget.work,
+          core.Position(
+              segmentIdx: blocks[c.segment].idx,
+              wordIdx: c.word,
+              lastModality: core.Modality.read)));
+      return;
+    }
     _detachAudioFollow(); // Campaign 9 Phase 7: the user's hand always wins
     setState(() => _wordIdx = globalIdx.clamp(0, doc.words.length - 1));
     if (_playing) _step();
@@ -1239,6 +1360,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     _pause();
     setState(() {
       _mode = next;
+      if (next != ReaderMode.rsvp) _pageMode = next;
       final doc = _doc;
       if (_mode != ReaderMode.rsvp && doc != null && doc.words.isNotEmpty) {
         _scrollAnchor = cursorAt(doc, _wordIdx).segment;
@@ -1291,6 +1413,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     final cleaned = ledgerWord(token);
     if (cleaned == null) return;
     _pause();
+    unawaited(_stopSpeak());
     unawaited(showDefinitionSheet(
       context,
       word: cleaned,
@@ -1340,20 +1463,18 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// audio and a player to hand it to. Otherwise it is the silent pacer.
   bool get _canListen => _hasAlignedAudio && widget.player != null;
 
-  /// The reader's one visible Play. With audio it listens: "Listen" hands
-  /// the cursor to the player (it replaced ⋮ → "Listen from here"), and
-  /// "Pause" pauses the player. Without audio it is the silent pacer that
-  /// used to hide in ⋮ as "Follow along", named "Play" because it makes
-  /// no sound. Null in RSVP for a work with no audio, whose controls
-  /// already hold the pacer's Play.
+  /// The reader's one visible Play (1.5.5: a Play that makes sound). With
+  /// aligned audio it listens: it hands the cursor to the player, and
+  /// pauses it, with the speed control beside it. A text is read aloud,
+  /// the same as the bar's Read aloud. RSVP's own controls hold its Play.
   Widget? _playButton({required bool fab}) {
     if (!_canListen) {
       if (!fab) return null;
       return FloatingActionButton(
         key: const Key('reader-play'),
-        tooltip: _playing ? 'Pause' : 'Play',
-        onPressed: _playing ? _pause : _play,
-        child: Icon(_playing ? Icons.pause : Icons.play_arrow),
+        tooltip: _speaking ? 'Stop reading' : 'Read aloud',
+        onPressed: _toggleSpeak,
+        child: Icon(_speaking ? Icons.pause : Icons.play_arrow),
       );
     }
     final player = widget.player!;
@@ -1370,20 +1491,35 @@ class _ReaderScreenState extends State<ReaderScreen>
                 unawaited(_stopSpeak());
                 unawaited(_listenFromHere());
               };
-        final icon = Icon(listening ? Icons.pause : Icons.headphones);
+        final icon = Icon(listening ? Icons.pause : Icons.play_arrow);
         final tooltip = listening ? 'Pause' : 'Listen';
-        return fab
-            ? FloatingActionButton(
+        if (!fab) {
+          return OhIconButton.filledTonal(
+              key: const Key('reader-play'),
+              iconSize: 28,
+              tooltip: tooltip,
+              onPressed: onPressed,
+              icon: icon);
+        }
+        return Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Material(
+              color: Theme.of(context).colorScheme.surfaceContainerHigh,
+              shape: const StadiumBorder(),
+              child: SpeedControl(
+                  key: const Key('reader-speed'),
+                  speed: player.speed,
+                  onChanged: player.setSpeed),
+            ),
+            const SizedBox(height: 8),
+            FloatingActionButton(
                 key: const Key('reader-play'),
                 tooltip: tooltip,
                 onPressed: onPressed,
-                child: icon)
-            : OhIconButton.filledTonal(
-                key: const Key('reader-play'),
-                iconSize: 28,
-                tooltip: tooltip,
-                onPressed: onPressed,
-                icon: icon);
+                child: icon),
+          ],
+        );
       },
     );
   }
@@ -1542,6 +1678,25 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   // ───── build ─────
 
+  PopupMenuItem<ReaderMode> _modeItem(
+          Key key, ReaderMode value, String label, String description,
+          {required bool checked}) =>
+      CheckedPopupMenuItem<ReaderMode>(
+        key: key,
+        value: value,
+        checked: checked,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(label),
+            Text(description,
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant)),
+          ],
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
     final doc = _doc;
@@ -1561,34 +1716,48 @@ class _ReaderScreenState extends State<ReaderScreen>
         // worded menu (fleet ruling on top bars).
         actions: [
           OhBarActions(children: [
-          // Campaign 9 Phase 6: a labeled three-way choice (Scroll / Words
-          // / Lines), not a binary cycle — [readerModeLabel] names the
-          // CURRENT mode, on the face of the bar as a word, not only as
-          // the picker's glyph.
+          // 1.5.5: two modes, RSVP and Page, each with a one-line
+          // description, and Page's highlight below them. Picking a
+          // highlight is picking Page with it; the cursor never moves.
           PopupMenuButton<ReaderMode>(
             key: const Key('mode-toggle'),
             tooltip: 'Reading mode: ${readerModeLabel(_mode)}',
             enabled: doc != null,
             onSelected: _setMode,
             itemBuilder: (_) => [
-              for (final m in ReaderMode.values)
-                CheckedPopupMenuItem<ReaderMode>(
-                  key: Key('mode-item-${readerModeLabel(m).toLowerCase()}'),
-                  value: m,
-                  checked: m == _mode,
-                  child: Text(readerModeLabel(m)),
-                ),
+              _modeItem(const Key('mode-item-rsvp'), ReaderMode.rsvp,
+                  readerModeLabel(ReaderMode.rsvp),
+                  readerModeDescription(ReaderMode.rsvp),
+                  checked: _mode == ReaderMode.rsvp),
+              _modeItem(const Key('mode-item-page'), _pageMode, 'Page',
+                  readerModeDescription(ReaderMode.scroll),
+                  checked: _mode != ReaderMode.rsvp),
+              const PopupMenuDivider(),
+              const PopupMenuItem<ReaderMode>(
+                  enabled: false, height: 32, child: Text('Page highlight')),
+              for (final m in const [ReaderMode.scroll, ReaderMode.lines])
+                _modeItem(
+                    Key(m == ReaderMode.lines
+                        ? 'highlight-item-line'
+                        : 'highlight-item-follow'),
+                    m,
+                    pageHighlightLabel(m),
+                    pageHighlightDescription(m),
+                    checked: _mode == m),
             ],
             child: _BarMenuFace(
                 icon: readerModeIcon(_mode), label: readerModeLabel(_mode)),
           ),
-          OhBarAction(
-            key: const Key('speak-toggle'),
-            icon: _speaking ? Icons.stop_circle_outlined
-                : Icons.volume_up_outlined,
-            label: _speaking ? 'Stop' : 'Read aloud',
-            onPressed: doc == null ? null : _toggleSpeak,
-          ),
+          // On Page a text's Play already reads aloud; the bar keeps the
+          // action only where nothing else does (1.5.5 ruling).
+          if (_mode == ReaderMode.rsvp || _canListen)
+            OhBarAction(
+              key: const Key('speak-toggle'),
+              icon: _speaking ? Icons.stop_circle_outlined
+                  : Icons.volume_up_outlined,
+              label: _speaking ? 'Stop' : 'Read aloud',
+              onPressed: doc == null ? null : _toggleSpeak,
+            ),
           OhBarOverflow<String>(
             key: const Key('reader-overflow'),
             onSelected: (value) {
@@ -1632,7 +1801,9 @@ class _ReaderScreenState extends State<ReaderScreen>
               PopupMenuItem(
                   key: const Key('work-language-action'),
                   value: 'work-language',
-                  child: Text('Language: ${languageDisplayName(_sourceLang)}')),
+                  child: Text(_sourceLang == null
+                      ? 'Language: not set'
+                      : 'Language: ${languageDisplayName(_sourceLang!)}')),
               // The settings escape (ADR-0006): only visible when there is
               // a neural voice to escape FROM — no dead settings.
               if (_synthEngineHolder != null)
@@ -1649,9 +1820,10 @@ class _ReaderScreenState extends State<ReaderScreen>
               // English text — hidden under the existing mt language
               // swap. "Translate…" opens a picker (there is no longer a
               // SINGLE fixed target — see [_openTranslatePicker]).
-              if (_availableTargets.isNotEmpty &&
+              if (widget.translation != null &&
                   _activeLang == null &&
-                  _translationJob == null)
+                  _translationJob == null &&
+                  _download == null)
                 const PopupMenuItem(
                     key: Key('translate-action'),
                     value: 'translate',
@@ -1691,6 +1863,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       ),
       body: Column(
         children: [
+          if (_download != null) _downloadCard(),
           if (_translationJob != null) _translationProgressCard(),
           // Natural-height, not an AppBar.bottom fixed slot — see
           // _recapOfferBar's own doc comment for why. Only once there is
@@ -1763,8 +1936,10 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// button shape without pulling in its river-level coordinator, since
   /// this run is scoped to one work already open in front of the reader.
   Widget _translationProgressCard() {
-    final s = _translationJob!.state;
+    final run = _translationJob!;
+    final s = run.state;
     final total = s.totalUnits;
+    final perPass = run.units.length;
     return Card(
       key: const Key('translation-progress'),
       margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
@@ -1777,9 +1952,16 @@ class _ReaderScreenState extends State<ReaderScreen>
                 (() {
                   final label = languageDisplayName(
                       _activeTranslationLang ?? '');
+                  // A pivot says so, and counts each pass's sentences
+                  // rather than a doubled total.
+                  final how = run.passCount > 1
+                      ? '$label via English, step ${run.pass + 1} of '
+                          '${run.passCount}'
+                      : label;
                   return total == 0
-                      ? 'Translating to $label…'
-                      : 'Translating to $label: ${s.doneUnits} of $total sentences';
+                      ? 'Translating to $how…'
+                      : 'Translating to $how: ${run.passDone} of $perPass '
+                          'sentences';
                 })(),
                 key: const Key('translation-status'),
                 style: Theme.of(context).textTheme.bodySmall),
@@ -1792,6 +1974,47 @@ class _ReaderScreenState extends State<ReaderScreen>
                 TextButton(
                   key: const Key('translation-cancel'),
                   onPressed: _cancelTranslation,
+                  child: const Text('Cancel'),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// A leg downloading for the translation just picked: what, how far,
+  /// and a Cancel that keeps what arrived (the resumable engine's
+  /// `.part` files) so a later pick resumes rather than restarts.
+  Widget _downloadCard() {
+    final p = _downloadProgress;
+    final total = p?.totalBytes ?? 0;
+    final fraction = p == null || total == 0 ? null : p.receivedBytes / total;
+    return Card(
+      key: const Key('translation-download'),
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+                p == null
+                    ? 'Downloading the $_downloadLabel translator…'
+                    : 'Downloading the $_downloadLabel translator: '
+                        '${formatBytes(p.receivedBytes)} of '
+                        '${formatBytes(total)}',
+                style: Theme.of(context).textTheme.bodySmall),
+            const SizedBox(height: 8),
+            LinearProgressIndicator(value: fraction),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                TextButton(
+                  key: const Key('translation-download-cancel'),
+                  style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                  onPressed: () => _download?.cancel(),
                   child: const Text('Cancel'),
                 ),
               ],
@@ -2261,7 +2484,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// scroll), scroll it into view — karaoke_screen.dart's own
   /// `_followPlayback` idiom (`ensureVisible`, alignment 0.3, 300ms).
   void _followAlongScroll(int segment) {
-    if (!_playing || _mode == ReaderMode.rsvp) return;
+    if (!(_playing || _speaking) || _mode == ReaderMode.rsvp) return;
     if (segment == _lastFollowedSegment) return;
     _lastFollowedSegment = segment;
     final ctx = _segKeys[segment]?.currentContext;
@@ -2444,6 +2667,11 @@ class _ReaderScreenState extends State<ReaderScreen>
         padding: const EdgeInsets.only(top: 2, bottom: 6),
         child: Text(text,
             key: key,
+            // Arabic (and any other right-to-left target) reads from the
+            // right even under a left-to-right original.
+            textDirection: isRightToLeft(_activeTranslationLang)
+                ? TextDirection.rtl
+                : null,
             style: theme.textTheme.bodyMedium?.copyWith(
                 fontFamily: readerTypefaceFontFamily(ReaderTypeface.lora),
                 package: kReaderFontPackage,

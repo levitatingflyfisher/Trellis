@@ -23,6 +23,8 @@ import 'package:ml_runtime/ml_runtime.dart';
 
 import '../../services/device_services.dart';
 import '../feeds/background/feed_check_settings.dart';
+import '../reader/translation/language_names.dart';
+import '../reader/translation/translation_service.dart';
 import 'consent.dart';
 import 'format.dart';
 import 'model_store.dart';
@@ -35,23 +37,28 @@ const Map<String, String> kModelLabels = {
   'silero-vad': 'Silence filter: voice activity detection',
   'qwen2.5-0.5b-instruct-litert': 'Qwen 2.5 0.5B: small local assistant',
   'supertonic-en-m1': 'Supertonic voice (English): read aloud, offline',
-  'opus-mt-en-es': 'Spanish translation: English to Spanish, offline',
-  // Campaign 8 "Babel widens": one label per shipped direction — a
-  // pair's two directions are separate downloads (separate registry
-  // ids), so each gets its own line rather than one combined label.
-  'opus-mt-en-de': 'German translation: English to German, offline',
-  'opus-mt-de-en': 'German translation: German to English, offline',
-  'opus-mt-en-ru': 'Russian translation: English to Russian, offline',
-  'opus-mt-ru-en': 'Russian translation: Russian to English, offline',
-  // en-zh (English to Chinese) is not offered here — registry.dart's own
-  // comment has the full reasoning: real translation quality, but no
-  // verified way to display the Chinese output (a golden-test render
-  // showed tofu; bundling a CJK font blows the C3 APK budget).
-  'opus-mt-zh-en': 'Chinese translation: Chinese to English, offline',
   'wiktionary-en-en-stardict': 'Wiktionary dictionary (English): word lookups, offline',
 };
 
-String modelLabel(String id) => kModelLabels[id] ?? id;
+/// Translation pairs are named from the registry itself ("English to
+/// Portuguese translation"): 25 of them, and an id like
+/// `opus-mt-en-ROMANCE` doesn't say which language it writes.
+final Map<String, String> _translationLabels = {
+  for (final s in ModelRegistry.starter().translationPairsAt(DeviceTier.t3))
+    s.id: '${languageDisplayName(s.sourceLang!)} to '
+        '${languageDisplayName(s.langs!.single)} translation, offline',
+};
+
+String modelLabel(String id) =>
+    kModelLabels[id] ?? _translationLabels[id] ?? id;
+
+/// The credit the OPUS-MT license asks for, shown with the translation
+/// models.
+const String opusMtCredit =
+    'Translation models: OPUS-MT by Helsinki-NLP (University of Helsinki), '
+    'each under CC-BY 4.0 or Apache-2.0 as its row says. Converted to ONNX '
+    'by Xenova and onnx-community. Source and licences: '
+    'https://github.com/Helsinki-NLP/Opus-MT';
 
 class ModelsScreen extends StatefulWidget {
   final ModelStore store;
@@ -147,6 +154,8 @@ class _ModelsScreenState extends State<ModelsScreen> {
   void initState() {
     super.initState();
     _refresh();
+    unawaited(topUpTranslationModels(widget.registry, widget.store)
+        .then((_) => mounted ? _refresh() : null));
   }
 
   @override
@@ -295,7 +304,9 @@ class _ModelsScreenState extends State<ModelsScreen> {
               style: Theme.of(context).textTheme.bodyMedium,
             ),
           ),
-          for (final spec in widget.registry.specs) _modelTile(spec),
+          for (final spec in widget.registry.specs)
+            if (spec.task != ModelTask.translation) _modelTile(spec),
+          if (_translationSpecs.isNotEmpty) _translationSection(),
           if (widget.feedCheck case final feedCheck?)
             FeedCheckSection(settings: feedCheck),
           if (widget.services != null) ..._storageSection(),
@@ -422,6 +433,37 @@ class _ModelsScreenState extends State<ModelsScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  List<ModelSpec> get _translationSpecs => [
+        for (final s in widget.registry.specs)
+          if (s.task == ModelTask.translation) s,
+      ];
+
+  /// One folded section for the translation pairs: there are two per
+  /// language, and the reader's Translate sheet downloads them as needed,
+  /// so here they are for looking up and removing, not the main list.
+  Widget _translationSection() {
+    final specs = _translationSpecs;
+    final downloaded = specs.where((s) => _rows[s.id]?.downloaded ?? false);
+    final theme = Theme.of(context);
+    return ExpansionTile(
+      key: const Key('models-translation'),
+      title: const Text('Translation languages'),
+      subtitle: Text(
+          '${downloaded.length} of ${specs.length} downloaded. Translate in '
+          'the reader downloads what it needs.'),
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+          child: Text(opusMtCredit,
+              key: const Key('opus-mt-credit'),
+              style: theme.textTheme.bodySmall),
+        ),
+        for (final spec in specs) _modelTile(spec),
+        const SizedBox(height: 8),
+      ],
     );
   }
 
