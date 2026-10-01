@@ -112,11 +112,12 @@ void main() => runFleetConformance(const FleetAppConfig(
       },
       // C4 v2 — the release MERGED surface, measured from the first real
       // release build: the six declared above, plus two the merge
-      // process adds. ACCESS_NETWORK_STATE rides in with the player and
-      // foreground-task plugins and is functional (the metered-download
-      // guard needs it); RECEIVE_BOOT_COMPLETED (foreground_task's
-      // restart-at-boot, unused here) is tools:node-removed in the
-      // source manifest, so its absence below is enforced too.
+      // process adds. ACCESS_NETWORK_STATE rides in with the player,
+      // foreground-task and WorkManager libraries, and WorkManager's
+      // network constraints use it (ADR-0018). RECEIVE_BOOT_COMPLETED
+      // (foreground_task's restart-at-boot, WorkManager's reboot
+      // reschedule) is tools:node-removed in the source manifest, so its
+      // absence below is enforced too.
       mergedAndroidPermissions: {
         'android.permission.INTERNET',
         'android.permission.FOREGROUND_SERVICE',

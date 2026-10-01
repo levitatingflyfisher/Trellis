@@ -16,6 +16,7 @@ import '../episodes/episode_row.dart' show thumbCacheWidth;
 import '../reader/reader_doors.dart';
 import '../search/search_entry.dart';
 import '../search/search_screen.dart';
+import 'background/feed_check_settings.dart';
 import 'episode_download_coordinator.dart';
 import 'feed_detail_screen.dart';
 import 'feed_ingest.dart';
@@ -103,6 +104,7 @@ class _FeedsScreenState extends State<FeedsScreen> {
   Map<int, int> _unplayed = const {};
   List<_Book> _books = const [];
   bool _dspGlobalDefault = false;
+  int? _lastCheckedMs;
 
   /// Set while an OPML import is checking its new feeds.
   ({int done, int total})? _importProgress;
@@ -145,6 +147,7 @@ class _FeedsScreenState extends State<FeedsScreen> {
     final dspGlobalDefault = await widget.db.profilesDao.dspGlobalDefault(
       profileId,
     );
+    final lastChecked = await readLastChecked(widget.db, profileId);
     if (!mounted) return;
     // Disk checks happen here, once per load, never per frame.
     final services = widget.localMlAvailable ? widget.repository.services : null;
@@ -163,6 +166,7 @@ class _FeedsScreenState extends State<FeedsScreen> {
       _books = books..sort((a, b) => shelfKey(a.work.title)
           .compareTo(shelfKey(b.work.title)));
       _dspGlobalDefault = dspGlobalDefault;
+      _lastCheckedMs = lastChecked;
     });
   }
 
@@ -212,7 +216,10 @@ class _FeedsScreenState extends State<FeedsScreen> {
   Future<void> _openSettings(Feed feed) async {
     await Navigator.of(context).push<void>(
       MaterialPageRoute(
-        builder: (_) => FeedSettingsScreen(db: widget.db, feed: feed),
+        builder: (_) => FeedSettingsScreen(
+            db: widget.db,
+            feed: feed,
+            offerAutoDownload: widget.repository.offersAutoDownload),
       ),
     );
     await _load();
@@ -358,6 +365,20 @@ class _FeedsScreenState extends State<FeedsScreen> {
           if (feeds != null && !empty)
             SearchEntry(
                 key: const Key('feeds-search'), onPressed: _openSearch),
+          if (feeds != null && !empty)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+              child: Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: Text(
+                  lastCheckedLabel(
+                      lastMs: _lastCheckedMs,
+                      nowMs: DateTime.now().millisecondsSinceEpoch),
+                  key: const Key('feeds-last-checked'),
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+            ),
           if (_importProgress case final p?) _ImportProgress(progress: p),
           Expanded(child: switch (feeds) {
             null => const Center(child: CircularProgressIndicator()),

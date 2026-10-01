@@ -54,7 +54,15 @@ tokens does not move the `.part`.
   opened carries on at the next launch without a tap.
 - **No new egress at launch (ADR-0003 law 6).** Resume only continues a
   transfer that the person already approved through the consent dialog.
-  Nothing starts a download on its own.
+  Nothing starts a download on its own, except auto-download (ADR-0018).
+  Those downloads are approved once, through the same dialog, when the
+  listener turns on a show's "Download new episodes". They run only in a
+  pass the system starts on an unmetered network, through the same
+  coordinator, so they get job rows and show here. Each pick is a paused
+  row before anything is fetched. An auto download that loses its
+  connection, or that a kill left `running`, is paused and handed back to
+  the next pass. A launch never resumes it, because the launch may be on
+  mobile data.
 - **One owner per `.part`.** The transcription's audio stage asks the
   download coordinator instead of fetching on its own, so the bytes it
   shows are the real bytes, and a download and a transcription of the

@@ -328,4 +328,86 @@ void main() {
     await coordinator.dismiss(workId);
     expect(sidecar.existsSync(), isFalse);
   });
+
+  group('auto-downloads (ADR-0018)', () {
+    Future<Map<String, dynamic>> payload() async =>
+        jsonDecode(await db.jobsDao.payloadOf(jobId)) as Map<String, dynamic>;
+
+    test('a queued pick is a paused row on the Jobs screen before any fetch',
+        () async {
+      final fetcher = FakeAudioFetcher();
+      final coordinator = coordinatorWith(fetcher);
+
+      expect(await coordinator.queueAuto(
+          workId: workId, url: url, title: 'Episode one'), isTrue);
+
+      final row = await db.jobsDao.load(jobId);
+      expect(row!.state, JobState.cancelled);
+      expect(await payload(), containsPair('queued', true));
+      expect(await payload(), containsPair('auto', true));
+      expect(coordinator.stateOf(workId).paused, isTrue);
+      expect(fetcher.fetched, isEmpty);
+      expect(await coordinator.queueAuto(
+          workId: workId, url: url, title: 'Episode one'), isFalse,
+          reason: 'one row per episode');
+    });
+
+    test('a lost connection hands it back to the next pass, paused, never '
+        'left running for a launch on mobile data', () async {
+      final fetcher = ControllableAudioFetcher();
+      final coordinator = coordinatorWith(fetcher);
+
+      final future = coordinator.start(workId: workId, url: url, auto: true);
+      await pumpEventQueue();
+      fetcher.failDownload(dio.DioException(
+          requestOptions: dio.RequestOptions(path: url),
+          type: dio.DioExceptionType.connectionError));
+
+      expect(await future, DownloadOutcome.paused);
+      final row = await db.jobsDao.load(jobId);
+      expect(row!.state, JobState.cancelled);
+      expect(await payload(), containsPair('queued', true));
+
+      final online = FakeAudioFetcher();
+      final relaunched = EpisodeDownloadCoordinator(
+          services: testServices(dir, audioFetcher: online), db: db);
+      await relaunched.restore();
+      await relaunched.resumeInterrupted();
+      expect(online.fetched, isEmpty);
+    });
+
+    test('one a process death left running is paused at restore and queued '
+        'for the next pass, not resumed', () async {
+      final fetcher = FakeAudioFetcher();
+      final coordinator = coordinatorWith(fetcher);
+      await seedRow(JobState.running, totalBytes: 1000);
+      await db.jobsDao.setPayload(jobId,
+          downloadPayload(workId: workId, title: 'E', url: url, auto: true));
+
+      await coordinator.restore();
+      await coordinator.resumeInterrupted();
+
+      expect(fetcher.fetched, isEmpty);
+      expect(coordinator.stateOf(workId).paused, isTrue);
+      final row = await db.jobsDao.load(jobId);
+      expect(row!.state, JobState.cancelled);
+      expect(await payload(), containsPair('queued', true));
+    });
+
+    test('a pause by hand stays the listener’s; a requeue gives it back',
+        () async {
+      final fetcher = ControllableAudioFetcher();
+      final coordinator = coordinatorWith(fetcher);
+      await coordinator.queueAuto(workId: workId, url: url, title: 'E');
+
+      final future = coordinator.resume(workId);
+      await pumpEventQueue();
+      coordinator.cancel(workId);
+      expect(await future, DownloadOutcome.paused);
+      expect(await payload(), isNot(contains('queued')));
+
+      await coordinator.requeue(workId);
+      expect(await payload(), containsPair('queued', true));
+    });
+  });
 }

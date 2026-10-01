@@ -13,7 +13,10 @@
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <!-- flutter_foreground_task injects this for its restart-jobs-at-boot
          feature, which this app never enables: jobs resume when a hand
-         opens the app. Stripped so the merged surface stays law 7's. -->
+         opens the app. WorkManager injects it to reschedule after a
+         reboot; without it, the background feed check comes back the next
+         time the app opens (ADR-0018). Stripped so the merged surface
+         stays law 7's. -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"
         tools:node="remove"/>
     <application

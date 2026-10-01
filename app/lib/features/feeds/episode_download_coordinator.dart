@@ -24,8 +24,26 @@ import 'package:jobs_core/jobs_core.dart';
 import '../../db/database.dart';
 import '../../services/device_services.dart';
 import '../jobs/failure_reason.dart';
+import 'auto_download.dart' show recordQueuedAutoDownload;
 
 String downloadJobId(int workId) => 'download-$workId';
+
+/// A download row's payload. Auto-downloads (ADR-0018) carry `auto`, and
+/// `queued` while the next auto-download pass owns them: picked but not
+/// started, or stopped by the system rather than by the listener.
+String downloadPayload(
+        {required int workId,
+        required String title,
+        required String url,
+        bool auto = false,
+        bool queued = false}) =>
+    jsonEncode({
+      'workId': workId,
+      'title': title,
+      'url': url,
+      if (auto) 'auto': true,
+      if (queued) 'queued': true,
+    });
 
 enum DownloadOutcome { done, paused, failed }
 
@@ -66,7 +84,11 @@ class _Entry {
   /// The row was still `running` at restore: a kill stopped it, not the
   /// user, so it may resume on its own.
   bool interrupted;
-  _Entry(this.url, this.state, {this.interrupted = false});
+
+  /// Fetched by an auto-download pass, which only runs on an unmetered
+  /// network: never resumed by a launch, which may be on mobile data.
+  final bool auto;
+  _Entry(this.url, this.state, {this.interrupted = false, this.auto = false});
 }
 
 class EpisodeDownloadCoordinator extends ChangeNotifier {
@@ -121,6 +143,27 @@ class EpisodeDownloadCoordinator extends ChangeNotifier {
       }
       final part = _partOf(workId, url);
       final failed = row.state == JobState.failed.name;
+      final auto = payload['auto'] == true;
+      final killed = row.state == JobState.running.name;
+      if (auto && killed) {
+        // Whatever stopped it, the next pass (unmetered) carries it on.
+        await db.jobsDao.save(Job(
+            id: row.id,
+            kind: row.kind,
+            state: JobState.cancelled,
+            checkpoint: row.checkpoint,
+            totalUnits: row.totalUnits,
+            doneUnits: row.doneUnits,
+            createdAtMs: row.createdAtMs));
+        await db.jobsDao.setPayload(
+            row.id,
+            downloadPayload(
+                workId: workId,
+                title: payload['title'] as String? ?? 'Episode',
+                url: url,
+                auto: true,
+                queued: true));
+      }
       _entries[workId] = _Entry(
         url,
         EpisodeDownloadState(
@@ -132,7 +175,8 @@ class EpisodeDownloadCoordinator extends ChangeNotifier {
               ? row.failureReason ?? genericFailureReason
               : null,
         ),
-        interrupted: row.state == JobState.running.name,
+        interrupted: killed && !auto,
+        auto: auto,
       );
     }
     notifyListeners();
@@ -152,7 +196,53 @@ class EpisodeDownloadCoordinator extends ChangeNotifier {
   Future<DownloadOutcome> resume(int workId) {
     final entry = _entries[workId];
     if (entry == null) return Future.value(DownloadOutcome.failed);
-    return start(workId: workId, url: entry.url, title: entry.state.title);
+    return start(
+        workId: workId,
+        url: entry.url,
+        title: entry.state.title,
+        auto: entry.auto);
+  }
+
+  /// Records an auto-download pick as a paused row before anything is
+  /// fetched, so it shows on the Jobs screen at once and survives a pass
+  /// the system stops. False when the episode already has a row or a file.
+  Future<bool> queueAuto(
+      {required int workId, required String url, required String title}) async {
+    if (_entries.containsKey(workId) || isDownloaded(workId, url)) {
+      return false;
+    }
+    if (!await recordQueuedAutoDownload(
+        db, (workId: workId, url: url, title: title),
+        _now().millisecondsSinceEpoch)) {
+      return false;
+    }
+    final part = _partOf(workId, url);
+    _entries[workId] = _Entry(
+        url,
+        EpisodeDownloadState(
+            title: title,
+            paused: true,
+            receivedBytes: part.existsSync() ? part.lengthSync() : 0),
+        auto: true);
+    notifyListeners();
+    return true;
+  }
+
+  /// Hands a download a pass stopped back to the next pass.
+  Future<void> requeue(int workId) async {
+    final entry = _entries[workId];
+    final jobId = downloadJobId(workId);
+    final row = await db.jobsDao.load(jobId);
+    if (entry == null || row == null || isDownloaded(workId, entry.url)) return;
+    await db.jobsDao.save(row.copyWith(state: JobState.cancelled));
+    await db.jobsDao.setPayload(
+        jobId,
+        downloadPayload(
+            workId: workId,
+            title: entry.state.title,
+            url: entry.url,
+            auto: true,
+            queued: true));
   }
 
   /// Fetches [url] to `services.audioFileFor(workId, url)`. Already on
@@ -160,7 +250,10 @@ class EpisodeDownloadCoordinator extends ChangeNotifier {
   /// button can be tapped freely and transcription can wait on the same
   /// fetch.
   Future<DownloadOutcome> start(
-      {required int workId, required String url, String title = 'Episode'}) {
+      {required int workId,
+      required String url,
+      String title = 'Episode',
+      bool auto = false}) {
     final running = _inFlight[workId];
     if (running != null) return running;
     if (isDownloaded(workId, url)) return _alreadyHere(workId);
@@ -176,9 +269,10 @@ class EpisodeDownloadCoordinator extends ChangeNotifier {
         receivedBytes: part.existsSync() ? part.lengthSync() : null,
         totalBytes: known?.totalBytes,
       ),
+      auto: auto,
     );
     notifyListeners();
-    final future = _run(workId, url, title, token);
+    final future = _run(workId, url, title, token, auto: auto);
     _inFlight[workId] = future;
     return future;
   }
@@ -192,7 +286,8 @@ class EpisodeDownloadCoordinator extends ChangeNotifier {
   }
 
   Future<DownloadOutcome> _run(
-      int workId, String url, String title, dio.CancelToken token) async {
+      int workId, String url, String title, dio.CancelToken token,
+      {bool auto = false}) async {
     final jobId = downloadJobId(workId);
     final gate = services.foregroundGate;
     var totalSaved = false;
@@ -209,8 +304,8 @@ class EpisodeDownloadCoordinator extends ChangeNotifier {
         doneUnits: 0,
         createdAtMs: existing?.createdAtMs ?? _now().millisecondsSinceEpoch,
       ));
-      await db.jobsDao.setPayload(
-          jobId, jsonEncode({'workId': workId, 'title': title, 'url': url}));
+      await db.jobsDao.setPayload(jobId,
+          downloadPayload(workId: workId, title: title, url: url, auto: auto));
       await gate.jobStarted(title, 'Downloading…');
       holdsGate = true;
 
@@ -267,14 +362,33 @@ class EpisodeDownloadCoordinator extends ChangeNotifier {
       final transient = isTransientFailure(err);
       try {
         final row = await db.jobsDao.load(jobId);
-        // A lost connection leaves the row `running`, which is what the
-        // next launch resumes.
-        if (row != null && !transient) {
+        // A lost connection leaves a tapped download `running`, which is
+        // what the next launch resumes. An auto-download goes back to the
+        // pass instead, which waits for an unmetered network.
+        if (row != null && transient && auto) {
+          await db.jobsDao.save(row.copyWith(state: JobState.cancelled));
+          await db.jobsDao.setPayload(
+              jobId,
+              downloadPayload(
+                  workId: workId,
+                  title: title,
+                  url: url,
+                  auto: true,
+                  queued: true));
+        } else if (row != null && !transient) {
           await db.jobsDao.save(row.copyWith(state: JobState.failed));
           await db.jobsDao.setFailureReason(jobId, reason);
         }
       } catch (_) {
         // The database may be what failed; the card still says so.
+      }
+      if (transient && auto) {
+        _set(workId, (s) => EpisodeDownloadState(
+            title: s.title,
+            paused: true,
+            receivedBytes: s.receivedBytes,
+            totalBytes: s.totalBytes));
+        return DownloadOutcome.paused;
       }
       _set(workId, (s) => EpisodeDownloadState(
           title: s.title,

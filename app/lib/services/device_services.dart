@@ -211,6 +211,26 @@ class DeviceServices {
         ),
       );
 
+  /// The background feed check's stack (ADR-0018): the same files as the
+  /// app, so downloads land where the player and eviction look, but no
+  /// foreground service. Android refuses to start one from the background,
+  /// and a check must not post a notification (ADR-0003 law 5).
+  factory DeviceServices.background(Directory supportDir) => DeviceServices(
+        supportDir: supportDir,
+        modelStore: DiskModelStore(
+          baseDir: Directory('${supportDir.path}/models'),
+        ),
+        registry: ModelRegistry.starter(),
+        decoder: WavPassthroughDecoder(),
+        audioFetcher: DioAudioFetcher.guarded(userAgent: trellisUserAgent),
+        executor: InlineTranscribeExecutor(),
+        foregroundGate: NoopJobForegroundGate(),
+        engineFor: (modelPath) => WhisperEngineSpec(
+          modelPath: modelPath,
+          libraryPath: whisperLibraryPath(),
+        ),
+      );
+
   /// A placeholder for surfaces that never start a P3 flow (plain widget
   /// tests): everything is present, nothing touches a platform. The support
   /// dir points into systemTemp and is only created if actually used.

@@ -2414,6 +2414,22 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
         FeedsCompanion(autoDownload: Value(on)),
       );
 
+  /// Turns auto-download off on every show and forgets the per-show marks
+  /// (`auto_download_after:<feed>` device settings), as a restore must.
+  Future<void> clearAutoDownloadConsent() async {
+    await update(feeds).write(const FeedsCompanion(autoDownload: Value(false)));
+    await customStatement(
+        "DELETE FROM device_settings WHERE key LIKE 'auto_download_after:%'");
+  }
+
+  /// Every reader's opted-in shows: auto-download belongs to the device,
+  /// which fetches for whoever follows them.
+  Future<List<Feed>> autoDownloadFeeds() =>
+      (select(feeds)
+            ..where((f) => f.autoDownload.equals(true))
+            ..orderBy([(f) => OrderingTerm.asc(f.id)]))
+          .get();
+
   Future<void> insertEpisode({
     required int workId,
     required int feedId,

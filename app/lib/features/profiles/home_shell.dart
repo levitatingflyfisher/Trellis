@@ -9,6 +9,7 @@ import '../../services/device_services.dart';
 import '../backup/backup_screen.dart';
 import '../dsp/dsp_coordinator.dart';
 import '../echo/echo_screen.dart';
+import '../feeds/background/feed_check_settings.dart';
 import '../feeds/episode_download_coordinator.dart';
 import '../feeds/feeds_repository.dart';
 import '../intake/audiobook_import.dart';
@@ -52,10 +53,25 @@ class HomeShell extends StatefulWidget {
     required this.createPlayer,
     required this.services,
     required this.jobs,
+    this.feedCheck,
+    this.afterFeedsChecked,
+    this.writesReady,
   });
 
   /// Every long job on the device; owned above this shell (see JobCenter).
   final JobCenter jobs;
+
+  /// The device's background-check switches, shown on "On this device"
+  /// where the system can run a check. Owned above this shell, like jobs.
+  final FeedCheckSettings? feedCheck;
+
+  /// Runs after a pull-to-refresh finishes: asks for an auto-download pass
+  /// when an opted-in show has something new (ADR-0018).
+  final Future<void> Function()? afterFeedsChecked;
+
+  /// Completes once a background check that was running at launch has
+  /// closed its connection; this shell's own start-up writes wait for it.
+  final Future<void>? writesReady;
 
   @override
   State<HomeShell> createState() => _HomeShellState();
@@ -67,7 +83,9 @@ class _HomeShellState extends State<HomeShell> {
     db: widget.db,
     fetcher: widget.fetcher,
     services: widget.services,
-  );
+  )
+    ..afterCheck = widget.afterFeedsChecked
+    ..offersAutoDownload = widget.afterFeedsChecked != null;
   late final PlayerController _player = PlayerController(
     db: widget.db,
     profileId: widget.profile.id,
@@ -140,7 +158,15 @@ class _HomeShellState extends State<HomeShell> {
     // paused at wherever playback last was, before anything is tapped —
     // see PlayerController.rehydrateLastPlayed's own doc for why this is
     // cheap (a DB read, never a real audio load).
-    _player.rehydrateLastPlayed();
+    // It may write (clearing a stale id), so it waits for writesReady.
+    final ready = widget.writesReady;
+    if (ready == null) {
+      _player.rehydrateLastPlayed();
+    } else {
+      unawaited(ready.then((_) {
+        if (mounted) _player.rehydrateLastPlayed();
+      }));
+    }
   }
 
   @override
@@ -161,6 +187,9 @@ class _HomeShellState extends State<HomeShell> {
             registry: widget.services.registry,
             services: widget.services,
             databaseFile: widget.services.databaseFile,
+            feedCheck: (widget.feedCheck?.scheduler.available ?? false)
+                ? widget.feedCheck
+                : null,
           )
         : const WebTierModelsNotice();
     Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => screen));

@@ -1,8 +1,14 @@
+import 'dart:async';
+
 import 'package:comms_core/comms_core.dart';
 import 'package:flutter/material.dart';
 
 import '../../db/database.dart';
 import '../../services/device_services.dart';
+import '../feeds/background/feed_check_platform.dart';
+import '../feeds/background/feed_check_runner.dart';
+import '../feeds/background/feed_check_settings.dart';
+import '../feeds/feeds_repository.dart';
 import '../intake/paste_intake.dart' show epochDayUtcNow;
 import '../jobs/job_center.dart';
 import '../player/episode_player.dart';
@@ -27,12 +33,17 @@ class HomeFlow extends StatefulWidget {
   final HttpFetcher fetcher;
   final EpisodePlayer Function() createPlayer;
   final DeviceServices services;
+
+  /// The system scheduler behind background feed checks; unavailable by
+  /// default, so widget tests never reach a platform channel.
+  final FeedCheckScheduler feedCheckScheduler;
   const HomeFlow(
       {super.key,
       required this.db,
       required this.fetcher,
       required this.createPlayer,
-      required this.services});
+      required this.services,
+      this.feedCheckScheduler = const UnavailableFeedCheckScheduler()});
 
   @override
   State<HomeFlow> createState() => _HomeFlowState();
@@ -49,25 +60,77 @@ class _HomeFlowState extends State<HomeFlow> {
   /// builds a second runner for a job already in flight.
   late final JobCenter _jobs = JobCenter.forDevice(widget.db, widget.services);
 
+  late final FeedCheckSettings _feedCheck =
+      FeedCheckSettings(widget.db, widget.feedCheckScheduler);
+
+  /// The app engine's side of a background check (ADR-0018): every reader's
+  /// feeds over this engine's connection, downloads through this engine's
+  /// coordinator, so they show on the Jobs screen as they run.
+  late final FeedCheckRunner? _feedCheckRunner = () {
+    final downloads = _jobs.downloads;
+    if (!widget.feedCheckScheduler.available || downloads == null) return null;
+    final repository = FeedsRepository(
+        db: widget.db, fetcher: widget.fetcher, services: widget.services);
+    final runner = FeedCheckRunner.withCoordinator(
+      db: widget.db,
+      repository: repository,
+      scheduler: widget.feedCheckScheduler,
+      downloads: downloads,
+    );
+    return runner;
+  }();
+
+  void Function()? _closeFeedCheckHost;
+
+  /// Completes once no background check can still be writing, so this
+  /// engine's own cold-start writes wait for it (ADR-0018). At once when
+  /// there is no background check on this platform.
+  final Completer<void> _writesReady = Completer<void>();
+
   @override
   void initState() {
     super.initState();
-    _load();
-    _jobs.restoreAndResume();
+    _boot();
+  }
+
+  Future<void> _boot() async {
+    // The readers render at once; only what writes waits for the hand-over.
+    unawaited(_load());
+    final runner = _feedCheckRunner;
+    if (runner != null) {
+      // A check running headless winds down first (a few seconds at most):
+      // its downloads pause before jobs resume, so none gets a second
+      // owner, and its connection closes before this one writes.
+      final close = await openFeedCheckHost(
+          (task, stop) => runner.run(task, stop: stop));
+      if (!mounted) {
+        close();
+        return;
+      }
+      _closeFeedCheckHost = close;
+    }
+    _writesReady.complete();
+    // Boot-time ephemera sweep (ADR-0003 law 2): decayed feed items leave
+    // the river into a recoverable soft state the River announces
+    // (Restore / Let go), never a silent delete. Promoted works are
+    // untouchable by design. It runs before jobs resume and before the
+    // River is first opened in all but a cold start that interrupted a
+    // background check, where it lands a few seconds later.
+    await widget.db.spineDao.sweepEphemera(todayEpochDay: epochDayUtcNow());
+    await _jobs.restoreAndResume();
+    await _feedCheck.applyAtLaunch();
+    await _feedCheckRunner?.requestAutoDownloadIfPending();
   }
 
   @override
   void dispose() {
+    _closeFeedCheckHost?.call();
+    _feedCheck.dispose();
     _jobs.dispose();
     super.dispose();
   }
 
   Future<void> _load() async {
-    // Boot-time ephemera sweep (ADR-0003 law 2): decayed feed items leave
-    // the river before anything renders, into a recoverable soft state the
-    // River announces (Restore / Let go) — never a silent delete. Promoted
-    // works are untouchable by design.
-    await widget.db.spineDao.sweepEphemera(todayEpochDay: epochDayUtcNow());
     var profiles = await widget.db.profilesDao.all();
     final pinSet = await _pin.isSet;
     // First launch: nothing to protect yet, so no name to type before the
@@ -169,6 +232,9 @@ class _HomeFlowState extends State<HomeFlow> {
       createPlayer: widget.createPlayer,
       services: widget.services,
       jobs: _jobs,
+      feedCheck: _feedCheck,
+      writesReady: _writesReady.future,
+      afterFeedsChecked: _feedCheckRunner?.requestAutoDownloadIfPending,
     );
   }
 }

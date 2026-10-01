@@ -153,7 +153,10 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
 
   Future<void> _openSettings() async {
     await Navigator.of(context).push<void>(MaterialPageRoute(
-        builder: (_) => FeedSettingsScreen(db: widget.db, feed: _feed)));
+        builder: (_) => FeedSettingsScreen(
+            db: widget.db,
+            feed: _feed,
+            offerAutoDownload: widget.repository.offersAutoDownload)));
     final fresh = await widget.db.feedsDao.feedById(_feed.id);
     if (fresh != null && mounted) setState(() => _feed = fresh);
   }

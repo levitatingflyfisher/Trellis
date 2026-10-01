@@ -14,6 +14,7 @@ import 'package:comms_core/comms_core.dart';
 import '../../db/database.dart';
 import '../../services/device_services.dart';
 import 'audio_eviction.dart';
+import 'background/feed_check_settings.dart' show lastCheckedKey;
 import 'feed_dedup.dart';
 import 'feed_ingest.dart';
 import 'feed_parse.dart';
@@ -137,6 +138,15 @@ class FeedsRepository {
   /// the podcast-directory search (no conditional GET, no breaker).
   final HttpFetcher _fetcher;
   final DateTime Function() nowFn;
+
+  /// Runs after every [refreshAll] that ran to the end: the app asks for an
+  /// auto-download pass here when one has work (ADR-0018).
+  Future<void> Function()? afterCheck;
+
+  /// Whether this device can run an auto-download pass (Android, where the
+  /// system scheduler exists). The podcast settings offer the switch only
+  /// then, so it never promises downloads nothing will make.
+  bool offersAutoDownload = false;
 
   int get _nowMs => nowFn().millisecondsSinceEpoch;
 
@@ -379,11 +389,19 @@ class FeedsRepository {
     );
   }
 
-  /// Pull-to-refresh: every feed of the profile, breaker rules applied
-  /// per feed. Returns the total number of new items.
-  Future<int> refreshAll(int profileId, {bool force = false}) async {
-    final outcomes =
-        await refreshMany(await db.feedsDao.feedsOf(profileId), force: force);
+  /// Pull-to-refresh and the background check: every feed of the
+  /// profile, breaker rules applied per feed. A check that ran to the end
+  /// is recorded for the Subscriptions header, then [afterCheck] runs.
+  /// Returns the total number of new items.
+  Future<int> refreshAll(int profileId,
+      {bool force = false, bool Function()? shouldStop}) async {
+    final outcomes = await refreshMany(await db.feedsDao.feedsOf(profileId),
+        force: force, shouldStop: shouldStop);
+    if (!(shouldStop?.call() ?? false)) {
+      await db.deviceSettingsDao
+          .write(lastCheckedKey(profileId), '$_nowMs');
+      await afterCheck?.call();
+    }
     return outcomes.values.fold<int>(0, (sum, o) => sum + o.newItems);
   }
 
@@ -395,9 +413,11 @@ class FeedsRepository {
       {bool force = false,
       int maxConcurrent = 4,
       int maxPerHost = 2,
-      void Function(int done, int total)? onProgress}) async {
+      void Function(int done, int total)? onProgress,
+      bool Function()? shouldStop}) async {
     final outcomes = <int, RefreshOutcome>{};
     if (feeds.isEmpty) return outcomes;
+    bool stopping() => shouldStop?.call() ?? false;
     final pending = [...feeds];
     final perHost = <String, int>{};
     final finished = Completer<void>();
@@ -410,6 +430,12 @@ class FeedsRepository {
     }
 
     void pump() {
+      // Asked to stop: what is in flight finishes, nothing new starts.
+      if (stopping()) {
+        pending.clear();
+        if (running == 0 && !finished.isCompleted) finished.complete();
+        return;
+      }
       // Skip past feeds whose host is at its cap so other hosts still run.
       for (var i = 0; i < pending.length && running < maxConcurrent;) {
         final feed = pending[i];

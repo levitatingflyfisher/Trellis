@@ -235,6 +235,25 @@ void main() {
       expect(await db.jobsDao.unfinished(), isEmpty);
     });
 
+    test('auto-download consent does not travel: every show restores with it '
+        'off, and this device forgets its marks', () async {
+      await seedRichly(db);
+      final feedId = (await db.customSelect('SELECT id FROM feeds LIMIT 1')
+              .getSingle())
+          .read<int>('id');
+      await db.feedsDao.setAutoDownload(feedId, true);
+      final payload = RowPayload.decode(RowPayload.encode(
+          await bridge.exportTables(),
+          createdAt: DateTime.utc(2026, 8, 11)));
+      await db.deviceSettingsDao.write('auto_download_after:$feedId', '1');
+
+      await bridge.restoreFullReplace(payload);
+
+      expect(await db.feedsDao.autoDownloadFeeds(), isEmpty);
+      expect(await db.deviceSettingsDao.read('auto_download_after:$feedId'),
+          isNull);
+    });
+
     test('reproduces every row on a second device, ids intact', () async {
       await seedRichly(db);
       final payload = RowPayload.encode(await bridge.exportTables(),

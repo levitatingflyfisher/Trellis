@@ -5,6 +5,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/feeds/feed_ingest.dart';
+import 'package:trellis/features/feeds/background/feed_check_settings.dart';
 import 'package:trellis/features/feeds/feeds_repository.dart';
 
 import '../support/scripted_fetcher.dart';
@@ -218,5 +219,48 @@ void main() {
     }
     expect(await done, 6, reason: 'one new item from each feed');
     expect(gated.maxInFlight, 4);
+  });
+
+  test('asked to stop, what is in flight finishes and nothing new starts',
+      () async {
+    final gated = GatedFetcher();
+    final repo = FeedsRepository(db: db, fetcher: gated.fetcher);
+    final feeds =
+        await seed([for (var i = 0; i < 6; i++) 'https://h$i.test/feed']);
+    var stop = false;
+
+    final done =
+        repo.refreshMany(feeds, maxConcurrent: 2, shouldStop: () => stop);
+    await settleUntil(() => gated.open.length == 2);
+    stop = true;
+    gated.releaseNext();
+    gated.releaseNext();
+
+    expect(await done, hasLength(2));
+    expect(gated.open, isEmpty);
+  });
+
+  test('a check that runs to the end is recorded, then afterCheck runs; a '
+      'stopped one is neither', () async {
+    final gated = GatedFetcher();
+    final repo = FeedsRepository(
+        db: db,
+        fetcher: gated.fetcher,
+        now: () => DateTime.fromMillisecondsSinceEpoch(1234));
+    var after = 0;
+    repo.afterCheck = () async => after++;
+    await seed(['https://h0.test/feed']);
+
+    final stopped = repo.refreshAll(profileId, shouldStop: () => true);
+    expect(await stopped, 0);
+    expect(await readLastChecked(db, profileId), isNull);
+    expect(after, 0);
+
+    final done = repo.refreshAll(profileId);
+    await settleUntil(() => gated.open.isNotEmpty);
+    gated.releaseNext();
+    await done;
+    expect(await readLastChecked(db, profileId), 1234);
+    expect(after, 1);
   });
 }

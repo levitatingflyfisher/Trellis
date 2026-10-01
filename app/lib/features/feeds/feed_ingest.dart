@@ -11,8 +11,10 @@ library;
 import 'dart:convert';
 
 import 'package:comms_core/comms_core.dart';
+import 'package:drift/drift.dart' show Variable;
 import 'package:intake_core/intake_core.dart';
 
+import '../../db/busy_retry.dart';
 import '../../db/database.dart';
 import '../intake/epub_flatten.dart' show SegmentRow;
 import 'feed_rules.dart';
@@ -185,7 +187,15 @@ Future<int> ingestFeedItems(
     required int nowMs,
     List<FeedRule> rules = const []}) async {
   var added = 0;
-  await db.transaction(() async {
+  // Another connection (the background check's, ADR-0018) may hold the
+  // write lock; the whole transaction rolls back and runs again.
+  await retryWhileBusy(() => db.transaction(() async {
+    added = 0;
+    // Write first, so the lock is taken before any work is done and the
+    // guids read below are the ones this transaction writes against.
+    // Drift opens with a deferred BEGIN, which takes no lock.
+    await db.customUpdate('UPDATE feeds SET id = id WHERE id = ?',
+        variables: [Variable.withInt(feedId)], updates: const {});
     // Read inside the transaction: drift runs transactions one at a time,
     // so a "Try again" overlapping a refresh of the same feed sees what
     // the other wrote instead of inserting the same items twice.
@@ -255,6 +265,6 @@ Future<int> ingestFeedItems(
       }
       added++;
     }
-  });
+  }));
   return added;
 }

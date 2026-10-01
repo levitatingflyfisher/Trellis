@@ -240,6 +240,10 @@ class DbBridge {
       for (final row in t['revlog']!) {
         await db.into(db.revlog).insert(RevlogRow.fromJson(cast(row)));
       }
+      // Auto-download is consent to downloads nobody taps, and consent is
+      // per device (ADR-0003 law 6, ADR-0018): a backup from another phone
+      // must not start fetching here. The marks name the old feed ids.
+      await db.feedsDao.clearAutoDownloadConsent();
     });
   }
 

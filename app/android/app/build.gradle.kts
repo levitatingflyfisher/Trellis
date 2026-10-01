@@ -58,3 +58,10 @@ android {
 flutter {
     source = "../.."
 }
+
+dependencies {
+    // The background feed check (ADR-0018): WorkManager itself, with our
+    // own small Worker instead of a plugin that registers every plugin in
+    // its engine.
+    implementation("androidx.work:work-runtime:2.11.2")
+}

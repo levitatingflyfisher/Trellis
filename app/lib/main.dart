@@ -5,12 +5,19 @@ import 'package:openhearth_design/openhearth_design.dart';
 import 'bootstrap/boot_guard.dart';
 import 'bootstrap/bootstrap.dart';
 import 'db/database.dart';
+import 'features/feeds/background/feed_check_platform.dart';
+import 'features/feeds/background/feed_check_settings.dart';
 import 'features/player/episode_player.dart';
 import 'features/player/just_audio_player.dart';
 import 'features/profiles/home_flow.dart';
 import 'features/settings/theme_preference.dart';
 import 'net/io_fetcher.dart';
 import 'services/device_services.dart';
+
+/// The background feed check's engine starts here, not at [main]
+/// (ADR-0018): no UI, no audio session, only the check.
+@pragma('vm:entry-point')
+Future<void> feedCheckMain(List<String> args) => runFeedCheckWorker(args);
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -60,6 +67,7 @@ Future<void> main() async {
     services: services,
     bootNotes: bootNotes,
     initialTheme: theme,
+    feedCheckScheduler: createFeedCheckScheduler(),
   ));
 }
 
@@ -83,6 +91,9 @@ class TrellisApp extends StatefulWidget {
   /// app reads it itself on its first frame.
   final OhThemeModePreference? initialTheme;
 
+  /// Background feed checks (ADR-0018); never available in widget tests.
+  final FeedCheckScheduler feedCheckScheduler;
+
   TrellisApp(
       {super.key,
       required this.db,
@@ -90,7 +101,8 @@ class TrellisApp extends StatefulWidget {
       EpisodePlayer Function()? createPlayer,
       DeviceServices? services,
       this.bootNotes = const [],
-      this.initialTheme})
+      this.initialTheme,
+      this.feedCheckScheduler = const UnavailableFeedCheckScheduler()})
       : fetcher = fetcher ?? IoHttpFetcher(),
         createPlayer = createPlayer ?? (() => JustAudioEpisodePlayer()),
         services = services ?? DeviceServices.detached();
@@ -137,7 +149,8 @@ class _TrellisAppState extends State<TrellisApp> {
                 db: widget.db,
                 fetcher: widget.fetcher,
                 createPlayer: widget.createPlayer,
-                services: widget.services),
+                services: widget.services,
+                feedCheckScheduler: widget.feedCheckScheduler),
           ),
         ),
       ),

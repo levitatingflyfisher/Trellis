@@ -22,6 +22,7 @@ import 'package:openhearth_design/openhearth_design.dart';
 import 'package:ml_runtime/ml_runtime.dart';
 
 import '../../services/device_services.dart';
+import '../feeds/background/feed_check_settings.dart';
 import 'consent.dart';
 import 'format.dart';
 import 'model_store.dart';
@@ -66,12 +67,17 @@ class ModelsScreen extends StatefulWidget {
   /// in-memory test dbs) skips the row gracefully.
   final File? databaseFile;
 
+  /// The background-check switches (ADR-0018); null where the system can't
+  /// run a check, and then the section is absent.
+  final FeedCheckSettings? feedCheck;
+
   const ModelsScreen({
     super.key,
     required this.store,
     required this.registry,
     this.services,
     this.databaseFile,
+    this.feedCheck,
   });
 
   @override
@@ -290,6 +296,8 @@ class _ModelsScreenState extends State<ModelsScreen> {
             ),
           ),
           for (final spec in widget.registry.specs) _modelTile(spec),
+          if (widget.feedCheck case final feedCheck?)
+            FeedCheckSection(settings: feedCheck),
           if (widget.services != null) ..._storageSection(),
         ],
       )),
@@ -507,6 +515,61 @@ class _ModelsScreenState extends State<ModelsScreen> {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// "Checking feeds": the device's two background-check switches. New
+/// episodes wait in the Inbox; nothing here ever notifies (ADR-0003).
+class FeedCheckSection extends StatefulWidget {
+  const FeedCheckSection({super.key, required this.settings});
+  final FeedCheckSettings settings;
+
+  @override
+  State<FeedCheckSection> createState() => _FeedCheckSectionState();
+}
+
+class _FeedCheckSectionState extends State<FeedCheckSection> {
+  @override
+  void initState() {
+    super.initState();
+    widget.settings.load();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return ListenableBuilder(
+      listenable: widget.settings,
+      builder: (context, _) {
+        final s = widget.settings;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 24, 16, 4),
+              child: Text('Checking feeds', style: theme.textTheme.titleMedium),
+            ),
+            SwitchListTile(
+              key: const Key('feed-check-background'),
+              title: const Text('Check feeds in the background'),
+              subtitle: const Text(
+                  'About every 4 hours, when the battery isn’t low. New '
+                  'episodes wait in your Inbox; you won’t get a notification.'),
+              value: s.background,
+              onChanged: s.setBackground,
+            ),
+            SwitchListTile(
+              key: const Key('feed-check-wifi-only'),
+              title: const Text('Only on Wi-Fi'),
+              subtitle: const Text(
+                  'Episode downloads always wait for Wi-Fi.'),
+              value: s.wifiOnly,
+              onChanged: s.background ? s.setWifiOnly : null,
+            ),
+          ],
+        );
+      },
     );
   }
 }

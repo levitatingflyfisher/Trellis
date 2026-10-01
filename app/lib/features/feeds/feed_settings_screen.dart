@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../../db/database.dart';
+import '../models/consent.dart';
+import 'auto_download.dart';
 import 'feed_rules.dart';
 import '../shared/capped_body.dart';
 
@@ -19,7 +21,15 @@ import '../shared/capped_body.dart';
 class FeedSettingsScreen extends StatefulWidget {
   final AppDatabase db;
   final Feed feed;
-  const FeedSettingsScreen({super.key, required this.db, required this.feed});
+
+  /// Whether this device can run an auto-download pass; the switch is
+  /// offered only then (ADR-0018).
+  final bool offerAutoDownload;
+  const FeedSettingsScreen(
+      {super.key,
+      required this.db,
+      required this.feed,
+      this.offerAutoDownload = false});
 
   @override
   State<FeedSettingsScreen> createState() => _FeedSettingsScreenState();
@@ -33,6 +43,7 @@ class _FeedSettingsScreenState extends State<FeedSettingsScreen> {
   late final TextEditingController _outroController;
   late final TextEditingController _keepLatestController;
   bool? _dspEnabled;
+  late bool _autoDownload = widget.feed.autoDownload;
 
   late List<FeedRule> _rules;
   late final TextEditingController _ruleTextController;
@@ -76,7 +87,24 @@ class _FeedSettingsScreenState extends State<FeedSettingsScreen> {
       dspEnabled: _dspEnabled,
     );
     await widget.db.feedsDao.setRules(widget.feed.id, encodeFeedRules(_rules));
+    if (_autoDownload != widget.feed.autoDownload) {
+      await setFeedAutoDownload(widget.db, widget.feed.id, _autoDownload);
+    }
     if (mounted) Navigator.of(context).pop();
+  }
+
+  /// Turning it on is consent to downloads nobody taps for, so it passes
+  /// the same dialog a tapped Download does (ADR-0003 law 6).
+  Future<void> _toggleAutoDownload(bool on) async {
+    if (on) {
+      final ok = await confirmDownload(context, items: const [
+        DownloadItem('New episodes of this show as they arrive: up to '
+            '$autoDownloadPerFeedCap each time feeds are checked, only on '
+            'Wi-Fi'),
+      ]);
+      if (!ok) return;
+    }
+    if (mounted) setState(() => _autoDownload = on);
   }
 
   void _addRule() {
@@ -218,6 +246,19 @@ class _FeedSettingsScreenState extends State<FeedSettingsScreen> {
                 hintText: 'e.g. 5. Leave blank to keep every episode’s audio',
               ),
             ),
+            if (widget.offerAutoDownload) ...[
+              const SizedBox(height: 16),
+              SwitchListTile(
+                key: const Key('feed-settings-auto-download'),
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Download new episodes'),
+                subtitle: const Text(
+                    'The newest $autoDownloadPerFeedCap from each check, on '
+                    'Wi-Fi only. They show in Jobs while they download.'),
+                value: _autoDownload,
+                onChanged: _toggleAutoDownload,
+              ),
+            ],
             const SizedBox(height: 24),
             _DspSettingsSection(
               value: _dspEnabled,
