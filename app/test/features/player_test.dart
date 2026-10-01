@@ -1159,6 +1159,41 @@ void main() {
               'the slider itself would misrepresent how far in this is');
     });
 
+    testWidgets('a rehydrated work whose duration was learned on the last '
+        'play shows the slider at the saved position, not at the start',
+        (tester) async {
+      // User: "when the podcast is paused, the little circle doesn't
+      // represent where in the timeline it is."
+      final work = await seedEpisode(title: 'Aurora season');
+      await controller.playWork(work);
+      player.emitDuration(const Duration(minutes: 60));
+      player.emitPosition(const Duration(minutes: 12, seconds: 34));
+      await tester.pump();
+      await controller.toggle(); // pause, saves tMs
+
+      final fresh = PlayerController(
+          db: db,
+          profileId: profileId,
+          createPlayer: () => FakeEpisodePlayer(),
+          now: () => DateTime.fromMillisecondsSinceEpoch(clockMs));
+      addTearDown(fresh.dispose);
+      await fresh.rehydrateLastPlayed();
+
+      await tester.pumpWidget(MaterialApp(
+        home: Scaffold(
+          body: const SizedBox.expand(),
+          bottomNavigationBar: MiniPlayerBar(controller: fresh),
+        ),
+      ));
+      await tester.pump();
+
+      final slider =
+          tester.widget<Slider>(find.byKey(const Key('player-slider')));
+      expect(slider.max, 3600000);
+      expect(slider.value, 754000);
+      expect(find.text('Paused at 12:34'), findsOneWidget);
+    });
+
     testWidgets('transport controls drive the seam', (tester) async {
       final work = await seedEpisode();
       await controller.playWork(work);

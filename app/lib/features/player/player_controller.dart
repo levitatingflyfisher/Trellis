@@ -151,6 +151,15 @@ class PlayerController extends ChangeNotifier {
   int? get rehydratedPositionMs =>
       _player == null ? _rehydratedPositionMs : null;
 
+  /// The rehydrated work's duration as last learned from a real play
+  /// (episode row, or the resumed audiobook file), so the paused bar's
+  /// slider can sit where the listener actually is. Null when it was never
+  /// learned; the bar then keeps the slider at zero and relies on the
+  /// "Paused at" caption alone.
+  int? _rehydratedDurationMs;
+  int? get rehydratedDurationMs =>
+      _player == null ? _rehydratedDurationMs : null;
+
   // ── sleep timer ──
   //
   // Lives here, not in a widget, so it survives screen navigation. Driven
@@ -303,6 +312,7 @@ class PlayerController extends ChangeNotifier {
     // A real player now owns position/duration — the rehydrated snapshot
     // (Campaign 9 Phase 2) has served its purpose.
     _rehydratedPositionMs = null;
+    _rehydratedDurationMs = null;
     _subs.add(
       p.positionStream.listen((_) {
         unawaited(_tickSleepTimer());
@@ -398,8 +408,10 @@ class PlayerController extends ChangeNotifier {
       _currentFileIdx =
           (resume?.fileIdx ?? 0).clamp(0, audiobookFiles.length - 1);
       _rehydratedPositionMs = resume?.tMs ?? 0;
+      _rehydratedDurationMs = audiobookFiles[_currentFileIdx!].durationMs;
     } else {
       _rehydratedPositionMs = await _resumeMs(work.id);
+      _rehydratedDurationMs = episode?.durationMs;
     }
     notifyListeners();
   }

@@ -61,6 +61,17 @@ class MiniPlayerBar extends StatelessWidget {
         final durationMs = controller.duration?.inMilliseconds;
         final positionMs = controller.position.inMilliseconds
             .clamp(0, durationMs ?? controller.position.inMilliseconds);
+        // Paused after a restart: no live player yet, so place the slider
+        // from the saved position and the duration learned on the last
+        // play. Unknown duration keeps it at zero (caption only).
+        final restoredMs = controller.rehydratedPositionMs;
+        final restoredDurationMs = controller.rehydratedDurationMs;
+        final sliderMax = restoredMs != null && restoredDurationMs != null
+            ? restoredDurationMs
+            : (durationMs ?? positionMs + 1);
+        final sliderValue = restoredMs != null && restoredDurationMs != null
+            ? restoredMs.clamp(0, restoredDurationMs)
+            : positionMs;
         return Material(
           key: const Key('mini-player'),
           color: theme.colorScheme.surfaceContainerHigh,
@@ -164,8 +175,8 @@ class MiniPlayerBar extends StatelessWidget {
                     child: Slider(
                       key: const Key('player-slider'),
                       min: 0,
-                      max: (durationMs ?? positionMs + 1).toDouble(),
-                      value: positionMs.toDouble(),
+                      max: sliderMax.toDouble(),
+                      value: sliderValue.toDouble(),
                       onChanged: durationMs == null
                           ? null
                           : (v) => controller
