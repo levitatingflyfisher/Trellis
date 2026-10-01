@@ -3,8 +3,11 @@
 /// Contract (http_fetcher.dart), honoured here:
 /// - Redirects are followed before returning, and the SSRF guard is re-run
 ///   on EVERY hop target — a public host must not be able to bounce the
-///   native app into the LAN (safe_url.dart is lexical; the hop re-check is
-///   this layer's duty).
+///   native app into the LAN. safe_url.dart is lexical; the client
+///   underneath (guarded_http_client.dart) checks every address a name
+///   resolves to, and connects only to the address it checked.
+/// - An unbroken run of 301/308 hops is reported as
+///   [FetchResponse.permanentUrl], so a moved feed can be followed.
 /// - Non-2xx statuses come back as a [FetchResponse]; only transport-level
 ///   failures throw.
 /// - [timeout] bounds the wait for headers, then the longest silence allowed
@@ -18,13 +21,24 @@ import 'dart:io';
 
 import 'package:comms_core/comms_core.dart';
 
+import '../app_version.dart';
+import 'guarded_http_client.dart';
+
 class IoHttpFetcher implements HttpFetcher {
+  /// [resolve] and [allowAddress] reach the socket-level guard
+  /// (guarded_http_client.dart); the defaults are real DNS and
+  /// comms_core's blocklist.
   IoHttpFetcher(
       {Uri Function(String rawUrl)? checkRedirectTarget,
-      this.maxBodyTime = const Duration(minutes: 3)})
+      this.maxBodyTime = const Duration(minutes: 3),
+      HostResolver? resolve,
+      AddressPolicy allowAddress = isPublicAddress})
       : _checkRedirectTarget = checkRedirectTarget ?? assertSafeFetchUrl,
-        _client = HttpClient() {
+        _client = resolve == null
+            ? guardedHttpClient(allow: allowAddress)
+            : guardedHttpClient(resolve: resolve, allow: allowAddress) {
     _client.autoUncompress = true;
+    _client.userAgent = trellisUserAgent;
   }
 
   /// SSRF re-check applied to every redirect target. Defaults to
@@ -60,6 +74,8 @@ class IoHttpFetcher implements HttpFetcher {
     }
 
     var current = url;
+    Uri? permanent;
+    var unbroken = true;
     for (var hop = 0; hop <= maxRedirects; hop++) {
       final request = await _client.getUrl(current).timeout(remaining());
       request.followRedirects = false; // hops are ours, so the guard runs
@@ -75,12 +91,17 @@ class IoHttpFetcher implements HttpFetcher {
         }
         // Resolve relative targets, then re-run the SSRF guard on the hop.
         current = _checkRedirectTarget(current.resolve(location).toString());
+        final isPermanent =
+            response.statusCode == 301 || response.statusCode == 308;
+        unbroken = unbroken && isPermanent;
+        if (unbroken) permanent = current;
         continue;
       }
 
       return FetchResponse(
         statusCode: response.statusCode,
         headers: _flattenHeaders(response.headers),
+        permanentUrl: permanent,
         body: timeout == null
             ? response
             : _stallBound(response, stall: timeout, ceiling: maxBodyTime),

@@ -77,16 +77,28 @@ String _archiveItemKey(FeedItem item) {
   return '${item.title}#${item.date}';
 }
 
+/// Parses a fetched feed body. Throws [FeedParseException] as
+/// [parseRssFeed] does.
+typedef FeedBodyParser = Future<ParsedFeed> Function(String body, String url);
+
+Future<ParsedFeed> parseFeedInline(String body, String url) async =>
+    parseRssFeed(body, url);
+
 String _pageWord(int n) => n == 1 ? 'page' : 'pages';
 
 /// Walks a feed's paged archive starting at [startPageUrl] (a
 /// [ParsedFeed.nextPageUrl] the caller already has in hand), fetching and
 /// parsing one hop at a time until the chain ends, [maxPages] is reached,
 /// or a hop fails.
+///
+/// [parse] turns each page into a feed; it defaults to [parseRssFeed]
+/// inline. The app passes one that runs on another isolate, which this
+/// package can't do itself without breaking its web build.
 Future<FeedArchiveResult> walkFeedArchive(
   CommsClient client, {
   required String startPageUrl,
   int maxPages = defaultArchivePageCap,
+  FeedBodyParser parse = parseFeedInline,
 }) async {
   final items = <FeedItem>[];
   final seenKeys = <String>{};
@@ -139,7 +151,7 @@ Future<FeedArchiveResult> walkFeedArchive(
 
     final ParsedFeed parsed;
     try {
-      parsed = parseRssFeed(res.body!, url);
+      parsed = await parse(res.body!, url);
     } on FeedParseException {
       return FeedArchiveResult(
         items: items,

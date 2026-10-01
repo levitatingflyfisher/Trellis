@@ -5,6 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sqlite3/sqlite3.dart' as raw;
 import 'package:trellis/db/database.dart';
 
+import '../support/schema_strip.dart';
+
 /// The spine's storage contract (ADR-0002): positions are one tiny row,
 /// layers are per-segment, ephemera carry their sovereignty bit.
 void main() {
@@ -332,6 +334,7 @@ void main() {
       await seed.close();
       final v12 = raw.sqlite3.open(file.path);
       v12.execute('''
+        $stripV26
         ALTER TABLE feeds DROP COLUMN image_url;
         DROP TABLE translation_sentences;
         DROP TABLE saved_views;
@@ -417,6 +420,7 @@ void main() {
       await seed.close();
       final v18 = raw.sqlite3.open(file.path);
       v18.execute('''
+        $stripV26
         ALTER TABLE translation_sentences DROP COLUMN engine;
         ALTER TABLE works DROP COLUMN active_translation_lang;
         ALTER TABLE feeds DROP COLUMN image_url;

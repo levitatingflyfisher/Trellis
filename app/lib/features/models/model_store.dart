@@ -313,6 +313,10 @@ class DiskModelStore implements ModelStore {
                   (await crypto.sha256.bind(part.openRead()).first).toString();
               if (digest != f.sha256) {
                 await part.delete();
+                // The engine's If-Range sidecar named the bytes just
+                // thrown away.
+                final validator = File('${part.path}.validator');
+                if (validator.existsSync()) await validator.delete();
                 throw ModelIntegrityException(
                     'model “${spec.id}”: ${_fileName(f)} hashed to $digest, '
                     'registry pins ${f.sha256}, so it was not installed');

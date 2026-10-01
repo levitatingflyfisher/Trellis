@@ -7,6 +7,8 @@ import 'package:sqlite3/sqlite3.dart' as raw;
 import 'package:study_core/study_core.dart';
 import 'package:trellis/db/database.dart';
 
+import '../support/schema_strip.dart';
+
 /// A fresh, never-reviewed FSRS card for item [id], due [today].
 FsrsCardState newFsrsCard(String id, int today) =>
     FsrsCardState.initial(id, today);
@@ -744,6 +746,7 @@ void main() {
       await seed.close();
       final v2 = raw.sqlite3.open(file.path);
       v2.execute('''
+        $stripV26
         ALTER TABLE feeds DROP COLUMN image_url;
         DROP TABLE revlog;
         DROP TABLE cards;

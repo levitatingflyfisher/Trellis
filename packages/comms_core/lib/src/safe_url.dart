@@ -14,7 +14,8 @@
 ///
 /// This is a lexical guard: it cannot see DNS. A hostname that *resolves* to
 /// a private address still gets through here — [HttpFetcher] implementations
-/// that resolve names should re-check the resolved address.
+/// that resolve names re-check each resolved address with
+/// [isBlockedIpAddress], and connect to the address they checked.
 library;
 
 import 'exceptions.dart';
@@ -59,6 +60,22 @@ bool _isBlockedHost(String host) {
   final v4 = _parseIpv4(host);
   if (v4 != null) return _isBlockedIpv4(v4);
   return false;
+}
+
+/// The same blocklist over an address a resolver returned, as raw bytes
+/// (4 for IPv4, 16 for IPv6; anything else fails closed). [HttpFetcher]
+/// implementations check every resolved address with this before
+/// connecting, since a public name can resolve to the LAN.
+bool isBlockedIpAddress(List<int> raw) {
+  if (raw.length == 4) {
+    return _isBlockedIpv4(
+        (raw[0] << 24) | (raw[1] << 16) | (raw[2] << 8) | raw[3]);
+  }
+  if (raw.length == 16) {
+    return _isBlockedIpv6(
+        [for (var i = 0; i < 16; i += 2) (raw[i] << 8) | raw[i + 1]]);
+  }
+  return true;
 }
 
 bool _isBlockedIpv4(int a) {

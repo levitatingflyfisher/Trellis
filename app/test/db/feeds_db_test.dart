@@ -7,6 +7,8 @@ import 'package:sqlite3/sqlite3.dart' as raw;
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/reader/reader_prefs.dart';
 
+import '../support/schema_strip.dart';
+
 /// The P2 feeds slice storage contract: feeds carry their refresh
 /// bookkeeping, every feed item IS a spine work (ADR-0002) with a small
 /// episodes row for river metadata, the river has exactly ONE ordering
@@ -992,6 +994,7 @@ void main() {
       await seed.close();
       final v11 = raw.sqlite3.open(file.path);
       v11.execute('''
+        $stripV26
         ALTER TABLE feeds DROP COLUMN image_url;
         ALTER TABLE feeds DROP COLUMN speed_override;
         ALTER TABLE feeds DROP COLUMN skip_intro_seconds;
@@ -1101,6 +1104,7 @@ void main() {
         await seed.close();
         final v12 = raw.sqlite3.open(file.path);
         v12.execute('''
+        $stripV26
         ALTER TABLE feeds DROP COLUMN image_url;
         DROP TABLE translation_sentences;
         DROP TABLE saved_views;
@@ -1196,6 +1200,7 @@ void main() {
       await seed.close();
       final v22 = raw.sqlite3.open(file.path);
       v22.execute('''
+        $stripV26
         ALTER TABLE episodes DROP COLUMN finished_at_ms;
         ALTER TABLE episodes DROP COLUMN image_url;
         ALTER TABLE feeds DROP COLUMN sort_oldest_first;
@@ -1310,6 +1315,7 @@ void main() {
       await seed.close();
       final v23 = raw.sqlite3.open(file.path);
       v23.execute('''
+        $stripV26
         ALTER TABLE feeds DROP COLUMN origin;
         PRAGMA user_version = 23;
       ''');
@@ -1365,6 +1371,7 @@ void main() {
         await seed.close();
         final v18 = raw.sqlite3.open(file.path);
         v18.execute('''
+        $stripV26
         ALTER TABLE feeds DROP COLUMN image_url;
         ALTER TABLE translation_sentences DROP COLUMN engine;
         ALTER TABLE works DROP COLUMN active_translation_lang;
@@ -1446,6 +1453,7 @@ void main() {
         await seed.close();
         final v19 = raw.sqlite3.open(file.path);
         v19.execute('''
+        $stripV26
         ALTER TABLE feeds DROP COLUMN image_url;
         ALTER TABLE jobs DROP COLUMN failure_reason;
         ALTER TABLE episodes DROP COLUMN finished_at_ms;

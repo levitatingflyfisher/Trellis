@@ -5,6 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sqlite3/sqlite3.dart' as raw;
 import 'package:trellis/db/database.dart';
 
+import '../support/schema_strip.dart';
+
 /// The word ledger (schema v5): words the user's hand set aside while
 /// reading or listening. Two laws under test here:
 ///
@@ -151,6 +153,7 @@ void main() {
       await seed.close();
       final v4 = raw.sqlite3.open(file.path);
       v4.execute('''
+        $stripV26
         ALTER TABLE feeds DROP COLUMN image_url;
         DROP TABLE word_ledger;
         ALTER TABLE profiles DROP COLUMN prefer_system_voice;

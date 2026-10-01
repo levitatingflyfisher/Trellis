@@ -54,6 +54,20 @@ void main() {
     expect(result.message, isNotEmpty);
   });
 
+  test('every page goes through the caller\'s parser, so the app can move '
+      'it off the UI isolate', () async {
+    final fetcher = ScriptedFetcher((url, headers) =>
+        _page(url.toString(), itemLinks: ['https://x/a']));
+    final seen = <String>[];
+    final result = await walkFeedArchive(client(fetcher),
+        startPageUrl: 'https://x.test/page1', parse: (body, url) async {
+      seen.add(url);
+      return parseRssFeed(body, url);
+    });
+    expect(seen, ['https://x.test/page1']);
+    expect(result.items, hasLength(1));
+  });
+
   test('dedups an item repeated across pages by link identity', () async {
     final fetcher = ScriptedFetcher((url, headers) {
       final u = url.toString();

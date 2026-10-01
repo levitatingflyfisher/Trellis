@@ -143,7 +143,7 @@ class EpisodeRow extends StatelessWidget {
     final fade = facts.played && !facts.archived;
     final tile = ListTile(
       onTap: onTap,
-      leading: _leading(fade),
+      leading: _leading(context, fade),
       title: Text(
         work.title,
         overflow: TextOverflow.ellipsis,
@@ -235,7 +235,7 @@ class EpisodeRow extends StatelessWidget {
     return parts.join(' · ');
   }
 
-  Widget? _leading(bool fade) {
+  Widget? _leading(BuildContext context, bool fade) {
     final art = artwork;
     if (art == null) return null;
     return ClipRRect(
@@ -248,6 +248,7 @@ class EpisodeRow extends StatelessWidget {
           key: Key('artwork-$_id'),
           width: 48,
           height: 48,
+          cacheWidth: thumbCacheWidth(context, 48),
           fit: BoxFit.cover,
           // A partial or corrupt file reads as "no thumbnail yet".
           errorBuilder: (_, _, _) => const SizedBox(width: 48, height: 48),
@@ -326,3 +327,9 @@ class _Marker extends StatelessWidget {
     );
   }
 }
+
+/// The pixel width to decode a [logical]-wide thumbnail at. Show art is
+/// commonly 3000 px square; decoded whole for a 48 dp row, each one holds
+/// ~36 MB of image cache instead of ~100 kB.
+int thumbCacheWidth(BuildContext context, double logical) =>
+    (logical * MediaQuery.devicePixelRatioOf(context)).ceil();

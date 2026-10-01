@@ -174,7 +174,10 @@ class CommsClient {
     try {
       final r = await _fetcher.get(safe,
           headers: headers, timeout: const Duration(seconds: 8));
-      if (r.statusCode == 304) return const FeedFetchResult.notModified();
+      final movedTo = r.permanentUrl?.toString();
+      if (r.statusCode == 304) {
+        return FeedFetchResult.notModified(movedTo: movedTo);
+      }
       if (r.statusCode == 429 || r.statusCode == 503) {
         final ra = r.header('retry-after');
         var retrySec = 60;
@@ -208,6 +211,7 @@ class CommsClient {
           body: body,
           etag: r.header('etag'),
           lastModified: r.header('last-modified'),
+          movedTo: movedTo,
         );
       }
       // 4xx: treat as error, caller decides whether to mark broken.

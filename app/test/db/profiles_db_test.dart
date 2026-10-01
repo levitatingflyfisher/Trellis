@@ -6,6 +6,8 @@ import 'package:sqlite3/sqlite3.dart' as raw;
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/reader/reader_prefs.dart';
 
+import '../support/schema_strip.dart';
+
 /// The speak-voice preference (ADR-0006's settings escape): a profile-scoped
 /// bool, false by default — the same "on-device state the reader already
 /// persists" surface as Positions, never a second prefs mechanism.
@@ -167,6 +169,7 @@ void main() {
       await seed.close();
       final v8 = raw.sqlite3.open(file.path);
       v8.execute('''
+        $stripV26
         ALTER TABLE feeds DROP COLUMN image_url;
         ALTER TABLE profiles DROP COLUMN scheduler;
         ALTER TABLE profiles DROP COLUMN keep_finished_in_queue;

@@ -86,6 +86,7 @@ String encodeBreakerState(FeedRefreshState s) => jsonEncode({
       if (s.lastError != null) 'lastError': s.lastError,
       if (s.throttledUntilMs != null) 'throttledUntilMs': s.throttledUntilMs,
       if (s.lastCheckedMs != null) 'lastCheckedMs': s.lastCheckedMs,
+      if (s.nextAttemptMs != null) 'nextAttemptMs': s.nextAttemptMs,
     });
 
 FeedRefreshState decodeBreakerState(
@@ -110,6 +111,7 @@ FeedRefreshState decodeBreakerState(
     lastError: m['lastError'] as String?,
     throttledUntilMs: (m['throttledUntilMs'] as num?)?.toInt(),
     lastCheckedMs: (m['lastCheckedMs'] as num?)?.toInt(),
+    nextAttemptMs: (m['nextAttemptMs'] as num?)?.toInt(),
   );
 }
 
@@ -182,15 +184,24 @@ Future<int> ingestFeedItems(
     required List<FeedItem> items,
     required int nowMs,
     List<FeedRule> rules = const []}) async {
-  final seen = await db.feedsDao.guidsOf(feedId);
   var added = 0;
   await db.transaction(() async {
+    // Read inside the transaction: drift runs transactions one at a time,
+    // so a "Try again" overlapping a refresh of the same feed sees what
+    // the other wrote instead of inserting the same items twice.
+    final seen = await db.feedsDao.guidsOf(feedId);
+    final gaps = await db.feedsDao.metadataGapsOf(feedId);
     for (final item in items) {
       final guid = guidOf(item);
       if (!seen.add(guid)) {
         // Items stored before ingest kept length and artwork still lack
         // them; a later listing fills the gaps.
-        if (item.durationMs != null || item.imageUrl != null) {
+        // Only a row with a gap this listing can fill costs a query; a
+        // 2,000-item listing of complete rows costs none.
+        final gap = gaps[guid];
+        if (gap != null &&
+            ((gap.duration && item.durationMs != null) ||
+                (gap.image && item.imageUrl != null))) {
           await db.feedsDao.fillMissingMetadata(feedId, guid,
               durationMs: item.durationMs, imageUrl: item.imageUrl);
         }
@@ -221,7 +232,7 @@ Future<int> ingestFeedItems(
       if (segments.isNotEmpty) {
         await db.spineDao.insertSegments(workId, segments);
       }
-      await db.feedsDao.insertEpisode(
+      final inserted = await db.feedsDao.insertEpisodeIfNew(
           workId: workId,
           feedId: feedId,
           guid: guid,
@@ -229,6 +240,12 @@ Future<int> ingestFeedItems(
           durationMs: item.durationMs,
           imageUrl: item.imageUrl,
           publishedAtMs: parsePublishedMs(item.date) ?? nowMs);
+      if (!inserted) {
+        // Another writer stored this item first (the unique (feed, guid)
+        // index said so): the work made for it is surplus.
+        await db.spineDao.deleteWork(workId);
+        continue;
+      }
       if (action == FeedRuleAction.markReadOnArrival) {
         await db.feedsDao.setReadAt(workId, nowMs);
       } else if (action == FeedRuleAction.autoKeep) {

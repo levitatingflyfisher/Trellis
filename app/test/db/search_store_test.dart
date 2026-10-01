@@ -8,6 +8,8 @@ import 'package:trellis/db/database.dart';
 import 'package:trellis/features/search/history_days.dart';
 import 'package:trellis/features/search/search_store.dart';
 
+import '../support/schema_strip.dart';
+
 /// History and search (ADR-0016 section 4): the FTS index follows its
 /// rows through insert, rename and delete; transcript hits carry a
 /// snippet and the time to seek to; history is most recent first.
@@ -383,6 +385,7 @@ void main() {
         v24.execute('DROP TRIGGER $t');
       }
       v24.execute('''
+        $stripV26
         DROP TABLE items_fts;
         DROP TABLE segments_fts;
         PRAGMA user_version = 24;

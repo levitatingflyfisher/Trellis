@@ -22,6 +22,17 @@ void main() {
               (e) => e.message, 'message', 'Invalid EPUB: no rootfile')));
     });
 
+    test('a declared uncompressed total over the cap is refused before '
+        'anything inflates', () {
+      // The real fixture is a few kB; a cap below it stands in for a
+      // zip bomb's gigabytes without allocating them.
+      expect(
+          () => parseEpub(fx.epub3(), maxUncompressedBytes: 100),
+          throwsA(isA<EpubTooLargeException>()
+              .having((e) => e.message, 'message', contains('too large'))));
+      expect(parseEpub(fx.epub3()).title, isNotEmpty);
+    });
+
     test('missing OPF', () {
       expect(
           () => parseEpub(fx.zipWithMissingOpf()),

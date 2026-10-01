@@ -5,6 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sqlite3/sqlite3.dart' as raw;
 import 'package:trellis/db/database.dart';
 
+import '../support/schema_strip.dart';
+
 /// The small DAO surface the library screen leans on beyond the spine
 /// contract already pinned in spine_db_test.dart.
 void main() {
@@ -236,6 +238,7 @@ void main() {
       await seed.close();
       final v12 = raw.sqlite3.open(file.path);
       v12.execute('''
+        $stripV26
         ALTER TABLE feeds DROP COLUMN image_url;
         DROP TABLE saved_views;
         DROP TABLE translation_sentences;

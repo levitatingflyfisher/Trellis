@@ -16,6 +16,7 @@ import '../../services/device_services.dart';
 import 'audio_eviction.dart';
 import 'feed_dedup.dart';
 import 'feed_ingest.dart';
+import 'feed_parse.dart';
 import 'feed_rules.dart';
 
 /// Proxy consent that never grants: the native app has no proxy path.
@@ -207,7 +208,7 @@ class FeedsRepository {
       return SubscribeFailure(e.message);
     }
 
-    final String feedUrl;
+    String feedUrl;
     try {
       feedUrl = await client.discoverFeedUrl(input);
     } on CommsException catch (e) {
@@ -229,10 +230,25 @@ class FeedsRepository {
           "That address couldn’t be reached as a feed right now.");
     }
     final ParsedFeed parsed;
+    final String bodyHash;
+    // A permanent move is believed only once the body proves to be a
+    // feed: a host that 301s every URL to its home page must not rewrite
+    // the address to one that isn't one.
+    final moved = res.movedTo;
+    final parseUrl = moved ?? feedUrl;
     try {
-      parsed = parseRssFeed(res.body!, feedUrl);
+      final body = await parseFeedBody(res.body!, parseUrl);
+      parsed = body.feed!;
+      bodyHash = body.hash;
     } on FeedParseException catch (e) {
       return SubscribeFailure(e.message);
+    }
+    if (moved != null && moved != feedUrl) {
+      final there = await db.feedsDao.feedByUrl(profileId, moved);
+      if (there != null) {
+        return AlreadySubscribed(there.title.isEmpty ? there.url : there.title);
+      }
+      feedUrl = moved;
     }
 
     final nowMs = _nowMs;
@@ -241,9 +257,6 @@ class FeedsRepository {
     final state = applyFetchResult(
         FeedRefreshState(url: feedUrl), res,
         nowMs: nowMs, parsedTitle: parsed.title);
-    await _persistState(feedId, state,
-        nextPageUrl: parsed.nextPageUrl, updateNextPageUrl: true,
-        imageUrl: parsed.imageUrl, updateImageUrl: true);
     // A brand-new feed has no rules yet (rulesJson is still the '[]'
     // default) — nothing to decode, the ingest default applies.
     final added = await ingestFeedItems(
@@ -252,6 +265,12 @@ class FeedsRepository {
         feedId: feedId,
         items: parsed.items,
         nowMs: nowMs);
+    // Validators and the body hash only once the items have landed; see
+    // [_refreshOne].
+    await _persistState(feedId, state,
+        nextPageUrl: parsed.nextPageUrl, updateNextPageUrl: true,
+        imageUrl: parsed.imageUrl, updateImageUrl: true);
+    await db.feedsDao.setBodyHash(feedId, bodyHash);
     await _settleOrigin(feedId, parsed);
     if (added > 0) await _runDedupPass(profileId);
     _fetchArtworkLater(() async {
@@ -282,21 +301,35 @@ class FeedsRepository {
         etag: feed.etag, lastModified: feed.lastModified);
 
     if (res.status == FeedFetchStatus.fresh) {
-      final ParsedFeed parsed;
+      final ParsedBody body;
       try {
-        parsed = parseRssFeed(res.body!, feed.url);
+        // The hash vouches for rows the last ingest wrote; with none left
+        // (all swept or purged since), the same body ingests again.
+        final unchangedHash = await db.feedsDao.hasEpisodes(feed.id)
+            ? feed.bodyHash
+            : null;
+        body = await parseFeedBody(res.body!, res.movedTo ?? feed.url,
+            unchangedHash: unchangedHash);
       } on FeedParseException catch (e) {
         await _persistState(feed.id,
             applyParseFailure(state, nowMs: nowMs, error: e.message));
         return (status: RefreshStatus.parseFailed, newItems: 0);
       }
+      final parsed = body.feed;
+      if (parsed == null) {
+        // The same bytes as the last body that ingested: a 304 the host
+        // didn't know how to send. The answer still counts as contact
+        // (failures reset, validators adopted); the archive link and
+        // artwork it would re-derive are the ones already stored.
+        state = applyFetchResult(state, res, nowMs: nowMs);
+        await _persistState(feed.id, state);
+        await _adoptMove(feed, res.movedTo);
+        _fetchArtworkLater(() =>
+            _fetchEpisodeArtwork(feed.id, showImageUrl: feed.imageUrl));
+        return (status: RefreshStatus.notModified, newItems: 0);
+      }
       state = applyFetchResult(state, res,
           nowMs: nowMs, parsedTitle: parsed.title);
-      await _persistState(feed.id, state,
-          nextPageUrl: parsed.nextPageUrl, updateNextPageUrl: true,
-          imageUrl: parsed.imageUrl, updateImageUrl: true);
-      await _maybeFetchArtwork(feed.id,
-          newUrl: parsed.imageUrl, oldUrl: feed.imageUrl);
       final added = await ingestFeedItems(
           db: db,
           profileId: feed.profileId,
@@ -304,6 +337,17 @@ class FeedsRepository {
           items: parsed.items,
           nowMs: nowMs,
           rules: decodeFeedRules(feed.rulesJson));
+      // Only now do the validators, the hash and a permanent move land.
+      // Written before, an ingest that failed would leave validators that
+      // turn every later fetch into a 304 (or a hash match) for a body
+      // whose items never arrived.
+      await _persistState(feed.id, state,
+          nextPageUrl: parsed.nextPageUrl, updateNextPageUrl: true,
+          imageUrl: parsed.imageUrl, updateImageUrl: true);
+      await db.feedsDao.setBodyHash(feed.id, body.hash);
+      await _adoptMove(feed, res.movedTo);
+      await _maybeFetchArtwork(feed.id,
+          newUrl: parsed.imageUrl, oldUrl: feed.imageUrl);
       await _settleOrigin(feed.id, parsed);
       // Every fresh refresh, not only one with new episodes: a fetch
       // that failed, or a URL filled in on an episode already stored,
@@ -320,6 +364,10 @@ class FeedsRepository {
 
     state = applyFetchResult(state, res, nowMs: nowMs);
     await _persistState(feed.id, state);
+    // A 304 is the feed answering at its new address: proof enough.
+    if (res.status == FeedFetchStatus.notModified) {
+      await _adoptMove(feed, res.movedTo);
+    }
     return (
       status: switch (res.status) {
         FeedFetchStatus.notModified => RefreshStatus.notModified,
@@ -424,6 +472,20 @@ class FeedsRepository {
       for (final f in await db.feedsDao.feedsOf(profileId))
         if (wanted.contains(f.id)) f,
     ];
+  }
+
+  /// A 301/308 chain says the feed lives elsewhere now, so the row
+  /// follows it; a 302/307 never reaches here (comms_core only reports an
+  /// unbroken permanent run). Called only once the answer proved to be
+  /// the feed (a parsed body, or a 304). When this profile already
+  /// follows the new address, the two rows are one show: the row keeps
+  /// its own address (merging settings and kept episodes is the
+  /// listener's call), and the usual post-ingest dedup pass hides the
+  /// episodes they share.
+  Future<void> _adoptMove(Feed feed, String? movedTo) async {
+    if (movedTo == null || movedTo == feed.url) return;
+    if (await db.feedsDao.feedByUrl(feed.profileId, movedTo) != null) return;
+    await db.feedsDao.setUrl(feed.id, movedTo);
   }
 
   Future<void> _persistState(int feedId, FeedRefreshState s,
@@ -537,7 +599,8 @@ class FeedsRepository {
     if (startUrl == null) {
       return (newItems: 0, message: noFeedArchiveNote);
     }
-    final result = await walkFeedArchive(client, startPageUrl: startUrl);
+    final result = await walkFeedArchive(client,
+        startPageUrl: startUrl, parse: parseFeedOffThread);
     final added = await ingestFeedItems(
         db: db,
         profileId: feed.profileId,

@@ -9,6 +9,7 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/feeds/feed_ingest.dart';
+import 'package:trellis/features/feeds/feed_parse.dart';
 import 'package:trellis/features/feeds/feed_rules.dart';
 import 'package:trellis/features/feeds/feeds_repository.dart';
 import 'package:trellis/features/transcribe/audio_fetcher.dart';
@@ -108,6 +109,7 @@ void main() {
         lastError: 'Fetch failed',
         throttledUntilMs: 12345,
         lastCheckedMs: 99,
+        nextAttemptMs: 777,
       );
       final back = decodeBreakerState(
           url: s.url,
@@ -120,6 +122,7 @@ void main() {
       expect(back.lastError, 'Fetch failed');
       expect(back.throttledUntilMs, 12345);
       expect(back.lastCheckedMs, 99);
+      expect(back.nextAttemptMs, 777);
     });
 
     test('an empty json object decodes to a clean state', () {
@@ -637,6 +640,50 @@ void main() {
       expect(await db.feedsDao.riverItems(profileId), hasLength(2));
     });
 
+    test('the same body again is not parsed again (ADR-0017)', () async {
+      final fetcher =
+          ScriptedFetcher((url, headers) => textResponse(_rssTwo));
+      final feed = await seedFeed();
+      final r = repo(fetcher);
+      expect((await r.refreshFeed(feed)).status, RefreshStatus.fresh);
+      final stored = (await db.feedsDao.feedsOf(profileId)).single;
+      expect(stored.bodyHash, feedBodyHash(_rssTwo));
+
+      final again = await r.refreshFeed(stored);
+      expect(again.status, RefreshStatus.notModified);
+      expect(again.newItems, 0);
+      expect(await db.feedsDao.riverItems(profileId), hasLength(2));
+    });
+
+    test('changing the rules forgets the hash, so the same body ingests '
+        'under them', () async {
+      final fetcher =
+          ScriptedFetcher((url, headers) => textResponse(_rssTwo));
+      final feed = await seedFeed();
+      await repo(fetcher).refreshFeed(feed);
+      await db.feedsDao.setRules(feed.id, '[]');
+      final stored = (await db.feedsDao.feedsOf(profileId)).single;
+      expect(stored.bodyHash, isNull);
+      expect((await repo(fetcher).refreshFeed(stored)).status,
+          RefreshStatus.fresh);
+    });
+
+    test('a big body goes off the UI isolate and parses the same; a parse '
+        'failure still lands as one after the hop', () async {
+      final notes = 'x' * 1000;
+      final extra = List.generate(300,
+          (i) => '<item><title>t$i</title><link>https://l/$i/$notes</link></item>');
+      final big = _rssTwo.replaceFirst('<item>', '${extra.join()}<item>');
+      expect(parsesOffThread(big), isTrue);
+      expect(parsesOffThread(_rssTwo), isFalse);
+      final parsed = await parseFeedBody(big, 'https://x.test/f');
+      expect(parsed.feed!.items.length, parseRssFeed(big, 'u').items.length);
+      expect(parsed.hash, feedBodyHash(big));
+      await expectLater(
+          parseFeedBody('<${'not xml ' * 40000}', 'https://x.test/f'),
+          throwsA(isA<FeedParseException>()));
+    });
+
     test('stored validators ride the next request as conditional headers',
         () async {
       final fetcher = ScriptedFetcher(
@@ -682,6 +729,7 @@ void main() {
       for (var i = 0; i < 5; i++) {
         final feed = (await db.feedsDao.feedsOf(profileId)).single;
         expect((await r.refreshFeed(feed)).status, RefreshStatus.error);
+        nowMs += const Duration(days: 1).inMilliseconds; // past the backoff
       }
       final broken = (await db.feedsDao.feedsOf(profileId)).single;
       expect(decodeBreakerState(
@@ -693,6 +741,133 @@ void main() {
           .broken, isTrue);
       expect((await r.refreshFeed(broken)).status, RefreshStatus.skipped);
       expect(fetcher.calls, hasLength(5));
+      // A week on, the broken feed gets its automatic retry.
+      nowMs += const Duration(days: 7).inMilliseconds;
+      expect((await r.refreshFeed(broken)).status, RefreshStatus.error);
+      expect(fetcher.calls, hasLength(6));
+    });
+
+    test('a failure backs off automatic refreshes; Try again does not wait '
+        '(ADR-0017)', () async {
+      var fail = true;
+      final fetcher = ScriptedFetcher((url, headers) =>
+          fail ? throw Exception('reset') : textResponse(_rssTwo));
+      final r = repo(fetcher);
+      await seedFeed();
+      Future<Feed> row() async => (await db.feedsDao.feedsOf(profileId)).single;
+
+      expect((await r.refreshFeed(await row())).status, RefreshStatus.error);
+      nowMs += const Duration(minutes: 10).inMilliseconds;
+      expect((await r.refreshFeed(await row())).status, RefreshStatus.skipped);
+      expect(fetcher.calls, hasLength(1));
+      fail = false;
+      expect((await r.refreshFeed(await row(), force: true)).status,
+          RefreshStatus.fresh);
+      expect(stateOfFeed(await row()).nextAttemptMs, isNull);
+    });
+
+    test('a permanent move to something that is not a feed is not '
+        'believed', () async {
+      final fetcher = ScriptedFetcher((url, headers) => FetchResponse(
+          statusCode: 200,
+          headers: const {},
+          body: Stream.value('this is not xml, a parked page'.codeUnits),
+          permanentUrl: Uri.parse('https://parked.test/')));
+      final feed = await seedFeed();
+      expect((await repo(fetcher).refreshFeed(feed)).status,
+          RefreshStatus.parseFailed);
+      expect((await db.feedsDao.feedById(feed.id))!.url, feed.url);
+    });
+
+    test('a failed ingest keeps the old validators and hash, so the next '
+        'refresh fetches the body again', () async {
+      final fetcher = ScriptedFetcher((url, headers) =>
+          textResponse(_rssTwo, headers: {'etag': '"new"'}));
+      final feed = await seedFeed(etag: '"old"');
+      await db.customStatement(
+          'CREATE TRIGGER boom BEFORE INSERT ON episodes '
+          "BEGIN SELECT RAISE(ABORT, 'disk trouble'); END");
+      await expectLater(repo(fetcher).refreshFeed(feed), throwsA(anything));
+      final after = (await db.feedsDao.feedsOf(profileId)).single;
+      expect(after.etag, '"old"');
+      expect(after.bodyHash, isNull);
+      await db.customStatement('DROP TRIGGER boom');
+      expect((await repo(fetcher).refreshFeed(after)).newItems, 2);
+    });
+
+    test('two ingests of the same listing at once store each item once and '
+        'never throw', () async {
+      final feed = await seedFeed();
+      final items = parseRssFeed(_rssTwo, feed.url).items;
+      final both = await Future.wait([
+        for (var i = 0; i < 2; i++)
+          ingestFeedItems(
+              db: db,
+              profileId: profileId,
+              feedId: feed.id,
+              items: items,
+              nowMs: nowMs),
+      ]);
+      expect(both.fold<int>(0, (a, b) => a + b), 2);
+      expect(await db.select(db.episodes).get(), hasLength(2));
+      expect(await db.select(db.works).get(), hasLength(2),
+          reason: 'no surplus work left behind');
+    });
+
+    test('a stored item already holding its (feed, guid) is yielded to, '
+        'not thrown on', () async {
+      final feed = await seedFeed();
+      Future<int> work() => db.spineDao.insertWork(
+          profileId: profileId,
+          kind: 'episode',
+          title: 't',
+          persistence: 'ephemeron',
+          firstSeenEpochDay: 1);
+      expect(
+          await db.feedsDao.insertEpisodeIfNew(
+              workId: await work(), feedId: feed.id, guid: 'g',
+              publishedAtMs: 1),
+          isTrue);
+      expect(
+          await db.feedsDao.insertEpisodeIfNew(
+              workId: await work(), feedId: feed.id, guid: 'g',
+              publishedAtMs: 1),
+          isFalse);
+    });
+
+    test('the same body ingests again once its rows are gone', () async {
+      final fetcher =
+          ScriptedFetcher((url, headers) => textResponse(_rssTwo));
+      final feed = await seedFeed();
+      await repo(fetcher).refreshFeed(feed);
+      final ids = [
+        for (final e in await db.select(db.episodes).get()) e.workId
+      ];
+      await db.spineDao.deleteWorks(ids);
+      final stored = (await db.feedsDao.feedsOf(profileId)).single;
+      final again = await repo(fetcher).refreshFeed(stored);
+      expect(again.status, RefreshStatus.fresh);
+      expect(again.newItems, 2);
+    });
+
+    test('a feed moved for good is followed to its new address; a temporary '
+        'or colliding move changes nothing', () async {
+      final fetcher = ScriptedFetcher((url, headers) => FetchResponse(
+          statusCode: 200,
+          headers: const {},
+          body: Stream.value(_rssTwo.codeUnits),
+          permanentUrl: Uri.parse('https://cast.test/new-feed')));
+      final feed = await seedFeed();
+      await repo(fetcher).refreshFeed(feed);
+      expect((await db.feedsDao.feedById(feed.id))!.url,
+          'https://cast.test/new-feed');
+
+      // A second follow of the old address that the host also moved there:
+      // the profile already has the new one, so this row keeps its own.
+      final dupe = await db.feedsDao
+          .insertFeed(profileId: profileId, url: 'https://cast.test/old2');
+      await repo(fetcher).refreshFeed((await db.feedsDao.feedById(dupe))!);
+      expect((await db.feedsDao.feedById(dupe))!.url, 'https://cast.test/old2');
     });
 
     test('404 marks the feed broken immediately', () async {

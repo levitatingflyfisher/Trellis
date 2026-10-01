@@ -5,6 +5,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sqlite3/sqlite3.dart' as raw;
 import 'package:trellis/db/database.dart';
 
+import '../support/schema_strip.dart';
+
 /// The study crown, Phase 2: captures. A capture is episode id + playback
 /// position + created-at, saved with one tap during listening. Snipd's
 /// known complaint is wrong clip boundaries from a raw ±15s guess — the
@@ -214,6 +216,7 @@ void main() {
       // was written — those columns are stripped too, or a v9 snapshot
       // would silently carry them from the future.
       v9.execute('''
+        $stripV26
         ALTER TABLE feeds DROP COLUMN image_url;
         DROP TABLE captures;
         ALTER TABLE profiles DROP COLUMN keep_finished_in_queue;

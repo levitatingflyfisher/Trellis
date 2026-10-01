@@ -185,7 +185,7 @@ void main() {
       await pump(tester, feed, ScriptedFetcher((u, h) => textResponse(rss)));
       await tester.pumpAndSettle();
       expect(find.text(feedGoneReason), findsOneWidget);
-      expect(find.textContaining('stopped checking'), findsOneWidget);
+      expect(find.textContaining('only once a week'), findsOneWidget);
     });
 
     testWidgets('Try again refetches, and a good answer clears the reason',

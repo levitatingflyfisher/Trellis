@@ -1,6 +1,6 @@
 {
   "_recipe": "measured from the current release's artifacts, then +5% — the C3 ratchet only ever tightens against reality, never against invention",
-  "_measured": "2026-08-15 (v1.3.0 build 2007): main.dart.js gzip 1332924 bytes; app-arm64-v8a-release.apk 68465362 bytes (the gap-map release — eight campaigns of UI aboard, and 22MB LIGHTER than 1.2.0's 91023974 because ADR-0012 swapped the Full-GPL ffmpeg for the LGPL audio-only variant)",
-  "main_dart_js_gz_max_bytes": 1399570,
+  "_measured": "2026-10-22 (fundamentals pass, web only): main.dart.js gzip 1405781 bytes after ADR-0016 steps 1-3 (episode rows, Subscriptions, history + FTS search) and ADR-0017; APK figure still from 2026-08-15 (v1.3.0 build 2007): app-arm64-v8a-release.apk 68465362 bytes",
+  "main_dart_js_gz_max_bytes": 1476070,
   "apk_arm64_max_bytes": 71888630
 }

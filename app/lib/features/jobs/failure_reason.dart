@@ -5,7 +5,9 @@ library;
 
 import 'dart:io';
 
+import 'package:comms_core/comms_core.dart' show CommsException;
 import 'package:dio/dio.dart';
+import 'package:domovoi/domovoi.dart' show TruncatedTransfer;
 
 import '../models/model_store.dart';
 import '../transcribe/decoder.dart';
@@ -71,6 +73,12 @@ String plainFailureReason(Object err) {
   }
   if (err is DecodeException) {
     return 'This audio couldn’t be read. It may be damaged or an odd format.';
+  }
+  // comms_core's refusals (an address on the LAN, a size cap) already
+  // carry a sentence written for the screen.
+  if (err is CommsException) return err.message;
+  if (err is TruncatedTransfer) {
+    return 'The download stopped early. Try again.';
   }
   if (err is ModelIntegrityException) {
     return 'The model download was damaged. Trying again fetches it fresh.';

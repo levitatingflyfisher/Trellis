@@ -6,6 +6,7 @@ import 'package:loom_core/loom_core.dart' as core;
 import 'package:study_core/study_core.dart' as study;
 
 import '../features/reader/reader_prefs.dart';
+import 'indexes.dart';
 import 'search_index.dart';
 
 part 'database.g.dart';
@@ -262,6 +263,12 @@ class Feeds extends Table {
   /// from each fresh parse; it only picks the Subscriptions shelf and
   /// never limits how an item is read or heard.
   TextColumn get origin => text().withDefault(const Constant('podcast'))();
+
+  /// SHA-256 of the last body that parsed and ingested (ADR-0017). Many
+  /// hosts send neither ETag nor Last-Modified, so a 200 with the same
+  /// bytes is common; a matching hash skips the parse. Cleared when the
+  /// feed's rules change, since the same body can then ingest differently.
+  TextColumn get bodyHash => text().nullable()();
 }
 
 /// River metadata for a feed item. The item itself IS a spine work
@@ -620,6 +627,14 @@ class JobsTable extends Table {
 
   @override
   Set<Column> get primaryKey => {id};
+}
+
+/// Splits [ids] for `IN (...)` lists: SQLite builds before 3.32 cap a
+/// statement at 999 bound variables.
+Iterable<List<int>> chunksForSql(List<int> ids, {int size = 500}) sync* {
+  for (var i = 0; i < ids.length; i += size) {
+    yield ids.sublist(i, i + size > ids.length ? ids.length : i + size);
+  }
 }
 
 /// The stateJson codec for [Cards]. Kept next to the table so the column's
@@ -1489,42 +1504,52 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
         WorksCompanion(finishedEpochDay: Value(epochDay)),
       );
 
-  Future<void> deleteWork(int workId) => transaction(() async {
+  Future<void> deleteWork(int workId) => deleteWorks([workId]);
+
+  /// Deletes [workIds] and every row hanging off them in one transaction,
+  /// one statement per table per chunk: the sweep and an unfollow can take
+  /// thousands at once, and a per-work loop was a few dozen statements
+  /// each.
+  Future<void> deleteWorks(Iterable<int> workIds) {
+    final ids = workIds.toSet().toList();
+    if (ids.isEmpty) return Future.value();
+    return transaction(() async {
+      for (final c in chunksForSql(ids)) {
         // The Up Next queue (P4 mercy #3) references works by id under
         // `PRAGMA foreign_keys = ON` — without this line, sweeping a
         // queued ephemeron or unfollowing its feed throws a foreign-key
         // violation instead of quietly taking the row with it.
-        await (delete(queueTable)..where((q) => q.workId.equals(workId)))
-            .go();
-        await (delete(playerPositions)..where((p) => p.workId.equals(workId)))
-            .go();
-        await (delete(captures)..where((c) => c.workId.equals(workId))).go();
+        await (delete(queueTable)..where((q) => q.workId.isIn(c))).go();
+        await (delete(playerPositions)..where((p) => p.workId.isIn(c))).go();
+        await (delete(captures)..where((x) => x.workId.isIn(c))).go();
         // Children before the parent audiobooks row — AudiobookFiles rows
         // carry the DB record of the copied files; the actual bytes on disk
         // are the caller's job (ADR-0013), mirroring how deleteWork has
         // never touched a downloaded episode's audio file either.
-        await (delete(audiobookFiles)..where((f) => f.workId.equals(workId)))
-            .go();
-        await (delete(audiobooks)..where((a) => a.workId.equals(workId))).go();
+        await (delete(audiobookFiles)..where((f) => f.workId.isIn(c))).go();
+        await (delete(audiobooks)..where((a) => a.workId.isIn(c))).go();
         // Cross-feed dedup (Campaign 5 Phase 3): if anything was
-        // suppressed as a duplicate of the work about to be deleted,
+        // suppressed as a duplicate of a work about to be deleted,
         // un-suppress it first — a canonical row can vanish (unfollow,
         // ephemera sweep) without taking its duplicate's visibility with
         // it. "Hidden" must never quietly become "lost".
-        await (update(episodes)
-              ..where((e) => e.duplicateOfWorkId.equals(workId)))
-            .write(const EpisodesCompanion(
-                dedupReason: Value(null), duplicateOfWorkId: Value(null)));
-        await (delete(episodes)..where((e) => e.workId.equals(workId))).go();
-        await (delete(positions)..where((p) => p.workId.equals(workId))).go();
-        await (delete(alignments)..where((a) => a.workId.equals(workId))).go();
-        await (delete(translationSentences)
-              ..where((t) => t.workId.equals(workId)))
+        await _clearDedupPointingAt(c);
+        await (delete(episodes)..where((e) => e.workId.isIn(c))).go();
+        await (delete(positions)..where((p) => p.workId.isIn(c))).go();
+        await (delete(alignments)..where((a) => a.workId.isIn(c))).go();
+        await (delete(translationSentences)..where((t) => t.workId.isIn(c)))
             .go();
-        await (delete(layers)..where((l) => l.workId.equals(workId))).go();
-        await (delete(segments)..where((s) => s.workId.equals(workId))).go();
-        await (delete(works)..where((w) => w.id.equals(workId))).go();
-      });
+        await (delete(layers)..where((l) => l.workId.isIn(c))).go();
+        await (delete(segments)..where((x) => x.workId.isIn(c))).go();
+        await (delete(works)..where((w) => w.id.isIn(c))).go();
+      }
+    });
+  }
+
+  Future<void> _clearDedupPointingAt(List<int> workIds) =>
+      (update(episodes)..where((e) => e.duplicateOfWorkId.isIn(workIds)))
+          .write(const EpisodesCompanion(
+              dedupReason: Value(null), duplicateOfWorkId: Value(null)));
 
   // ───── translation layers (ADR-0008 "Babel" Phase 3) ─────
 
@@ -1652,15 +1677,12 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
     // What decayed is kept for a second window, then deleted for good; the
     // Inbox's notice says so. Without an end, rows nobody ever answers
     // would pile up forever.
-    final expired = await (select(works)
-          ..where((w) =>
-              w.persistence.equals('decayed') &
-              w.firstSeenEpochDay
-                  .isSmallerThanValue(todayEpochDay - 2 * retentionDays - 1)))
-        .get();
-    for (final w in expired) {
-      await deleteWork(w.id);
-    }
+    final expired = selectOnly(works)
+      ..addColumns([works.id])
+      ..where(works.persistence.equals('decayed') &
+          works.firstSeenEpochDay
+              .isSmallerThanValue(todayEpochDay - 2 * retentionDays - 1));
+    await deleteWorks([for (final r in await expired.get()) r.read(works.id)!]);
     final verdict = core.sweepEphemera(
       [
         for (final w in rows)
@@ -1674,16 +1696,14 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
       todayEpochDay: todayEpochDay,
       retentionDays: retentionDays,
     );
+    final decaying = [for (final id in verdict) int.parse(id)];
     await transaction(() async {
-      for (final id in verdict) {
-        final workId = int.parse(id);
-        // As deleteWork does: a hidden duplicate must not stay hidden
+      for (final c in chunksForSql(decaying)) {
+        // As deleteWorks does: a hidden duplicate must not stay hidden
         // behind a canonical row that just left the river.
-        await (update(episodes)
-              ..where((e) => e.duplicateOfWorkId.equals(workId)))
-            .write(const EpisodesCompanion(
-                dedupReason: Value(null), duplicateOfWorkId: Value(null)));
-        await setPersistence(workId, 'decayed');
+        await _clearDedupPointingAt(c);
+        await (update(works)..where((w) => w.id.isIn(c)))
+            .write(const WorksCompanion(persistence: Value('decayed')));
       }
     });
     return verdict.length;
@@ -1692,10 +1712,16 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
   /// Works the person's hand is on without having kept them: queued in Up
   /// Next, or captured from. The sweep never decays these, and the Inbox
   /// says so on their rows instead of a countdown.
-  Future<Set<int>> heldWorkIds() async => {
-        for (final q in await select(queueTable).get()) q.workId,
-        for (final c in await select(captures).get()) c.workId,
-      };
+  Future<Set<int>> heldWorkIds() async {
+    final queued = selectOnly(queueTable, distinct: true)
+      ..addColumns([queueTable.workId]);
+    final captured = selectOnly(captures, distinct: true)
+      ..addColumns([captures.workId]);
+    return {
+      for (final r in await queued.get()) r.read(queueTable.workId)!,
+      for (final r in await captured.get()) r.read(captures.workId)!,
+    };
+  }
 
   /// The profile's decayed ephemera — what the River's notice counts.
   Future<List<Work>> decayedOf(int profileId) => (select(works)
@@ -1718,9 +1744,11 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
   /// The one gesture that deletes decayed ephemera: the user letting them
   /// go from the River's notice.
   Future<void> purgeDecayed(int profileId) async {
-    for (final w in await decayedOf(profileId)) {
-      await deleteWork(w.id);
-    }
+    final q = selectOnly(works)
+      ..addColumns([works.id])
+      ..where(works.profileId.equals(profileId) &
+          works.persistence.equals('decayed'));
+    await deleteWorks([for (final r in await q.get()) r.read(works.id)!]);
   }
 }
 
@@ -2439,6 +2467,41 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
     ),
   );
 
+  /// [insertEpisode] that yields to a row already holding this
+  /// (feed, guid): false when one did, and nothing was written.
+  Future<bool> insertEpisodeIfNew({
+    required int workId,
+    required int feedId,
+    required String guid,
+    String? enclosureUrl,
+    int? durationMs,
+    String? imageUrl,
+    required int publishedAtMs,
+  }) async {
+    await into(episodes).insert(
+        EpisodesCompanion.insert(
+          workId: Value(workId),
+          feedId: feedId,
+          guid: guid,
+          enclosureUrl: Value(enclosureUrl),
+          durationMs: Value(durationMs),
+          imageUrl: Value(imageUrl),
+          publishedAtMs: publishedAtMs,
+        ),
+        mode: InsertMode.insertOrIgnore);
+    final n = await customSelect('SELECT changes() AS n').getSingle();
+    return n.read<int>('n') > 0;
+  }
+
+  /// Whether any episode row of this feed is left.
+  Future<bool> hasEpisodes(int feedId) async {
+    final q = selectOnly(episodes)
+      ..addColumns([episodes.workId])
+      ..where(episodes.feedId.equals(feedId))
+      ..limit(1);
+    return (await q.get()).isNotEmpty;
+  }
+
   Future<Episode?> episodeOf(int workId) => (select(
     episodes,
   )..where((e) => e.workId.equals(workId))).getSingleOrNull();
@@ -2469,8 +2532,15 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
 
   /// This feed's rules (Campaign 5 Phase 3) — see [Feeds.rulesJson].
   Future<void> setRules(int feedId, String rulesJson) =>
+      (update(feeds)..where((f) => f.id.equals(feedId))).write(
+          FeedsCompanion(
+              rulesJson: Value(rulesJson), bodyHash: const Value(null)));
+
+  /// Recorded only once a body's items have landed, so a failed ingest
+  /// is retried by the next refresh rather than skipped as unchanged.
+  Future<void> setBodyHash(int feedId, String hash) =>
       (update(feeds)..where((f) => f.id.equals(feedId)))
-          .write(FeedsCompanion(rulesJson: Value(rulesJson)));
+          .write(FeedsCompanion(bodyHash: Value(hash)));
 
   /// Cross-feed dedup candidates: every currently-visible (not already
   /// suppressed) episode in a profile's river, with what
@@ -2515,6 +2585,24 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
       (update(episodes)..where((e) => e.workId.equals(workId))).write(
           const EpisodesCompanion(
               dedupReason: Value(null), duplicateOfWorkId: Value(null)));
+
+  /// Seen items whose stored row still lacks a length or artwork, keyed
+  /// by guid, so ingest only asks to fill rows that have a gap. Rows with
+  /// both are absent.
+  Future<Map<String, ({bool duration, bool image})>> metadataGapsOf(
+      int feedId) async {
+    final q = selectOnly(episodes)
+      ..addColumns([episodes.guid, episodes.durationMs, episodes.imageUrl])
+      ..where(episodes.feedId.equals(feedId) &
+          (episodes.durationMs.isNull() | episodes.imageUrl.isNull()));
+    return {
+      for (final r in await q.get())
+        r.read(episodes.guid)!: (
+          duration: r.read(episodes.durationMs) == null,
+          image: r.read(episodes.imageUrl) == null,
+        ),
+    };
+  }
 
   Future<Set<String>> guidsOf(int feedId) async {
     final q = selectOnly(episodes)
@@ -2571,6 +2659,10 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
         (work: r.readTable(works), episode: r.readTable(episodes)),
     ];
   }
+
+  Future<void> setUrl(int feedId, String url) =>
+      (update(feeds)..where((f) => f.id.equals(feedId)))
+          .write(FeedsCompanion(url: Value(url)));
 
   Future<void> setOrigin(int feedId, String origin) =>
       (update(feeds)..where((f) => f.id.equals(feedId)))
@@ -2753,17 +2845,15 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
   /// a promoted work belongs to the library now — only its river metadata
   /// goes (its sourceUrl still carries the enclosure).
   Future<void> deleteFeedCascade(int feedId) => transaction(() async {
-    final rows = await (select(episodes)..where((e) => e.feedId.equals(feedId)))
-        .join([innerJoin(works, works.id.equalsExp(episodes.workId))])
-        .get();
-    for (final r in rows) {
-      final work = r.readTable(works);
-      if (work.persistence == 'ephemeron' || work.persistence == 'decayed') {
-        await db.spineDao.deleteWork(work.id);
-      } else {
-        await (delete(episodes)..where((e) => e.workId.equals(work.id))).go();
-      }
-    }
+    final q = selectOnly(episodes).join([
+      innerJoin(works, works.id.equalsExp(episodes.workId)),
+    ])
+      ..addColumns([works.id])
+      ..where(episodes.feedId.equals(feedId) &
+          works.persistence.isIn(const ['ephemeron', 'decayed']));
+    await db.spineDao
+        .deleteWorks([for (final r in await q.get()) r.read(works.id)!]);
+    await (delete(episodes)..where((e) => e.feedId.equals(feedId))).go();
     await (delete(feeds)..where((f) => f.id.equals(feedId))).go();
   });
 }
@@ -2854,9 +2944,8 @@ class HouseholdDao extends DatabaseAccessor<AppDatabase>
     for (final f in await db.feedsDao.feedsOf(profileId)) {
       await db.feedsDao.deleteFeedCascade(f.id);
     }
-    for (final w in await db.spineDao.worksOf(profileId)) {
-      await db.spineDao.deleteWork(w.id);
-    }
+    await db.spineDao.deleteWorks(
+        [for (final w in await db.spineDao.worksOf(profileId)) w.id]);
     for (final c in await db.studyDao.coursesOf(profileId)) {
       final cardRows = await (select(
         cards,
@@ -3012,7 +3101,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 25;
+  int get schemaVersion => 26;
   // There is no v14: it was reserved for the reader-depth campaign, which
   // landed as v18 after three sibling campaigns merged ahead of it, so the
   // guard chain skips from 13 to 15. Version gaps are harmless — an
@@ -3025,12 +3114,40 @@ class AppDatabase extends _$AppDatabase {
   // below 20 still runs every block below exactly once, in order, same as
   // every gap above.
 
+  static const _isWeb = bool.fromEnvironment('dart.library.js_interop');
+
+  /// Twin (feed, guid) rows keep the oldest. A twin nobody kept goes the
+  /// way an unfollowed feed's ephemera go; a kept one stays in the library
+  /// and loses only its river row, as [FeedsDao.deleteFeedCascade] does.
+  Future<void> _foldDuplicateEpisodes() async {
+    final twins = await customSelect('''
+      SELECT e.work_id AS id, w.persistence AS persistence
+      FROM episodes e JOIN works w ON w.id = e.work_id
+      WHERE EXISTS (SELECT 1 FROM episodes k
+        WHERE k.feed_id = e.feed_id AND k.guid = e.guid
+          AND k.work_id < e.work_id)
+    ''').get();
+    if (twins.isEmpty) return;
+    final unkept = <int>[];
+    for (final r in twins) {
+      final id = r.read<int>('id');
+      final persistence = r.read<String>('persistence');
+      if (persistence == 'ephemeron' || persistence == 'decayed') {
+        unkept.add(id);
+      } else {
+        await (delete(episodes)..where((e) => e.workId.equals(id))).go();
+      }
+    }
+    await spineDao.deleteWorks(unkept);
+  }
+
   @override
   MigrationStrategy get migration => MigrationStrategy(
         onCreate: (m) async {
           await m.createAll();
           // drift's createAll knows nothing of virtual tables or triggers.
           await installSearchIndex(this);
+          await installIndexes(this);
         },
         onUpgrade: (m, from, to) async {
           if (from < 2) {
@@ -3285,9 +3402,27 @@ class AppDatabase extends _$AppDatabase {
             // first made at the current schema already carries it.
             await installSearchIndex(this);
           }
+          if (from < 26) {
+            // ADR-0017: the first secondary indexes. The unique one needs
+            // any twin rows folded first, which only a race could have made.
+            await _foldDuplicateEpisodes();
+            await installIndexes(this);
+            // Guarded like every feeds column: a from < 2 upgrade made
+            // `feeds` fresh with this column already present.
+            if (from >= 2) await m.addColumn(feeds, feeds.bodyHash);
+          }
         },
         beforeOpen: (details) async {
           await customStatement('PRAGMA foreign_keys = ON');
+          // A refresh writing while the UI reads no longer blocks it, and
+          // a commit no longer waits on an fsync per transaction; NORMAL
+          // under WAL can lose the last commits on power loss, never
+          // corrupt. The web build's storage has no shared memory for WAL.
+          if (!_isWeb) {
+            await customSelect('PRAGMA journal_mode = WAL').get();
+            await customStatement('PRAGMA synchronous = NORMAL');
+          }
+          await customStatement('PRAGMA busy_timeout = 5000');
         },
       );
 }

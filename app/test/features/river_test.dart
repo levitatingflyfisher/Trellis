@@ -271,7 +271,8 @@ void main() {
       enclosureUrl: 'https://cast.test/aurora.mp3',
       guid: 'https://cast.test/aurora',
     );
-    // And a broken feed the breaker must skip.
+    // And a broken feed the breaker must skip: its weekly retry is not
+    // due (ADR-0017; one with no retry scheduled would be due now).
     await db.feedsDao.updateRefreshState(
       await db.feedsDao.insertFeed(
         profileId: profileId,
@@ -280,7 +281,7 @@ void main() {
       title: 'Dead',
       etag: null,
       lastModified: null,
-      breakerJson: '{"broken":true}',
+      breakerJson: '{"broken":true,"nextAttemptMs":9000000000000000}',
     );
 
     final fetcher = ScriptedFetcher((u, h) => textResponse(_rssTwo));
@@ -886,6 +887,13 @@ void main() {
       // hides the one signal the river's own tests already pin.
       expect(find.byKey(Key('unread-dot-$withArtId')), findsOneWidget);
       expect(find.byKey(Key('unread-dot-$noArtId')), findsOneWidget);
+      // Decoded at the size it shows (ADR-0017), not the file's own: show
+      // art is often 3000 px square.
+      final image =
+          tester.widget<Image>(find.byKey(Key('artwork-$withArtId')));
+      final dpr = tester.view.devicePixelRatio;
+      expect(image.image, isA<ResizeImage>()
+          .having((r) => r.width, 'width', (48 * dpr).ceil()));
     });
 
     testWidgets('on a tier with localMlAvailable false (the web tier), '

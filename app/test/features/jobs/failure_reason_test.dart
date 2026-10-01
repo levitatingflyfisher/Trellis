@@ -1,6 +1,8 @@
 import 'dart:io';
 
+import 'package:comms_core/comms_core.dart' show UnsafeUrlException;
 import 'package:dio/dio.dart';
+import 'package:domovoi/domovoi.dart' show TruncatedTransfer;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/features/jobs/failure_reason.dart';
 import 'package:trellis/features/models/model_store.dart';
@@ -28,6 +30,21 @@ void main() {
       response: Response(requestOptions: req, statusCode: 404),
     );
     expect(plainFailureReason(err), contains('isn’t there any more'));
+  });
+
+  test('a download that ended short says so, and offers the retry', () {
+    expect(
+        plainFailureReason(
+            const TruncatedTransfer(expected: 100, received: 40)),
+        'The download stopped early. Try again.');
+  });
+
+  test('a download refused by the address guard says why', () {
+    final err = DioException(
+        requestOptions: req,
+        error: const UnsafeUrlException(
+            "Local and private-network addresses can't be loaded."));
+    expect(plainFailureReason(err), contains('private-network'));
   });
 
   test('a full disk says so', () {

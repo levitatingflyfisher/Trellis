@@ -115,6 +115,22 @@ void main() {
     expect(top(tester, books), lessThan(top(tester, find.text('Middlemarch'))));
   });
 
+  // Both list forms mount only what is on screen, so this can't see the
+  // difference ADR-0017 made (tiles and their disk checks no longer built
+  // for every row up front); it pins that the builder still reaches the
+  // end of a 300-show list in order.
+  testWidgets('a long list scrolls to its last show', (tester) async {
+    for (var i = 0; i < 300; i++) {
+      await feed('Show ${i.toString().padLeft(3, '0')}');
+    }
+    await pump(tester);
+    expect(find.text('Show 000'), findsOneWidget);
+    expect(find.text('Show 299'), findsNothing);
+    await tester.scrollUntilVisible(find.text('Show 299'), 2000,
+        scrollable: find.byType(Scrollable).last);
+    expect(find.text('Show 299'), findsOneWidget);
+  });
+
   testWidgets('an empty shelf is not shown', (tester) async {
     await feed('Night Sky');
     await pump(tester);

@@ -98,6 +98,16 @@ class EpisodeDownloadCoordinator extends ChangeNotifier {
   File _partOf(int workId, String url) =>
       File('${services.audioFileFor(workId, url).path}.part');
 
+  /// The partial and the engine's `.validator` sidecar beside it, which
+  /// names the bytes in the partial for If-Range: a sidecar left behind
+  /// would vouch for bytes that are gone.
+  void _deletePartial(int workId, String url) {
+    final part = _partOf(workId, url);
+    for (final f in [part, File('${part.path}.validator')]) {
+      if (f.existsSync()) f.deleteSync();
+    }
+  }
+
   /// Rebuild entries from unfinished download rows. Bytes come from the
   /// `.part` on disk, the same truth the engine resumes from.
   Future<void> restore() async {
@@ -296,10 +306,9 @@ class EpisodeDownloadCoordinator extends ChangeNotifier {
     _entries.remove(workId);
     await db.jobsDao.deleteJob(downloadJobId(workId));
     if (entry != null) {
-      final part = _partOf(workId, entry.url);
       // Sync on purpose: real-io futures never complete under a widget
       // test's fake-async zone.
-      if (part.existsSync()) part.deleteSync();
+      _deletePartial(workId, entry.url);
     }
     notifyListeners();
   }
@@ -325,8 +334,7 @@ class EpisodeDownloadCoordinator extends ChangeNotifier {
   /// partials are deleted, never appended to. Call after [stopAll].
   void discardAll() {
     for (final e in _entries.entries) {
-      final part = _partOf(e.key, e.value.url);
-      if (part.existsSync()) part.deleteSync();
+      _deletePartial(e.key, e.value.url);
     }
     _entries.clear();
     notifyListeners();

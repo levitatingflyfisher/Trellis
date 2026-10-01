@@ -39,6 +39,31 @@ void main() {
     expect(fetcher.calls.single.headers ?? const <String, String>{}, isEmpty);
   });
 
+  group('a feed that moved (ADR-0017)', () {
+    FetchResponse moved(Uri? to, {int code = 200}) => FetchResponse(
+        statusCode: code,
+        headers: const {},
+        body: code == 200 ? Stream.value(utf8.encode('<rss/>')) : const Stream.empty(),
+        permanentUrl: to);
+
+    test('a permanent move rides a fresh result and a 304', () async {
+      final to = Uri.parse('https://new.test/feed');
+      for (final code in [200, 304]) {
+        final res = await feedClient(
+                ScriptedFetcher((url, headers) => moved(to, code: code)))
+            .fetchFeedConditional('https://old.test/feed');
+        expect(res.movedTo, 'https://new.test/feed', reason: '$code');
+      }
+    });
+
+    test('no permanent move, nothing to adopt', () async {
+      final res = await feedClient(
+              ScriptedFetcher((url, headers) => moved(null)))
+          .fetchFeedConditional('https://old.test/feed');
+      expect(res.movedTo, isNull);
+    });
+  });
+
   group('throttling (429/503 + Retry-After)', () {
     Future<FeedFetchResult> throttleWith(String? retryAfter,
         {int code = 429, DateTime Function()? now}) {

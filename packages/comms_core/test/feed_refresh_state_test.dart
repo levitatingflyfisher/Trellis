@@ -21,9 +21,16 @@ void main() {
       expect(shouldSkipRefresh(s, nowMs: nowMs), RefreshSkip.none);
     });
 
-    test('broken skips', () {
-      const s = FeedRefreshState(url: 'u', broken: true);
+    test('broken skips until its weekly retry', () {
+      const s = FeedRefreshState(
+          url: 'u', broken: true, nextAttemptMs: nowMs + 5000);
       expect(shouldSkipRefresh(s, nowMs: nowMs), RefreshSkip.broken);
+    });
+
+    test('broken with no retry scheduled (it broke before retries '
+        'existed) is due now', () {
+      const s = FeedRefreshState(url: 'u', broken: true);
+      expect(shouldSkipRefresh(s, nowMs: nowMs), RefreshSkip.none);
     });
 
     test('force overrides both', () {
@@ -31,6 +38,77 @@ void main() {
           url: 'u', broken: true, throttledUntilMs: nowMs + 5000);
       expect(shouldSkipRefresh(s, nowMs: nowMs, force: true),
           RefreshSkip.none);
+    });
+  });
+
+  group('backoff (ADR-0017)', () {
+    const minute = 60 * 1000;
+    const hour = 60 * minute;
+    const error = FeedFetchResult.error();
+
+    // r = 0.5 is the jitter's midpoint: no spread at all.
+    FeedRefreshState failTimes(int n, {double r = 0.5}) {
+      var s = const FeedRefreshState(url: 'u');
+      for (var i = 0; i < n; i++) {
+        s = applyFetchResult(s, error, nowMs: nowMs, jitter: () => r);
+      }
+      return s;
+    }
+
+    test('each failure doubles the wait from 30 minutes', () {
+      expect(failTimes(1).nextAttemptMs, nowMs + 30 * minute);
+      expect(failTimes(2).nextAttemptMs, nowMs + 60 * minute);
+      expect(failTimes(3).nextAttemptMs, nowMs + 120 * minute);
+    });
+
+    test('jitter spreads the wait by at most a fifth either way', () {
+      expect(failTimes(1, r: 0).nextAttemptMs, nowMs + 24 * minute);
+      expect(failTimes(1, r: 1).nextAttemptMs, nowMs + 36 * minute);
+    });
+
+    test('the wait never passes a day, jitter included', () {
+      // At the default base the breaker trips (four hours in) long before
+      // the cap matters; a longer base shows the cap holds.
+      final four = applyFetchResult(
+          const FeedRefreshState(url: 'u', consecutiveFailures: 3), error,
+          nowMs: nowMs, jitter: () => 0.5);
+      expect(four.nextAttemptMs, nowMs + 4 * hour);
+      final capped = applyParseFailure(
+          const FeedRefreshState(url: 'u', consecutiveFailures: 3),
+          nowMs: nowMs, jitter: () => 1, baseMs: 10 * hour);
+      expect(capped.nextAttemptMs, nowMs + 24 * hour);
+    });
+
+    test('an automatic refresh waits; an explicit one does not', () {
+      final s = failTimes(1);
+      expect(shouldSkipRefresh(s, nowMs: nowMs + minute), RefreshSkip.backoff);
+      expect(shouldSkipRefresh(s, nowMs: nowMs + minute, force: true),
+          RefreshSkip.none);
+      expect(shouldSkipRefresh(s, nowMs: nowMs + 31 * minute),
+          RefreshSkip.none);
+    });
+
+    test('a broken feed is tried again automatically once a week', () {
+      final gone = applyFetchResult(
+          const FeedRefreshState(url: 'u'), const FeedFetchResult.notFound(),
+          nowMs: nowMs, jitter: () => 0.5);
+      const week = 7 * 24 * hour;
+      expect(gone.nextAttemptMs, nowMs + week);
+      expect(shouldSkipRefresh(gone, nowMs: nowMs + week - 1),
+          RefreshSkip.broken);
+      expect(shouldSkipRefresh(gone, nowMs: nowMs + week), RefreshSkip.none);
+      final fifth = failTimes(5);
+      expect(fifth.broken, isTrue);
+      expect(fifth.nextAttemptMs, nowMs + week);
+    });
+
+    test('an answer clears the wait', () {
+      final s = applyFetchResult(failTimes(3),
+          const FeedFetchResult.notModified(), nowMs: nowMs);
+      expect(s.nextAttemptMs, isNull);
+      final f = applyFetchResult(failTimes(3),
+          const FeedFetchResult.fresh(body: ''), nowMs: nowMs);
+      expect(f.nextAttemptMs, isNull);
     });
   });
 

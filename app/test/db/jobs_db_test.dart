@@ -6,6 +6,8 @@ import 'package:jobs_core/jobs_core.dart';
 import 'package:sqlite3/sqlite3.dart' as raw;
 import 'package:trellis/db/database.dart';
 
+import '../support/schema_strip.dart';
+
 /// The Drift adapter of jobs_core's `JobStore` (proposal-2 §9). The one law
 /// an implementation MUST honor: `saveCheckpoint` merges exactly two fields
 /// atomically and refuses to invent rows. The payload column is app-side
@@ -181,6 +183,7 @@ void main() {
       await seed.close();
       final v21 = raw.sqlite3.open(file.path);
       v21.execute('''
+        $stripV26
         ALTER TABLE jobs DROP COLUMN failure_reason;
         ALTER TABLE episodes DROP COLUMN finished_at_ms;
         ALTER TABLE episodes DROP COLUMN image_url;
@@ -228,6 +231,7 @@ void main() {
       await seed.close();
       final v3 = raw.sqlite3.open(file.path);
       v3.execute('''
+        $stripV26
         ALTER TABLE feeds DROP COLUMN image_url;
         DROP TABLE jobs;
         ALTER TABLE profiles DROP COLUMN prefer_system_voice;

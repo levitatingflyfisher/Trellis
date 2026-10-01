@@ -105,4 +105,17 @@ void main() {
               'hangs on the launch logo. See ${source.path}.');
     });
   });
+
+  test('Android Auto Backup is off: the app has its own encrypted backup '
+      '(ADR-0017)', () {
+    // Left on, Android copies the database (listening history, the
+    // parent PIN's digest) to the user's cloud account unencrypted by
+    // this app, beside the .ohbk backup whose whole point is that the
+    // household holds the key.
+    final manifest =
+        File('android/app/src/main/AndroidManifest.xml').readAsStringSync();
+    final application =
+        RegExp(r'<application[^>]*>', dotAll: true).firstMatch(manifest)![0]!;
+    expect(application, contains('android:allowBackup="false"'));
+  });
 }

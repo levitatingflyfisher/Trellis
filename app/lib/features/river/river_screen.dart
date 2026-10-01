@@ -150,6 +150,7 @@ class _RiverScreenState extends State<RiverScreen> {
     final rowState =
         await EpisodeListState.load(widget.db, widget.profile.id);
     if (!mounted) return;
+    _actions.forgetArtwork();
     setState(() {
       _entries = entries;
       _decayed = decayed.length;
@@ -502,26 +503,33 @@ class _RiverScreenState extends State<RiverScreen> {
             ),
           ],
         ),
-        _ => Column(
-          children: [
-            SearchEntry(
-                key: const Key('river-search'), onPressed: _openSearch),
-            TranscribeJobCards(coordinator: widget.coordinator),
-            _decayedNotice(),
-            _filterChips(),
-            Expanded(
-              child: RefreshIndicator(
-                onRefresh: _refresh,
-                child: ListView.builder(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  itemCount: _visible.length,
-                  itemBuilder: (_, i) => _itemTile(_visible[i]),
-                ),
-              ),
-            ),
-          ],
-        ),
+        _ => _riverList(),
       }),
+    );
+  }
+
+  Widget _riverList() {
+    // Once per build: the filter rebuilds a list of every item, and the
+    // builder used to ask for it again for every row it laid out.
+    final visible = _visible;
+    return Column(
+      children: [
+        SearchEntry(
+            key: const Key('river-search'), onPressed: _openSearch),
+        TranscribeJobCards(coordinator: widget.coordinator),
+        _decayedNotice(),
+        _filterChips(),
+        Expanded(
+          child: RefreshIndicator(
+            onRefresh: _refresh,
+            child: ListView.builder(
+              physics: const AlwaysScrollableScrollPhysics(),
+              itemCount: visible.length,
+              itemBuilder: (_, i) => _itemTile(visible[i]),
+            ),
+          ),
+        ),
+      ],
     );
   }
 

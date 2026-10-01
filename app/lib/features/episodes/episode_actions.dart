@@ -54,18 +54,33 @@ class EpisodeActions {
   }
 
   /// The episode's own artwork if it was fetched, else the show's, else
-  /// none. Only ever reads files ingest already wrote.
+  /// none. Only ever reads files ingest already wrote. Remembered until
+  /// [forgetArtwork], so a row rebuilt on scroll or by a download's
+  /// progress doesn't stat the disk again: a list's rows share a handful
+  /// of show images between them.
   File? artworkFor(Episode e) {
     final s = services;
     if (s == null) return null;
+    final key = '${e.feedId} ${e.imageUrl ?? ''}';
+    if (_artwork.containsKey(key)) return _artwork[key];
     final own = e.imageUrl;
+    File? found;
     if (own != null) {
       final f = s.episodeArtworkFileFor(own);
-      if (f.existsSync()) return f;
+      if (f.existsSync()) found = f;
     }
-    final show = s.artworkFileFor(e.feedId);
-    return show.existsSync() ? show : null;
+    if (found == null) {
+      final show = s.artworkFileFor(e.feedId);
+      if (show.existsSync()) found = show;
+    }
+    return _artwork[key] = found;
   }
+
+  final _artwork = <String, File?>{};
+
+  /// Artwork lands in the background after a refresh; a screen calls this
+  /// when it reloads, so newly fetched images show from then on.
+  void forgetArtwork() => _artwork.clear();
 
   Future<void> play(Work work) async => player?.playWork(work);
 

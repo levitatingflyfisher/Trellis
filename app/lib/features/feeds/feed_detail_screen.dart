@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:comms_core/comms_core.dart' show feedUnreachableReason;
 import 'package:flutter/material.dart';
 
@@ -72,14 +74,23 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
     _load();
   }
 
+  /// The show's artwork, if it is on disk; checked in [_load].
+  File? _art;
+
   Future<void> _load() async {
     final episodes = await widget.db.feedsDao
         .episodesOfFeed(_feed.id, oldestFirst: _feed.sortOldestFirst);
     final rowState = await EpisodeListState.load(widget.db, _feed.profileId);
     if (!mounted) return;
+    // Disk checks happen here, once per load, never per frame.
+    _actions.forgetArtwork();
+    final art = widget.localMlAvailable
+        ? widget.repository.services?.artworkFileFor(_feed.id)
+        : null;
     setState(() {
       _episodes = episodes;
       _rowState = rowState;
+      _art = art != null && art.existsSync() ? art : null;
     });
   }
 
@@ -169,13 +180,25 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
       ),
       body: CappedBody(child: switch (episodes) {
         null => const Center(child: CircularProgressIndicator()),
-        _ => ListView(children: [
-            ?_problem(),
-            _header(episodes),
-            for (var i = 0; i < episodes.length; i++) _row(episodes, i),
-            _footer(),
-          ]),
+        // Built as rows scroll in: a back catalogue of 2,000 episodes
+        // used to build 2,000 rows (and check their artwork on disk)
+        // before the first frame.
+        _ => _list(episodes),
       }),
+    );
+  }
+
+  Widget _list(List<EpisodeEntry> episodes) {
+    final problem = _problem();
+    final lead = problem == null ? 1 : 2;
+    return ListView.builder(
+      itemCount: lead + episodes.length + 1,
+      itemBuilder: (_, i) {
+        if (problem != null && i == 0) return problem;
+        if (i == lead - 1) return _header(episodes);
+        if (i == lead + episodes.length) return _footer();
+        return _row(episodes, i - lead);
+      },
     );
   }
 
@@ -185,9 +208,7 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
         .where((e) =>
             e.episode.enclosureUrl != null && e.episode.finishedAtMs == null)
         .length;
-    final art = widget.localMlAvailable
-        ? widget.repository.services?.artworkFileFor(_feed.id)
-        : null;
+    final art = _art;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
       child: Column(
@@ -195,7 +216,7 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
         children: [
           Row(
             children: [
-              if (art != null && art.existsSync())
+              if (art != null)
                 Padding(
                   padding: const EdgeInsets.only(right: 16),
                   child: ClipRRect(
@@ -203,6 +224,7 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
                     child: Image.file(art,
                         width: 72,
                         height: 72,
+                        cacheWidth: thumbCacheWidth(context, 72),
                         fit: BoxFit.cover,
                         errorBuilder: (_, _, _) => const SizedBox.shrink()),
                   ),
@@ -298,10 +320,10 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
       key: const Key('feed-problem'),
       leading: Icon(Icons.error_outline, color: error),
       title: Text(state.lastError ?? feedUnreachableReason),
-      // A broken feed is skipped by every refresh, so the listener must hear
-      // that nothing will change on its own.
+      // A broken feed is checked only once a week (ADR-0017), so the
+      // listener must hear that it won't fix itself soon.
       subtitle: state.broken
-          ? const Text('Trellis has stopped checking this feed.')
+          ? const Text('Trellis now checks this feed only once a week.')
           : null,
       trailing: TextButton(
         onPressed: _retrying ? null : _retry,

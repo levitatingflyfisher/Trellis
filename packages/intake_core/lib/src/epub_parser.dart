@@ -132,23 +132,47 @@ class _ManifestItem {
   _ManifestItem({this.href, this.type, required this.properties});
 }
 
+/// Real books, even heavily illustrated ones, unpack to well under this;
+/// past it the file is either not a book or built to exhaust memory.
+const maxEpubUncompressedBytes = 200 * 1024 * 1024;
+
+/// An EPUB whose contents declare more than [maxEpubUncompressedBytes].
+/// A [FormatException] so every existing "couldn't read it" path still
+/// catches it; [message] is fit to show as is.
+class EpubTooLargeException extends FormatException {
+  const EpubTooLargeException()
+      : super('This book is too large to open: unpacked, it would take '
+            'more than 200 MB.');
+}
+
 /// Parses EPUB [bytes] (donor `parseEpubFile`).
 ///
 /// [sourceName] plays the donor's `file.name` role: when the OPF has no
 /// `dc:title`, the title falls back to it (minus any `.epub` suffix), then to
 /// `'Untitled'`.
 ///
+/// [maxUncompressedBytes] refuses a zip bomb with [EpubTooLargeException].
+///
 /// Throws [FormatException] with the donor's messages on structurally invalid
 /// EPUBs. Missing spine items are skipped silently (the donor warned to the
 /// console); a malformed OPF yields an empty doc, as the donor's error-doc
 /// path did.
-EpubDoc parseEpub(List<int> bytes, {String? sourceName}) {
+EpubDoc parseEpub(List<int> bytes,
+    {String? sourceName, int maxUncompressedBytes = maxEpubUncompressedBytes}) {
   final Archive archive;
   try {
     archive = ZipDecoder().decodeBytes(bytes);
   } on ArchiveException {
     throw const FormatException('Invalid EPUB: no container.xml');
   }
+  // The decoder reads only the central directory; nothing inflates until
+  // `.content`. A few-kB zip can declare gigabytes, so the declared total
+  // is judged here, before any entry is read.
+  var declared = 0;
+  for (final f in archive.files) {
+    if (f.isFile) declared += f.size;
+  }
+  if (declared > maxUncompressedBytes) throw const EpubTooLargeException();
   final byName = <String, ArchiveFile>{
     for (final f in archive.files)
       if (f.isFile) f.name: f,

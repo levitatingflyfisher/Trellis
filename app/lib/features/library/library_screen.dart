@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:comms_core/comms_core.dart';
 import 'package:flutter/material.dart';
+import 'package:intake_core/intake_core.dart' show EpubTooLargeException;
 import 'package:openhearth_design/openhearth_design.dart';
 
 import '../../db/database.dart' hide Alignment;
@@ -283,6 +284,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
       final workId =
           await pickAndImportEpub(db: widget.db, profileId: widget.profile.id);
       if (workId != null) await _load();
+    } on EpubTooLargeException catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.message)));
     } on FormatException {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(

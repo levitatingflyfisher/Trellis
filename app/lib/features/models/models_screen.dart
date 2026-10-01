@@ -162,8 +162,13 @@ class _ModelsScreenState extends State<ModelsScreen> {
       _pcmBytes = _dirBytes(_pcmDir);
     }
     final dbFile = widget.databaseFile;
+    // Under WAL, recent writes live in the -wal sibling until a checkpoint.
     _dbBytes = (dbFile != null && dbFile.existsSync())
-        ? dbFile.lengthSync()
+        ? [
+            for (final suffix in const ['', '-wal', '-shm'])
+              if (File('${dbFile.path}$suffix').existsSync())
+                File('${dbFile.path}$suffix').lengthSync(),
+          ].fold<int>(0, (a, b) => a + b)
         : null;
     if (mounted) setState(() {});
   }

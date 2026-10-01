@@ -18,6 +18,7 @@ import 'package:flutter_tts/flutter_tts.dart';
 import 'package:ml_runtime/ml_runtime.dart';
 import 'package:stardict_core/stardict_core.dart';
 
+import '../app_version.dart';
 import '../features/backup/backup_custody.dart';
 import '../features/models/model_store.dart';
 import '../features/reader/speech/speech_engine.dart';
@@ -195,7 +196,7 @@ class DeviceServices {
         ),
         registry: ModelRegistry.starter(),
         decoder: _isAndroid ? FfmpegDecoder() : WavPassthroughDecoder(),
-        audioFetcher: DioAudioFetcher(),
+        audioFetcher: DioAudioFetcher.guarded(userAgent: trellisUserAgent),
         executor: IsolateTranscribeExecutor(),
         foregroundGate: _isAndroid
             ? SharedJobForegroundGate(AndroidJobForegroundGate())

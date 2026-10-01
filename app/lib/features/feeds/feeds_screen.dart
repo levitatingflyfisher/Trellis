@@ -12,6 +12,7 @@ import '../../services/picked_save.dart';
 import '../dsp/dsp_coordinator.dart';
 import '../player/player_controller.dart';
 import '../episodes/episode_actions.dart';
+import '../episodes/episode_row.dart' show thumbCacheWidth;
 import '../reader/reader_doors.dart';
 import '../search/search_entry.dart';
 import '../search/search_screen.dart';
@@ -133,6 +134,9 @@ class _FeedsScreenState extends State<FeedsScreen> {
     _load();
   }
 
+  /// Each followed show's artwork that is on disk, by feed id.
+  Map<int, File> _art = const {};
+
   Future<void> _load() async {
     final profileId = widget.profile.id;
     final feeds = await widget.db.feedsDao.feedsOf(profileId);
@@ -142,7 +146,17 @@ class _FeedsScreenState extends State<FeedsScreen> {
       profileId,
     );
     if (!mounted) return;
+    // Disk checks happen here, once per load, never per frame.
+    final services = widget.localMlAvailable ? widget.repository.services : null;
+    final art = <int, File>{
+      if (services != null)
+        for (final f in feeds)
+          if (services.artworkFileFor(f.id) case final file
+              when file.existsSync())
+            f.id: file,
+    };
     setState(() {
+      _art = art;
       _feeds = feeds..sort((a, b) => shelfKey(_feedName(a))
           .compareTo(shelfKey(_feedName(b))));
       _unplayed = unplayed;
@@ -348,42 +362,50 @@ class _FeedsScreenState extends State<FeedsScreen> {
           Expanded(child: switch (feeds) {
             null => const Center(child: CircularProgressIndicator()),
             _ when empty => _EmptyFeeds(onFollow: _follow),
-            _ => ListView(
-              padding: const EdgeInsets.only(bottom: 88),
-              children: _shelves(feeds),
-            ),
+            _ => _shelfList(feeds),
           }),
         ])),
       ),
     );
   }
 
+  /// Rows are built as they scroll in: 300 follows used to build 300
+  /// tiles before the first frame.
+  Widget _shelfList(List<Feed> feeds) {
+    final rows = _shelves(feeds);
+    return ListView.builder(
+      padding: const EdgeInsets.only(bottom: 88),
+      itemCount: rows.length,
+      itemBuilder: (_, i) => rows[i](),
+    );
+  }
+
   /// Empty shelves are left out rather than shown with a zero: there is
   /// nothing to see there.
-  List<Widget> _shelves(List<Feed> feeds) {
+  List<Widget Function()> _shelves(List<Feed> feeds) {
     final podcasts = [for (final f in feeds) if (f.origin != 'blog') f];
     final blogs = [for (final f in feeds) if (f.origin == 'blog') f];
     return [
       if (podcasts.isNotEmpty) ...[
-        _ShelfHeader(
+        () => _ShelfHeader(
             key: const Key('shelf-podcasts'),
             title: 'Podcasts',
             count: podcasts.length),
-        for (final f in podcasts) _feedTile(f),
+        for (final f in podcasts) () => _feedTile(f),
       ],
       if (blogs.isNotEmpty) ...[
-        _ShelfHeader(
+        () => _ShelfHeader(
             key: const Key('shelf-blogs'),
             title: 'Blogs and newsletters',
             count: blogs.length),
-        for (final f in blogs) _feedTile(f),
+        for (final f in blogs) () => _feedTile(f),
       ],
       if (_books.isNotEmpty) ...[
-        _ShelfHeader(
+        () => _ShelfHeader(
             key: const Key('shelf-books'),
             title: 'Books',
             count: _books.length),
-        for (final b in _books) _bookTile(b),
+        for (final b in _books) () => _bookTile(b),
       ],
     ];
   }
@@ -503,16 +525,18 @@ class _FeedsScreenState extends State<FeedsScreen> {
 
   Widget _feedTile(Feed feed) {
     final name = _feedName(feed);
-    final art = widget.localMlAvailable
-        ? widget.repository.services?.artworkFileFor(feed.id)
-        : null;
+    final art = _art[feed.id];
     final initial = _Initial(name);
     return ListTile(
       onTap: () => _openFeed(feed),
       leading: _Thumb(
-        child: art != null && art.existsSync()
+        child: art != null
             ? Image.file(art,
-                fit: BoxFit.cover, errorBuilder: (_, _, _) => initial)
+                width: 48,
+                height: 48,
+                cacheWidth: thumbCacheWidth(context, 48),
+                fit: BoxFit.cover,
+                errorBuilder: (_, _, _) => initial)
             : initial,
       ),
       title: Text(name, overflow: TextOverflow.ellipsis, maxLines: 2),

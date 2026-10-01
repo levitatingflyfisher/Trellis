@@ -26,12 +26,13 @@ class FeedFetchResult {
     this.etag,
     this.lastModified,
     this.viaProxy = false,
+    this.movedTo,
   })  : status = FeedFetchStatus.fresh,
         retryAfterSeconds = null,
         errorCode = null,
         message = null;
 
-  const FeedFetchResult.notModified()
+  const FeedFetchResult.notModified({this.movedTo})
       : status = FeedFetchStatus.notModified,
         body = null,
         etag = null,
@@ -43,6 +44,7 @@ class FeedFetchResult {
 
   const FeedFetchResult.throttled(int this.retryAfterSeconds)
       : status = FeedFetchStatus.throttled,
+        movedTo = null,
         body = null,
         etag = null,
         lastModified = null,
@@ -52,6 +54,7 @@ class FeedFetchResult {
 
   const FeedFetchResult.notFound()
       : status = FeedFetchStatus.notFound,
+        movedTo = null,
         body = null,
         etag = null,
         lastModified = null,
@@ -62,6 +65,7 @@ class FeedFetchResult {
 
   const FeedFetchResult.error([this.errorCode, this.message])
       : status = FeedFetchStatus.error,
+        movedTo = null,
         body = null,
         etag = null,
         lastModified = null,
@@ -69,6 +73,10 @@ class FeedFetchResult {
         viaProxy = false;
 
   final FeedFetchStatus status;
+
+  /// The feed's new permanent address, when the host moved it with
+  /// 301/308 (fresh and notModified only). The caller adopts it.
+  final String? movedTo;
 
   /// Decoded feed text (fresh only).
   final String? body;

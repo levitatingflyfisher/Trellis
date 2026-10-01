@@ -7,6 +7,8 @@ import 'package:sqlite3/sqlite3.dart' as raw;
 import 'package:study_core/study_core.dart';
 import 'package:trellis/db/database.dart';
 
+import '../support/schema_strip.dart';
+
 /// The study crown, Phase 1: daily review. Zero-effort resurfacing for
 /// extracts/vocab (the word ledger) and captures (Phase 2) — the gentle
 /// on-ramp, not a replacement for the four-grade course flow, which this
@@ -215,6 +217,7 @@ void main() {
       // was written — those columns are stripped too, or a v10 snapshot
       // would silently carry them from the future.
       v10.execute('''
+        $stripV26
         ALTER TABLE feeds DROP COLUMN image_url;
         DROP TABLE daily_review_cards;
         ALTER TABLE profiles DROP COLUMN keep_finished_in_queue;

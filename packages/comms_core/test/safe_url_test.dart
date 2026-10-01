@@ -136,4 +136,44 @@ void main() {
     expect(u.host, 'example.com');
     expect(u.port, 8080);
   });
+
+  group('resolved addresses (ADR-0017)', () {
+    // What a resolver hands back: 4 or 16 raw bytes, no text to parse.
+    test('private, loopback, link-local and CGNAT IPv4 are blocked', () {
+      for (final a in [
+        [127, 0, 0, 1],
+        [10, 1, 2, 3],
+        [172, 16, 0, 1],
+        [192, 168, 1, 1],
+        [169, 254, 169, 254],
+        [100, 64, 0, 1],
+        [0, 0, 0, 0],
+      ]) {
+        expect(isBlockedIpAddress(a), isTrue, reason: '$a');
+      }
+    });
+
+    test('public IPv4 passes', () {
+      expect(isBlockedIpAddress([93, 184, 216, 34]), isFalse);
+      expect(isBlockedIpAddress([8, 8, 8, 8]), isFalse);
+    });
+
+    test('IPv6 loopback, link-local, unique-local and mapped-private are '
+        'blocked; public passes', () {
+      List<int> v6(List<int> groups) => [
+            for (final g in groups) ...[g >> 8, g & 0xFF]
+          ];
+      expect(isBlockedIpAddress(v6([0, 0, 0, 0, 0, 0, 0, 1])), isTrue);
+      expect(isBlockedIpAddress(v6([0xfe80, 0, 0, 0, 0, 0, 0, 1])), isTrue);
+      expect(isBlockedIpAddress(v6([0xfd00, 0, 0, 0, 0, 0, 0, 1])), isTrue);
+      expect(isBlockedIpAddress(v6([0, 0, 0, 0, 0, 0xffff, 0x0a00, 1])),
+          isTrue);
+      expect(isBlockedIpAddress(v6([0x2606, 0x4700, 0, 0, 0, 0, 0, 0x1111])),
+          isFalse);
+    });
+
+    test('anything that is not 4 or 16 bytes fails closed', () {
+      expect(isBlockedIpAddress([1, 2, 3]), isTrue);
+    });
+  });
 }

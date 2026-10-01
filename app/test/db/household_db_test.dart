@@ -7,6 +7,8 @@ import 'package:sqlite3/sqlite3.dart' as raw;
 import 'package:study_core/study_core.dart' as study;
 import 'package:trellis/db/database.dart';
 
+import '../support/schema_strip.dart';
+
 /// The household layer (schema v6, P5): one optional parent-PIN row (salt +
 /// digest, never the PIN itself), profile rename/delete, and the parent
 /// dashboard's per-profile LIFETIME BUILT stats. Laws under test:
@@ -101,6 +103,7 @@ void main() {
       await seed.close();
       final v5 = raw.sqlite3.open(file.path);
       v5.execute('''
+        $stripV26
         ALTER TABLE feeds DROP COLUMN image_url;
         DROP TABLE household_pin;
         ALTER TABLE profiles DROP COLUMN prefer_system_voice;

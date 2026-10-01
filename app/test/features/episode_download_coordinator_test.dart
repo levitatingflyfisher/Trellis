@@ -307,4 +307,25 @@ void main() {
         isFalse);
     expect(coordinator.entries, isEmpty);
   });
+
+  test('dropping a partial drops its saved validator too', () async {
+    // The engine's If-Range sidecar names the bytes in the partial; left
+    // behind, it would vouch for bytes that are gone.
+    final coordinator = coordinatorWith(FakeAudioFetcher());
+    await seedRow(JobState.cancelled);
+    seedPartial(400);
+    final sidecar =
+        File('${services.audioFileFor(workId, url).path}.part.validator')
+          ..writeAsStringSync('"etag"');
+    await coordinator.restore();
+    coordinator.discardAll();
+    expect(sidecar.existsSync(), isFalse);
+
+    seedPartial(400);
+    sidecar.writeAsStringSync('"etag"');
+    await seedRow(JobState.cancelled);
+    await coordinator.restore();
+    await coordinator.dismiss(workId);
+    expect(sidecar.existsSync(), isFalse);
+  });
 }
