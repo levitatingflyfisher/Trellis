@@ -163,9 +163,19 @@ flutter:
     - assets/courses/kalman.ohcourse
 
   # The fleet's type (proposal-2 §12): Lora for display, Nunito for body,
-  # bundled as package fonts by openhearth_design (0.7.1+), so the app
-  # carries no font files of its own. C7 checks every glyph the UI prints
-  # against those package cmaps (the ≤/≥ tofu law learned in Peckish).
+  # bundled as package fonts by openhearth_design (0.7.1+). C7 checks every
+  # glyph the UI prints against those package cmaps (the ≤/≥ tofu law
+  # learned in Peckish), intersected with the app's own font below.
+  #
+  # The app's one font of its own: a 24 KB Noto Sans Mono subset for the
+  # reader's code and table blocks on the web, where there is no platform
+  # monospace and Nunito loses ASCII-table columns. It covers everything
+  # Lora and Nunito share, so C7's intersection does not shrink.
+  # Licence and recipe: assets/fonts/OFL.txt.
+  fonts:
+    - family: NotoSansMono
+      fonts:
+        - asset: assets/fonts/NotoSansMono-Subset.ttf
 
   # To add assets to your application, add an assets section, like this:
   # assets:

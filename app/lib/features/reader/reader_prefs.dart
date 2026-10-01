@@ -9,7 +9,8 @@ library;
 import 'dart:convert';
 
 /// The two faces the app ships: Lora and Nunito, bundled as package fonts
-/// by openhearth_design (the app carries no font files of its own).
+/// by openhearth_design. (The app's one font of its own is the mono subset
+/// for code and table blocks on the web — see reader_code_face.dart.)
 enum ReaderTypeface { lora, nunito }
 
 ReaderTypeface _typefaceFromWire(Object? v) => switch (v) {
@@ -25,7 +26,7 @@ String _typefaceToWire(ReaderTypeface t) => switch (t) {
 /// The package that bundles the reader's two faces. Pass it with
 /// [readerTypefaceFontFamily] in every `copyWith(fontFamily:, package:)`:
 /// a bare `'Lora'` would silently fall back to the platform font now that
-/// the app carries no font files of its own, and a pre-prefixed name would
+/// the app carries no Lora or Nunito files of its own, and a pre-prefixed name would
 /// be prefixed twice by a theme style that already carries the package.
 const String kReaderFontPackage = 'openhearth_design';
 

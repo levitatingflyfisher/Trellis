@@ -19,6 +19,7 @@ import '../player/player_controller.dart';
 import 'dictionary_sheet.dart';
 import 'ledger_screen.dart';
 import 'line_paced_view.dart';
+import 'reader_code_face.dart';
 import 'reader_logic.dart';
 import 'reader_prefs.dart';
 import 'reader_typography_settings_screen.dart';
@@ -2103,8 +2104,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                             readerTypefaceFontFamily(ReaderTypeface.lora),
                         package: kReaderFontPackage,
                         fontStyle: FontStyle.italic)
-                    : OhTypography.code(
-                        color: theme.colorScheme.onSurface)),
+                    : readerCodeStyle(color: theme.colorScheme.onSurface)),
           ),
         );
     }

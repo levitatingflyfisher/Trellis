@@ -33,6 +33,9 @@ void main() => runFleetConformance(const FleetAppConfig(
       // or `IconButton.filledTonal` reappearing in lib/ is now a red suite,
       // not a silent invisible button.
       checks: {
+        // C13: the PWA loads nothing from Google's CDNs. web/flutter_bootstrap.js
+        // points CanvasKit and the engine's fallback fonts at this origin.
+        FleetCheck.c13WebSelfHosted,
         FleetCheck.c1Style,
         FleetCheck.c3Budgets,
         FleetCheck.c4Permissions,
