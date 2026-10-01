@@ -6,6 +6,7 @@ import 'package:trellis/features/reader/reader_screen.dart';
 import 'package:trellis/main.dart';
 import '../support/pick_reader.dart';
 import '../support/tabs.dart';
+import '../support/open_work.dart';
 
 /// Campaign 9 Phase 6 ("a third way to read"): Lines is a genuine third
 /// [ReaderMode] alongside Words (RSVP) and Scroll — a scroll-family view
@@ -51,8 +52,7 @@ void main() {
     await tester.pumpAndSettle();
     await pickReader(tester, 'Ada');
     await toTab(tester, 'Library');
-    await tester.tap(find.text(title));
-    await tester.pumpAndSettle();
+    await openToRead(tester, title);
   }
 
   Future<void> switchMode(WidgetTester tester, String itemKey) async {

@@ -12,7 +12,8 @@ library;
 import 'dart:convert';
 
 import 'package:comms_core/comms_core.dart';
-import 'package:drift/drift.dart' show Variable;
+import 'package:drift/drift.dart' show InsertMode, Value, Variable;
+import 'package:flutter/foundation.dart' show compute;
 import 'package:intake_core/intake_core.dart';
 
 import '../../db/busy_retry.dart';
@@ -161,6 +162,61 @@ List<SegmentRow> _segmentsFor(FeedItem item) {
   return const [];
 }
 
+/// Sanitized notes and their plain words, ready for `work_notes`.
+typedef CleanNotes = ({String html, String plain});
+
+/// What one feed item becomes before any lock is taken: its body as
+/// segments and, for an audio item that carries notes, those notes
+/// cleaned. A body with nothing readable left is stored empty, so the next
+/// refresh doesn't clean it again.
+typedef PreparedItem = ({List<SegmentRow> segments, CleanNotes? notes});
+
+/// Prepares each item, keyed by [guidOf]. Top-level so a whole listing's
+/// worth can run on another isolate in one hop.
+Map<String, PreparedItem> prepareFeedItems(List<FeedItem> items) => {
+      for (final item in items) guidOf(item): _prepare(item),
+    };
+
+PreparedItem _prepare(FeedItem item) {
+  final raw = item.enclosure == null ? null : item.notesHtml;
+  return (
+    segments: _segmentsFor(item),
+    notes: raw == null
+        ? null
+        : switch (sanitizeNotesHtml(raw)) {
+            final clean? => (html: clean, plain: notesPlainText(clean)),
+            null => (html: '', plain: ''),
+          },
+  );
+}
+
+/// How [ingestFeedItems] moves preparation off the UI isolate. A test
+/// hands in its own to see it was asked.
+typedef PrepareOffload = Future<Map<String, PreparedItem>> Function(
+    List<FeedItem> items);
+
+Future<Map<String, PreparedItem>> prepareOffThread(List<FeedItem> items) =>
+    compute(prepareFeedItems, items);
+
+/// A fresh isolate costs a few milliseconds and a copy of the items, so
+/// only a batch that would stall a frame pays for one: 15 long posts
+/// (one newsletter's feed) took about 90 ms to extract on a desktop, and
+/// the first refresh after the v29 migration cleans a whole back
+/// catalogue's notes.
+bool preparesOffThread(List<FeedItem> items) {
+  if (items.length > offThreadPrepareCount) return true;
+  var chars = 0;
+  for (final item in items) {
+    chars += item.enclosure == null
+        ? item.contentHtml?.length ?? 0
+        : item.notesHtml?.length ?? 0;
+  }
+  return chars >= offThreadPrepareChars;
+}
+
+const offThreadPrepareCount = 40;
+const offThreadPrepareChars = 32 * 1024;
+
 /// Item identity for dedupe: link, else enclosure URL, else title#date.
 String guidOf(FeedItem item) {
   if (item.link.isNotEmpty) return item.link;
@@ -176,17 +232,51 @@ String guidOf(FeedItem item) {
 /// at all — not even counted toward [seen], so a still-skipped item is
 /// simply re-evaluated (and re-skipped) on the next refresh, which is the
 /// honest reading of "never enters"; markReadOnArrival and autoKeep both
-/// insert normally, then apply the same transition Let-it-pass/Keep
-/// perform by hand. An empty (or absent) rule list is every feed's
-/// default and behaves exactly as ingestion did before this parameter
-/// existed.
+/// insert normally, already in the state Let-it-pass/Keep leave by hand.
+/// An empty (or absent) rule list is every feed's default and behaves
+/// exactly as ingestion did before this parameter existed.
+///
+/// The work is split so the write lock is held only for writing: article
+/// extraction and notes cleaning run first (off the UI isolate for a big
+/// batch, through [offload]), and the transaction then writes each table
+/// in one batched statement rather than three awaited calls per item.
 Future<int> ingestFeedItems(
     {required AppDatabase db,
     required int profileId,
     required int feedId,
     required List<FeedItem> items,
     required int nowMs,
-    List<FeedRule> rules = const []}) async {
+    List<FeedRule> rules = const [],
+    PrepareOffload offload = prepareOffThread}) async {
+  FeedRuleAction? actionOf(FeedItem item) => rules.isEmpty
+      ? null
+      : evaluateFeedRules(rules, title: item.title, description: item.desc);
+
+  // Which items look new, and which stored ones lack notes this listing
+  // carries, read before the lock: only a hint for what to prepare. The
+  // transaction reads both again and those reads decide, so this does not
+  // undo keeping them under the lock; an item the hint missed (another
+  // writer stored or removed it in between) is prepared in place there.
+  final seenHint = await db.feedsDao.guidsOf(feedId);
+  final lackingHint = await db.feedsDao.notesGapsOf(feedId);
+  final hinted = <String>{};
+  final toPrepare = <FeedItem>[];
+  for (final item in items) {
+    final guid = guidOf(item);
+    if (!hinted.add(guid)) continue;
+    final wanted = seenHint.contains(guid)
+        ? lackingHint.contains(guid) && item.notesHtml != null
+        : actionOf(item) != FeedRuleAction.skip;
+    if (wanted) toPrepare.add(item);
+  }
+  final prepared = toPrepare.isEmpty
+      ? const <String, PreparedItem>{}
+      : preparesOffThread(toPrepare)
+          ? await offload(toPrepare)
+          : prepareFeedItems(toPrepare);
+  PreparedItem preparedFor(FeedItem item, String guid) =>
+      prepared[guid] ?? _prepare(item);
+
   var added = 0;
   // Another connection (the background check's, ADR-0018) may hold the
   // write lock; the whole transaction rolls back and runs again.
@@ -202,26 +292,39 @@ Future<int> ingestFeedItems(
     // the other wrote instead of inserting the same items twice.
     final seen = await db.feedsDao.guidsOf(feedId);
     final gaps = await db.feedsDao.metadataGapsOf(feedId);
+    final lacking = await db.feedsDao.notesGapIdsOf(feedId);
+    // Ids are handed out here, under the lock, so every table's rows can
+    // be written in one batch; AUTOINCREMENT never reuses one, so the
+    // sequence is read as well as the largest live id.
+    var nextId = await _lastWorkId(db) + 1;
+    final works = <WorksCompanion>[];
+    final segments = <SegmentsCompanion>[];
+    final episodes = <EpisodesCompanion>[];
+    final notes = <WorkNotesCompanion>[];
+    final fills = <List<Object?>>[];
     for (final item in items) {
       final guid = guidOf(item);
       if (!seen.add(guid)) {
+        final lackingId = lacking[guid];
+        if (lackingId != null && item.notesHtml != null) {
+          final note = preparedFor(item, guid).notes;
+          if (note != null) {
+            notes.add(WorkNotesCompanion.insert(
+                workId: Value(lackingId), html: note.html, plain: note.plain));
+          }
+        }
         // Items stored before ingest kept length and artwork still lack
-        // them; a later listing fills the gaps.
-        // Only a row with a gap this listing can fill costs a query; a
-        // 2,000-item listing of complete rows costs none.
+        // them; a later listing fills the gaps. Only a row with a gap this
+        // listing can fill costs a statement.
         final gap = gaps[guid];
         if (gap != null &&
             ((gap.duration && item.durationMs != null) ||
                 (gap.image && item.imageUrl != null))) {
-          await db.feedsDao.fillMissingMetadata(feedId, guid,
-              durationMs: item.durationMs, imageUrl: item.imageUrl);
+          fills.add([item.durationMs, item.imageUrl, feedId, guid]);
         }
         continue;
       }
-      final action = rules.isEmpty
-          ? null
-          : evaluateFeedRules(rules,
-              title: item.title, description: item.desc);
+      final action = actionOf(item);
       if (action == FeedRuleAction.skip) continue;
       final enclosureUrl = item.enclosure?.url;
       // Tracker stripping (Campaign 5 Phase 4, the Miniflux lesson) applies
@@ -232,40 +335,63 @@ Future<int> ingestFeedItems(
       // already-seen item look new.
       final sourceUrl = enclosureUrl ??
           (item.link.isEmpty ? null : canonicalizeForDedup(item.link));
-      final workId = await db.spineDao.insertWork(
+      final workId = nextId++;
+      final prep = preparedFor(item, guid);
+      works.add(WorksCompanion.insert(
+          id: Value(workId),
           profileId: profileId,
           kind: enclosureUrl != null ? 'episode' : 'article',
           title: item.title.isEmpty ? 'Untitled' : item.title,
-          persistence: 'ephemeron',
+          // The same transition Keep performs by hand (river_triage.dart).
+          persistence:
+              action == FeedRuleAction.autoKeep ? 'work' : 'ephemeron',
           firstSeenEpochDay: nowMs ~/ Duration.millisecondsPerDay,
-          sourceUrl: sourceUrl);
-      final segments = _segmentsFor(item);
-      if (segments.isNotEmpty) {
-        await db.spineDao.insertSegments(workId, segments);
+          sourceUrl: Value(sourceUrl)));
+      for (final r in prep.segments) {
+        segments.add(SegmentsCompanion.insert(
+            workId: workId, idx: r.idx, kind: r.kind, body: r.text));
       }
-      final inserted = await db.feedsDao.insertEpisodeIfNew(
-          workId: workId,
+      episodes.add(EpisodesCompanion.insert(
+          workId: Value(workId),
           feedId: feedId,
           guid: guid,
-          enclosureUrl: enclosureUrl,
-          durationMs: item.durationMs,
-          imageUrl: item.imageUrl,
-          publishedAtMs: parsePublishedMs(item.date) ?? nowMs);
-      if (!inserted) {
-        // Another writer stored this item first (the unique (feed, guid)
-        // index said so): the work made for it is surplus.
-        await db.spineDao.deleteWork(workId);
-        continue;
-      }
-      if (action == FeedRuleAction.markReadOnArrival) {
-        await db.feedsDao.setReadAt(workId, nowMs);
-      } else if (action == FeedRuleAction.autoKeep) {
-        // The same transition Keep performs by hand (river_triage.dart).
-        await db.spineDao.promoteWork(workId);
-        await db.feedsDao.setReadAt(workId, nowMs);
+          enclosureUrl: Value(enclosureUrl),
+          durationMs: Value(item.durationMs),
+          imageUrl: Value(item.imageUrl),
+          publishedAtMs: parsePublishedMs(item.date) ?? nowMs,
+          readAtMs: action == null ? const Value.absent() : Value(nowMs)));
+      // Only an audio item's are prepared: a text item's body is its
+      // segments.
+      if (prep.notes case final note?) {
+        notes.add(WorkNotesCompanion.insert(
+            workId: Value(workId), html: note.html, plain: note.plain));
       }
       added++;
     }
+    if (works.isEmpty && notes.isEmpty && fills.isEmpty) return;
+    await db.batch((b) {
+      b.insertAll(db.works, works);
+      b.insertAll(db.segments, segments);
+      b.insertAll(db.episodes, episodes);
+      // Only rows still without notes are filled: a note another writer
+      // stored first wins, and nothing is replaced.
+      b.insertAll(db.workNotes, notes, mode: InsertMode.insertOrIgnore);
+      for (final args in fills) {
+        b.customStatement(
+            'UPDATE episodes SET duration_ms = COALESCE(duration_ms, ?), '
+            'image_url = COALESCE(image_url, ?) '
+            'WHERE feed_id = ? AND guid = ?',
+            args);
+      }
+    });
   }));
   return added;
+}
+
+Future<int> _lastWorkId(AppDatabase db) async {
+  final row = await db.customSelect(
+      "SELECT MAX(COALESCE((SELECT seq FROM sqlite_sequence "
+      "WHERE name = 'works'), 0), COALESCE((SELECT MAX(id) FROM works), 0)) "
+      'AS n').getSingle();
+  return row.read<int>('n');
 }

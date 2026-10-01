@@ -4,6 +4,50 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/features/shared/coalesced_reload.dart';
 
 void main() {
+  testWidgets('a throttle lets the first request through at once and folds '
+      'the rest of each window into one at its end', (tester) async {
+    var fired = 0;
+    final throttle = RequestThrottle(() => fired++,
+        interval: const Duration(seconds: 1));
+    // 118 progress beats, 20 ms apart: 2.36 s of beats.
+    for (var i = 0; i < 118; i++) {
+      throttle.request();
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+    await tester.pump(const Duration(seconds: 2));
+    expect(fired, inInclusiveRange(3, 4));
+  });
+
+  testWidgets('the last request of a burst is never dropped: it fires as '
+      'the window ends', (tester) async {
+    var fired = 0;
+    final throttle = RequestThrottle(() => fired++,
+        interval: const Duration(seconds: 1));
+    throttle.request();
+    await tester.pump(const Duration(milliseconds: 100));
+    throttle.request();
+    expect(fired, 1);
+    await tester.pump(const Duration(milliseconds: 950));
+    expect(fired, 2);
+    await tester.pump(const Duration(seconds: 2));
+    expect(fired, 2, reason: 'nothing left to fold');
+  });
+
+  testWidgets('a lone request after a quiet window fires at once',
+      (tester) async {
+    var fired = 0;
+    final throttle = RequestThrottle(() => fired++,
+        interval: const Duration(seconds: 1));
+    throttle.request();
+    await tester.pump(const Duration(seconds: 2));
+    throttle.request();
+    expect(fired, 2);
+    throttle.cancel();
+    throttle.request();
+    expect(fired, 3, reason: 'cancel ends the window, not the throttle');
+    throttle.cancel();
+  });
+
   test('a burst of requests during one reload costs one more reload, not '
       'one each', () async {
     var runs = 0;

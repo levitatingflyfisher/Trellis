@@ -4,6 +4,7 @@ import 'package:comms_core/comms_core.dart';
 import 'package:flutter/material.dart';
 
 import '../../db/database.dart';
+import '../../db/search_index.dart';
 import '../../services/device_services.dart';
 import '../feeds/background/feed_check_platform.dart';
 import '../feeds/background/feed_check_runner.dart';
@@ -86,6 +87,10 @@ class _HomeFlowState extends State<HomeFlow> {
   /// there is no background check on this platform.
   final Completer<void> _writesReady = Completer<void>();
 
+  /// Fills the search index an upgrade rebuilt empty (1.5.4): a writer,
+  /// so it waits for the hand-over like every cold-start write.
+  late final SearchBackfill _searchBackfill = SearchBackfill(widget.db);
+
   @override
   void initState() {
     super.initState();
@@ -95,6 +100,7 @@ class _HomeFlowState extends State<HomeFlow> {
   Future<void> _boot() async {
     // The readers render at once; only what writes waits for the hand-over.
     unawaited(_load());
+    unawaited(_searchBackfill.run(after: _writesReady.future));
     final runner = _feedCheckRunner;
     if (runner != null) {
       // A check running headless winds down first (a few seconds at most):
@@ -116,6 +122,7 @@ class _HomeFlowState extends State<HomeFlow> {
 
   @override
   void dispose() {
+    _searchBackfill.stop();
     _closeFeedCheckHost?.call();
     _feedCheck.dispose();
     _jobs.dispose();

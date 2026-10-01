@@ -42,7 +42,7 @@ void main() {
     await tester.pumpAndSettle();
 
     final menu = tester.widget<PopupMenuButton<String>>(
-        find.byKey(Key('work-menu-$workId')));
+        find.byKey(Key('menu-$workId')));
     expect(menu.tooltip, isNotNull);
     expect(menu.tooltip, isNotEmpty);
   });

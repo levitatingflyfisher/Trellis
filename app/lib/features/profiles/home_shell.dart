@@ -13,6 +13,7 @@ import '../episodes/episode_actions.dart';
 import '../feeds/background/feed_check_settings.dart';
 import '../feeds/episode_download_coordinator.dart';
 import '../feeds/feeds_repository.dart';
+import '../feeds/feed_detail_screen.dart';
 import '../intake/audiobook_import.dart';
 import '../intake/audiobook_import_screen.dart';
 import '../intake/audiobook_picker_gateway.dart';
@@ -291,6 +292,47 @@ class _HomeShellState extends State<HomeShell> {
   /// rather than stacking a second copy over the shell.
   void _openQueue() => setState(() => _tab = _queueTab);
 
+  /// The episode actions and reader seams every list of works shares, so
+  /// the Queue, the Library and History act and open the way Latest does.
+  late final EpisodeActions _episodeActions = EpisodeActions(
+    db: widget.db,
+    profileId: widget.profile.id,
+    player: _player,
+    downloader: _downloadCoordinator,
+    dsp: _dspCoordinator,
+    transcriber: _coordinator,
+    services: _repository.services,
+    localMlAvailable: widget.services.localMlAvailable,
+    openShow: _openShow,
+  );
+
+  /// The work page's "From …" for the Queue, the Library and History.
+  Future<void> _openShow(BuildContext context, Feed feed) =>
+      Navigator.of(context).push<void>(MaterialPageRoute(
+          builder: (_) => FeedDetailScreen(
+                db: widget.db,
+                repository: _repository,
+                feed: feed,
+                playerController: _player,
+                downloadCoordinator: _downloadCoordinator,
+                dspCoordinator: _dspCoordinator,
+                localMlAvailable: widget.services.localMlAvailable,
+                readerDoors: _readerDoors,
+                transcriber: _coordinator,
+              )));
+
+  ReaderDoors get _readerDoors => ReaderDoors(
+        tts: widget.services.tts,
+        localMlAvailable: widget.services.localMlAvailable,
+        resolveSpeechEngine: widget.services.resolveSpeechEngine,
+        lookupDefinition: widget.services.lookupDefinition,
+        createSpeechTempFiles: widget.services.createSpeechTempFiles,
+        player: _player,
+        resolveTranslator: widget.services.resolveTranslator,
+        availableTranslationTargets:
+            widget.services.availableTranslationTargets,
+      );
+
   /// History, from the Queue bar: the queue is what plays next, history
   /// is what played. Built here, not in the Queue tab, because opening a
   /// row needs the reader's and the episode actions' whole kit.
@@ -300,26 +342,8 @@ class _HomeShellState extends State<HomeShell> {
             doors: SearchDoors(
               db: widget.db,
               profile: widget.profile,
-              actions: EpisodeActions(
-                db: widget.db,
-                profileId: widget.profile.id,
-                player: _player,
-                downloader: _downloadCoordinator,
-                dsp: _dspCoordinator,
-                services: _repository.services,
-                localMlAvailable: widget.services.localMlAvailable,
-              ),
-              readerDoors: ReaderDoors(
-                tts: widget.services.tts,
-                localMlAvailable: widget.services.localMlAvailable,
-                resolveSpeechEngine: widget.services.resolveSpeechEngine,
-                lookupDefinition: widget.services.lookupDefinition,
-                createSpeechTempFiles: widget.services.createSpeechTempFiles,
-                player: _player,
-                resolveTranslator: widget.services.resolveTranslator,
-                availableTranslationTargets:
-                    widget.services.availableTranslationTargets,
-              ),
+              actions: _episodeActions,
+              readerDoors: _readerDoors,
             ),
           ),
         ),
@@ -399,6 +423,8 @@ class _HomeShellState extends State<HomeShell> {
                 db: widget.db,
                 profile: widget.profile,
                 player: _player,
+                actions: _episodeActions,
+                readerDoors: _readerDoors,
                 onOpenHistory: _openHistory),
             2 => LibraryScreen(
                 db: widget.db,
@@ -416,6 +442,7 @@ class _HomeShellState extends State<HomeShell> {
                 resolveTranslator: widget.services.resolveTranslator,
                 availableTranslationTargets:
                     widget.services.availableTranslationTargets,
+                actions: _episodeActions,
                 onImportAudiobook: _onImportAudiobook,
                 onDeleteAudiobookFiles: widget.services.localMlAvailable
                     ? _deleteAudiobookFiles

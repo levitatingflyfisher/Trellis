@@ -5,6 +5,7 @@ import 'package:dio/dio.dart' as dio;
 import 'package:domovoi/domovoi.dart' show TransferOutcome;
 
 import 'package:comms_core/comms_core.dart';
+import 'package:drift/drift.dart' show ApplyInterceptor;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
@@ -17,6 +18,7 @@ import 'package:trellis/services/device_services.dart';
 
 import '../support/fake_services.dart';
 import '../support/scripted_fetcher.dart';
+import '../support/statement_counter.dart';
 
 const _rssBlog = '''
 <?xml version="1.0" encoding="UTF-8"?>
@@ -349,6 +351,135 @@ void main() {
       });
     });
 
+    group('full show notes (1.5.4)', () {
+      FeedItem ep({String? notes, String guidSuffix = ''}) => FeedItem(
+          title: 'Aurora season',
+          link: 'https://cast.test/aurora$guidSuffix',
+          date: 'Wed, 05 Aug 2026 12:00:00 GMT',
+          desc: 'Lights in the north.',
+          enclosure: Enclosure(url: 'https://cast.test/aurora$guidSuffix.mp3'),
+          notesHtml: notes);
+
+      test('an audio item stores its full notes, sanitized, beside the '
+          'capped preview', () async {
+        final long = 'Plenty of words about the aurora. ' * 30;
+        await ingestFeedItems(
+            db: db,
+            profileId: profileId,
+            feedId: feedId,
+            items: [
+              ep(
+                  notes: '<p>$long</p><script>track()</script>'
+                      '<p><a href="https://cast.test/map" onclick="x()">Map'
+                      '</a><img src="https://t.test/p.gif" width="1" '
+                      'height="1"></p>'),
+            ],
+            nowMs: nowMs);
+        final work = (await db.spineDao.worksOf(profileId)).single;
+        final notes = (await db.feedsDao.notesOf(work.id))!;
+        expect(notes.html, contains(long.trim()));
+        expect(notes.html, contains('<a href="https://cast.test/map">Map</a>'));
+        expect(notes.html, isNot(contains('script')));
+        expect(notes.html, isNot(contains('onclick')));
+        expect(notes.html, isNot(contains('img')));
+        expect(notes.plain, startsWith('Plenty of words'));
+        // The row preview is still the capped desc.
+        final segs = await db.spineDao.segmentsOf(work.id);
+        expect(segs.single.body, 'Lights in the north.');
+      });
+
+      test('a text item stores no notes: its body is its segments', () async {
+        await ingestFeedItems(
+            db: db,
+            profileId: profileId,
+            feedId: feedId,
+            items: const [
+              FeedItem(
+                  title: 'On hedges',
+                  link: 'https://notes.test/hedges',
+                  date: '',
+                  desc: 'Laid, not trimmed.',
+                  notesHtml: '<p>Laid, not trimmed.</p>'),
+            ],
+            nowMs: nowMs);
+        final work = (await db.spineDao.worksOf(profileId)).single;
+        expect(await db.feedsDao.notesOf(work.id), isNull);
+      });
+
+      test('notes that clean down to nothing are not cleaned again on every '
+          'refresh', () async {
+        await ingestFeedItems(
+            db: db,
+            profileId: profileId,
+            feedId: feedId,
+            items: [ep(notes: '<script>track()</script><img width="1" '
+                'height="1" src="https://t.test/p.gif">')],
+            nowMs: nowMs);
+        expect(await db.feedsDao.notesGapsOf(feedId), isEmpty);
+        final work = (await db.spineDao.worksOf(profileId)).single;
+        expect(await db.feedsDao.notesOf(work.id), isNull,
+            reason: 'nothing readable reads as no notes');
+      });
+
+      test('the first refresh after v29 fills a whole back catalogue, '
+          'cleaned off the UI isolate', () async {
+        List<FeedItem> listing({required bool notes}) => [
+              for (var i = 0; i < offThreadPrepareCount + 10; i++)
+                FeedItem(
+                    title: 'Episode $i',
+                    link: 'https://cast.test/e$i',
+                    date: '',
+                    desc: 'Preview $i.',
+                    enclosure: Enclosure(url: 'https://cast.test/e$i.mp3'),
+                    notesHtml: notes ? '<p>Notes for $i</p><script>x</script>' : null),
+            ];
+        await ingestFeedItems(
+            db: db,
+            profileId: profileId,
+            feedId: feedId,
+            items: listing(notes: false),
+            nowMs: nowMs);
+        expect(await db.feedsDao.notesGapsOf(feedId),
+            hasLength(offThreadPrepareCount + 10));
+        await ingestFeedItems(
+            db: db,
+            profileId: profileId,
+            feedId: feedId,
+            items: listing(notes: true),
+            nowMs: nowMs);
+        expect(await db.feedsDao.notesGapsOf(feedId), isEmpty);
+        final works = await db.spineDao.worksOf(profileId);
+        final some = await db.feedsDao.notesOf(works.first.id);
+        expect(some!.html, startsWith('<p>Notes for '));
+        expect(some.html, isNot(contains('script')));
+      });
+
+      test('a refresh fills notes a stored item lacks, never replaces them, '
+          'and a listing that drops the item deletes nothing', () async {
+        Future<void> ingest(List<FeedItem> items) => ingestFeedItems(
+            db: db,
+            profileId: profileId,
+            feedId: feedId,
+            items: items,
+            nowMs: nowMs);
+        // Stored before this release: no notes.
+        await ingest([ep()]);
+        final work = (await db.spineDao.worksOf(profileId)).single;
+        expect(await db.feedsDao.notesOf(work.id), isNull);
+
+        await ingest([ep(notes: '<p>First notes</p>')]);
+        expect((await db.feedsDao.notesOf(work.id))!.html, '<p>First notes</p>');
+
+        await ingest([ep(notes: '<p>Edited later</p>')]);
+        expect((await db.feedsDao.notesOf(work.id))!.html, '<p>First notes</p>');
+
+        await ingest([ep(notes: '<p>Other</p>', guidSuffix: '-2')]);
+        final works = await db.spineDao.worksOf(profileId);
+        expect(works, hasLength(2));
+        expect((await db.feedsDao.notesOf(work.id))!.html, '<p>First notes</p>');
+      });
+    });
+
     group('tracker stripping on outbound article links (Campaign 5 Phase 4, '
         'the Miniflux lesson)', () {
       test('an article link with tracking params is stored clean', () async {
@@ -590,6 +721,187 @@ void main() {
     });
   });
 
+  group('ingest cost (the Subscriptions lag)', () {
+    late StatementCounter counter;
+    late AppDatabase db;
+    late int profileId;
+    late int feedId;
+    final nowMs = DateTime.utc(2026, 8, 6).millisecondsSinceEpoch;
+    setUp(() async {
+      counter = StatementCounter();
+      db = AppDatabase.forTesting(
+          NativeDatabase.memory().interceptWith(counter));
+      profileId = await db.profilesDao.create('Ada');
+      feedId = await db.feedsDao
+          .insertFeed(profileId: profileId, url: 'https://cast.test/feed');
+    });
+    tearDown(() => db.close());
+
+    String longPost(int i) => [
+          for (var p = 0; p < 40; p++)
+            '<p>Paragraph $p of post $i, long enough to read as prose and '
+                'not as an excerpt of anything shorter.</p>',
+        ].join();
+
+    List<FeedItem> mixed(int n) => [
+          for (var i = 0; i < n; i++)
+            i.isEven
+                ? FeedItem(
+                    title: 'Episode $i',
+                    link: 'https://cast.test/e$i',
+                    date: 'Wed, 05 Aug 2026 12:00:00 GMT',
+                    desc: 'Preview $i.',
+                    enclosure: Enclosure(url: 'https://cast.test/e$i.mp3'),
+                    notesHtml: '<p>Notes for $i</p><script>x</script>')
+                : FeedItem(
+                    title: 'Post $i',
+                    link: 'https://cast.test/p$i',
+                    date: 'Wed, 05 Aug 2026 12:00:00 GMT',
+                    desc: 'Excerpt $i.',
+                    contentHtml: longPost(i)),
+        ];
+
+    test('500 new items cost a fixed number of statements per table, '
+        'not one per item', () async {
+      final items = mixed(500);
+      counter.calls.clear();
+      final added = await ingestFeedItems(
+          db: db,
+          profileId: profileId,
+          feedId: feedId,
+          items: items,
+          nowMs: nowMs,
+          rules: const [
+            FeedRule(
+                field: FeedRuleField.title,
+                match: FeedRuleMatch.contains,
+                text: 'Episode 2',
+                action: FeedRuleAction.autoKeep),
+          ],
+          offload: (batch) async => prepareFeedItems(batch));
+      expect(added, 500);
+      final perTable = counter.writesPerTable();
+      for (final table in ['works', 'segments', 'episodes', 'work_notes']) {
+        expect(perTable[table], inInclusiveRange(1, 2), reason: table);
+      }
+      expect(counter.calls.length, lessThan(25),
+          reason: 'round trips: ${counter.calls.length}');
+      // Everything still landed as before.
+      expect(await db.select(db.episodes).get(), hasLength(500));
+      expect(await db.feedsDao.notesGapsOf(feedId), isEmpty);
+      final post = (await db.spineDao.worksOf(profileId))
+          .firstWhere((w) => w.title == 'Post 1');
+      expect(await db.spineDao.segmentsOf(post.id), hasLength(40));
+      final kept = (await db.spineDao.worksOf(profileId))
+          .where((w) => w.persistence == 'work')
+          .map((w) => w.title);
+      expect(kept, contains('Episode 2'));
+      for (final w in await db.spineDao.worksOf(profileId)) {
+        if (w.persistence == 'work') {
+          expect((await db.feedsDao.episodeOf(w.id))!.readAtMs, nowMs);
+        }
+      }
+    });
+
+    test('a refresh of the same 500 items writes nothing', () async {
+      final items = mixed(500);
+      await ingestFeedItems(
+          db: db,
+          profileId: profileId,
+          feedId: feedId,
+          items: items,
+          nowMs: nowMs,
+          offload: (batch) async => prepareFeedItems(batch));
+      counter.calls.clear();
+      var hops = 0;
+      final again = await ingestFeedItems(
+          db: db,
+          profileId: profileId,
+          feedId: feedId,
+          items: items,
+          nowMs: nowMs,
+          offload: (batch) async {
+            hops++;
+            return prepareFeedItems(batch);
+          });
+      expect(again, 0);
+      expect(hops, 0, reason: 'nothing new to extract or clean');
+      expect(counter.writesPerTable().keys,
+          isNot(anyOf(contains('works'), contains('segments'),
+              contains('episodes'), contains('work_notes'))));
+    });
+
+    test('a text feed of long posts is extracted off the UI isolate, in '
+        'one hop before the transaction', () async {
+      final batches = <int>[];
+      await ingestFeedItems(
+          db: db,
+          profileId: profileId,
+          feedId: feedId,
+          items: [
+            for (var i = 0; i < 15; i++)
+              FeedItem(
+                  title: 'Post $i',
+                  link: 'https://news.test/p$i',
+                  date: '',
+                  desc: 'Excerpt.',
+                  contentHtml: longPost(i)),
+          ],
+          nowMs: nowMs,
+          offload: (batch) async {
+            batches.add(batch.length);
+            return prepareFeedItems(batch);
+          });
+      expect(batches, [15]);
+      final works = await db.spineDao.worksOf(profileId);
+      expect(works, hasLength(15));
+      expect(await db.spineDao.segmentsOf(works.first.id), hasLength(40));
+    });
+
+    test('long posts extract the same through a real isolate', () async {
+      await ingestFeedItems(
+          db: db,
+          profileId: profileId,
+          feedId: feedId,
+          items: [
+            for (var i = 0; i < 15; i++)
+              FeedItem(
+                  title: 'Post $i',
+                  link: 'https://news.test/p$i',
+                  date: '',
+                  desc: 'Excerpt.',
+                  contentHtml: longPost(i)),
+          ],
+          nowMs: nowMs);
+      final works = await db.spineDao.worksOf(profileId);
+      expect(works, hasLength(15));
+      final first = await db.spineDao.segmentsOf(works.first.id);
+      expect(first, hasLength(40));
+      expect(first.first.body, startsWith('Paragraph 0 of post'));
+    });
+
+    test('one short item is prepared in place: an isolate costs more',
+        () async {
+      var hops = 0;
+      await ingestFeedItems(
+          db: db,
+          profileId: profileId,
+          feedId: feedId,
+          items: const [
+            FeedItem(
+                title: 'Short', link: 'https://news.test/s', date: '',
+                desc: 'A line.'),
+          ],
+          nowMs: nowMs,
+          offload: (batch) async {
+            hops++;
+            return prepareFeedItems(batch);
+          });
+      expect(hops, 0);
+      expect(await db.spineDao.worksOf(profileId), hasLength(1));
+    });
+  });
+
   group('FeedsRepository refresh', () {
     late AppDatabase db;
     late int profileId;
@@ -697,6 +1009,9 @@ void main() {
       final big = _rssTwo.replaceFirst('<item>', '${extra.join()}<item>');
       expect(parsesOffThread(big), isTrue);
       expect(parsesOffThread(_rssTwo), isFalse);
+      // 36 of one listener's 112 feeds were under 256 KB, and a 200 KB
+      // body is a multi-frame parse on a mid-range phone.
+      expect(parsesOffThread('x' * 200 * 1024), isTrue);
       final parsed = await parseFeedBody(big, 'https://x.test/f');
       expect(parsed.feed!.items.length, parseRssFeed(big, 'u').items.length);
       expect(parsed.hash, feedBodyHash(big));
@@ -891,6 +1206,36 @@ void main() {
       expect((await db.feedsDao.feedById(dupe))!.url, 'https://cast.test/old2');
     });
 
+    test('a show followed at an address that later moved is still matched '
+        'by that address, so re-importing the old list adds no twin',
+        () async {
+      // Synthetic stand-ins for a newsletter that moved hosts for good.
+      const old = 'https://old-host.test/archive/rss/';
+      const moved = 'https://www.new-host.test/archive/rss/';
+      final fetcher = ScriptedFetcher((url, headers) => FetchResponse(
+          statusCode: 200,
+          headers: const {},
+          body: Stream.value(_rssBlog.codeUnits),
+          permanentUrl: Uri.parse(moved)));
+      final r = repo(fetcher);
+      final (:added, existing: _) = await r.followOutlines(
+          profileId, const [OpmlOutline(url: old, title: 'Old name')]);
+      await r.refreshFeed(added.single);
+      final row = (await db.feedsDao.feedById(added.single.id))!;
+      expect(row.url, moved);
+      expect(row.subscribedUrl, old);
+
+      final again = await r.followOutlines(
+          profileId, const [OpmlOutline(url: old, title: 'Old name')]);
+      expect(again.added, isEmpty);
+      expect(again.existing.map((f) => f.id), [row.id]);
+      expect(await db.feedsDao.feedsOf(profileId), hasLength(1));
+
+      // A second move keeps the first address, the one that was followed.
+      await db.feedsDao.adoptUrl(row.id, 'https://third.test/rss');
+      expect((await db.feedsDao.feedById(row.id))!.subscribedUrl, old);
+    });
+
     test('404 marks the feed broken immediately', () async {
       final fetcher =
           ScriptedFetcher((url, headers) => textResponse('', status: 404));
@@ -934,6 +1279,22 @@ void main() {
 
       test('any item with audio makes it a podcast', () async {
         expect(await originAfter(_rssTwo, before: 'blog'), 'podcast');
+      });
+
+      test('a Ghost newsletter lands on the newsletter shelf, its posts '
+          'read in full', () async {
+        // comms_core's hand-written fixture, read from the package.
+        final ghost = File(
+                '../packages/comms_core/test/fixtures/ghost_newsletter.xml')
+            .readAsStringSync();
+        expect(originOf(parseRssFeed(ghost, 'https://hedgerow.test/rss/')),
+            'blog');
+        expect(await originAfter(ghost), 'blog');
+        final works = await db.spineDao.worksOf(profileId);
+        expect(works, hasLength(3));
+        final well =
+            works.firstWhere((w) => w.title == 'Who pays for the village well');
+        expect(await db.spineDao.segmentsOf(well.id), hasLength(greaterThan(3)));
       });
 
       test('items with no audio make it a blog', () async {
@@ -1489,6 +1850,37 @@ void main() {
       }
     });
 
+    test('draining the artwork queue stops episode images not yet '
+        'fetched, and keeps the show\'s own', () async {
+      final dir = Directory.systemTemp.createTempSync('trellis-ep-art-drain');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final gate = Completer<void>();
+      final fetcher = _ScriptedAudioFetcher()..gate = gate.future;
+      final repository = FeedsRepository(
+          db: db,
+          fetcher: ScriptedFetcher((u, h) => textResponse(feedWith([
+                'https://cast.test/a.jpg',
+                'https://cast.test/b.jpg',
+                'https://cast.test/c.jpg',
+              ]))),
+          services: testServices(dir, audioFetcher: fetcher));
+      await repository.subscribe(
+          profileId: profileId, rawUrl: 'https://cast.test/feed');
+      await pumpEventQueue();
+      // The show's artwork is in flight, held by the slow host.
+      expect(fetcher.fetched, ['https://cast.test/show.jpg']);
+      repository.drainArtwork();
+      gate.complete();
+      await repository.artworkSettled;
+      expect(fetcher.fetched, ['https://cast.test/show.jpg'],
+          reason: 'no episode image was started after the drain');
+      // A later refresh fetches them as before: the files are still missing.
+      final feed = (await db.feedsDao.feedsOf(profileId)).single;
+      await repository.refreshFeed(feed, force: true);
+      await repository.artworkSettled;
+      expect(fetcher.fetched, hasLength(4));
+    });
+
     test('following a show returns before a slow image host answers',
         () async {
       final dir = Directory.systemTemp.createTempSync('trellis-ep-art-slow');
@@ -1645,3 +2037,4 @@ class _ScriptedAudioFetcher implements AudioFetcher {
     return TransferOutcome.completed;
   }
 }
+

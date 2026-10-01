@@ -1,5 +1,5 @@
 /// Multi-select and the clean-up's bulk actions (ADR-0016 section 5), one
-/// home for every list that uses [EpisodeRow], so Latest, the podcast
+/// home for every list that uses [WorkRow], so Latest, the podcast
 /// page, History and search can't drift apart.
 ///
 /// The session it serves is "clean up what I didn't listen to". Nothing

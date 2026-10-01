@@ -408,3 +408,13 @@ the first.
   "podcast:chapters" rows are corrected (Phase 4) to say what the code
   actually does today, rather than repeat a claim two campaigns now have
   found unbacked.
+
+## Update (1.5.4): a tap opens the work's page
+
+This pass shipped with a library tile whose tap played the book at once,
+with no screen of its own: "the audiobook opens into the existing player
+surface". From 1.5.4 every work, an audiobook included, opens one page on
+a tap (`WorkDoors.open`, the work page). An audiobook's page offers Listen,
+which plays it through the same shared player as before (Decision 6 is
+unchanged), and Read, disabled, with the reason given: an audiobook has no
+text. The row's own Play still plays at once, so playing stays one tap.

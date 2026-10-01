@@ -13,6 +13,7 @@ import 'package:trellis/db/database.dart';
 import 'package:trellis/features/library/library_screen.dart';
 import 'package:trellis/features/player/player_controller.dart';
 import 'package:trellis/features/reader/reader_screen.dart';
+import 'package:trellis/features/works/work_page.dart';
 
 import '../support/fake_player.dart';
 
@@ -131,11 +132,12 @@ void main() {
       return indicator.value ?? 0.0;
     }
 
-    testWidgets('a never-played audiobook shows New — zero progress',
-        (tester) async {
-      await seedAudiobook(title: 'Fresh Trail');
+    // The shared row's law (1.5.4): a bar only once started, and played
+    // wins over any bar.
+    testWidgets('a never-played audiobook shows no bar', (tester) async {
+      final work = await seedAudiobook(title: 'Fresh Trail');
       await pump(tester);
-      expect(progressOf(tester, 'Fresh Trail'), 0.0);
+      expect(find.byKey(Key('progress-${work.id}')), findsNothing);
     });
 
     testWidgets(
@@ -149,19 +151,20 @@ void main() {
       expect(progressOf(tester, 'Midway Trail'), closeTo(1 / 3, 0.001));
     });
 
-    testWidgets('a finished audiobook shows full progress regardless of fileIdx',
+    testWidgets('a finished audiobook reads as played, whatever its fileIdx',
         (tester) async {
       final work = await seedAudiobook(title: 'Done Trail');
       await db.feedsDao.savePlayerPosition(
           profileId: profileId, workId: work.id, tMs: 1000, fileIdx: 1);
       await db.spineDao.markFinished(work.id, 200);
       await pump(tester);
-      expect(progressOf(tester, 'Done Trail'), 1.0);
+      expect(find.byKey(Key('played-${work.id}')), findsOneWidget);
+      expect(find.byKey(Key('progress-${work.id}')), findsNothing);
     });
   });
 
-  group('tapping an audiobook tile plays it — no separate reader screen',
-      () {
+  group('an audiobook tile opens its page, whose Listen plays it — no '
+      'reader screen', () {
     testWidgets('routes through PlayerController.playAudiobook', (tester) async {
       final work = await seedAudiobook(title: 'Play Me');
       final fakePlayer = FakeEpisodePlayer();
@@ -173,7 +176,11 @@ void main() {
       addTearDown(controller.dispose);
 
       await pump(tester, player: controller);
+      // 1.5.4: every row's tap opens the work page; Listen plays.
       await tester.tap(find.text('Play Me'));
+      await tester.pumpAndSettle();
+      expect(find.byType(WorkPage), findsOneWidget);
+      await tester.tap(find.byKey(const Key('mode-listen')));
       await tester.pumpAndSettle();
 
       expect(controller.isAudiobook, isTrue);
@@ -183,7 +190,6 @@ void main() {
       // ReaderScreen (ADR-0013 Decision 6/7 — "the audiobook opens into the
       // EXISTING player surface").
       expect(find.byType(ReaderScreen), findsNothing);
-      expect(find.text('Library'), findsOneWidget);
     });
   });
 
@@ -195,7 +201,7 @@ void main() {
 
       await pump(tester,
           onDeleteAudiobookFiles: (workId) => deleted.add(workId));
-      await tester.tap(find.byKey(Key('work-menu-${work.id}')));
+      await tester.tap(find.byKey(Key('menu-${work.id}')));
       await tester.pumpAndSettle();
       await tester.tap(find.text('Remove'));
       await tester.pumpAndSettle();

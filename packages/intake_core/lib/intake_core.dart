@@ -13,3 +13,4 @@ export 'src/epub_parser.dart';
 export 'src/gutenberg_cleaner.dart';
 export 'src/gutendex.dart';
 export 'src/m4b_chapters.dart';
+export 'src/notes_sanitizer.dart';

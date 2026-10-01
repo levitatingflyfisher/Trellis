@@ -63,6 +63,27 @@ String? _cleanContentHtml(String s) {
   return t.isEmpty ? null : t;
 }
 
+/// [FeedItem.notesHtml]: the candidate whose visible text is longest. A
+/// tie keeps the earlier candidate, so callers list them in order of
+/// preference. Decoded once, by the XML layer, and no more: notes that
+/// show `&lt;b&gt;` as text must keep it as text, and the HTML parser
+/// downstream decodes the HTML's own entities.
+String? _longestBody(List<String> candidates) {
+  String? best;
+  var bestLen = 0;
+  for (final raw in candidates) {
+    final trimmed = raw.trim();
+    final html = trimmed.isEmpty ? null : trimmed;
+    if (html == null) continue;
+    final len = html.replaceAll(_tagRe, '').trim().length;
+    if (best == null || len > bestLen) {
+      best = html;
+      bestLen = len;
+    }
+  }
+  return best;
+}
+
 /// Donor parseTs: `HH:MM:SS(.ms)`, `MM:SS(.ms)` or bare seconds. Keeps the
 /// donor's JS-number quirks: empty parts count as 0, unparseable multi-part
 /// timestamps propagate NaN, a bare unparseable value collapses to 0.
@@ -236,14 +257,16 @@ FeedItem _rssItem(XmlElement item, String feedUrl) {
   final linkEl = _firstLocal(item.descendantElements, 'link');
   var link = linkEl?.innerText.trim() ?? '';
   if (link.isEmpty) link = linkEl?.getAttribute('href') ?? '';
-  var rawDesc =
+  final description =
       _firstLocal(item.descendantElements, 'description')?.innerText ?? '';
+  var rawDesc = description;
   // content:encoded read unconditionally (Campaign 9 Phase 4) —
   // independent of whether description was present, so a Substack-shaped
   // item (a short excerpt AND a full content:encoded body) keeps both.
   final encoded = _nsText(item, 'encoded');
+  final summary = _nsText(item, 'summary');
   if (rawDesc.isEmpty) rawDesc = encoded;
-  if (rawDesc.isEmpty) rawDesc = _nsText(item, 'summary');
+  if (rawDesc.isEmpty) rawDesc = summary;
   final ch = _findChapters(item);
   return FeedItem(
     title: decodeHtmlEntities(
@@ -256,6 +279,7 @@ FeedItem _rssItem(XmlElement item, String feedUrl) {
     chapters: ch.chapters,
     chaptersUrl: ch.chaptersUrl,
     contentHtml: _cleanContentHtml(encoded),
+    notesHtml: _longestBody([encoded, description, summary]),
     imageUrl: _itemImageUrl(item, feedUrl),
     durationMs: _parseDuration(_nsText(item, 'duration')),
   );
@@ -276,8 +300,9 @@ FeedItem _atomEntry(XmlElement entry) {
   if (date.isEmpty) {
     date = _firstLocal(entry.descendantElements, 'updated')?.innerText ?? '';
   }
-  var rawDesc =
+  final summary =
       _firstLocal(entry.descendantElements, 'summary')?.innerText ?? '';
+  var rawDesc = summary;
   // <content> read unconditionally too (Campaign 9 Phase 4) — same
   // independence from summary as content:encoded's from description above.
   final content =
@@ -295,6 +320,7 @@ FeedItem _atomEntry(XmlElement entry) {
     chapters: ch.chapters,
     chaptersUrl: ch.chaptersUrl,
     contentHtml: _cleanContentHtml(content),
+    notesHtml: _longestBody([content, summary]),
   );
 }
 

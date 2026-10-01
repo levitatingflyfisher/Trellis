@@ -214,7 +214,7 @@ void main() {
           (await fileDb.customSelect('PRAGMA $p').getSingle()).data.values.first;
       expect(await pragma('journal_mode'), 'wal');
       expect(await pragma('synchronous'), 1);
-      expect(await pragma('busy_timeout'), 5000);
+      expect(await pragma('busy_timeout'), 15000);
       expect(await pragma('foreign_keys'), 1);
     });
   });

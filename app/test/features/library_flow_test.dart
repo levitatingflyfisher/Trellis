@@ -148,7 +148,7 @@ void main() {
     expect(secondY, lessThan(firstY));
 
     // Pin First → it floats above Second.
-    await tester.tap(find.byKey(Key('work-menu-$first')));
+    await tester.tap(find.byKey(Key('menu-$first')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Pin'));
     await tester.pumpAndSettle();
@@ -158,7 +158,7 @@ void main() {
 
     // Remove Second: a deliberate menu choice, so no dialog. It leaves the
     // list at once and a lasting Undo brings it back.
-    await tester.tap(find.byKey(Key('work-menu-$second')));
+    await tester.tap(find.byKey(Key('menu-$second')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Remove'));
     await tester.pumpAndSettle();
@@ -173,7 +173,7 @@ void main() {
     expect(await db.spineDao.worksOf(profileId), hasLength(2));
 
     // Removed again and let go (Dismiss): now it is gone for good.
-    await tester.tap(find.byKey(Key('work-menu-$second')));
+    await tester.tap(find.byKey(Key('menu-$second')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Remove'));
     await tester.pumpAndSettle();
@@ -209,7 +209,7 @@ void main() {
     await pickReader(tester, 'Ada');
     await toTab(tester, 'Library');
 
-    await tester.tap(find.byKey(Key('work-menu-$ep')));
+    await tester.tap(find.byKey(Key('menu-$ep')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Remove from Library'));
     await tester.pumpAndSettle();
@@ -261,7 +261,8 @@ void main() {
       await pickReader(tester, 'Ada');
       await toTab(tester, 'Library');
 
-      expect(find.text('5 Aug'), findsOneWidget);
+      // The date sits in the shared row's one meta line.
+      expect(find.text('Book · 5 Aug'), findsOneWidget);
     });
 
     testWidgets('a kept episode shows its PUBLISHED date, not the day it '
@@ -291,7 +292,7 @@ void main() {
       await pickReader(tester, 'Ada');
       await toTab(tester, 'Library');
 
-      expect(find.text('1 Jan'), findsOneWidget);
+      expect(find.text('Feed · 1 Jan'), findsOneWidget);
     });
   });
 }

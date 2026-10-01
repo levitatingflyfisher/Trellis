@@ -115,6 +115,18 @@ retries. Two dedup passes interleaving would also be safe, because a pass
 only ever hides the younger item of a pair
 (`test/db/two_connections_test.dart`).
 
+**Update (1.5.4).** The app now opens two connections of its own: the
+writer and one reader (`createDb(readPool: 1)`, `bootstrap_io.dart`).
+drift sends only SELECTs outside a transaction to the reader, and under
+WAL a reader never takes the write lock, so this rule is about writers
+and still holds. The headless worker opens `createDb(readPool: 0)`.
+The search index fill (`SearchBackfill`) is a second app writer that
+starts after launch: it waits for HomeFlow's writes-ready gate like
+every cold-start write, takes the lock first with a no-op write, and
+retries a lost lock with back-off. It is the second thing, after
+ingest, that retries. Every connection gets a 15 s busy timeout at
+open, and `beforeOpen` no longer lowers the writer's to 5 s.
+
 ### 4. Auto-download
 
 The podcast's settings page has a switch, "Download new episodes".

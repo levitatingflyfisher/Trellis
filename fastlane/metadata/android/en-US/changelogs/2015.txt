@@ -1,0 +1,8 @@
+Trellis 1.5.4
+
+• Every item has its own page: Listen or Read, its language, full show notes with tappable times.
+• The same row on every list.
+• Search rebuilt: sections with counts, word endings, show notes.
+• Subscriptions is faster, with Find a subscription and shelf chips.
+• Import fixes; a paused slider keeps its place; no "database is locked" at startup.
+• After updating, show notes fill in over a few checks, and search says "Updating search…" until its index is built.

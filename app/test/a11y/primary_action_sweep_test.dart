@@ -7,6 +7,7 @@ import 'package:trellis/features/backup/backup_screen.dart';
 import 'package:trellis/features/intake/url_intake.dart';
 import 'package:trellis/features/library/library_screen.dart';
 import 'package:trellis/features/reader/reader_screen.dart';
+import 'package:trellis/features/works/work_page.dart';
 import 'package:trellis/features/river/river_screen.dart';
 import 'package:trellis/features/study/courses_screen.dart';
 import 'package:trellis/main.dart';
@@ -101,10 +102,32 @@ void main() {
     await seedReader(withWork: true);
     await runPrimaryActionSweep(tester, pumpScreen: () async {
       await app(tester, tab: 'Library');
-      await tester.tap(find.text('A Rather Longer Title Than Any Row Would Prefer'));
-      await tester.pumpAndSettle();
+      // The re-pump keeps the reader pushed; open it only the first time.
+      if (find.byType(ReaderScreen).evaluate().isEmpty) {
+        await tester
+            .tap(find.text('A Rather Longer Title Than Any Row Would Prefer'));
+        await tester.pumpAndSettle();
+        // The row opens the work page (1.5.4); Read there opens the reader.
+        await tester.ensureVisible(find.byKey(const Key('mode-read')));
+        await tester.pumpAndSettle();
+        await tester.tap(find.byKey(const Key('mode-read')));
+        await tester.pumpAndSettle();
+      }
       expect(find.byType(ReaderScreen), findsOneWidget);
     }, primaryAction: find.byKey(const Key('play-toggle')));
+  });
+
+  testWidgets('WorkPage: Read', (tester) async {
+    await seedReader(withWork: true);
+    await runPrimaryActionSweep(tester, pumpScreen: () async {
+      await app(tester, tab: 'Library');
+      if (find.byType(WorkPage).evaluate().isEmpty) {
+        await tester
+            .tap(find.text('A Rather Longer Title Than Any Row Would Prefer'));
+        await tester.pumpAndSettle();
+      }
+      expect(find.byType(WorkPage), findsOneWidget);
+    }, primaryAction: find.byKey(const Key('mode-read')));
   });
 
   testWidgets('UrlIntakeScreen: Fetch article', (tester) async {

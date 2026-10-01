@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:comms_core/comms_core.dart';
@@ -12,33 +13,28 @@ import '../intake/epub_intake.dart';
 import '../intake/gutenberg_screen.dart';
 import '../intake/paste_intake.dart';
 import '../intake/url_intake.dart';
-import '../models/format.dart' show formatDay, formatEpochDay;
 import '../player/player_controller.dart';
 import '../reader/reader_doors.dart';
 import '../reader/speech/speech_engine.dart';
 import '../reader/speech/speech_temp_files.dart';
 import '../reader/translation/marian_engine.dart';
 import '../settings/theme_preference.dart';
+import '../episodes/episode_actions.dart';
+import '../works/work_menu.dart';
+import '../works/work_open.dart';
+import '../works/remove_undo.dart';
+import '../works/work_row.dart';
+import '../search/search_store.dart';
 import 'library_filter_screen.dart';
 import 'library_filter_sheet.dart';
 import 'library_query.dart';
 import '../shared/capped_body.dart';
 
-typedef _Entry = ({
-  Work work,
-  int segmentCount,
-  Position? position,
-  Episode? episode,
-  String? feedTitle,
-  // Campaign 7 (ADR-0013): an audiobook has no Segments/Positions rows at
-  // all — its progress reads PlayerPositions (fileIdx) and its own file
-  // count instead. Both null for every non-audiobook work.
-  PlayerPosition? playerPosition,
-  int? audiobookFileCount,
-});
+typedef _Entry = ({Work work, Episode? episode, String? feedTitle});
 
-/// One reader's works: pinned first, then newest; progress is the cursor
-/// law's numerator over the segment count. The empty state is an invitation,
+/// One reader's works: pinned first, then newest, each in the shared row
+/// every list of works uses; progress is the cursor law's numerator over
+/// the segment count. The empty state is an invitation,
 /// not a void (ADR-0003 — no guilt, no streaks).
 class LibraryScreen extends StatefulWidget {
   final AppDatabase db;
@@ -121,6 +117,10 @@ class LibraryScreen extends StatefulWidget {
   /// pointing at nothing.
   final void Function(int workId)? onDeleteAudiobookFiles;
 
+  /// What a feed item's row can do and knows (artwork, downloads); the
+  /// shell's own, so its menu matches Latest's. Null builds a bare one.
+  final EpisodeActions? actions;
+
   const LibraryScreen(
       {super.key,
       required this.db,
@@ -138,7 +138,8 @@ class LibraryScreen extends StatefulWidget {
       this.resolveTranslator,
       this.availableTranslationTargets,
       this.onImportAudiobook,
-      this.onDeleteAudiobookFiles});
+      this.onDeleteAudiobookFiles,
+      this.actions});
 
   @override
   State<LibraryScreen> createState() => _LibraryScreenState();
@@ -148,11 +149,57 @@ class _LibraryScreenState extends State<LibraryScreen> {
   List<_Entry>? _entries;
   LibraryQuery? _activeQuery;
 
+  /// What the search engine found for the filter's words, and the words
+  /// it answers; the last answer stands while a new one is pending.
+  Set<int>? _textMatches;
+  String _textAnswered = '';
+  bool _textPending = false;
+  Timer? _textTimer;
+  int _textGeneration = 0;
+
+  /// Every filter change comes through here, so the words reach the
+  /// search engine (debounced, as Latest's box is).
+  void _setQuery(LibraryQuery? q) {
+    setState(() => _activeQuery = q == null || q.isEmpty ? null : q);
+    _textTimer?.cancel();
+    final words = _activeQuery?.textSearch?.trim() ?? '';
+    if (words.isEmpty) {
+      setState(() => _textPending = false);
+      return;
+    }
+    if (words == _textAnswered && !_textPending) return;
+    setState(() => _textPending = true);
+    _textTimer =
+        Timer(const Duration(milliseconds: 300), () => _searchText(words));
+  }
+
+  Future<void> _searchText(String words) async {
+    final gen = ++_textGeneration;
+    try {
+      final found = await SearchStore(widget.db)
+          .libraryMatches(widget.profile.id, words);
+      if (!mounted || gen != _textGeneration) return;
+      setState(() {
+        _textMatches = found;
+        _textAnswered = words;
+        _textPending = false;
+      });
+    } catch (_) {
+      if (!mounted || gen != _textGeneration) return;
+      setState(() => _textPending = false);
+    }
+  }
+
+  @override
+  void dispose() {
+    _textTimer?.cancel();
+    super.dispose();
+  }
+
   /// Works removed but still on offer to Undo (the fleet's delete ruling:
   /// a deliberate delete doesn't ask, and its Undo never times out). They
   /// leave the list at once; the rows go only when the offer is let go.
   final Set<int> _removing = {};
-  final OhUndoController _undo = OhUndoController();
   List<SavedViewRow> _savedViews = const [];
 
   SpineDao get _dao => widget.db.spineDao;
@@ -165,45 +212,38 @@ class _LibraryScreenState extends State<LibraryScreen> {
     _load();
   }
 
+  WorkListState _rowState = WorkListState.empty;
+
+  late final EpisodeActions _actions = widget.actions ??
+      EpisodeActions(
+          db: widget.db, profileId: widget.profile.id, player: widget.player);
+
+  /// One query for the works, then a few for every row's facts at once:
+  /// never a query per row.
   Future<void> _load() async {
     final queryEntries =
         await widget.db.libraryDao.libraryQueryEntriesOf(widget.profile.id);
     final entries = <_Entry>[
       for (final qe in queryEntries)
-        if (qe.work.kind == 'audiobook')
-          (
-            work: qe.work,
-            segmentCount: 0,
-            position: null,
-            episode: qe.episode,
-            feedTitle: qe.feedTitle,
-            playerPosition: await widget.db.feedsDao.playerPosition(
-                profileId: widget.profile.id, workId: qe.work.id),
-            audiobookFileCount:
-                await widget.db.audiobooksDao.fileCountOf(qe.work.id),
-          )
-        else
-          (
-            work: qe.work,
-            segmentCount: await _dao.segmentCount(qe.work.id),
-            position: await _dao.position(
-                profileId: widget.profile.id, workId: qe.work.id),
-            episode: qe.episode,
-            feedTitle: qe.feedTitle,
-            playerPosition: null,
-            audiobookFileCount: null,
-          )
+        (work: qe.work, episode: qe.episode, feedTitle: qe.feedTitle)
     ];
+    final rowState = await WorkListState.load(widget.db, widget.profile.id,
+        entries: [for (final e in entries) (work: e.work, episode: e.episode)]);
     entries.sort((a, b) {
       if (a.work.pinned != b.work.pinned) return a.work.pinned ? -1 : 1;
       return b.work.id.compareTo(a.work.id); // newest first
     });
     final savedViews = await widget.db.libraryDao.savedViewsOf(widget.profile.id);
     if (!mounted) return;
+    _actions.forgetArtwork();
     setState(() {
       _entries = entries;
+      _rowState = rowState;
       _savedViews = savedViews;
     });
+    // What was kept or removed may have changed what the words find.
+    final words = _activeQuery?.textSearch?.trim() ?? '';
+    if (words.isNotEmpty) await _searchText(words);
   }
 
   /// The filtered view of [_entries] — pure, re-evaluated on every build
@@ -223,7 +263,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
     return [
       for (final e in entries)
         if (matchesLibraryQuery(
-            (work: e.work, episode: e.episode, feedTitle: e.feedTitle), query))
+            (work: e.work, episode: e.episode, feedTitle: e.feedTitle), query,
+            textMatches: _textMatches))
           e
     ];
   }
@@ -239,7 +280,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Future<void> _openFilter() async {
     final active = _activeQuery;
     if (active != null && !active.isEmpty) {
-      setState(() => _activeQuery = null);
+      _setQuery(null);
       return;
     }
     final action = await showModalBottomSheet<String>(
@@ -249,8 +290,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         db: widget.db,
         profileId: widget.profile.id,
         initial: active ?? const LibraryQuery(),
-        onChanged: (q) =>
-            setState(() => _activeQuery = q.isEmpty ? null : q),
+        onChanged: _setQuery,
       ),
     );
     if (action != openSavedViewsManagement || !mounted) return;
@@ -262,7 +302,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 currentQuery: _activeQuery ?? const LibraryQuery())));
     if (!mounted) return;
     if (result != null) {
-      setState(() => _activeQuery = result.isEmpty ? null : result);
+      _setQuery(result);
     }
     await _load(); // a view may have been created/deleted/reordered too
   }
@@ -270,7 +310,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
   void _applySavedView(SavedViewRow v) {
     final query = LibraryQuery.fromJson(
         jsonDecode(v.queryJson) as Map<String, Object?>);
-    setState(() => _activeQuery = query.isEmpty ? null : query);
+    _setQuery(query);
   }
 
   Future<void> _pasteText() async {
@@ -391,28 +431,30 @@ class _LibraryScreenState extends State<LibraryScreen> {
   /// changes nothing. A feed item only leaves the Library: Latest keeps
   /// it, so the words say "from Library" (ADR-0019 §1).
   void _remove(_Entry e) {
-    final id = e.work.id;
-    setState(() => _removing.add(id));
-    _undo.show(
-      message: e.episode == null
-          ? "Removed '${e.work.title}'"
-          : "Removed '${e.work.title}' from Library",
-      onUndo: () async {
-        if (mounted) setState(() => _removing.remove(id));
-      },
-      onCommit: () async {
-        final deleted = await _dao.removeFromLibrary(id);
-        // Campaign 7 (ADR-0013): a delete only ever removes DB rows (the
-        // same law ADR-0012 recorded for a downloaded episode's audio
-        // file) — an audiobook's copied bytes on disk are this screen's
-        // own job to clear, or Remove silently leaks the whole book.
-        if (deleted && e.work.kind == 'audiobook') {
-          widget.onDeleteAudiobookFiles?.call(id);
-        }
-        _removing.remove(id);
-        if (mounted) await _load();
-      },
+    // The one shared Remove (remove_undo.dart), so the work page's means
+    // the same. Campaign 7 (ADR-0013): a delete only ever removes DB rows
+    // — an audiobook's copied bytes on disk go through the callback, or
+    // Remove silently leaks the whole book.
+    _hideWhile(
+      e.work.id,
+      removeWithUndo(
+        ScaffoldMessenger.of(context),
+        db: widget.db,
+        work: e.work,
+        fromFeed: e.episode != null,
+        deleteAudiobookFiles: widget.onDeleteAudiobookFiles,
+      ),
     );
+  }
+
+  /// Keeps [id] out of the list while its removal's Undo stands, then
+  /// shows the list as it is.
+  void _hideWhile(int id, Future<bool> removal) {
+    setState(() => _removing.add(id));
+    removal.then((_) async {
+      _removing.remove(id);
+      if (mounted) await _load();
+    });
   }
 
   ReaderDoors get _readerDoors => ReaderDoors(
@@ -425,32 +467,19 @@ class _LibraryScreenState extends State<LibraryScreen> {
       resolveTranslator: widget.resolveTranslator,
       availableTranslationTargets: widget.availableTranslationTargets);
 
+  WorkDoors get _doors => WorkDoors(
+      db: widget.db,
+      profileId: widget.profile.id,
+      readerDoors: _readerDoors,
+      actions: _actions);
+
+  /// The row's tap, through the one shared open: the work's page.
   Future<void> _open(_Entry e) async {
-    // Campaign 7 (ADR-0013): "the audiobook opens into the EXISTING
-    // player surface" — there is no separate audiobook reader screen,
-    // tapping the tile starts playback and the persistent mini player bar
-    // (chapters, speed, sleep timer, bookmark) is the whole interface
-    // from here.
-    if (e.work.kind == 'audiobook') {
-      await widget.player?.playAudiobook(e.work);
-      if (!mounted) return;
-      await _load();
-      return;
-    }
-    await _readerDoors.open(context,
-        db: widget.db,
-        profileId: widget.profile.id,
-        work: e.work,
-        position: e.position,
-        segmentCount: e.segmentCount);
+    final removal =
+        await _doors.open(context, (work: e.work, episode: e.episode));
+    if (removal != null && mounted) _hideWhile(e.work.id, removal);
     if (!mounted) return;
     await _load(); // progress may have moved
-  }
-
-  @override
-  void dispose() {
-    _undo.dispose();
-    super.dispose();
   }
 
   @override
@@ -459,7 +488,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
     final hasFilter = _activeQuery != null;
     final theme = ThemePreferenceScope.maybeOf(context);
     return Scaffold(
-      bottomSheet: OhUndoBar(controller: _undo),
       appBar: AppBar(
         title: const Text('Library'),
         // Icon + word for what matters here; rarer doors in a worded menu
@@ -517,6 +545,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
         _ => Column(
             children: [
               if (_savedViews.isNotEmpty) _savedViewChips(),
+              SizedBox(
+                height: 3,
+                child: _textPending
+                    ? const LinearProgressIndicator(
+                        key: Key('library-search-pending'), minHeight: 3)
+                    : null,
+              ),
               Expanded(child: _libraryList(_visibleEntries)),
             ],
           ),
@@ -566,98 +601,54 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
-  /// Progress for an audiobook (ADR-0013): file-count-coarse — how many of
-  /// the book's files the stored position has reached, ignoring the exact
-  /// offset within the current one. Deliberately not time-precise (a
-  /// per-file duration is only ever learned once that file has actually
-  /// played — see [AudiobookFiles.durationMs]), the same Voice/SABP-shape
-  /// honesty the spec asks for.
-  double _audiobookProgress(_Entry e) {
-    final count = e.audiobookFileCount ?? 0;
-    if (count == 0) return 0.0;
-    final fileIdx = e.playerPosition?.fileIdx ?? 0;
-    return (fileIdx / count).clamp(0.0, 1.0);
-  }
-
-  /// Campaign 9 Phase 4: user: "library rows have no dates." An episode's
-  /// date is when the HOST published it (what a listener actually cares
-  /// about, independent of whenever it happened to be kept); every other
-  /// kind falls back to when it was first added — the same distinction
-  /// the river already draws between an episode row's own date and
-  /// anything else.
-  String _dateLabel(_Entry e) {
-    final episode = e.episode;
-    return episode != null
-        ? formatDay(episode.publishedAtMs)
-        : formatEpochDay(e.work.firstSeenEpochDay);
-  }
-
   Widget _workTile(_Entry e) {
-    final progress = e.work.finishedEpochDay != null
-        ? 1.0
-        : e.work.kind == 'audiobook'
-            ? _audiobookProgress(e)
-            : e.segmentCount == 0
-                ? 0.0
-                : ((e.position?.segmentIdx ?? 0) / e.segmentCount)
-                    .clamp(0.0, 1.0);
-    return ListTile(
+    final work = e.work;
+    final episode = e.episode;
+    final entry = (work: work, episode: episode);
+    final isAudio = episode?.enclosureUrl != null || work.kind == 'audiobook';
+    return WorkRow(
+      work: work,
+      episode: episode,
+      facts: WorkRowFacts.of(work, episode, _rowState,
+          downloaded: episode != null && _actions.isDownloaded(episode)),
+      showTitle: e.feedTitle,
+      artwork: episode == null ? null : _actions.artworkFor(episode),
       onTap: () => _open(e),
-      leading: Icon(switch (e.work.kind) {
-        'book' => Icons.menu_book_outlined,
-        'article' => Icons.article_outlined,
-        'audiobook' => Icons.headphones_outlined,
-        _ => Icons.notes_outlined,
-      }),
-      title: Text(e.work.title, overflow: TextOverflow.ellipsis, maxLines: 2),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text(_dateLabel(e),
-                key: Key('date-${e.work.id}'),
-                style: Theme.of(context)
-                    .textTheme
-                    .bodySmall
-                    ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant)),
-          ),
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: LinearProgressIndicator(
-                value: progress, borderRadius: BorderRadius.circular(2)),
-          ),
-        ],
-      ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (e.work.pinned)
-            const Padding(
-              padding: EdgeInsets.only(right: 4),
-              child: Icon(Icons.push_pin, size: 18),
-            ),
-          PopupMenuButton<String>(
-            key: Key('work-menu-${e.work.id}'),
-            tooltip: 'More',
-            onSelected: (v) => switch (v) {
-              'pin' => _togglePin(e),
-              _ => _remove(e),
-            },
-            itemBuilder: (_) => [
-              PopupMenuItem(
-                  value: 'pin',
-                  child: Text(e.work.pinned ? 'Unpin' : 'Pin')),
-              PopupMenuItem(
-                  value: 'remove',
-                  child: Text(e.episode == null
-                      ? 'Remove'
-                      : 'Remove from Library')),
-            ],
-          ),
-        ],
-      ),
+      onPlay: isAudio && widget.player != null
+          ? () async {
+              await _doors.play(work);
+              if (mounted) await _load();
+            }
+          : null,
+      onRead: _doors.canRead(entry)
+          ? () async {
+              await _doors.readFromRow(context, entry);
+              if (mounted) await _load();
+            }
+          : null,
+      menuBuilder: (_) => workMenuItems(_actions, entry,
+          transcribed: _rowState.transcribed.contains(work.id), extras: [
+        PopupMenuItem(
+            key: Key('pin-${work.id}'),
+            value: 'pin',
+            child: Text(work.pinned ? 'Unpin' : 'Pin')),
+        PopupMenuItem(
+            key: Key('remove-${work.id}'),
+            value: 'remove',
+            child: Text(episode == null ? 'Remove' : 'Remove from Library')),
+      ]),
+      onMenu: (v) async {
+        switch (v) {
+          case 'pin':
+            await _togglePin(e);
+          case 'remove':
+            _remove(e);
+          default:
+            await _actions.handleShared(context, v, entry,
+                showTitle: e.feedTitle);
+            if (mounted) await _load();
+        }
+      },
     );
   }
 }

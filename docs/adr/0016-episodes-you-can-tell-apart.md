@@ -198,3 +198,38 @@ piece of work.
   `finishedAtMs` but never the work's finished day. Nothing ranks,
   nothing fills Up Next unasked, and the bar reports only what the
   listener just did.
+
+## Update (1.5.4): the search index
+
+The index section above describes 1.5.3. As of 1.5.4 (schema v29):
+
+- **Three FTS5 tables**, all `tokenize = 'porter unicode61
+  remove_diacritics 2', prefix = '2 3'`, so word endings and accents
+  don't matter and a part-typed word matches:
+  - `items_fts(title, show, notes)`: one row per work. `notes` holds the
+    episode's full show notes (`work_notes.plain`); until those arrive,
+    and for a feed's text items always, it holds the item's body
+    segments (a post's text, an episode's short description). A book's
+    body is still not indexed.
+  - `segments_fts(body)`: transcript sentences (segments with an
+    alignment), as before.
+  - `feeds_fts(title)`: followed shows, so a show with no items is found
+    and its name matches as every other word does.
+- Triggers keep all three in step, including a post's text when its
+  segments change and notes when they change. The show-name trigger
+  fires only on a real rename.
+- Every word of a query is a prefix; a contraction ("it's") is matched
+  as the phrase the tokenizer stores. User input is always quoted.
+- Results come in sections, each newest first (ADR-0003, amended): Shows,
+  In titles (title or show name), In the text (`notes`, or words split
+  between it and the title), Said in. A work is listed once across the
+  first three; Said in lists every matching sentence.
+- **The v29 hop builds the tables and triggers empty.** `SearchBackfill`
+  fills them after launch, once the app may write (ADR-0018), 500 works
+  per transaction, saving its place with each batch so a kill resumes.
+  Until it finishes, search answers by LIKE and the search screen says
+  "Updating search… N%" (or that the update stopped, and will try again
+  at the next launch). A new install and a backup restore index in full.
+- Searches run on the app's reader connection (`readPool: 1`), so they
+  never queue behind a write transaction.
+

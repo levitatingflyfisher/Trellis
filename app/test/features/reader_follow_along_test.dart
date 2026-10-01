@@ -5,6 +5,7 @@ import 'package:trellis/db/database.dart';
 import 'package:trellis/main.dart';
 import '../support/pick_reader.dart';
 import '../support/tabs.dart';
+import '../support/open_work.dart';
 
 /// Campaign 4 Phase 2: follow-along guided pacing for scroll mode — the
 /// speak-mode karaoke path (per-segment GlobalKeys + Scrollable.
@@ -51,8 +52,7 @@ void main() {
     await tester.pumpAndSettle();
     await pickReader(tester, 'Ada');
     await toTab(tester, 'Library');
-    await tester.tap(find.text(title));
-    await tester.pumpAndSettle();
+    await openToRead(tester, title);
     await switchMode(tester, 'mode-item-scroll');
   }
 
@@ -75,8 +75,7 @@ void main() {
     await tester.pumpAndSettle();
     await pickReader(tester, 'Ada');
     await toTab(tester, 'Library');
-    await tester.tap(find.text('Along'));
-    await tester.pumpAndSettle();
+    await openToRead(tester, 'Along');
     expect(find.byKey(const Key('reader-play')), findsNothing);
     expect(find.byKey(const Key('play-toggle')), findsOneWidget);
 

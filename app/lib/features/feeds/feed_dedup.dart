@@ -16,6 +16,7 @@
 library;
 
 import 'package:comms_core/comms_core.dart';
+import 'package:flutter/foundation.dart' show compute;
 
 const _fortyEightHoursMs = 48 * 60 * 60 * 1000;
 
@@ -112,3 +113,26 @@ String? _matchReason(DedupCandidate a, DedupCandidate b) {
   }
   return null;
 }
+
+/// How [findDuplicatesOffThread] leaves the UI isolate; a test hands in
+/// its own to see it was asked.
+typedef DedupOffload = Future<Map<int, DedupVerdict>> Function(
+    List<DedupCandidate> candidates);
+
+Future<Map<int, DedupVerdict>> _compute(List<DedupCandidate> candidates) =>
+    compute(findDuplicates, candidates);
+
+/// [findDuplicates] for a whole river, run on another isolate once it is
+/// big enough to stall frames: a first import's pass canonicalizes and
+/// normalizes every one of tens of thousands of items. A small river is
+/// compared in place, since the hop and the copy would cost more.
+Future<Map<int, DedupVerdict>> findDuplicatesOffThread(
+    List<DedupCandidate> candidates,
+    {DedupOffload offload = _compute}) async {
+  if (candidates.length < offThreadDedupCount) {
+    return findDuplicates(candidates);
+  }
+  return offload(candidates);
+}
+
+const offThreadDedupCount = 1000;

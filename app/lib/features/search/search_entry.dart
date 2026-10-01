@@ -29,7 +29,7 @@ class SearchEntry extends StatelessWidget {
                   const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      'Search titles, shows, what was said',
+                      'Search titles, shows, notes, what was said',
                       style: TextStyle(color: scheme.onSurfaceVariant),
                     ),
                   ),

@@ -341,7 +341,7 @@ void main() {
 
     testWidgets('rows play from here, and say their length', (tester) async {
       await pumpPage(tester);
-      expect(find.textContaining(' · 45 min'), findsNWidgets(2));
+      expect(find.textContaining(' · 45\u00A0min'), findsNWidgets(2));
 
       await tester.tap(find.byKey(Key('play-${ids['Clear night']}')));
       await tester.pumpAndSettle();

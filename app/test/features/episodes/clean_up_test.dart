@@ -123,6 +123,11 @@ void main() {
     }
 
     Future<void> pumpPage(WidgetTester tester) async {
+      // Tall enough for every seeded row: a row carries its Play and
+      // Read on a line of their own (1.5.4), and the list builds lazily.
+      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
       final feed = (await db.feedsDao.feedById(feedId))!;
       await tester.pumpWidget(MaterialApp(
           home: FeedDetailScreen(
@@ -487,6 +492,11 @@ void main() {
     });
 
     Future<void> pumpLatest(WidgetTester tester) async {
+      // Tall enough for every seeded row: a row carries its Play and
+      // Read on a line of their own (1.5.4), and the list builds lazily.
+      tester.view.physicalSize = const Size(800, 1600);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
       await tester.pumpWidget(TrellisApp(
           db: db,
           fetcher: ScriptedFetcher((u, h) => textResponse('')),

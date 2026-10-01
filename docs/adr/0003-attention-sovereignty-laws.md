@@ -18,6 +18,8 @@ Seven laws. Where a law is expressible as a test, the test is the law.
 
 1. **The river is reverse-chronological only.** No ranking code path exists —
    there is nothing to A/B, nothing to tune, nothing to test but ordering.
+   **Amended 1.5.4:** search answers in fixed sections, each newest first
+   (see "Search sections" below). That is not a ranking.
 2. **Ephemera decay by default; works persist.** Promotion requires the
    user's hand. (Sweep behavior tested in `loom_core`.)
    **Superseded by [ADR-0019](0019-latest-is-a-permanent-archive.md):**
@@ -34,6 +36,30 @@ Seven laws. Where a law is expressible as a test, the test is the law.
 7. **The permission surface is a test** (conformance C4, both directions,
    release merged manifest): INTERNET, FOREGROUND_SERVICE(dataSync,
    mediaPlayback), POST_NOTIFICATIONS, WAKE_LOCK — and nothing else.
+
+## Search sections (1.5.4)
+
+Search used to be one newest-first list cut at 100 rows. A word in a
+long-followed show's name filled the list with that show's newest
+episodes, and the title match being looked for sat past the cut with no
+sign it existed. The fix is placing, not scoring. Results fall into
+fixed sections by where the words were found:
+
+- **Shows**: followed shows by name, in shelf order;
+- **In titles**: the work's title, or an episode's show name;
+- **In the text**: its show notes, a post's text or an episode's
+  description, or words split between those and the title;
+- **Said in**: transcript sentences, of any work.
+
+Each section of works is newest first; every section says its true count
+and pages through every row ("Show all N"). A work is listed in its
+first section only among Shows, In titles and In the text; Said in lists
+every matching sentence, even of a work found above, since the jump to
+the sentence is the point. Law 1 holds because nothing is scored: the
+section a row lands in is a fact about the row (does the title hold
+these words?), the same for every user and every query, with nothing to
+weigh or tune. A relevance score (`bm25`) was considered and refused for
+the reason law 1 exists.
 
 ## Consequences
 

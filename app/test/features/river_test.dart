@@ -248,10 +248,15 @@ void main() {
     expect(find.byKey(Key('unread-dot-$workId')), findsOneWidget);
     await tester.tap(find.text('A text item'));
     await tester.pumpAndSettle();
+    // The work page (1.5.4); its Read opens the reader.
+    await tester.tap(find.byKey(const Key('mode-read')));
+    await tester.pumpAndSettle();
 
     // The reader opened on the spine work (RSVP shows the first word).
     expect(find.byKey(const Key('reader-tapzone')), findsOneWidget);
 
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle();
     await tester.tap(find.byType(BackButton));
     await tester.pumpAndSettle();
     expect(
@@ -1003,7 +1008,7 @@ void main() {
       await pumpApp(tester, ScriptedFetcher((u, h) => textResponse(_rssOne)));
       await openRiver(tester);
 
-      expect(find.textContaining('23 min left'), findsOneWidget);
+      expect(find.textContaining('23\u00A0min\u00A0left'), findsOneWidget);
       expect(find.byKey(Key('progress-$workId')), findsOneWidget);
     });
 

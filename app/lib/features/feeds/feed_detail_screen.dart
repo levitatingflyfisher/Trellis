@@ -7,11 +7,13 @@ import 'package:openhearth_design/openhearth_design.dart';
 import '../../db/database.dart';
 import '../dsp/dsp_coordinator.dart';
 import '../episodes/episode_actions.dart';
-import '../episodes/episode_row.dart';
+import '../transcribe/transcribe_coordinator.dart';
+import '../works/work_menu.dart';
+import '../works/work_open.dart';
+import '../works/work_row.dart';
 import '../episodes/episode_selection.dart';
 import '../player/player_controller.dart';
 import '../reader/reader_doors.dart';
-import '../reader/reader_screen.dart';
 import 'episode_download_coordinator.dart';
 import 'feed_ingest.dart';
 import 'feed_settings_screen.dart';
@@ -44,6 +46,10 @@ class FeedDetailScreen extends StatefulWidget {
   /// back to a bare kit around [playerController].
   final ReaderDoors? readerDoors;
 
+  /// Runs the shared Transcribe and Translate; null where this tier
+  /// can't, which hides them here as everywhere else.
+  final TranscribeCoordinator? transcriber;
+
   const FeedDetailScreen(
       {super.key,
       required this.db,
@@ -53,7 +59,8 @@ class FeedDetailScreen extends StatefulWidget {
       this.downloadCoordinator,
       this.dspCoordinator,
       this.localMlAvailable = true,
-      this.readerDoors});
+      this.readerDoors,
+      this.transcriber});
 
   @override
   State<FeedDetailScreen> createState() => _FeedDetailScreenState();
@@ -62,7 +69,7 @@ class FeedDetailScreen extends StatefulWidget {
 class _FeedDetailScreenState extends State<FeedDetailScreen> {
   late Feed _feed;
   List<EpisodeEntry>? _episodes;
-  EpisodeListState _rowState = EpisodeListState.empty;
+  WorkListState _rowState = WorkListState.empty;
   bool _fetching = false;
   bool _retrying = false;
 
@@ -74,6 +81,9 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
     dsp: widget.dspCoordinator,
     services: widget.repository.services,
     localMlAvailable: widget.localMlAvailable,
+    transcriber: widget.transcriber,
+    // This show is the page beneath: "From …" goes back to it.
+    openShow: (context, feed) async => Navigator.of(context).pop(),
   );
 
   final _selection = EpisodeSelection();
@@ -113,7 +123,8 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
   Future<void> _load() async {
     final episodes = await widget.db.feedsDao
         .episodesOfFeed(_feed.id, oldestFirst: _feed.sortOldestFirst);
-    final rowState = await EpisodeListState.load(widget.db, _feed.profileId);
+    final rowState = await WorkListState.load(widget.db, _feed.profileId,
+        entries: episodes);
     if (!mounted) return;
     // Disk checks happen here, once per load, never per frame.
     _actions.forgetArtwork();
@@ -184,17 +195,18 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
       ));
   }
 
+  WorkDoors get _workDoors => WorkDoors(
+      db: widget.db,
+      profileId: _feed.profileId,
+      readerDoors:
+          widget.readerDoors ?? ReaderDoors(player: widget.playerController),
+      actions: _actions);
+
   Future<void> _open(EpisodeEntry e) async {
-    await widget.db.feedsDao
-        .markRead(e.work.id, DateTime.now().millisecondsSinceEpoch);
-    if (!mounted) return;
-    await Navigator.of(context).push(MaterialPageRoute<void>(
-        builder: (_) => ReaderScreen(
-            db: widget.db,
-            profileId: _feed.profileId,
-            work: e.work,
-            player: widget.playerController)));
+    final removal = await _workDoors.open(context, e, showTitle: _feed.title);
     await _load();
+    // Removed from its page: show the list as it is once the Undo goes.
+    removal?.then((_) => mounted ? _load() : null);
   }
 
   Future<void> _onMenu(String choice, int index) async {
@@ -205,7 +217,8 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
       await _bulk.markOlderPlayed(context, _olderUnplayed(e));
       return;
     } else {
-      await _actions.handleCommon(context, choice, e);
+      await _actions.handleShared(context, choice, e,
+          showTitle: _feed.title);
     }
     await _load();
   }
@@ -354,10 +367,10 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
     final isAudio = e.episode.enclosureUrl != null;
     final canPlay = isAudio && widget.playerController != null;
     final selecting = _selection.active;
-    return EpisodeRow(
+    return WorkRow(
       work: e.work,
       episode: e.episode,
-      facts: EpisodeRowFacts.of(e.episode, _rowState,
+      facts: WorkRowFacts.of(e.work, e.episode, _rowState,
           downloaded: isAudio && _actions.isDownloaded(e.episode)),
       artwork: _actions.artworkFor(e.episode),
       onTap: selecting ? () => _selection.toggle(e.work.id) : () => _open(e),
@@ -371,27 +384,30 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
               await _load();
             }
           : null,
-      onRead: canPlay
+      onRead: canPlay || !isAudio
           ? () async {
-              await _transcriptDoors
-                  .openTranscript(context, db: widget.db, work: e.work);
+              await (isAudio
+                  ? _transcriptDoors
+                      .openTranscript(context, db: widget.db, work: e.work)
+                  : _workDoors.readFromRow(context, e));
               await _load();
             }
           : null,
       onMenu: (choice) => _onMenu(choice, i),
-      menuBuilder: (_) => [
+      // The shared items first, then this page's own.
+      menuBuilder: (_) => workMenuItems(_actions, e,
+          transcribed: _rowState.transcribed.contains(e.work.id), extras: [
         if (canPlay)
           PopupMenuItem(
               key: Key('play-from-here-${e.work.id}'),
               value: 'play-from-here',
               child: const Text('Play from here')),
-        ..._actions.commonMenuItems(e),
         if (isAudio && _olderUnplayed(e).isNotEmpty)
           PopupMenuItem(
               key: Key('mark-older-${e.work.id}'),
               value: 'mark-older',
               child: const Text('Mark everything older as played')),
-      ],
+      ]),
     );
   }
 

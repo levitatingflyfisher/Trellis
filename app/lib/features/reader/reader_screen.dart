@@ -168,6 +168,17 @@ class ReaderScreen extends StatefulWidget {
   /// a look at a match never costs the reader where they were.
   final int? startSegmentIdx;
 
+  /// The work page (1.5.4) opens the reader already doing what was
+  /// asked: [startSpeaking] reads aloud from the saved place,
+  /// [speakTranslation] speaks the active translation instead of the
+  /// original, [layerLang] projects that `mt` layer, and
+  /// [openTranslatePicker] asks which language to translate into. Each
+  /// applies once, on the first load; none is remembered.
+  final bool startSpeaking;
+  final bool speakTranslation;
+  final String? layerLang;
+  final bool openTranslatePicker;
+
   const ReaderScreen(
       {super.key,
       required this.db,
@@ -184,7 +195,11 @@ class ReaderScreen extends StatefulWidget {
       this.resolveTranslator,
       this.availableTranslationTargets,
       this.offerRecap = false,
-      this.startSegmentIdx});
+      this.startSegmentIdx,
+      this.startSpeaking = false,
+      this.speakTranslation = false,
+      this.layerLang,
+      this.openTranslatePicker = false});
 
   @override
   State<ReaderScreen> createState() => _ReaderScreenState();
@@ -202,6 +217,10 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   /// Whether [ReaderScreen.startSegmentIdx] still applies to a load.
   bool _startPending = true;
+
+  /// Whether the work page's entry request (speak, a layer, the picker)
+  /// is still to be carried out: once, after the first load.
+  bool _entryPending = true;
   ReaderMode _mode = ReaderMode.rsvp;
   int _scrollAnchor = 0; // segment the scroll view opens around
 
@@ -593,6 +612,40 @@ class _ReaderScreenState extends State<ReaderScreen>
         player.current?.id == widget.work.id &&
         player.playing) {
       _attachAudioFollow();
+    }
+    if (_entryPending) {
+      _entryPending = false;
+      _applyEntry();
+    }
+  }
+
+  void _applyEntry() {
+    final layer = widget.layerLang;
+    final doc = _doc;
+    if (layer != null && doc != null && _mtLangs.contains(layer)) {
+      final segment = doc.words.isEmpty ? 0 : cursorAt(doc, _wordIdx).segment;
+      final blocks = _projectedBlocks(layer);
+      final newDoc = core.tokenizeDocument(blocks);
+      setState(() {
+        _activeLang = layer;
+        _blocks = blocks;
+        _doc = newDoc;
+        _wordIdx =
+            newDoc.words.isEmpty ? 0 : globalWordIndex(newDoc, segment, 0);
+        _scrollAnchor = segment;
+      });
+    }
+    if (widget.speakTranslation && _hasStoredTranslation) {
+      setState(() {
+        _showTranslation = true;
+        _speakTranslation = true;
+      });
+    }
+    if (widget.startSpeaking) _startSpeak();
+    if (widget.openTranslatePicker) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) unawaited(_openTranslatePicker());
+      });
     }
   }
 

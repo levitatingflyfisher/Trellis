@@ -189,16 +189,20 @@ void main() {
       final repo = FeedsRepository(
           db: db, fetcher: ScriptedFetcher((u, h) => textResponse(_rss)));
 
-      final added = await repo.followOutlines(profileId, const [
+      final (:added, :existing) = await repo.followOutlines(profileId, const [
         OpmlOutline(url: '  https://new.test/feed ', title: 'New'),
         OpmlOutline(url: 'https://new.test/feed', title: 'Again'),
         OpmlOutline(url: 'https://old.test/feed', title: 'Old'),
         OpmlOutline(url: '   ', title: 'Blank'),
         OpmlOutline(url: 'https://two.test/feed', title: ''),
+        OpmlOutline(url: 'https://old.test/feed', title: 'Old again'),
       ]);
 
       expect(added.map((f) => (f.url, f.title)),
           [('https://new.test/feed', 'New'), ('https://two.test/feed', '')]);
+      // What the file named that was already followed, once each: what
+      // "Already following all N" counts and "Show them" shows.
+      expect(existing.map((f) => f.url), ['https://old.test/feed']);
       expect(await db.feedsDao.feedsOf(profileId), hasLength(3));
     });
   });
@@ -262,5 +266,122 @@ void main() {
     await done;
     expect(await readLastChecked(db, profileId), 1234);
     expect(after, 1);
+  });
+
+  group('the paced notes fill (1.5.4)', () {
+    String cast(String host, {bool notes = true}) => '''
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+  <title>Cast $host</title>
+  <item>
+    <title>Episode one</title>
+    <link>https://$host/one</link>
+    <enclosure url="https://$host/one.mp3" type="audio/mpeg" length="1"/>
+    ${notes ? '<description>Notes about lighthouses.</description>' : ''}
+    <pubDate>Wed, 05 Aug 2026 12:00:00 GMT</pubDate>
+  </item>
+</channel></rss>
+''';
+
+    test('a check parses only a few marked shows in full, whatever their '
+        'validators say, and the rest answer 304 as usual', () async {
+      final full = <String>[];
+      final repo = FeedsRepository(
+          db: db,
+          fetcher: ScriptedFetcher((url, headers) {
+            if (headers?['If-None-Match'] != null) {
+              return textResponse('', status: 304);
+            }
+            full.add(url.host);
+            return textResponse(cast(url.host),
+                headers: const {'etag': '"v2"'});
+          }));
+      final count = notesFillPerRefresh + 3;
+      for (var i = 0; i < count; i++) {
+        await db.feedsDao.insertFeed(
+            profileId: profileId, url: 'https://h$i.test/feed');
+      }
+      // Each show already stored its episode, before notes were kept.
+      for (final f in await db.feedsDao.feedsOf(profileId)) {
+        final parsed =
+            parseRssFeed(cast(Uri.parse(f.url).host, notes: false), f.url);
+        await ingestFeedItems(
+            db: db,
+            profileId: profileId,
+            feedId: f.id,
+            items: parsed.items,
+            nowMs: 1);
+      }
+      await db.customStatement(
+          "UPDATE feeds SET etag = '\"v1\"', notes_fill_pending = 1");
+
+      await repo.refreshAll(profileId);
+      expect(full, hasLength(notesFillPerRefresh));
+      final feeds = await db.feedsDao.feedsOf(profileId);
+      final filled = [
+        for (final f in feeds)
+          if (f.notesFillPending == null) f
+      ];
+      expect(filled.map((f) => Uri.parse(f.url).host).toSet(), full.toSet());
+      for (final f in filled) {
+        final work = (await db.feedsDao.notesGapIdsOf(f.id));
+        expect(work, isEmpty, reason: 'its stored episode has notes now');
+      }
+
+      full.clear();
+      await repo.refreshAll(profileId);
+      expect(full, hasLength(3), reason: 'the next check takes the rest');
+      full.clear();
+      await repo.refreshAll(profileId);
+      expect(full, isEmpty);
+      expect([
+        for (final f in await db.feedsDao.feedsOf(profileId))
+          f.notesFillPending
+      ], everyElement(isNull));
+    });
+
+    test('one show refreshed on its own fills at once', () async {
+      var full = 0;
+      final repo = FeedsRepository(
+          db: db,
+          fetcher: ScriptedFetcher((url, headers) {
+            if (headers?['If-None-Match'] != null) {
+              return textResponse('', status: 304);
+            }
+            full++;
+            return textResponse(cast(url.host));
+          }));
+      final id = await db.feedsDao
+          .insertFeed(profileId: profileId, url: 'https://one.test/feed');
+      await db.customStatement(
+          "UPDATE feeds SET etag = '\"v1\"', notes_fill_pending = 1");
+      await repo.refreshFeed((await db.feedsDao.feedById(id))!);
+      expect(full, 1);
+      expect((await db.feedsDao.feedById(id))!.notesFillPending, isNull);
+    });
+
+    test('a show that keeps failing waits behind the healthy ones, so it '
+        'never holds their fill back', () {
+      Feed feed(int id, {int failures = 0, bool pending = true}) => Feed(
+          id: id,
+          profileId: 1,
+          url: 'https://h$id.test/f',
+          title: '',
+          breakerJson: encodeBreakerState(FeedRefreshState(
+              url: 'https://h$id.test/f', consecutiveFailures: failures)),
+          autoDownload: false,
+          rulesJson: '[]',
+          sortOldestFirst: false,
+          origin: 'podcast',
+          notesFillPending: pending ? true : null);
+      final picked = pickNotesFills([
+        feed(1, failures: 2),
+        feed(2),
+        feed(3, pending: false),
+        feed(4, failures: 1),
+        feed(5),
+      ], nowMs: 0, count: 3);
+      expect(picked, {2, 5, 4});
+    });
   });
 }

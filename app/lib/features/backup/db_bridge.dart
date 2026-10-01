@@ -3,6 +3,7 @@ import 'package:drift/drift.dart';
 import 'package:study_core/study_core.dart' as study;
 
 import '../../db/database.dart';
+import '../../db/search_index.dart';
 
 /// The Drift <-> backup_core seam. backup_core deliberately never sees a
 /// database — it speaks DB-agnostic row maps — so this bridge is the ONE
@@ -119,9 +120,14 @@ class DbBridge {
               (p) => OrderingTerm.asc(p.workId)
             ]))
           .get()),
-      'feeds': rows(await (db.select(db.feeds)
-            ..orderBy([(f) => OrderingTerm.asc(f.id)]))
-          .get()),
+      // Whether a show still owes this device a notes fill is this
+      // device's refresh plan, not the show's; a restore sets its own.
+      'feeds': [
+        for (final f in rows(await (db.select(db.feeds)
+              ..orderBy([(f) => OrderingTerm.asc(f.id)]))
+            .get()))
+          f..remove('notesFillPending'),
+      ],
       'courses': rows(await (db.select(db.courses)
             ..orderBy([(c) => OrderingTerm.asc(c.id)]))
           .get()),
@@ -160,6 +166,8 @@ class DbBridge {
         db.wordLedger,
         db.captures,
         db.playerPositions,
+        // Show notes don't travel: they come from the feed again.
+        db.workNotes,
         db.episodes,
         db.positions,
         db.alignments,
@@ -246,10 +254,20 @@ class DbBridge {
       for (final row in t['revlog']!) {
         await db.into(db.revlog).insert(RevlogRow.fromJson(cast(row)));
       }
+      // Show notes don't travel, so every podcast parses in full again to
+      // bring them back: a few shows per check, as after the 1.5.4
+      // upgrade, rather than every show on the first refresh. Validators
+      // and hashes stay; the restored rows are the ones they vouch for.
+      await db.customStatement('UPDATE feeds SET notes_fill_pending = 1 '
+          'WHERE EXISTS (SELECT 1 FROM episodes e '
+          'WHERE e.feed_id = feeds.id AND e.enclosure_url IS NOT NULL)');
       // Auto-download is consent to downloads nobody taps, and consent is
       // per device (ADR-0003 law 6, ADR-0018): a backup from another phone
       // must not start fetching here. The marks name the old feed ids.
       await db.feedsDao.clearAutoDownloadConsent();
+      // The index fills a feed item's body when its feed row lands, and a
+      // restore writes that row before the body; refill it from the rows.
+      await installSearchIndex(db);
     });
   }
 
@@ -410,7 +428,8 @@ class DbBridge {
 
       for (final row in result.tables['feeds'] ?? const []) {
         final url = row['url'] as String;
-        if (await db.feedsDao.feedByUrl(profileId, url) != null) {
+        // Also a show followed here that has since moved on from [url].
+        if (await db.feedsDao.feedByAnyUrl(profileId, url) != null) {
           skip('a feed already subscribed here');
           continue;
         }

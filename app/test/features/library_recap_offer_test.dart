@@ -6,6 +6,7 @@ import 'package:trellis/features/intake/paste_intake.dart' show epochDayUtcNow;
 import 'package:trellis/main.dart';
 import '../support/pick_reader.dart';
 import '../support/tabs.dart';
+import '../support/open_work.dart';
 
 /// Campaign 4 Phase 4: LibraryScreen._open resolves `offerRecap` BEFORE
 /// pushing the reader — same "resolved before the push" shape ADR-0006's
@@ -56,8 +57,7 @@ void main() {
     await tester.pumpAndSettle();
     await pickReader(tester, 'Ada');
     await toTab(tester, 'Library');
-    await tester.tap(find.text('Stale'));
-    await tester.pumpAndSettle();
+    await openToRead(tester, 'Stale');
 
     expect(find.byKey(const Key('recap-offer-chip')), findsOneWidget);
   });
@@ -72,8 +72,7 @@ void main() {
     await tester.pumpAndSettle();
     await pickReader(tester, 'Ada');
     await toTab(tester, 'Library');
-    await tester.tap(find.text('Fresh'));
-    await tester.pumpAndSettle();
+    await openToRead(tester, 'Fresh');
 
     expect(find.byKey(const Key('recap-offer-chip')), findsNothing);
   });
@@ -87,8 +86,7 @@ void main() {
     await tester.pumpAndSettle();
     await pickReader(tester, 'Ada');
     await toTab(tester, 'Library');
-    await tester.tap(find.text('BarelyStarted'));
-    await tester.pumpAndSettle();
+    await openToRead(tester, 'BarelyStarted');
 
     expect(find.byKey(const Key('recap-offer-chip')), findsNothing);
   });

@@ -28,10 +28,12 @@ Future<ParsedBody> parseFeedBody(String body, String url,
 
 /// A fresh isolate costs a few milliseconds and a copy of the body; a
 /// small feed parses in less than that, so only a body big enough to
-/// stall a frame pays for one.
+/// stall a frame pays for one. Parsing runs at about 0.13 ms per KB on a
+/// desktop and two to three times that on a mid-range phone, so 64 KB is
+/// already near a frame's budget there.
 bool parsesOffThread(String body) => body.length >= offThreadParseChars;
 
-const offThreadParseChars = 256 * 1024;
+const offThreadParseChars = 64 * 1024;
 
 /// [parseFeedBody] in the shape comms_core's archive walk takes.
 Future<ParsedFeed> parseFeedOffThread(String body, String url) async =>

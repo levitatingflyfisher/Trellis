@@ -130,7 +130,8 @@ class _LibraryFilterSheetState extends State<LibraryFilterSheet> {
                 key: const Key('filter-search'),
                 controller: _searchController,
                 decoration: const InputDecoration(
-                    hintText: 'Search titles', prefixIcon: Icon(Icons.search)),
+                    hintText: 'Titles, shows, notes, what was said',
+                    prefixIcon: Icon(Icons.search)),
                 onChanged: (_) => _emit(),
               ),
               const SizedBox(height: 24),

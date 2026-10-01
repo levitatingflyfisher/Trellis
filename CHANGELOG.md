@@ -7,6 +7,43 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.5.4 — 2026-10-25
+
+### Changed
+- **The same row on every list.** Latest, the Queue, History, the
+  Library, a show's page and search all show an item the same way, with
+  Play (or Read) on the row and the rest in its ⋮ menu.
+- **Every item has its own page.** Tapping a row opens it: Listen and Read
+  side by side, the language to read or hear it in, and the episode's
+  full show notes. Times in the notes are tappable and play from there;
+  a link asks before it opens, and says where it goes. The page opens to
+  whatever you last used for that item: listening or reading.
+- **Subscriptions is faster**, even with hundreds of shows, and has a
+  "Find a subscription" box and a chip for each shelf.
+- **Search is rebuilt.** Results come in sections: Shows, In titles, In
+  the text (show notes and article text) and Said in (transcripts). Each
+  section says how many it found and shows them all on request. Word
+  endings no longer matter ("machines" finds "machine"), every word can
+  be typed in part, and show notes are searched. The Library's filter
+  searches the same way. A thin bar shows while a search is running.
+- **Importing a list of shows** can be stopped, says how many you already
+  follow, and offers to show them.
+- **Remove** takes a kept episode out of the Library, with an Undo that
+  stays until you dismiss it.
+
+### Fixed
+- After a restart, a paused episode's slider sits where you left off, not
+  at the start.
+- Opening the app while a background check was running could fail with
+  "database is locked"; it now waits for the check to finish.
+
+### The first launch after updating
+- Show notes fill in over the next few feed checks, a few shows at a time,
+  rather than all at once.
+- Search rebuilds its index in the background. Until it is done, the
+  search screen says "Updating search… N%" and search still works, but
+  without word endings, article text or episode descriptions.
+
 ## 1.5.3 — 2026-10-24
 
 ### Changed

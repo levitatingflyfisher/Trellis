@@ -11,32 +11,56 @@ library;
 import 'dart:io';
 
 import 'package:comms_core/comms_core.dart';
-import 'package:drift_flutter/drift_flutter.dart';
+import 'package:drift/drift.dart' show DatabaseConnection;
+import 'package:drift/native.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/common.dart' show CommonDatabase;
+import 'package:sqlite3/sqlite3.dart' show sqlite3;
 
 import '../db/database.dart';
 import '../features/reader/speech/speech_temp_files.dart';
 import '../net/io_fetcher.dart';
 import '../services/device_services.dart';
 
-/// drift_flutter's native convention: documents-dir/NAME.sqlite.
-AppDatabase createDb() => AppDatabase(
-  driftDatabase(
-    name: 'trellis',
-    native: const DriftNativeOptions(setup: configureConnection),
-  ),
-);
+/// drift_flutter's native convention: documents-dir/NAME.sqlite, opened
+/// the way its `driftDatabase` opens it, plus a read pool, which it has no
+/// option for. [readPool] is how many reading connections run beside the
+/// writer: the app's one, so a search never queues behind a refresh's
+/// write transaction (1.5.4). The background check (ADR-0018) only
+/// writes and passes none.
+AppDatabase createDb({int readPool = 1}) =>
+    AppDatabase(DatabaseConnection.delayed(Future(() async {
+      // sqlite3's temporary files: the system default may be out of the
+      // sandbox's reach. A process-wide setting, so the readers get it too.
+      sqlite3.tempDirectory ??= (await getTemporaryDirectory()).path;
+      return openNativeConnection(
+          databaseFileIn(await getApplicationDocumentsDirectory()),
+          readPool: readPool);
+    })));
 
-/// Runs on every native connection before drift reads the schema version,
-/// so a second connection (the background feed check, ADR-0018) waits for
-/// the first instead of failing with "database is locked" mid-migration.
-/// AppDatabase's beforeOpen sets the same timeout again, but only after
-/// the migrations, which is too late for an upgrade.
-void configureConnection(CommonDatabase db) =>
-    db.execute('PRAGMA busy_timeout = 15000');
+/// The connection [createDb] opens, on a background isolate, with
+/// [readPool] reading isolates beside it. drift sends SELECTs outside a
+/// transaction to the readers and everything else to the writer; under
+/// WAL a reader sees the last commit and never waits for a writer.
+/// (drift_flutter's old-Android workaround is for API levels below the
+/// app's minimum of 24.)
+DatabaseConnection openNativeConnection(File file, {int readPool = 1}) =>
+    NativeDatabase.createBackgroundConnection(file,
+        setup: configureConnection, readPool: readPool);
+
+/// Runs on every native connection, readers included, before drift reads
+/// the schema version, so a second connection (the background feed
+/// check, ADR-0018) waits for the first instead of failing with "database
+/// is locked" mid-migration. AppDatabase's beforeOpen sets the same
+/// timeout again, but only after the migrations, which is too late for an
+/// upgrade. WAL is what lets a reader run beside a write; it persists in
+/// the file, and asking again once it is set changes nothing.
+void configureConnection(CommonDatabase db) {
+  db.execute('PRAGMA busy_timeout = 15000');
+  db.execute('PRAGMA journal_mode = WAL');
+}
 
 /// Where drift keeps the database — named so the storage panel can weigh
 /// the real file, not a guess.

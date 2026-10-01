@@ -6,6 +6,7 @@ import 'package:trellis/features/intake/paste_intake.dart' show epochDayUtcNow;
 import 'package:trellis/main.dart';
 import '../support/pick_reader.dart';
 import '../support/tabs.dart';
+import '../support/open_work.dart';
 
 /// Campaign 4 Phase 5's write side, wired into the reader: every
 /// `_savePosition` call also records today's UTC epoch day in
@@ -34,8 +35,7 @@ void main() {
     await tester.pumpAndSettle();
     await pickReader(tester, 'Ada');
     await toTab(tester, 'Library');
-    await tester.tap(find.text('Five Words'));
-    await tester.pumpAndSettle();
+    await openToRead(tester, 'Five Words');
 
     // Center tap on the RSVP tapzone: play, then pause — _pause() is one
     // of the shared _savePosition call sites.

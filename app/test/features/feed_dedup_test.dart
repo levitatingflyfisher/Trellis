@@ -231,6 +231,42 @@ void main() {
       }
     });
   });
+
+  group('off the UI isolate', () {
+    test('a big river is compared on another isolate, with the same verdicts',
+        () async {
+      final river = [
+        for (var i = 0; i < offThreadDedupCount + 10; i++)
+          c(
+              workId: i,
+              feedId: i % 3,
+              sourceUrl: 'https://news.test/story/${i ~/ 3}',
+              title: 'Story ${i ~/ 3}',
+              publishedAtMs: i * hour),
+      ];
+      var hops = 0;
+      final verdicts = await findDuplicatesOffThread(river,
+          offload: (candidates) async {
+        hops++;
+        return findDuplicates(candidates);
+      });
+      expect(hops, 1);
+      expect(verdicts, findDuplicates(river));
+      // And through the real hop.
+      expect(await findDuplicatesOffThread(river), findDuplicates(river));
+    });
+
+    test('a small river is compared in place', () async {
+      var hops = 0;
+      await findDuplicatesOffThread(
+          [c(workId: 1, feedId: 1, publishedAtMs: 1)],
+          offload: (candidates) async {
+        hops++;
+        return findDuplicates(candidates);
+      });
+      expect(hops, 0);
+    });
+  });
 }
 
 /// The definition, written as the obvious all-pairs loop: for each

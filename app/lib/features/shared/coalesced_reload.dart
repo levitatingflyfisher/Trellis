@@ -31,3 +31,42 @@ class CoalescedReload {
     return _running = run;
   }
 }
+
+/// Lets requests through at most once per [interval]: the first at once,
+/// and whatever arrives inside the window folded into one at its end.
+///
+/// [CoalescedReload] alone starts the next reload as soon as one ends, so
+/// a 118-feed import still reloaded Subscriptions back to back for its
+/// whole length, every run queued behind the import's own writes. A list
+/// a second behind the progress bar is enough to watch it fill.
+class RequestThrottle {
+  RequestThrottle(this._fire, {this.interval = const Duration(seconds: 1)});
+
+  final void Function() _fire;
+  final Duration interval;
+
+  Timer? _window;
+  bool _pending = false;
+
+  void request() {
+    if (_window != null) {
+      _pending = true;
+      return;
+    }
+    _fire();
+    _window = Timer(interval, () {
+      _window = null;
+      if (_pending) {
+        _pending = false;
+        request();
+      }
+    });
+  }
+
+  /// Drops a folded request and ends the window; for dispose.
+  void cancel() {
+    _window?.cancel();
+    _window = null;
+    _pending = false;
+  }
+}

@@ -50,6 +50,10 @@ class ReaderDoors {
     required Position? position,
     required int segmentCount,
     int? startSegmentIdx,
+    bool startSpeaking = false,
+    bool speakTranslation = false,
+    String? layerLang,
+    bool openTranslatePicker = false,
   }) async {
     final resolver = resolveSpeechEngine;
     final hasVoice =
@@ -77,7 +81,11 @@ class ReaderDoors {
           resolveTranslator: resolveTranslator,
           availableTranslationTargets: availableTranslationTargets,
           offerRecap: offerRecap,
-          startSegmentIdx: startSegmentIdx),
+          startSegmentIdx: startSegmentIdx,
+          startSpeaking: startSpeaking,
+          speakTranslation: speakTranslation,
+          layerLang: layerLang,
+          openTranslatePicker: openTranslatePicker),
     ));
   }
 

@@ -6,6 +6,7 @@ import 'package:trellis/features/reader/reader_prefs.dart';
 import 'package:trellis/main.dart';
 import '../support/pick_reader.dart';
 import '../support/tabs.dart';
+import '../support/open_work.dart';
 
 /// Campaign 4 Phase 1: per-profile typography prefs reach the print
 /// reader's rendered paragraph (scroll mode). RSVP/the ticker are untouched
@@ -34,8 +35,7 @@ void main() {
     await tester.pumpAndSettle();
     await pickReader(tester, 'Ada');
     await toTab(tester, 'Library');
-    await tester.tap(find.text(title));
-    await tester.pumpAndSettle();
+    await openToRead(tester, title);
     // Campaign 9 Phase 6: `mode-toggle` opens a labeled three-way picker
     // rather than cycling on its own tap.
     await tester.tap(find.byKey(const Key('mode-toggle')));
@@ -115,9 +115,10 @@ void main() {
     // library screen already showing this title — re-pumping the whole
     // app here would reuse the Navigator's element and skip its own
     // initState, so re-enter through the same live tree instead.
+    // Back lands on the work page (1.5.4); its Read reopens the reader.
     await tester.tap(find.byType(BackButton));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Typography'));
+    await tester.tap(find.byKey(const Key('mode-read')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('mode-toggle')));
     await tester.pumpAndSettle();

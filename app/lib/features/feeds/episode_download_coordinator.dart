@@ -104,6 +104,17 @@ class EpisodeDownloadCoordinator extends ChangeNotifier {
   final Map<int, dio.CancelToken> _tokens = {};
   final Map<int, Future<DownloadOutcome>> _inFlight = {};
 
+  /// Bumped on every change, so a list that remembers what's on disk
+  /// knows when to look again.
+  int get revision => _revision;
+  int _revision = 0;
+
+  @override
+  void notifyListeners() {
+    _revision++;
+    super.notifyListeners();
+  }
+
   EpisodeDownloadState stateOf(int workId) =>
       _entries[workId]?.state ?? const EpisodeDownloadState();
 

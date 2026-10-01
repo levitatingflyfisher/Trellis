@@ -10,6 +10,7 @@ import 'package:trellis/features/reader/reader_code_face.dart';
 import 'package:trellis/main.dart';
 import '../support/pick_reader.dart';
 import '../support/tabs.dart';
+import '../support/open_work.dart';
 
 /// Code and table blocks keep their columns on the web. Without a bundled
 /// monospace, OhTypography.code() is Nunito there (the self-hosted web
@@ -92,8 +93,7 @@ void main() {
     await tester.pumpAndSettle();
     await pickReader(tester, 'Ada');
     await toTab(tester, 'Library');
-    await tester.tap(find.text('Columns'));
-    await tester.pumpAndSettle();
+    await openToRead(tester, 'Columns');
     await tester.tap(find.byKey(const Key('mode-toggle')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('mode-item-scroll')));

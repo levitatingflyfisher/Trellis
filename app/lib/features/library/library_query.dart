@@ -36,9 +36,10 @@ enum ReadState { any, unread, read }
 typedef LibraryQueryEntry = ({Work work, Episode? episode, String? feedTitle});
 
 class LibraryQuery {
-  /// Case-insensitive substring match on the work's title. Null/empty
-  /// matches everything — the library has no separate stored body to
-  /// search against title-only is the honest scope for v1.
+  /// Words for the search engine (1.5.4), matched as every search box
+  /// matches them: titles, show names, show notes and transcripts. The
+  /// screen asks the engine and hands its matches to
+  /// [matchesLibraryQuery]. Null/empty matches everything.
   final String? textSearch;
 
   /// Empty matches every kind.
@@ -103,14 +104,18 @@ class LibraryQuery {
       );
 }
 
-bool matchesLibraryQuery(LibraryQueryEntry entry, LibraryQuery query) {
+/// [textMatches] is the work ids the search engine found for
+/// [LibraryQuery.textSearch]; null (not asked yet) matches nothing while
+/// there are words to match.
+bool matchesLibraryQuery(LibraryQueryEntry entry, LibraryQuery query,
+    {Set<int>? textMatches}) {
   final work = entry.work;
   final episode = entry.episode;
 
   final search = query.textSearch?.trim();
   if (search != null &&
       search.isNotEmpty &&
-      !work.title.toLowerCase().contains(search.toLowerCase())) {
+      !(textMatches?.contains(work.id) ?? false)) {
     return false;
   }
 

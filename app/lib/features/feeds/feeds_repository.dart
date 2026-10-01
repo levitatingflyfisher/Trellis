@@ -114,6 +114,29 @@ String? originOf(ParsedFeed parsed) {
 /// How many distinct episode images one refresh may fetch.
 const episodeArtworkFetchLimit = 20;
 
+/// How many shows a check parses in full for their notes (1.5.4). A
+/// 118-show profile is filled in about fifteen checks rather than in one
+/// that refetches and cleans every back catalogue at once on the first
+/// launch after the upgrade.
+const notesFillPerRefresh = 8;
+
+/// The marked shows [feeds] fills this time: ones the breaker would let
+/// run, fewest recent failures first, so a show that keeps failing never
+/// holds the healthy ones' fill back.
+Set<int> pickNotesFills(List<Feed> feeds,
+    {required int nowMs, int count = notesFillPerRefresh}) {
+  final due = [
+    for (final f in feeds)
+      if (f.notesFillPending == true)
+        if (stateOfFeed(f) case final s
+            when shouldSkipRefresh(s, nowMs: nowMs) == RefreshSkip.none)
+          (feed: f, failures: s.consecutiveFailures),
+  ]..sort((a, b) => a.failures != b.failures
+      ? a.failures.compareTo(b.failures)
+      : a.feed.id.compareTo(b.feed.id));
+  return {for (final d in due.take(count)) d.feed.id};
+}
+
 class FeedsRepository {
   FeedsRepository(
       {required this.db,
@@ -225,7 +248,7 @@ class FeedsRepository {
       return SubscribeFailure(e.message);
     }
 
-    final existing = await db.feedsDao.feedByUrl(profileId, feedUrl);
+    final existing = await db.feedsDao.feedByAnyUrl(profileId, feedUrl);
     if (existing != null) {
       return AlreadySubscribed(
           existing.title.isEmpty ? existing.url : existing.title);
@@ -254,7 +277,7 @@ class FeedsRepository {
       return SubscribeFailure(e.message);
     }
     if (moved != null && moved != feedUrl) {
-      final there = await db.feedsDao.feedByUrl(profileId, moved);
+      final there = await db.feedsDao.feedByAnyUrl(profileId, moved);
       if (there != null) {
         return AlreadySubscribed(there.title.isEmpty ? there.url : there.title);
       }
@@ -284,24 +307,31 @@ class FeedsRepository {
     await db.feedsDao.setBodyHash(feedId, bodyHash);
     await _settleOrigin(feedId, parsed);
     if (added > 0) await _runDedupPass(profileId);
-    _fetchArtworkLater(() async {
-      await _maybeFetchArtwork(feedId, newUrl: parsed.imageUrl, oldUrl: null);
-      await _fetchEpisodeArtwork(feedId, showImageUrl: parsed.imageUrl);
-    });
+    // The show's own picture is fetched only when its URL changes, so it
+    // is never let go by a drain; the episodes' are retried next refresh.
+    _fetchArtworkLater(
+        (_) => _maybeFetchArtwork(feedId, newUrl: parsed.imageUrl, oldUrl: null),
+        droppable: false);
+    _fetchArtworkLater((dropped) => _fetchEpisodeArtwork(feedId,
+        showImageUrl: parsed.imageUrl, dropped: dropped));
     return SubscribeSuccess(
         feedId: feedId, title: state.title, newItems: added);
   }
 
   /// One feed's conditional refresh under the breaker's verdict.
   Future<RefreshOutcome> refreshFeed(Feed feed, {bool force = false}) async {
-    final outcome = await _refreshOne(feed, force: force);
+    final outcome = await _refreshOne(feed,
+        force: force, fillNotes: feed.notesFillPending == true);
     if (outcome.newItems > 0) await _runDedupPass(feed.profileId);
     return outcome;
   }
 
   /// [refreshFeed] minus the dedup pass, which scans the whole profile and
   /// so runs once per batch in [refreshMany] rather than once per feed.
-  Future<RefreshOutcome> _refreshOne(Feed feed, {bool force = false}) async {
+  /// [fillNotes] fetches and parses in full, validators and hash aside,
+  /// so stored items get the show notes a 304 would never bring.
+  Future<RefreshOutcome> _refreshOne(Feed feed,
+      {bool force = false, bool fillNotes = false}) async {
     final nowMs = _nowMs;
     var state = stateOfFeed(feed);
     if (shouldSkipRefresh(state, nowMs: nowMs, force: force) !=
@@ -309,16 +339,18 @@ class FeedsRepository {
       return (status: RefreshStatus.skipped, newItems: 0);
     }
     final res = await client.fetchFeedConditional(feed.url,
-        etag: feed.etag, lastModified: feed.lastModified);
+        etag: fillNotes ? null : feed.etag,
+        lastModified: fillNotes ? null : feed.lastModified);
 
     if (res.status == FeedFetchStatus.fresh) {
       final ParsedBody body;
       try {
         // The hash vouches for rows the last ingest wrote; with none left
         // (all swept or purged since), the same body ingests again.
-        final unchangedHash = await db.feedsDao.hasEpisodes(feed.id)
-            ? feed.bodyHash
-            : null;
+        final unchangedHash =
+            !fillNotes && await db.feedsDao.hasEpisodes(feed.id)
+                ? feed.bodyHash
+                : null;
         body = await parseFeedBody(res.body!, res.movedTo ?? feed.url,
             unchangedHash: unchangedHash);
       } on FeedParseException catch (e) {
@@ -335,8 +367,8 @@ class FeedsRepository {
         state = applyFetchResult(state, res, nowMs: nowMs);
         await _persistState(feed.id, state);
         await _adoptMove(feed, res.movedTo);
-        _fetchArtworkLater(() =>
-            _fetchEpisodeArtwork(feed.id, showImageUrl: feed.imageUrl));
+        _fetchArtworkLater((dropped) => _fetchEpisodeArtwork(feed.id,
+            showImageUrl: feed.imageUrl, dropped: dropped));
         return (status: RefreshStatus.notModified, newItems: 0);
       }
       state = applyFetchResult(state, res,
@@ -357,6 +389,11 @@ class FeedsRepository {
           imageUrl: parsed.imageUrl, updateImageUrl: true,
         language: parsed.language, updateLanguage: true);
       await db.feedsDao.setBodyHash(feed.id, body.hash);
+      // A full parse has filled every listed item's notes, whether it was
+      // asked for or the feed simply changed.
+      if (feed.notesFillPending == true) {
+        await db.feedsDao.clearNotesFillPending(feed.id);
+      }
       await _adoptMove(feed, res.movedTo);
       await _maybeFetchArtwork(feed.id,
           newUrl: parsed.imageUrl, oldUrl: feed.imageUrl);
@@ -364,8 +401,8 @@ class FeedsRepository {
       // Every fresh refresh, not only one with new episodes: a fetch
       // that failed, or a URL filled in on an episode already stored,
       // still needs its file.
-      _fetchArtworkLater(() =>
-          _fetchEpisodeArtwork(feed.id, showImageUrl: parsed.imageUrl));
+      _fetchArtworkLater((dropped) => _fetchEpisodeArtwork(feed.id,
+          showImageUrl: parsed.imageUrl, dropped: dropped));
       final deviceServices = services;
       if (deviceServices != null) {
         await evictStaleAudio(
@@ -419,6 +456,7 @@ class FeedsRepository {
       bool Function()? shouldStop}) async {
     final outcomes = <int, RefreshOutcome>{};
     if (feeds.isEmpty) return outcomes;
+    final fills = pickNotesFills(feeds, nowMs: _nowMs);
     bool stopping() => shouldStop?.call() ?? false;
     final pending = [...feeds];
     final perHost = <String, int>{};
@@ -452,7 +490,8 @@ class FeedsRepository {
         () async {
           RefreshOutcome outcome;
           try {
-            outcome = await _refreshOne(feed, force: force);
+            outcome = await _refreshOne(feed,
+                force: force, fillNotes: fills.contains(feed.id));
           } catch (_) {
             outcome = (status: RefreshStatus.error, newItems: 0);
           } finally {
@@ -481,25 +520,32 @@ class FeedsRepository {
   /// Follows each OPML outline not already followed, in one transaction so
   /// the list can show them all before any is fetched. URLs are only
   /// trimmed: rewriting them further could merge feeds that differ.
-  Future<List<Feed>> followOutlines(
+  /// [existing] is what the file named that was already followed, once
+  /// each, so the page can say how many and show them.
+  Future<({List<Feed> added, List<Feed> existing})> followOutlines(
       int profileId, List<OpmlOutline> outlines) async {
+    final existingIds = <int>{};
     final ids = await db.transaction(() async {
       final seen = <String>{};
       final ids = <int>[];
       for (final o in outlines) {
         final url = o.url.trim();
         if (url.isEmpty || !seen.add(url)) continue;
-        if (await db.feedsDao.feedByUrl(profileId, url) != null) continue;
+        if (await db.feedsDao.feedByAnyUrl(profileId, url) case final had?) {
+          existingIds.add(had.id);
+          continue;
+        }
         ids.add(await db.feedsDao
             .insertFeed(profileId: profileId, url: url, title: o.title));
       }
       return ids;
     });
     final wanted = ids.toSet();
-    return [
-      for (final f in await db.feedsDao.feedsOf(profileId))
-        if (wanted.contains(f.id)) f,
-    ];
+    final all = await db.feedsDao.feedsOf(profileId);
+    return (
+      added: [for (final f in all) if (wanted.contains(f.id)) f],
+      existing: [for (final f in all) if (existingIds.contains(f.id)) f],
+    );
   }
 
   /// A 301/308 chain says the feed lives elsewhere now, so the row
@@ -512,8 +558,10 @@ class FeedsRepository {
   /// episodes they share.
   Future<void> _adoptMove(Feed feed, String? movedTo) async {
     if (movedTo == null || movedTo == feed.url) return;
-    if (await db.feedsDao.feedByUrl(feed.profileId, movedTo) != null) return;
-    await db.feedsDao.setUrl(feed.id, movedTo);
+    if (await db.feedsDao.feedByAnyUrl(feed.profileId, movedTo) != null) {
+      return;
+    }
+    await db.feedsDao.adoptUrl(feed.id, movedTo);
   }
 
   Future<void> _persistState(int feedId, FeedRefreshState s,
@@ -573,15 +621,29 @@ class FeedsRepository {
   /// shouldn't hang on a slow image host.
   Future<void> get artworkSettled => _artwork;
 
+  int _artworkGeneration = 0;
+
+  /// Lets go of queued episode artwork, and of the rest of a job under
+  /// way: an import of 118 shows queues up to 2,360 image fetches that
+  /// would otherwise run long after the import was left. Nothing is lost
+  /// for good; a missing file is fetched by the next refresh.
+  void drainArtwork() => _artworkGeneration++;
+
   /// Queues artwork behind any still under way, one fetch at a time, so
   /// two refreshes never write the same file at once. A failure is just a
-  /// missing thumbnail, retried by the next refresh.
-  void _fetchArtworkLater(Future<void> Function() fetch) {
+  /// missing thumbnail, retried by the next refresh. A [droppable] job
+  /// queued before a [drainArtwork] is skipped, and is handed the test to
+  /// stop part way.
+  void _fetchArtworkLater(Future<void> Function(bool Function() dropped) fetch,
+      {bool droppable = true}) {
     final previous = _artwork;
+    final generation = _artworkGeneration;
+    bool dropped() => droppable && generation != _artworkGeneration;
     _artwork = () async {
       await previous;
+      if (dropped()) return;
       try {
-        await fetch();
+        await fetch(dropped);
       } catch (_) {}
     }();
   }
@@ -593,20 +655,16 @@ class FeedsRepository {
   /// catalogue doesn't mean 500 image requests; older rows show the
   /// show's artwork. A failed image is just a missing thumbnail.
   Future<void> _fetchEpisodeArtwork(int feedId,
-      {required String? showImageUrl}) async {
+      {required String? showImageUrl, bool Function()? dropped}) async {
     final deviceServices = services;
     // existsSync throws on the web tier, and nothing there reads the file.
     if (deviceServices == null || !deviceServices.localMlAvailable) return;
-    final wanted = <String>{};
-    for (final e in await db.feedsDao.episodesOfFeed(feedId)) {
-      final url = e.episode.imageUrl;
-      if (url == null || url == showImageUrl) continue;
-      wanted.add(url);
-      if (wanted.length == episodeArtworkFetchLimit) break;
-    }
+    final wanted = await db.feedsDao.episodeArtworkOf(feedId,
+        except: showImageUrl, limit: episodeArtworkFetchLimit);
     for (final url in wanted) {
+      if (dropped?.call() ?? false) return;
       final file = deviceServices.episodeArtworkFileFor(url);
-      if (file.existsSync()) continue;
+      if (await file.exists()) continue;
       try {
         await deviceServices.audioFetcher.fetch(url, file);
       } catch (_) {
@@ -657,7 +715,7 @@ class FeedsRepository {
   /// concurrent passes would interleave their whole-profile read-then-write.
   Future<void> _runDedupPass(int profileId) async {
     final candidates = await db.feedsDao.dedupCandidatesOf(profileId);
-    final verdicts = findDuplicates(candidates);
+    final verdicts = await findDuplicatesOffThread(candidates);
     // One commit, not one per verdict: a first import can carry thousands.
     await db.transaction(() async {
       for (final entry in verdicts.entries) {

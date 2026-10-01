@@ -6,6 +6,7 @@ import 'package:trellis/features/reader/reader_logic.dart';
 import 'package:trellis/main.dart';
 import '../support/pick_reader.dart';
 import '../support/tabs.dart';
+import '../support/open_work.dart';
 
 /// Campaign 4 Phase 2: the lost priming visuals, restored as first-class
 /// reader options (donor OpenHearth/ohPrimer index.html) --
@@ -44,8 +45,7 @@ void main() {
     await tester.pumpAndSettle();
     await pickReader(tester, 'Ada');
     await toTab(tester, 'Library');
-    await tester.tap(find.text(title));
-    await tester.pumpAndSettle();
+    await openToRead(tester, title);
   }
 
   group('classic-mode ORP anchor', () {
@@ -142,8 +142,7 @@ void main() {
       await tester.pumpAndSettle();
       await pickReader(tester, 'Ada');
       await toTab(tester, 'Library');
-      await tester.tap(find.text('Sentinel'));
-      await tester.pumpAndSettle();
+      await openToRead(tester, 'Sentinel');
 
       await tester.tap(find.byKey(const Key('parafoveal-toggle')));
       await tester.pump();

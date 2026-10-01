@@ -123,7 +123,7 @@ Future<void> runFeedCheckWorker(List<String> args) async {
 Future<bool> _runHeadless(FeedCheckTask task, StopSignal stop) async {
   final services =
       DeviceServices.background(await getApplicationSupportDirectory());
-  final db = createDb();
+  final db = createDb(readPool: 0);
   final downloads = EpisodeDownloadCoordinator(services: services, db: db);
   final repository =
       FeedsRepository(db: db, fetcher: IoHttpFetcher(), services: services);

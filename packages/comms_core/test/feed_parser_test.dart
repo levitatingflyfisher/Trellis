@@ -140,6 +140,86 @@ void main() {
     });
   });
 
+  group('show notes (notesHtml)', () {
+    String rss(String body) => '''
+<rss version="2.0" xmlns:content="http://purl.org/rss/1.0/modules/content/"
+  xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"><channel>
+  <title>Show</title>
+  <item>
+    <title>Ep</title>
+    <enclosure url="https://cdn.x/ep.mp3" type="audio/mpeg"/>
+    $body
+  </item>
+</channel></rss>
+''';
+
+    test('keeps the raw description HTML, uncapped, tags and all', () {
+      final long = 'word ' * 120;
+      final feed = parseRssFeed(
+          rss('<description><![CDATA[<p>Intro <a href="https://x.com">link</a></p>'
+              '<p>$long</p>]]></description>'),
+          'https://x.com/feed');
+      final item = feed.items.single;
+      expect(item.notesHtml, contains('<a href="https://x.com">link</a>'));
+      expect(item.notesHtml!.length, greaterThan(600));
+      expect(item.desc.length, lessThanOrEqualTo(300),
+          reason: 'the row preview stays capped');
+    });
+
+    test('picks the longest body among content:encoded, description and '
+        'itunes:summary, measured as text', () {
+      final feed = parseRssFeed(
+          rss('<description>Short teaser</description>'
+              '<content:encoded><![CDATA[<p>The full notes, much longer than '
+              'the teaser is.</p>]]></content:encoded>'
+              '<itunes:summary>Medium summary text</itunes:summary>'),
+          'https://x.com/feed');
+      expect(feed.items.single.notesHtml,
+          '<p>The full notes, much longer than the teaser is.</p>');
+    });
+
+    test('markup padding does not make a body win', () {
+      final feed = parseRssFeed(
+          rss('<description><![CDATA[<img src="https://t.x/p.gif" width="1" '
+              'height="1"/><img src="https://t.x/q.gif" width="1" height="1"/>'
+              'Tiny]]></description>'
+              '<itunes:summary>A real summary of the episode</itunes:summary>'),
+          'https://x.com/feed');
+      expect(feed.items.single.notesHtml, 'A real summary of the episode');
+    });
+
+    test('entity-escaped description HTML comes back as markup', () {
+      final feed = parseRssFeed(
+          rss('<description>&lt;p&gt;Hello &amp;amp; welcome&lt;/p&gt;'
+              '</description>'),
+          'https://x.com/feed');
+      // Decoded once, by the XML: the &amp; left is the HTML's own.
+      expect(feed.items.single.notesHtml, '<p>Hello &amp; welcome</p>');
+    });
+
+    test('notes that show markup as text keep it as text', () {
+      final feed = parseRssFeed(
+          rss('<description><![CDATA[<p>Write &lt;b&gt; for bold</p>]]>'
+              '</description>'),
+          'https://x.com/feed');
+      expect(feed.items.single.notesHtml, '<p>Write &lt;b&gt; for bold</p>');
+    });
+
+    test('null, never empty, when the item has no body at all', () {
+      final feed = parseRssFeed(rss(''), 'https://x.com/feed');
+      expect(feed.items.single.notesHtml, isNull);
+    });
+
+    test('Atom: the longer of summary and content', () {
+      final feed = parseRssFeed('''
+<feed xmlns="http://www.w3.org/2005/Atom"><title>A</title>
+  <entry><title>E</title><summary>Short</summary>
+    <content type="html">&lt;p&gt;The longer body&lt;/p&gt;</content></entry>
+</feed>''', 'https://x.com/feed');
+      expect(feed.items.single.notesHtml, '<p>The longer body</p>');
+    });
+  });
+
   group('enclosure selection (donor findAudio)', () {
     test('standard RSS enclosure with audio type', () {
       final feed = parseRssFeed(

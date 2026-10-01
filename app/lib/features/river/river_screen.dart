@@ -7,20 +7,19 @@ import '../../db/database.dart' hide Alignment;
 import '../settings/theme_preference.dart';
 import '../dsp/dsp_coordinator.dart';
 import '../episodes/episode_actions.dart';
-import '../episodes/episode_row.dart';
+import '../works/work_menu.dart';
+import '../works/work_open.dart';
+import '../works/work_row.dart';
 import '../episodes/episode_selection.dart';
 import '../feeds/episode_download_coordinator.dart';
 import '../jobs/jobs_screen.dart' show downloadFraction, downloadStatus;
 import '../feeds/feeds_repository.dart';
+import '../feeds/feed_detail_screen.dart';
 import '../feeds/feeds_screen.dart';
 import '../feeds/subscribe_screen.dart';
-import '../models/consent.dart';
-import '../models/format.dart';
-import '../models/models_screen.dart' show modelLabel;
 import '../player/player_controller.dart';
 import '../../services/device_services.dart' show TtsSpeaker;
 import '../reader/reader_doors.dart';
-import '../reader/reader_screen.dart';
 import '../reader/speech/speech_engine.dart';
 import '../search/search_entry.dart';
 import '../search/search_screen.dart';
@@ -152,10 +151,26 @@ class _RiverScreenState extends State<RiverScreen>
     player: widget.playerController,
     downloader: widget.downloadCoordinator,
     dsp: widget.dspCoordinator,
+    transcriber: widget.coordinator,
     services: widget.repository.services,
     localMlAvailable: widget.localMlAvailable,
+    openShow: _openShow,
   );
-  EpisodeListState _rowState = EpisodeListState.empty;
+
+  Future<void> _openShow(BuildContext context, Feed feed) =>
+      Navigator.of(context).push<void>(MaterialPageRoute(
+          builder: (_) => FeedDetailScreen(
+                db: widget.db,
+                repository: widget.repository,
+                feed: feed,
+                playerController: widget.playerController,
+                downloadCoordinator: widget.downloadCoordinator,
+                dspCoordinator: widget.dspCoordinator,
+                localMlAvailable: widget.localMlAvailable,
+                readerDoors: _readerDoors,
+                transcriber: widget.coordinator,
+              )));
+  WorkListState _rowState = WorkListState.empty;
   final _selection = EpisodeSelection();
   final _undo = OhUndoController();
   late final EpisodeBulk _bulk =
@@ -280,8 +295,8 @@ class _RiverScreenState extends State<RiverScreen>
     final generation = ++_generation;
     final entries = await widget.db.feedsDao
         .riverItems(widget.profile.id, kind: _kind);
-    final rowState =
-        await EpisodeListState.load(widget.db, widget.profile.id);
+    final rowState = await WorkListState.load(widget.db, widget.profile.id,
+        entries: _entriesOf(entries));
     if (!mounted || generation != _generation) return;
     _actions.forgetArtwork();
     setState(() {
@@ -302,8 +317,8 @@ class _RiverScreenState extends State<RiverScreen>
     final generation = ++_generation;
     final entries = await widget.db.feedsDao.riverItems(widget.profile.id,
         kind: _kind, through: _cursorOf(loaded.last), limit: null);
-    final rowState =
-        await EpisodeListState.load(widget.db, widget.profile.id);
+    final rowState = await WorkListState.load(widget.db, widget.profile.id,
+        entries: _entriesOf(entries));
     if (!mounted || generation != _generation) return;
     _actions.forgetArtwork();
     setState(() {
@@ -326,9 +341,13 @@ class _RiverScreenState extends State<RiverScreen>
     _loadingMore = true;
     final generation = _generation;
     List<RiverEntry>? page;
+    WorkListState? rowState;
     try {
       page = await widget.db.feedsDao.riverItems(widget.profile.id,
           kind: _kind, after: _cursorOf(loaded.last));
+      // The new page's text sizes, in a query or two for the whole page,
+      // while this load still holds the gate.
+      rowState = await _rowState.including(widget.db, _entriesOf(page));
     } catch (e) {
       debugPrint('Latest: loading the next page failed: $e');
     } finally {
@@ -342,12 +361,16 @@ class _RiverScreenState extends State<RiverScreen>
       unawaited(_loadMore());
       return;
     }
-    if (page == null) {
+    if (page == null || rowState == null) {
       setState(() => _moreFailed = true);
       return;
     }
     final got = page;
+    final state = rowState;
     setState(() {
+      // Onto the state as it is now: a row re-read may have landed while
+      // this page was in flight.
+      _rowState = _rowState.withSizesFrom(state);
       _entries = [...loaded, ...got];
       _hasMore = got.length == riverPageSize;
     });
@@ -356,11 +379,14 @@ class _RiverScreenState extends State<RiverScreen>
   /// Re-reads one row after an action on it, in place.
   Future<void> _patch(int workId) async {
     final entry = await widget.db.feedsDao.riverEntryOf(workId);
-    final rowState =
-        await EpisodeListState.load(widget.db, widget.profile.id);
+    final rowState = await WorkListState.load(widget.db, widget.profile.id,
+        entries: [if (entry != null) (work: entry.work, episode: entry.episode)],
+        carry: _rowState);
     if (!mounted) return;
     setState(() {
-      _rowState = rowState;
+      // The re-read's list-wide facts, with every size known now: a page
+      // may have landed while it was in flight.
+      _rowState = rowState.withSizesFrom(_rowState);
       final entries = _entries;
       if (entries == null) return;
       _entries = [
@@ -415,6 +441,7 @@ class _RiverScreenState extends State<RiverScreen>
           downloadCoordinator: widget.downloadCoordinator,
           dspCoordinator: widget.dspCoordinator,
           readerDoors: _readerDoors,
+          transcriber: widget.coordinator,
         ),
       ),
     );
@@ -428,33 +455,19 @@ class _RiverScreenState extends State<RiverScreen>
   }
 
 
+  WorkDoors get _workDoors => WorkDoors(
+      db: widget.db,
+      profileId: widget.profile.id,
+      readerDoors: _readerDoors,
+      actions: _actions);
+
   Future<void> _openItem(RiverEntry e) async {
-    await widget.db.feedsDao.markRead(
-      e.work.id,
-      DateTime.now().millisecondsSinceEpoch,
-    );
-    if (!mounted) return;
-    // See LibraryScreen._open — same resolve-before-push shape (ADR-0006).
-    final resolver = widget.resolveSpeechEngine;
-    final hasVoice = resolver == null
-        ? false
-        : await resolver(lang: e.work.lang) != null;
-    if (!mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => ReaderScreen(
-          db: widget.db,
-          profileId: widget.profile.id,
-          work: e.work,
-          offerNeuralVoice: widget.localMlAvailable && !hasVoice,
-          resolveSpeechEngine: widget.resolveSpeechEngine,
-          lookupDefinition: widget.lookupDefinition,
-          createSpeechTempFiles: widget.createSpeechTempFiles,
-          player: widget.playerController,
-          resolveTranslator: widget.resolveTranslator,
-          availableTranslationTargets: widget.availableTranslationTargets),
-    ));
+    final removal = await _workDoors.open(
+        context, (work: e.work, episode: e.episode),
+        showTitle: e.feedTitle);
     await _patch(e.work.id);
+    // Un-kept from its page: the row changes once the Undo goes.
+    removal?.then((_) => mounted ? _patch(e.work.id) : null);
   }
 
   Future<void> _playItem(RiverEntry e) async {
@@ -462,48 +475,13 @@ class _RiverScreenState extends State<RiverScreen>
     await _patch(e.work.id); // the unread dot cleared
   }
 
-  /// The transcribe entry: plan → the ONE consent chokepoint when anything
-  /// would download (ADR-0003 law 6) → hand the flow to the coordinator.
-  Future<void> _transcribe(RiverEntry e, {required bool translate}) async {
-    final url = e.episode.enclosureUrl;
-    if (url == null) return;
-    final coordinator = widget.coordinator;
-    final plan = await coordinator.planFor(
-      workId: e.work.id,
-      enclosureUrl: url,
-    );
-    if (!mounted) return;
-    if (plan.needsDownloads) {
-      final ok = await confirmDownload(
-        context,
-        items: [
-          if (plan.needsModel)
-            DownloadItem(
-              '${modelLabel(plan.model.id)} '
-              '(${formatBytes(plan.model.sizeBytes)}), one time',
-            ),
-          if (plan.needsAudio)
-            DownloadItem('This episode’s audio (size depends on the episode)'),
-        ],
-      );
-      if (!ok) return;
-    }
-    unawaited(
-      coordinator.start(
-        workId: e.work.id,
-        title: e.work.title,
-        enclosureUrl: url,
-        lang: e.work.lang,
-        translate: translate,
-      ),
-    );
-  }
-
-  /// The shared menu entries (queue, download, mark played) live with
-  /// [EpisodeActions]; the row shows their result after a reload.
-  Future<void> _common(String choice, RiverEntry e) async {
-    await _actions.handleCommon(
-        context, choice, (work: e.work, episode: e.episode));
+  /// The menu's shared items (queue, download, played, transcribe,
+  /// share) live with [EpisodeActions]; the row shows their result after
+  /// a re-read.
+  Future<void> _shared(String choice, RiverEntry e) async {
+    await _actions.handleShared(
+        context, choice, (work: e.work, episode: e.episode),
+        showTitle: e.feedTitle);
     await _patch(e.work.id);
   }
 
@@ -714,10 +692,10 @@ class _RiverScreenState extends State<RiverScreen>
     final selecting = _selection.active;
     final isAudio = e.episode.enclosureUrl != null;
     final entry = (work: e.work, episode: e.episode);
-    final row = EpisodeRow(
+    final row = WorkRow(
       work: e.work,
       episode: e.episode,
-      facts: EpisodeRowFacts.of(e.episode, _rowState,
+      facts: WorkRowFacts.of(e.work, e.episode, _rowState,
           downloaded: isAudio && _actions.isDownloaded(e.episode)),
       showTitle: e.feedTitle,
       artwork: _actions.artworkFor(e.episode),
@@ -725,10 +703,9 @@ class _RiverScreenState extends State<RiverScreen>
           ? () => _selection.toggle(e.work.id)
           : () => _openItem(e),
       onPlay: isAudio ? () => _playItem(e) : null,
-      onRead: _readerDoors.canOpenTranscript
+      onRead: _workDoors.canRead(entry)
           ? () async {
-              await _readerDoors.openTranscript(context,
-                  db: widget.db, work: e.work);
+              await _workDoors.readFromRow(context, entry);
               await _patch(e.work.id);
             }
           : null,
@@ -747,12 +724,13 @@ class _RiverScreenState extends State<RiverScreen>
       onMenu: (choice) => switch (choice) {
         'keep' => _keep(e),
         'pass' => _letItPass(e),
-        'transcribe' => _transcribe(e, translate: false),
-        'translate' => _transcribe(e, translate: true),
         'mark-older' => _markOlderPlayed(e),
-        _ => _common(choice, e),
+        _ => _shared(choice, e),
       },
-      menuBuilder: (_) => [
+      // The shared items first, then Latest's own: the same menu as this
+      // episode has anywhere else, plus triage.
+      menuBuilder: (_) => workMenuItems(_actions, entry,
+          transcribed: _rowState.transcribed.contains(e.work.id), extras: [
         PopupMenuItem(
             key: Key('keep-${e.work.id}'),
             value: 'keep',
@@ -761,25 +739,12 @@ class _RiverScreenState extends State<RiverScreen>
             key: Key('pass-${e.work.id}'),
             value: 'pass',
             child: const Text('Let it pass')),
-        ..._actions.commonMenuItems(entry),
         if (isAudio && _offersOlder(visible, e))
           PopupMenuItem(
               key: Key('mark-older-${e.work.id}'),
               value: 'mark-older',
               child: const Text('Mark everything older as played')),
-        if (isAudio && widget.localMlAvailable) ...[
-          PopupMenuItem(
-              key: Key('transcribe-${e.work.id}'),
-              value: 'transcribe',
-              child: Text(e.episode.archivedAtMs != null
-                  ? 'Re-download audio'
-                  : 'Transcribe')),
-          PopupMenuItem(
-              key: Key('translate-${e.work.id}'),
-              value: 'translate',
-              child: const Text('Transcribe + translate to English')),
-        ],
-      ],
+      ]),
     );
     // Swipe Keep / Let it pass (Campaign 5): confirmDismiss performs the
     // gesture then always returns false, so the tile springs back showing

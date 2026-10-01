@@ -8,6 +8,7 @@ import 'package:jobs_core/jobs_core.dart' as jobs;
 import 'package:study_core/study_core.dart' as study;
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/backup/db_bridge.dart';
+import 'package:trellis/features/search/search_store.dart';
 
 /// The Drift <-> backup_core seam. Contracts pinned here:
 ///
@@ -233,6 +234,63 @@ void main() {
       await bridge.restoreFullReplace(payload);
 
       expect(await db.jobsDao.unfinished(), isEmpty);
+    });
+
+    test('show notes are not in a backup: a restore clears this device\'s '
+        'and marks every podcast to parse again, a few per check, so they '
+        'come back', () async {
+      await seedRichly(db);
+      final work = (await db.select(db.episodes).get()).first.workId;
+      await db.feedsDao.fillNotes(work, html: '<p>n</p>', plain: 'n');
+      final feedId = (await db.customSelect('SELECT id FROM feeds LIMIT 1')
+              .getSingle())
+          .read<int>('id');
+      await db.feedsDao.setBodyHash(feedId, 'abc');
+      final payload = RowPayload.decode(RowPayload.encode(
+          await bridge.exportTables(),
+          createdAt: DateTime.utc(2026, 8, 11)));
+
+      await bridge.restoreFullReplace(payload);
+
+      expect(await db.select(db.workNotes).get(), isEmpty);
+      final audioFeeds = {
+        for (final e in await db.select(db.episodes).get())
+          if (e.enclosureUrl != null) e.feedId
+      };
+      expect(audioFeeds, isNotEmpty);
+      for (final f in await db.select(db.feeds).get()) {
+        expect(f.notesFillPending,
+            audioFeeds.contains(f.id) ? isTrue : isNull);
+        if (f.id == feedId) expect(f.bodyHash, 'abc');
+      }
+    });
+
+    test('a restored post is found by a word in its body', () async {
+      // A restore writes feed rows before segments, the reverse of
+      // ingest, so the index must not depend on the order.
+      final p = await db.profilesDao.create('Ada');
+      final f = await db.feedsDao
+          .insertFeed(profileId: p, url: 'https://b.test/f', title: 'Blog');
+      final post = await db.spineDao.insertWork(
+          profileId: p,
+          kind: 'article',
+          title: 'Weeknotes',
+          persistence: 'ephemeron',
+          firstSeenEpochDay: 1);
+      await db.spineDao.insertSegments(
+          post, const [(idx: 0, kind: 'prose', text: 'A zeppelin overhead.')]);
+      await db.feedsDao
+          .insertEpisode(workId: post, feedId: f, guid: 'w', publishedAtMs: 1);
+      final payload = RowPayload.decode(RowPayload.encode(
+          await bridge.exportTables(),
+          createdAt: DateTime.utc(2026, 8, 11)));
+      final db2 = AppDatabase.forTesting(NativeDatabase.memory());
+      addTearDown(db2.close);
+
+      await DbBridge(db2).restoreFullReplace(payload);
+
+      final r = await SearchStore(db2).search(p, 'zeppelin');
+      expect([for (final i in r.items) i.work.id], [post]);
     });
 
     test('auto-download consent does not travel: every show restores with it '
@@ -541,6 +599,17 @@ void main() {
       expect((await db.spineDao.worksOf(ada)).length, 1);
       expect((await db.ledgerDao.wordsOf(ada)).length, 1);
       expect((await db.feedsDao.feedsOf(ada)).length, 1);
+    });
+
+    test('a feed this profile follows at a newer address is not added '
+        'twice', () async {
+      final ada = await db.profilesDao.create('Ada');
+      final id = await db.feedsDao
+          .insertFeed(profileId: ada, url: 'https://a.example/feed.xml');
+      await db.feedsDao.adoptUrl(id, 'https://b.example/feed.xml');
+      await bridge.applyPrimer(import(), profileId: ada, nowMs: 999);
+      expect((await db.feedsDao.feedsOf(ada)).map((f) => f.url),
+          ['https://b.example/feed.xml']);
     });
   });
 }

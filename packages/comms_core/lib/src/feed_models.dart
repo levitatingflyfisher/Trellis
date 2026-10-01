@@ -48,6 +48,7 @@ class FeedItem {
     this.chapters,
     this.chaptersUrl,
     this.contentHtml,
+    this.notesHtml,
     this.imageUrl,
     this.durationMs,
   });
@@ -71,6 +72,14 @@ class FeedItem {
   /// `description` at all) — ingestion decides what to do with each
   /// independently.
   final String? contentHtml;
+
+  /// The item's show notes as the feed wrote them: the longest body among
+  /// RSS `content:encoded`, `description` and `itunes:summary` (Atom:
+  /// `content` and `summary`), measured as text so markup padding never
+  /// wins. Decoded once (by the XML), uncapped and UNSANITIZED:
+  /// whoever stores or shows it must clean it first. Null when the item
+  /// has no body at all.
+  final String? notesHtml;
 
   final Enclosure? enclosure;
 

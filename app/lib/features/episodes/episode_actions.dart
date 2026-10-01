@@ -1,9 +1,10 @@
-/// What any episode list can do with its rows: play, queue, download,
-/// mark played. One home so Latest and the podcast page can't drift,
-/// and so there is still exactly one download consent path (ADR-0003
-/// law 6).
+/// What any list of works can do with its rows: play, queue, download,
+/// mark played or finished, transcribe, share. One home so every list
+/// offers the same things for the same kind of work, and so there is
+/// still exactly one download consent path (ADR-0003 law 6).
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -13,11 +14,22 @@ import '../../db/database.dart';
 import '../dsp/dsp_coordinator.dart';
 import '../dsp/dsp_params.dart' show effectiveDspEnabled;
 import '../feeds/episode_download_coordinator.dart';
+import '../intake/paste_intake.dart' show epochDayUtcNow;
 import '../models/consent.dart';
+import '../models/format.dart' show formatBytes;
+import '../models/models_screen.dart' show modelLabel;
 import '../player/player_controller.dart';
+import '../search/search_store.dart' show SearchItem;
+import '../search/share_item.dart';
+import '../transcribe/transcribe_coordinator.dart';
+import '../works/work_row.dart' show WorkEntry;
 import '../../services/device_services.dart';
 
 typedef EpisodeEntry = ({Work work, Episode episode});
+
+/// Opens a show's page. Needs the feeds repository and the player's kit,
+/// which only the screens that own them can build.
+typedef ShowOpener = Future<void> Function(BuildContext context, Feed feed);
 
 class EpisodeActions {
   final AppDatabase db;
@@ -26,10 +38,20 @@ class EpisodeActions {
   final EpisodeDownloadCoordinator? downloader;
   final DspCoordinator? dsp;
 
+  /// Runs Transcribe and Translate; null where this tier can't.
+  final TranscribeCoordinator? transcriber;
+
+  /// The platform share; null copies to the clipboard instead.
+  final ShareText? shareText;
+
   /// Null on the web tier: there `existsSync` throws, so no artwork or
   /// download check may touch the disk.
   final DeviceServices? services;
   final bool localMlAvailable;
+
+  /// Opens the show a feed item came from (the work page's "From …");
+  /// null where the screen can't build the show page.
+  final ShowOpener? openShow;
   final int Function() _nowMs;
 
   EpisodeActions({
@@ -38,21 +60,35 @@ class EpisodeActions {
     this.player,
     this.downloader,
     this.dsp,
+    this.transcriber,
+    ShareText? shareText,
+    bool useDefaultShare = true,
     DeviceServices? services,
     this.localMlAvailable = true,
+    this.openShow,
     int Function()? nowMs,
   }) : services = localMlAvailable ? services : null,
+       shareText = shareText ?? (useDefaultShare ? defaultShareText : null),
        _nowMs = nowMs ?? (() => DateTime.now().millisecondsSinceEpoch);
 
   bool get canDownload => localMlAvailable && downloader != null;
 
   /// Disk truth; false, never a throw, where there is nothing to check.
+  /// Remembered until the downloader changes or [forgetArtwork], so a
+  /// list's rebuild doesn't stat a file per row.
   bool isDownloaded(Episode e) {
     final url = e.enclosureUrl;
     final d = downloader;
     if (url == null || d == null) return false;
-    return d.isDownloaded(e.workId, url);
+    if (d.revision != _downloadedRevision) {
+      _downloaded.clear();
+      _downloadedRevision = d.revision;
+    }
+    return _downloaded[e.workId] ??= d.isDownloaded(e.workId, url);
   }
+
+  final _downloaded = <int, bool>{};
+  int _downloadedRevision = -1;
 
   /// The episode's own artwork if it was fetched, else the show's, else
   /// none. Only ever reads files ingest already wrote. Remembered until
@@ -81,7 +117,10 @@ class EpisodeActions {
 
   /// Artwork lands in the background after a refresh; a screen calls this
   /// when it reloads, so newly fetched images show from then on.
-  void forgetArtwork() => _artwork.clear();
+  void forgetArtwork() {
+    _artwork.clear();
+    _downloaded.clear();
+  }
 
   Future<void> play(Work work) async => player?.playWork(work);
 
@@ -188,6 +227,7 @@ class EpisodeActions {
         cancelled++;
       }
     }
+    _downloaded.clear();
     return (removed: removed, cancelled: cancelled, kept: kept);
   }
 
@@ -216,6 +256,15 @@ class EpisodeActions {
     );
     if (!enabled) return;
     await processor.start(workId: e.work.id, title: e.work.title, url: url);
+  }
+
+  /// Deletes a removed audiobook's copied files (ADR-0013: removing the
+  /// rows never touches disk). A no-op where there is no disk (the web).
+  void deleteAudiobookFiles(int workId) {
+    // Sync on purpose, as in removeDownloads: real-io futures never
+    // complete under a widget test's fake-async zone.
+    final dir = services?.audiobookDirFor(workId);
+    if (dir != null && dir.existsSync()) dir.deleteSync(recursive: true);
   }
 
   /// The menu entries every episode row shares. Screens add their own
@@ -248,6 +297,127 @@ class EpisodeActions {
             value: 'mark-unplayed',
             child: const Text('Mark unplayed')),
     ];
+  }
+
+  bool get canTranscribe => localMlAvailable && transcriber != null;
+
+  /// Everything the ⋮ menu offers for this kind of work on every screen.
+  /// Audio: queue, download, played, transcribe, share. A text (a book,
+  /// an article, a feed's text item) or an audiobook: finished, share.
+  /// Screens add only their own items after these.
+  List<PopupMenuEntry<String>> sharedMenuItems(WorkEntry e,
+      {bool transcribed = false}) {
+    final id = e.work.id;
+    final episode = e.episode;
+    final share = PopupMenuItem<String>(
+        key: Key('share-$id'), value: 'share', child: const Text('Share'));
+    if (episode != null && episode.enclosureUrl != null) {
+      return [
+        ...commonMenuItems((work: e.work, episode: episode)),
+        if (canTranscribe) ...[
+          PopupMenuItem(
+              key: Key('transcribe-$id'),
+              value: 'transcribe',
+              child: Text(episode.archivedAtMs != null
+                  ? 'Re-download audio'
+                  : transcribed
+                      ? 'Transcribe again'
+                      : 'Transcribe')),
+          PopupMenuItem(
+              key: Key('translate-$id'),
+              value: 'translate',
+              child: const Text('Transcribe + translate to English')),
+        ],
+        share,
+      ];
+    }
+    final finished =
+        e.work.finishedEpochDay != null || episode?.finishedAtMs != null;
+    return [
+      finished
+          ? PopupMenuItem(
+              key: Key('mark-unfinished-$id'),
+              value: 'mark-unfinished',
+              child: const Text('Mark unfinished'))
+          : PopupMenuItem(
+              key: Key('mark-finished-$id'),
+              value: 'mark-finished',
+              child: const Text('Mark finished')),
+      share,
+    ];
+  }
+
+  /// Runs a [sharedMenuItems] choice; false when [choice] isn't one, so
+  /// the screen handles it. [showTitle] goes into what is shared.
+  Future<bool> handleShared(BuildContext context, String choice, WorkEntry e,
+      {String? showTitle}) async {
+    final episode = e.episode;
+    if (episode != null && commonChoices.contains(choice)) {
+      return handleCommon(context, choice, (work: e.work, episode: episode));
+    }
+    switch (choice) {
+      case 'share':
+        await shareItem(
+            context, SearchItem(e.work, episode, showTitle), shareText);
+        return true;
+      case 'transcribe' || 'translate':
+        if (episode == null) return true;
+        await transcribe(context, (work: e.work, episode: episode),
+            translate: choice == 'translate');
+        return true;
+      case 'mark-finished':
+        // Marking, like Mark played, doesn't promote: clearing a backlog
+        // must not keep all of it.
+        await db.spineDao.markFinished(e.work.id, epochDayUtcNow());
+        return true;
+      case 'mark-unfinished':
+        await db.spineDao.markUnfinished(e.work.id);
+        return true;
+    }
+    return false;
+  }
+
+  static const commonChoices = {
+    'play-next',
+    'play-last',
+    'download',
+    'mark-played',
+    'mark-unplayed',
+  };
+
+  /// The transcribe entry: plan, then the ONE consent chokepoint when
+  /// anything would download (ADR-0003 law 6), then the coordinator's
+  /// flow.
+  Future<void> transcribe(BuildContext context, EpisodeEntry e,
+      {required bool translate}) async {
+    final url = e.episode.enclosureUrl;
+    final coordinator = transcriber;
+    if (url == null || coordinator == null) return;
+    final plan =
+        await coordinator.planFor(workId: e.work.id, enclosureUrl: url);
+    if (!context.mounted) return;
+    if (plan.needsDownloads) {
+      final ok = await confirmDownload(
+        context,
+        items: [
+          if (plan.needsModel)
+            DownloadItem(
+              '${modelLabel(plan.model.id)} '
+              '(${formatBytes(plan.model.sizeBytes)}), one time',
+            ),
+          if (plan.needsAudio)
+            DownloadItem('This episode’s audio (size depends on the episode)'),
+        ],
+      );
+      if (!ok) return;
+    }
+    unawaited(coordinator.start(
+      workId: e.work.id,
+      title: e.work.title,
+      enclosureUrl: url,
+      lang: e.work.lang,
+      translate: translate,
+    ));
   }
 
   /// Runs a [commonMenuItems] choice; false when [choice] isn't one, so

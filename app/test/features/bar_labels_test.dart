@@ -97,6 +97,10 @@ void main() {
     await toTab(tester, 'Library');
     await tester.tap(find.text('A Rather Longer Title Than Any Bar Would Prefer'));
     await tester.pumpAndSettle();
+    // The work page's bar names its menu too.
+    seen('More');
+    await tester.tap(find.byKey(const Key('mode-read')));
+    await tester.pumpAndSettle();
     // The reader's title (a book's name) cannot be whole beside its
     // commands, so the bar keeps it a floor and folds right to left.
     final shown = [

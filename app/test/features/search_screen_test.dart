@@ -1,8 +1,11 @@
+import 'dart:async';
+
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
+import 'package:trellis/db/search_index.dart';
 import 'package:trellis/features/episodes/episode_actions.dart';
 import 'package:trellis/features/player/player_controller.dart';
 import 'package:trellis/features/search/search_screen.dart';
@@ -152,11 +155,37 @@ void main() {
       expect(find.byKey(const Key('search-results')), findsOneWidget);
     });
 
+    testWidgets('a matching show sits above everything, and opens its page',
+        (tester) async {
+      final opened = <String>[];
+      final d = SearchDoors(
+          db: db,
+          profile: profile,
+          actions: EpisodeActions(
+              db: db,
+              profileId: profile.id,
+              player: controller,
+              localMlAvailable: false,
+              openShow: (context, feed) async => opened.add(feed.title)),
+          useDefaultShare: false,
+          now: () => now);
+      await pumpSearch(tester, d);
+      await type(tester, 'night sky');
+      final shows = find.byKey(const Key('search-shows-heading'));
+      expect(shows, findsOneWidget);
+      expect(tester.getTopLeft(shows).dy,
+          lessThan(tester.getTopLeft(
+              find.byKey(const Key('search-titles-heading'))).dy));
+      await tester.tap(find.widgetWithText(ListTile, 'Night Sky Hour'));
+      await tester.pumpAndSettle();
+      expect(opened, ['Night Sky Hour']);
+    });
+
     testWidgets('titles come first, then what was said, with the match in '
         'bold and its time', (tester) async {
       await pumpSearch(tester, doors());
       await type(tester, 'comet');
-      final items = find.byKey(const Key('search-items-heading'));
+      final items = find.byKey(const Key('search-titles-heading'));
       final said = find.byKey(const Key('search-said-heading'));
       expect(tester.getTopLeft(items).dy,
           lessThan(tester.getTopLeft(said).dy));
@@ -192,6 +221,85 @@ void main() {
       await type(tester, 'zebra');
       expect(find.byKey(const Key('search-nothing')), findsOneWidget);
     });
+  });
+
+  group('while a search is pending (1.5.4)', () {
+    testWidgets('a thin bar shows, and History never does once something '
+        'is typed', (tester) async {
+      final store = _GatedStore(db);
+      await tester.pumpWidget(
+          MaterialApp(home: SearchScreen(doors: doors(), store: store)));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('search-pending')), findsNothing);
+      await tester.enterText(find.byKey(const Key('search-field')), 'comet');
+      await tester.pump();
+      // Still inside the pause before searching.
+      expect(find.byKey(const Key('search-pending')), findsOneWidget);
+      expect(find.byKey(const Key('search-history-heading')), findsNothing);
+      expect(find.byKey(const Key('history-empty')), findsNothing);
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pump();
+      expect(store.asked, ['comet']);
+      expect(find.byKey(const Key('search-pending')), findsOneWidget);
+      expect(find.byKey(const Key('search-history-heading')), findsNothing);
+      expect(find.byKey(const Key('history-empty')), findsNothing);
+      store.release();
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('search-pending')), findsNothing);
+      expect(find.byKey(Key('item-$journal')), findsOneWidget);
+    });
+
+    testWidgets('the last answer is dimmed, not passed off as the new '
+        'one\'s', (tester) async {
+      await pumpSearch(tester, doors());
+      await type(tester, 'comet');
+      expect(find.byKey(const Key('search-stale')), findsNothing);
+      await tester.enterText(find.byKey(const Key('search-field')), 'zebra');
+      await tester.pump();
+      expect(find.byKey(const Key('search-stale')), findsOneWidget);
+      expect(find.byKey(const Key('search-nothing')), findsNothing);
+      await tester.pump(const Duration(milliseconds: 350));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('search-stale')), findsNothing);
+      expect(find.byKey(const Key('search-nothing')), findsOneWidget);
+    });
+  });
+
+  testWidgets('each section says its true count, and Show all pages in '
+      'the rest', (tester) async {
+    final ids = <int>[];
+    for (var i = 0; i < 25; i++) {
+      final id = await db.spineDao.insertWork(
+          profileId: profile.id,
+          kind: 'book',
+          title: 'Lantern $i',
+          persistence: 'work',
+          firstSeenEpochDay: 100 + i);
+      ids.add(id);
+    }
+    await tester.pumpWidget(MaterialApp(
+        home: SearchScreen(
+            doors: doors(), store: SearchStore(db, pageSize: 10))));
+    await tester.pumpAndSettle();
+    await type(tester, 'lanterns');
+    final heading = find.byKey(const Key('search-titles-heading'));
+    expect(find.descendant(of: heading, matching: find.text('25')),
+        findsOneWidget);
+    final list = find
+        .descendant(
+            of: find.byKey(const Key('search-results')),
+            matching: find.byType(Scrollable))
+        .first;
+    final all = find.byKey(const Key('search-titles-all'));
+    await tester.scrollUntilVisible(all, 200, scrollable: list);
+    expect(find.text('Show all 25'), findsOneWidget);
+    await tester.tap(all);
+    await tester.pumpAndSettle();
+    // The oldest is the last row, reached only by paging.
+    await tester.scrollUntilVisible(find.byKey(Key('item-${ids.first}')), 300,
+        scrollable: list);
+    await tester.pumpAndSettle();
+    expect(find.byKey(Key('item-${ids.first}')), findsOneWidget);
   });
 
   testWidgets('a failing search says so instead of showing stale results',
@@ -277,10 +385,49 @@ void main() {
     testWidgets('a book with no link shares its title', (tester) async {
       await pumpSearch(tester, doors());
       await type(tester, 'journal');
+      // Share is in the row's menu, as it is on an episode's.
+      await tester.tap(find.byKey(Key('menu-$journal')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(Key('share-$journal')));
       await tester.pumpAndSettle();
       expect(copied, ['Comet journal']);
     });
+  });
+
+  testWidgets('words found in notes come under In the text', (tester) async {
+    await db.feedsDao.fillNotes(aurora,
+        html: '<p>glaciers</p>', plain: 'About glaciers.');
+    await pumpSearch(tester, doors());
+    await type(tester, 'glacier');
+    expect(
+        find.descendant(
+            of: find.byKey(const Key('search-notes-heading')),
+            matching: find.text('In the text')),
+        findsOneWidget);
+    expect(find.byKey(Key('item-$aurora')), findsOneWidget);
+  });
+
+  testWidgets('while the index fills, a plain line says how far, and search '
+      'still answers', (tester) async {
+    await db.deviceSettingsDao.write(searchBackfillAfterKey, '0');
+    await db.deviceSettingsDao.write(searchBackfillThroughKey, '$journal');
+    await pumpSearch(tester, doors());
+    expect(find.text('Updating search… 0%'), findsOneWidget);
+    await type(tester, 'comet');
+    expect(find.byKey(Key('item-$journal')), findsOneWidget);
+    expect(find.text('Updating search… 0%'), findsOneWidget);
+  });
+
+  testWidgets('a fill that stopped says so rather than sitting at its '
+      'percent', (tester) async {
+    await db.deviceSettingsDao.write(searchBackfillAfterKey, '0');
+    await db.deviceSettingsDao.write(searchBackfillThroughKey, '$journal');
+    await db.deviceSettingsDao.write(searchBackfillErrorKey, 'disk I/O error');
+    await pumpSearch(tester, doors());
+    expect(
+        find.text('Updating search stopped at 0%. It will try again the '
+            'next time Trellis starts.'),
+        findsOneWidget);
   });
 
   group('the way in', () {
@@ -322,13 +469,18 @@ void main() {
       expect(find.byType(HistoryScreen), findsOneWidget);
     });
 
-    testWidgets('Subscriptions has its own search', (tester) async {
+    testWidgets('Subscriptions finds its own shows, and hands the words on '
+        'to search everything', (tester) async {
       await pumpApp(tester);
       await tester.tap(find.byKey(const Key('manage-feeds')));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('feeds-search')));
+      await tester.enterText(find.byKey(const Key('feeds-find')), 'comet');
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('feeds-search-all')));
       await tester.pumpAndSettle();
       expect(find.byType(SearchScreen), findsOneWidget);
+      expect(find.byKey(Key('item-$journal')), findsOneWidget,
+          reason: 'the search already ran on the words typed');
     });
   });
 }
@@ -340,6 +492,28 @@ class _FlakyStore extends SearchStore {
   @override
   Future<SearchResults> search(int profileId, String query) async {
     if (failing) throw StateError('database is closed');
+    return super.search(profileId, query);
+  }
+}
+
+class _GatedStore extends SearchStore {
+  final asked = <String>[];
+  final _gates = <Completer<void>>[];
+  _GatedStore(super.db);
+
+  void release() {
+    for (final g in _gates) {
+      g.complete();
+    }
+    _gates.clear();
+  }
+
+  @override
+  Future<SearchResults> search(int profileId, String query) async {
+    asked.add(query);
+    final gate = Completer<void>();
+    _gates.add(gate);
+    await gate.future;
     return super.search(profileId, query);
   }
 }

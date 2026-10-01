@@ -66,13 +66,20 @@ void main() {
   Iterable<String> titles(SearchResults r) => r.items.map((i) => i.work.title);
 
   group('the query', () {
-    test('quotes every term and prefixes the last', () {
-      expect(SearchStore.matchQuery('aurora sea'), '"aurora" "sea"*');
+    test('quotes every term and prefixes every one', () {
+      expect(SearchStore.matchQuery('aurora sea'), '"aurora"* "sea"*');
+    });
+
+    test('a contraction stays one phrase, either apostrophe', () {
+      expect(SearchStore.matchQuery("it's"), '"it s"');
+      expect(SearchStore.matchQuery('it’s time'), '"it s" "time"*');
+      // Half typed: the apostrophe has nothing after it yet.
+      expect(SearchStore.matchQuery("don'"), '"don"*');
     });
 
     test('hostile input becomes plain terms', () {
       expect(SearchStore.matchQuery('c++ don\'t "x NEAR foo:'),
-          '"c" "don" "t" "x" "NEAR" "foo"*');
+          '"c"* "don t" "x"* "NEAR"* "foo"*');
       expect(SearchStore.matchQuery('  ::  '), isNull);
     });
 
@@ -81,6 +88,345 @@ void main() {
       for (final q in ['"', 'NEAR(', 'foo:', '*', 'AND OR NOT', '(((']) {
         await store.search(profileId, q);
       }
+    });
+  });
+
+  group('shows', () {
+    for (final like in [false, true]) {
+      test('a followed show is found by its name, even with no items '
+          '(${like ? 'LIKE' : 'index'})', () async {
+        final s = SearchStore(db, forceLike: like);
+        final bam = await db.feedsDao.insertFeed(
+            profileId: profileId,
+            url: 'https://money.test/rss',
+            title: 'Hedgerow Ledger');
+        final other = await db.profilesDao.create('Grace');
+        await db.feedsDao.insertFeed(
+            profileId: other, url: 'https://b.test/f', title: 'Hedgerow Ledger');
+        final r = await s.search(profileId, 'hedge ledger');
+        expect(r.shows.map((f) => f.id), [bam]);
+        expect(r.items, isEmpty);
+        expect(r.isEmpty, isFalse);
+        expect((await s.search(profileId, 'ledger')).shows.single.id, bam);
+        expect((await s.search(profileId, 'zebra')).shows, isEmpty);
+      });
+    }
+
+    test('a common word lists the first shows in shelf order, not any '
+        'twenty', () async {
+      // Inserted backwards, so the table's own order is the wrong one.
+      for (var i = 29; i >= 0; i--) {
+        await db.feedsDao.insertFeed(
+            profileId: profileId,
+            url: 'https://p$i.test',
+            title: 'Podcast ${i.toString().padLeft(2, '0')}');
+      }
+      final r = await SearchStore(db, pageSize: 20).search(profileId, 'podcast');
+      expect(r.showSection.count, 30);
+      expect(r.shows.map((f) => f.title),
+          [for (var i = 0; i < 20; i++) 'Podcast ${i.toString().padLeft(2, '0')}']);
+    });
+
+    test('shows come in shelf order, not ranked', () async {
+      await db.feedsDao.insertFeed(
+          profileId: profileId, url: 'https://z.test', title: 'Sky Zebra');
+      await db.feedsDao.insertFeed(
+          profileId: profileId, url: 'https://a.test', title: 'The Sky Atlas');
+      expect([for (final f in (await store.search(profileId, 'sky')).shows) f.title],
+          ['Night Sky Hour', 'The Sky Atlas', 'Sky Zebra']);
+    });
+  });
+
+  group('show notes (1.5.4)', () {
+    test('a word only in an episode\'s notes finds the episode, and its '
+        'markup never matches', () async {
+      final id = await episode('Episode 12');
+      await db.feedsDao.fillNotes(id,
+          html: '<p>Guest: <a href="https://x.test">Vera Rubin</a></p>',
+          plain: 'Guest: Vera Rubin');
+      expect(titles(await store.search(profileId, 'rubin')), ['Episode 12']);
+      expect(titles(await store.search(profileId, 'href')), isEmpty);
+      await db.spineDao.deleteWork(id);
+      expect(titles(await store.search(profileId, 'rubin')), isEmpty);
+    });
+
+    test('the LIKE fallback searches notes too', () async {
+      final id = await episode('Episode 12');
+      await db.feedsDao.fillNotes(id,
+          html: '<p>Guest: Vera Rubin</p>', plain: 'Guest: Vera Rubin');
+      final like = SearchStore(db, forceLike: true);
+      expect(titles(await like.search(profileId, 'vera rubin')),
+          ['Episode 12']);
+    });
+  });
+
+  group('matching (1.5.4)', () {
+    test('a word matches its other forms', () async {
+      await episode('The charity that is also a time machine');
+      for (final q in ['machines', 'time machines', 'charities']) {
+        expect(titles(await store.search(profileId, q)),
+            ['The charity that is also a time machine'],
+            reason: q);
+      }
+    });
+
+    test('every word is a prefix, not only the last', () async {
+      await episode('Time machine');
+      expect(titles(await store.search(profileId, 'tim machine')),
+          ['Time machine']);
+    });
+
+    test('a contraction finds itself, not "it" beside any s-word',
+        () async {
+      await episode('It sings softly');
+      await episode('It was summer');
+      await episode('It’s raining');
+      await episode("It's late");
+      expect(titles(await store.search(profileId, "it's")).toSet(),
+          {'It’s raining', "It's late"});
+      expect(titles(await store.search(profileId, 'it’s rain')),
+          ['It’s raining']);
+    });
+
+    test('a word in the title beside one in the notes still finds it',
+        () async {
+      final id = await episode('Aurora season');
+      await db.feedsDao.fillNotes(id,
+          html: '<p>Guest: Vera Rubin</p>', plain: 'Guest: Vera Rubin');
+      expect(titles(await store.search(profileId, 'aurora rubin')),
+          ['Aurora season']);
+    });
+
+    Future<int> post(String title, List<String> body, {int? feed}) async {
+      final id = await db.spineDao.insertWork(
+          profileId: profileId,
+          kind: 'article',
+          title: title,
+          persistence: 'ephemeron',
+          firstSeenEpochDay: 100,
+          sourceUrl: 'https://blog.test/$title');
+      // Ingest's order: the work, its body, then its feed row.
+      await db.spineDao.insertSegments(id, [
+        for (final (i, t) in body.indexed) (idx: i, kind: 'prose', text: t)
+      ]);
+      await db.feedsDao.insertEpisode(
+          workId: id, feedId: feed ?? feedId, guid: title, publishedAtMs: 1);
+      return id;
+    }
+
+    test('a blog post is found by a word in its body', () async {
+      await post('Weeknotes', ['Mostly about bicycles.', 'And a zeppelin.']);
+      expect(titles(await store.search(profileId, 'zeppelins')),
+          ['Weeknotes']);
+      expect(titles(await store.search(profileId, 'bicycle zeppelin')),
+          ['Weeknotes']);
+    });
+
+    test('a book\'s body is not searched', () async {
+      final id = await book('Plain cover');
+      await db.spineDao.insertSegments(
+          id, const [(idx: 0, kind: 'prose', text: 'A zeppelin inside.')]);
+      expect(titles(await store.search(profileId, 'zeppelin')), isEmpty);
+    });
+
+    test('before its full notes arrive, an episode is found by its short '
+        'description; the notes then take its place', () async {
+      final id = await db.spineDao.insertWork(
+          profileId: profileId,
+          kind: 'episode',
+          title: 'Episode 9',
+          persistence: 'ephemeron',
+          firstSeenEpochDay: 100);
+      await db.spineDao.insertSegments(id,
+          const [(idx: 0, kind: 'prose', text: 'A talk about lighthouses.')]);
+      await db.feedsDao.insertEpisode(
+          workId: id,
+          feedId: feedId,
+          guid: 'e9',
+          enclosureUrl: 'https://cast.test/9.mp3',
+          publishedAtMs: 1);
+      expect(titles(await store.search(profileId, 'lighthouse')),
+          ['Episode 9']);
+      await db.feedsDao.fillNotes(id,
+          html: '<p>Keepers and lamps</p>', plain: 'Keepers and lamps');
+      expect(titles(await store.search(profileId, 'lamp')), ['Episode 9']);
+      expect(titles(await store.search(profileId, 'lighthouse')), isEmpty);
+    });
+
+    test('a transcript sentence is not show notes', () async {
+      final id = await episode('Episode 3');
+      await transcribe(id, ['We saw a narwhal.']);
+      final r = await store.search(profileId, 'narwhal');
+      expect(r.items, isEmpty);
+      expect(r.said.single.item.work.id, id);
+    });
+
+    test('a show\'s name matches the way every other word does', () async {
+      final ml = await db.feedsDao.insertFeed(
+          profileId: profileId,
+          url: 'https://ml.test/f',
+          title: 'Machine Learning Weekly');
+      expect((await store.search(profileId, 'machines')).shows.single.id, ml);
+      expect((await store.search(profileId, 'mach learn')).shows.single.id,
+          ml);
+      await (db.update(db.feeds)..where((f) => f.id.equals(ml)))
+          .write(const FeedsCompanion(title: Value('Deep Nets')));
+      expect((await store.search(profileId, 'machine')).shows, isEmpty);
+      expect((await store.search(profileId, 'nets')).shows.single.id, ml);
+      await db.feedsDao.deleteFeedCascade(ml);
+      expect((await store.search(profileId, 'nets')).shows, isEmpty);
+    });
+  });
+
+  group('sections (1.5.4)', () {
+    test('a title match comes in titles, a notes match in show notes, and '
+        'a work found by both is listed once, in titles', () async {
+      final inTitle = await episode('Charity season', publishedAtMs: 1);
+      final inNotes = await episode('Episode 2', publishedAtMs: 2);
+      await db.feedsDao.fillNotes(inNotes,
+          html: '<p>a charity</p>', plain: 'About a charity drive.');
+      await db.feedsDao.fillNotes(inTitle,
+          html: '<p>a charity</p>', plain: 'Another charity.');
+      final r = await store.search(profileId, 'charity');
+      expect([for (final i in r.titleSection.rows) i.work.id], [inTitle]);
+      expect([for (final i in r.notesSection.rows) i.work.id], [inNotes]);
+      expect(r.titleSection.count, 1);
+      expect(r.notesSection.count, 1);
+    });
+
+    test('a show\'s name puts its episodes in titles', () async {
+      final id = await episode('Episode 2');
+      final r = await store.search(profileId, 'night sky');
+      expect([for (final i in r.titleSection.rows) i.work.id], [id]);
+      expect(r.notesSection.count, 0);
+    });
+
+    test('words split between title and notes land in show notes', () async {
+      final id = await episode('Aurora season');
+      await db.feedsDao.fillNotes(id, html: '<p>Rubin</p>', plain: 'Rubin');
+      final r = await store.search(profileId, 'aurora rubin');
+      expect(r.titleSection.count, 0);
+      expect([for (final i in r.notesSection.rows) i.work.id], [id]);
+    });
+
+    for (final like in [false, true]) {
+      test('Said in lists every sentence, even of a work found above: the '
+          'jump to the sentence is the point (${like ? 'LIKE' : 'index'})',
+          () async {
+        final s = SearchStore(db, forceLike: like);
+        final titled = await episode('Comet night');
+        await transcribe(titled, ['A comet, again.']);
+        final other = await episode('Episode 4');
+        await transcribe(other, ['The comet was bright.']);
+        final r = await s.search(profileId, 'comet');
+        expect([for (final i in r.items) i.work.id], [titled]);
+        expect([for (final h in r.said) h.item.work.id], [other, titled]);
+        expect(r.saidSection.count, 2);
+      });
+    }
+
+    test('a post whose text is rewritten is found by its new words only',
+        () async {
+      final id = await db.spineDao.insertWork(
+          profileId: profileId,
+          kind: 'article',
+          title: 'Weeknotes',
+          persistence: 'ephemeron',
+          firstSeenEpochDay: 100);
+      await db.spineDao.insertSegments(
+          id, const [(idx: 0, kind: 'prose', text: 'A short excerpt.')]);
+      await db.feedsDao
+          .insertEpisode(workId: id, feedId: feedId, guid: 'w', publishedAtMs: 1);
+      // The full article replaces the excerpt, as an article fetch does.
+      await db.customStatement('DELETE FROM segments WHERE work_id = ?', [id]);
+      await db.spineDao.insertSegments(id, const [
+        (idx: 0, kind: 'prose', text: 'All about zeppelins.'),
+        (idx: 1, kind: 'prose', text: 'And airships.'),
+      ]);
+      expect(titles(await store.search(profileId, 'zeppelin airship')),
+          ['Weeknotes']);
+      expect(titles(await store.search(profileId, 'excerpt')), isEmpty);
+      await db.customStatement(
+          "UPDATE segments SET body = 'Blimps now.' WHERE work_id = ? AND idx = 1",
+          [id]);
+      expect(titles(await store.search(profileId, 'blimp')), ['Weeknotes']);
+      expect(titles(await store.search(profileId, 'airship')), isEmpty);
+    });
+
+    test('notes that change are found by their new words only', () async {
+      final id = await episode('Episode 8');
+      await db.feedsDao.fillNotes(id, html: '<p>a</p>', plain: 'Lighthouses.');
+      await db.customStatement(
+          "UPDATE work_notes SET plain = 'Glaciers.' WHERE work_id = ?", [id]);
+      expect(titles(await store.search(profileId, 'glacier')), ['Episode 8']);
+      expect(titles(await store.search(profileId, 'lighthouse')), isEmpty);
+    });
+
+    for (final like in [false, true]) {
+      test('each section says its true count past the first page, and '
+          'pages through the rest, newest first '
+          '(${like ? 'LIKE' : 'index'})', () async {
+        final s = SearchStore(db, forceLike: like, pageSize: 5);
+        final titled = [
+          for (var i = 0; i < 150; i++)
+            await episode('Machine $i', publishedAtMs: 1000 + i),
+        ];
+        // Fifty newer episodes with the word only in their notes.
+        final noted = <int>[];
+        for (var i = 0; i < 50; i++) {
+          final id = await episode('Episode $i', publishedAtMs: 5000 + i);
+          await db.feedsDao.fillNotes(id,
+              html: '<p>machine</p>', plain: 'About a machine.');
+          noted.add(id);
+        }
+        for (var i = 0; i < 12; i++) {
+          final id = await book('Plain $i');
+          await transcribe(id, ['The machine hums.']);
+        }
+        final r = await s.search(profileId, 'machine');
+        expect(r.titleSection.count, 150);
+        expect(r.titleSection.hasMore, isTrue);
+        expect([for (final i in r.titleSection.rows) i.work.id],
+            titled.reversed.take(5));
+        expect(r.notesSection.count, 50);
+        expect(r.saidSection.count, 12);
+        expect(r.said, hasLength(5));
+        final rest = await s.itemsPage(profileId, 'machine', SearchTier.titles,
+            offset: 5, limit: 200);
+        expect([for (final i in rest) i.work.id], titled.reversed.skip(5));
+        final notes = await s.itemsPage(profileId, 'machine', SearchTier.notes,
+            offset: 0, limit: 200);
+        expect([for (final i in notes) i.work.id], noted.reversed);
+        expect(await s.saidPage(profileId, 'machine', offset: 5, limit: 200),
+            hasLength(7));
+      });
+    }
+
+    test('shows say their count and page like every section', () async {
+      for (var i = 0; i < 30; i++) {
+        await db.feedsDao.insertFeed(
+            profileId: profileId, url: 'https://p$i.test', title: 'Pod $i');
+      }
+      final r = await SearchStore(db, pageSize: 5).search(profileId, 'pod');
+      expect(r.showSection.count, 30);
+      expect(r.shows, hasLength(5));
+      expect((await store.showsMatching(profileId, 'pod')), hasLength(30));
+    });
+
+    test('Library matches are kept works the words find in any section, '
+        'and nothing unkept', () async {
+      final kept = await episode('Kept charity');
+      await db.spineDao.promoteWork(kept);
+      await episode('Unkept charity');
+      final noted = await episode('Episode 7');
+      await db.feedsDao.fillNotes(noted, html: '<p>c</p>', plain: 'charity');
+      await db.spineDao.promoteWork(noted);
+      final saidBook = await book('Plain');
+      await transcribe(saidBook, ['A charity drive.']);
+      final mine = await store.libraryMatches(profileId, 'charities');
+      expect(mine, {kept, noted, saidBook});
+      expect(await SearchStore(db, forceLike: true)
+          .libraryMatches(profileId, 'charity'), {kept, noted, saidBook});
     });
   });
 
@@ -138,6 +484,56 @@ void main() {
           ['First light']);
     });
 
+    Future<int> totalChanges() async => (await db
+            .customSelect('SELECT total_changes() AS n')
+            .getSingle())
+        .read<int>('n');
+
+    test('rewriting a show\'s title unchanged reindexes none of its '
+        'episodes', () async {
+      for (var i = 0; i < 20; i++) {
+        await episode('Light $i');
+      }
+      final before = await totalChanges();
+      // Raw, so the guard is what is tested, not the DAO's own skip.
+      await db.customStatement(
+          'UPDATE feeds SET title = title WHERE id = ?', [feedId]);
+      expect(await totalChanges() - before, 1,
+          reason: 'only the feed row itself changed');
+      expect((await store.search(profileId, 'night sky')).titleSection.count,
+          20);
+    });
+
+    test('a refresh with the same title changes one row and leaves the '
+        'title unwritten', () async {
+      await episode('First light');
+      await db.customStatement('CREATE TEMP TABLE title_writes(n INTEGER)');
+      await db.customStatement('CREATE TEMP TRIGGER count_title_writes '
+          'AFTER UPDATE OF title ON feeds BEGIN '
+          'INSERT INTO title_writes VALUES (1); END');
+      final before = await totalChanges();
+      await db.feedsDao.updateRefreshState(feedId,
+          title: 'Night Sky Hour',
+          etag: '"e"',
+          lastModified: null,
+          breakerJson: '{}');
+      expect(await totalChanges() - before, 1);
+      final writes = await db
+          .customSelect('SELECT count(*) AS n FROM title_writes')
+          .getSingle();
+      expect(writes.read<int>('n'), 0);
+      expect((await db.feedsDao.feedById(feedId))!.etag, '"e"');
+      // A real rename still lands, and still reindexes.
+      await db.feedsDao.updateRefreshState(feedId,
+          title: 'Deep Field',
+          etag: '"e"',
+          lastModified: null,
+          breakerJson: '{}');
+      expect((await db.feedsDao.feedById(feedId))!.title, 'Deep Field');
+      expect(titles(await store.search(profileId, 'deep field')),
+          ['First light']);
+    });
+
     test('words split between the show and the title still find it',
         () async {
       await episode('Episode 5');
@@ -175,10 +571,18 @@ void main() {
     test('the transcript query never scans a table', () async {
       final plan = await db.customSelect(
           'EXPLAIN QUERY PLAN ${SearchStore.saidSql}',
-          variables: [Variable.withString('"x"'), Variable.withInt(1)]).get();
+          variables: [
+            Variable.withString('"x"'),
+            Variable.withInt(1),
+            Variable.withInt(10),
+            Variable.withInt(0),
+          ]).get();
       final details = [for (final r in plan) r.read<String>('detail')];
+      // The subquery is the list of works found above, already matched.
       final scans = details.where((d) =>
-          d.startsWith('SCAN ') && !d.contains('VIRTUAL TABLE'));
+          d.startsWith('SCAN ') &&
+          !d.contains('VIRTUAL TABLE') &&
+          !d.startsWith('SCAN (subquery'));
       expect(scans, isEmpty, reason: details.join('\n'));
       expect(details.join('\n'), isNot(contains('segments ')));
     });
@@ -381,11 +785,15 @@ void main() {
           .map((r) => r['name'] as String)
           .toList();
       expect(triggers, isNotEmpty, reason: 'a fresh file carries the index');
-      for (final t in triggers) {
+      v24.execute(stripV26);
+      for (final t in v24
+          .select("SELECT name FROM sqlite_master WHERE type = 'trigger' "
+              "AND name LIKE '%fts%'")
+          .map((r) => r['name'] as String)
+          .toList()) {
         v24.execute('DROP TRIGGER $t');
       }
       v24.execute('''
-        $stripV26
         DROP TABLE items_fts;
         DROP TABLE segments_fts;
         PRAGMA user_version = 24;

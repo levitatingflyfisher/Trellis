@@ -92,6 +92,34 @@ class Works extends Table {
   /// active translation layer per work at a time" is the law this column
   /// makes literal: there is exactly one slot, not a set.
   TextColumn get activeTranslationLang => text().nullable()();
+
+  /// The language the work page last opened this work in (1.5.4): null
+  /// for the original, else the tag of a translation that exists for it,
+  /// a translated-sentence layer or a whole-segment `mt` layer. Its own
+  /// slot rather than [activeTranslationLang], which is the reader's
+  /// translate-target state and can't name an `mt` layer.
+  TextColumn get readLang => text().nullable()();
+
+  /// The mode the work page last opened this work in (1.5.4): `listen`,
+  /// `read` or `watch`, and when. Every way in from the page writes it,
+  /// including the transcript and the show notes, which keep no reading
+  /// place of their own. Null until the page is first used; the page then
+  /// falls back to the reader's and the player's places.
+  TextColumn get lastMode => text().nullable()();
+  IntColumn get lastModeAtMs => integer().nullable()();
+}
+
+/// An item's full show notes (1.5.4), sanitized before they are stored
+/// (intake_core's `sanitizeNotesHtml`), with their plain words beside them
+/// for search. A table of its own so the episode row stays narrow: Latest
+/// pages through 20k of those and never shows notes.
+@DataClassName('WorkNote')
+class WorkNotes extends Table {
+  IntColumn get workId => integer().references(Works, #id)();
+  TextColumn get html => text()();
+  TextColumn get plain => text()();
+  @override
+  Set<Column> get primaryKey => {workId};
 }
 
 class Segments extends Table {
@@ -280,6 +308,18 @@ class Feeds extends Table {
   /// (`en-us`, `ru-RU`); null when the feed declares none. Transcription
   /// locks whisper to it rather than detecting on every window.
   TextColumn get language => text().nullable()();
+
+  /// The address this show was first followed at, kept when a permanent
+  /// move rewrites [url]; null for a show that never moved. A list
+  /// exported before the move still names the old address, and following
+  /// it again must find this row rather than add a twin.
+  TextColumn get subscribedUrl => text().nullable()();
+
+  /// True while this show's stored items may still lack the full show
+  /// notes 1.5.4 began keeping: its next few refreshes parse it in full,
+  /// whatever the validators say, a few shows per check rather than all
+  /// at once. Null otherwise, including in a backup made before it.
+  BoolColumn get notesFillPending => boolean().nullable()();
 }
 
 /// River metadata for a feed item. The item itself IS a spine work
@@ -1301,7 +1341,7 @@ class ProfilesDao extends DatabaseAccessor<AppDatabase>
 @DriftAccessor(
     tables: [Works, Segments, Layers, Alignments, Positions, Episodes,
         PlayerPositions, Captures, QueueTable, TranslationSentences,
-        Audiobooks, AudiobookFiles])
+        Audiobooks, AudiobookFiles, WorkNotes])
 class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
   SpineDao(super.db);
 
@@ -1457,6 +1497,35 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
 
   Future<List<Position>> allPositions() => select(positions).get();
 
+  /// Every place this reader has in a text, by work: one query for a
+  /// whole list's progress bars.
+  Future<Map<int, Position>> positionsOf(int profileId) async => {
+    for (final p in await (select(
+      positions,
+    )..where((p) => p.profileId.equals(profileId))).get())
+      p.workId: p,
+  };
+
+  /// How many segments and characters each of [workIds] holds, without
+  /// loading a body: a list's reading times and progress denominators in
+  /// one query per [_inChunk] ids. A work with no text is absent.
+  Future<Map<int, TextSize>> textSizesOf(Iterable<int> workIds) async {
+    final count = segments.idx.count();
+    final chars = segments.body.length.sum();
+    final out = <int, TextSize>{};
+    for (final chunk in _chunks(workIds)) {
+      final q = selectOnly(segments)
+        ..addColumns([segments.workId, count, chars])
+        ..where(segments.workId.isIn(chunk))
+        ..groupBy([segments.workId]);
+      for (final r in await q.get()) {
+        out[r.read(segments.workId)!] =
+            (segments: r.read(count) ?? 0, chars: r.read(chars) ?? 0);
+      }
+    }
+    return out;
+  }
+
   Future<void> insertAlignments(
     int workId,
     List<({int segmentIdx, int tStartMs, int tEndMs})> rows,
@@ -1498,6 +1567,15 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
         WorksCompanion(finishedEpochDay: Value(epochDay)),
       );
 
+  /// Undoes a finish, by hand or by ear: the work's day and, for a feed
+  /// item, its played fact.
+  Future<void> markUnfinished(int workId) => transaction(() async {
+        await (update(works)..where((w) => w.id.equals(workId)))
+            .write(const WorksCompanion(finishedEpochDay: Value(null)));
+        await (update(episodes)..where((e) => e.workId.equals(workId)))
+            .write(const EpisodesCompanion(finishedAtMs: Value(null)));
+      });
+
   Future<void> deleteWork(int workId) => deleteWorks([workId]);
 
   /// The Library's Remove. A feed item is demoted, never deleted: Latest
@@ -1537,6 +1615,7 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
         await (delete(queueTable)..where((q) => q.workId.isIn(c))).go();
         await (delete(playerPositions)..where((p) => p.workId.isIn(c))).go();
         await (delete(captures)..where((x) => x.workId.isIn(c))).go();
+        await (delete(workNotes)..where((n) => n.workId.isIn(c))).go();
         // Children before the parent audiobooks row — AudiobookFiles rows
         // carry the DB record of the copied files; the actual bytes on disk
         // are the caller's job (ADR-0013), mirroring how deleteWork has
@@ -1608,6 +1687,27 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
           const WorksCompanion(
               activeTranslationLang: Value(null),
               showTranslationLayer: Value(false)));
+
+  /// The languages this work has translated sentences in: what the work
+  /// page lists beside the original.
+  Future<List<String>> translationLangsOf(int workId) async {
+    final q = selectOnly(translationSentences, distinct: true)
+      ..addColumns([translationSentences.lang])
+      ..where(translationSentences.workId.equals(workId))
+      ..orderBy([OrderingTerm.asc(translationSentences.lang)]);
+    return [for (final r in await q.get()) r.read(translationSentences.lang)!];
+  }
+
+  /// Records the mode the work page just opened [workId] in.
+  Future<void> setLastMode(int workId, String mode, int nowMs) =>
+      (update(works)..where((w) => w.id.equals(workId))).write(
+          WorksCompanion(lastMode: Value(mode), lastModeAtMs: Value(nowMs)));
+
+  /// The language the work page opens this work in; null is the
+  /// original. See [Works.readLang].
+  Future<void> setReadLang(int workId, String? lang) =>
+      (update(works)..where((w) => w.id.equals(workId)))
+          .write(WorksCompanion(readLang: Value(lang)));
 
   /// Sets a work's declared source language (Campaign 8 "Babel widens"
   /// Phase 1's calm per-work selector — see [Works.lang]). Most intake
@@ -1891,15 +1991,34 @@ class DailyReviewDao extends DatabaseAccessor<AppDatabase>
   }
 }
 
-/// A queue row plus the work it names — the queue view's list without a
-/// second query per row.
-typedef QueueEntry = ({QueueRow row, Work work});
+/// Segments and characters in one work's text.
+typedef TextSize = ({int segments, int chars});
+
+/// Ids per IN list: well under SQLite's bound-variable limit, so a list of
+/// any length is a handful of queries rather than one that fails.
+const _inChunk = 500;
+
+Iterable<List<int>> _chunks(Iterable<int> ids) sync* {
+  final all = ids.toSet().toList();
+  for (var i = 0; i < all.length; i += _inChunk) {
+    yield all.sublist(i, i + _inChunk > all.length ? all.length : i + _inChunk);
+  }
+}
+
+/// A queue row plus the work it names, and the episode and show when it
+/// came from a feed: the queue's rows without a second query per row.
+typedef QueueEntry = ({
+  QueueRow row,
+  Work work,
+  Episode? episode,
+  String? feedTitle,
+});
 
 /// The queue (P4 mercy #3): a position-ordered, per-profile list of
 /// works waiting to play next. Positions stay contiguous from 0 — every
 /// mutating method renumbers rather than leaving gaps, so "the head" is
 /// always simply the row at position 0.
-@DriftAccessor(tables: [QueueTable, Works])
+@DriftAccessor(tables: [QueueTable, Works, Episodes, Feeds])
 class QueueDao extends DatabaseAccessor<AppDatabase> with _$QueueDaoMixin {
   QueueDao(super.db);
 
@@ -1919,13 +2038,22 @@ class QueueDao extends DatabaseAccessor<AppDatabase> with _$QueueDaoMixin {
     final q =
         select(
             queueTable,
-          ).join([innerJoin(works, works.id.equalsExp(queueTable.workId))])
+          ).join([
+            innerJoin(works, works.id.equalsExp(queueTable.workId)),
+            leftOuterJoin(episodes, episodes.workId.equalsExp(works.id)),
+            leftOuterJoin(feeds, feeds.id.equalsExp(episodes.feedId)),
+          ])
           ..where(queueTable.profileId.equals(profileId))
           ..orderBy([OrderingTerm.asc(queueTable.position)]);
     final rows = await q.get();
     return [
       for (final r in rows)
-        (row: r.readTable(queueTable), work: r.readTable(works)),
+        (
+          row: r.readTable(queueTable),
+          work: r.readTable(works),
+          episode: r.readTableOrNull(episodes),
+          feedTitle: r.readTableOrNull(feeds)?.title,
+        ),
     ];
   }
 
@@ -2250,6 +2378,22 @@ class AudiobooksDao extends DatabaseAccessor<AppDatabase>
     return (await q.getSingle()).read(c) ?? 0;
   }
 
+  /// [fileCountOf] for a whole list at once.
+  Future<Map<int, int>> fileCountsOf(Iterable<int> workIds) async {
+    final c = audiobookFiles.id.count();
+    final out = <int, int>{};
+    for (final chunk in _chunks(workIds)) {
+      final q = selectOnly(audiobookFiles)
+        ..addColumns([audiobookFiles.workId, c])
+        ..where(audiobookFiles.workId.isIn(chunk))
+        ..groupBy([audiobookFiles.workId]);
+      for (final r in await q.get()) {
+        out[r.read(audiobookFiles.workId)!] = r.read(c) ?? 0;
+      }
+    }
+    return out;
+  }
+
   /// Learned lazily the first time a file actually plays
   /// ([PlayerController]'s duration-stream handler) — see
   /// [AudiobookFiles.durationMs]'s own doc comment for why nothing
@@ -2275,7 +2419,8 @@ enum RiverKind { all, text, audio }
 const riverPageSize = 60;
 
 @DriftAccessor(
-    tables: [Feeds, Episodes, Works, PlayerPositions, Positions, Alignments])
+    tables: [Feeds, Episodes, Works, PlayerPositions, Positions, Alignments,
+        WorkNotes])
 class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
   FeedsDao(super.db);
 
@@ -2303,6 +2448,17 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
       (select(feeds)
             ..where((f) => f.profileId.equals(profileId) & f.url.equals(url)))
           .getSingleOrNull();
+
+  /// [feedByUrl], also matching a show that moved away from [url]: the
+  /// address a list or a paste names may be the one it was followed at.
+  /// The row at [url] itself wins over one that merely came from there.
+  Future<Feed?> feedByAnyUrl(int profileId, String url) => (select(feeds)
+        ..where((f) =>
+            f.profileId.equals(profileId) &
+            (f.url.equals(url) | f.subscribedUrl.equals(url)))
+        ..orderBy([(f) => OrderingTerm.desc(f.url.equals(url))])
+        ..limit(1))
+      .getSingleOrNull();
 
   Future<Feed?> feedById(int id) =>
       (select(feeds)..where((f) => f.id.equals(id))).getSingleOrNull();
@@ -2362,19 +2518,25 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
     bool updateImageUrl = false,
     String? language,
     bool updateLanguage = false,
-  }) => (update(feeds)..where((f) => f.id.equals(feedId))).write(
-    FeedsCompanion(
-      title: Value(title),
-      etag: Value(etag),
-      lastModified: Value(lastModified),
-      breakerJson: Value(breakerJson),
-      nextPageUrl: updateNextPageUrl
-          ? Value(nextPageUrl)
-          : const Value.absent(),
-      imageUrl: updateImageUrl ? Value(imageUrl) : const Value.absent(),
-      language: updateLanguage ? Value(language) : const Value.absent(),
-    ),
-  );
+  }) async {
+    await (update(feeds)..where((f) => f.id.equals(feedId))).write(
+      FeedsCompanion(
+        etag: Value(etag),
+        lastModified: Value(lastModified),
+        breakerJson: Value(breakerJson),
+        nextPageUrl: updateNextPageUrl
+            ? Value(nextPageUrl)
+            : const Value.absent(),
+        imageUrl: updateImageUrl ? Value(imageUrl) : const Value.absent(),
+        language: updateLanguage ? Value(language) : const Value.absent(),
+      ),
+    );
+    // Only a changed title is written: the show trigger is guarded too,
+    // but a title left out of the SET list never asks it.
+    await (update(feeds)
+          ..where((f) => f.id.equals(feedId) & f.title.equals(title).not()))
+        .write(FeedsCompanion(title: Value(title)));
+  }
 
   Future<void> setAutoDownload(int feedId, bool on) =>
       (update(feeds)..where((f) => f.id.equals(feedId))).write(
@@ -2427,21 +2589,24 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
     int? durationMs,
     String? imageUrl,
     required int publishedAtMs,
-  }) async {
-    await into(episodes).insert(
-        EpisodesCompanion.insert(
-          workId: Value(workId),
-          feedId: feedId,
-          guid: guid,
-          enclosureUrl: Value(enclosureUrl),
-          durationMs: Value(durationMs),
-          imageUrl: Value(imageUrl),
-          publishedAtMs: publishedAtMs,
-        ),
-        mode: InsertMode.insertOrIgnore);
-    final n = await customSelect('SELECT changes() AS n').getSingle();
-    return n.read<int>('n') > 0;
-  }
+  }) =>
+      // One transaction, so changes() is read on the connection that
+      // inserted: outside one, a read pool would answer it from a reader.
+      transaction(() async {
+        await into(episodes).insert(
+            EpisodesCompanion.insert(
+              workId: Value(workId),
+              feedId: feedId,
+              guid: guid,
+              enclosureUrl: Value(enclosureUrl),
+              durationMs: Value(durationMs),
+              imageUrl: Value(imageUrl),
+              publishedAtMs: publishedAtMs,
+            ),
+            mode: InsertMode.insertOrIgnore);
+        final n = await customSelect('SELECT changes() AS n').getSingle();
+        return n.read<int>('n') > 0;
+      });
 
   /// Whether any episode row of this feed is left.
   Future<bool> hasEpisodes(int feedId) async {
@@ -2486,6 +2651,11 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
           FeedsCompanion(
               rulesJson: Value(rulesJson), bodyHash: const Value(null)));
 
+  /// A full parse has run since 1.5.4 began keeping show notes.
+  Future<void> clearNotesFillPending(int feedId) =>
+      (update(feeds)..where((f) => f.id.equals(feedId)))
+          .write(const FeedsCompanion(notesFillPending: Value(null)));
+
   /// Recorded only once a body's items have landed, so a failed ingest
   /// is retried by the next refresh rather than skipped as unchanged.
   Future<void> setBodyHash(int feedId, String hash) =>
@@ -2498,24 +2668,56 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
   /// nothing else. Excluding already-suppressed rows keeps a
   /// [duplicateOfWorkId] always pointing at a non-suppressed root rather
   /// than chaining through another suppressed row.
+  ///
+  /// Only those five columns are read: a profile's whole river is tens of
+  /// thousands of rows, and mapping every column of both tables for each
+  /// was most of the pass.
   Future<List<({int workId, int feedId, String? sourceUrl, String title,
       int publishedAtMs})>> dedupCandidatesOf(int profileId) async {
-    final q = select(episodes).join([
+    final q = selectOnly(episodes).join([
       innerJoin(works, works.id.equalsExp(episodes.workId)),
     ])
+      ..addColumns([
+        works.id,
+        episodes.feedId,
+        works.sourceUrl,
+        works.title,
+        episodes.publishedAtMs,
+      ])
       ..where(works.profileId.equals(profileId) &
           episodes.dedupReason.isNull());
     final rows = await q.get();
     return [
       for (final r in rows)
         (
-          workId: r.readTable(works).id,
-          feedId: r.readTable(episodes).feedId,
-          sourceUrl: r.readTable(works).sourceUrl,
-          title: r.readTable(works).title,
-          publishedAtMs: r.readTable(episodes).publishedAtMs,
+          workId: r.read(works.id)!,
+          feedId: r.read(episodes.feedId)!,
+          sourceUrl: r.read(works.sourceUrl),
+          title: r.read(works.title)!,
+          publishedAtMs: r.read(episodes.publishedAtMs)!,
         )
     ];
+  }
+
+  /// The newest [limit] distinct episode images of a feed, newest first,
+  /// leaving out [except] (the show's own): what a refresh fetches up
+  /// front, without loading every episode row to pick them.
+  Future<List<String>> episodeArtworkOf(int feedId,
+      {String? except, required int limit}) async {
+    final rows = await customSelect('''
+      SELECT image_url FROM episodes
+      WHERE feed_id = ? AND image_url IS NOT NULL
+        AND (? IS NULL OR image_url != ?)
+      GROUP BY image_url
+      ORDER BY MAX(published_at_ms) DESC
+      LIMIT ?
+    ''', variables: [
+      Variable.withInt(feedId),
+      Variable(except),
+      Variable(except),
+      Variable.withInt(limit),
+    ], readsFrom: {episodes}).get();
+    return [for (final r in rows) r.read<String>('image_url')];
   }
 
   /// Suppresses one episode as a cross-feed duplicate — hidden from
@@ -2551,6 +2753,41 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
           image: r.read(episodes.imageUrl) == null,
         ),
     };
+  }
+
+  /// The guids of this feed's audio items that have no notes stored yet:
+  /// what a refresh may fill. Text items keep their body as segments.
+  Future<Set<String>> notesGapsOf(int feedId) async =>
+      (await notesGapIdsOf(feedId)).keys.toSet();
+
+  /// [notesGapsOf] with each item's work id, so a fill needs no lookup.
+  Future<Map<String, int>> notesGapIdsOf(int feedId) async {
+    final rows = await customSelect('''
+      SELECT e.guid AS guid, e.work_id AS work_id FROM episodes e
+      WHERE e.feed_id = ? AND e.enclosure_url IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM work_notes n WHERE n.work_id = e.work_id)
+    ''', variables: [Variable.withInt(feedId)],
+        readsFrom: {episodes, workNotes}).get();
+    return {
+      for (final r in rows) r.read<String>('guid'): r.read<int>('work_id'),
+    };
+  }
+
+  /// Stores [workId]'s notes unless it already has some: a refresh only
+  /// fills what is missing, and never rewrites what was kept.
+  Future<void> fillNotes(int workId,
+          {required String html, required String plain}) =>
+      into(workNotes).insert(
+          WorkNotesCompanion.insert(
+              workId: Value(workId), html: html, plain: plain),
+          mode: InsertMode.insertOrIgnore);
+
+  /// Null when there are none, or when the feed's were nothing readable
+  /// (stored empty, so a refresh doesn't clean them again).
+  Future<WorkNote?> notesOf(int workId) async {
+    final n = await (select(workNotes)..where((n) => n.workId.equals(workId)))
+        .getSingleOrNull();
+    return n == null || n.html.isEmpty ? null : n;
   }
 
   Future<Set<String>> guidsOf(int feedId) async {
@@ -2693,9 +2930,13 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
     ];
   }
 
-  Future<void> setUrl(int feedId, String url) =>
-      (update(feeds)..where((f) => f.id.equals(feedId)))
-          .write(FeedsCompanion(url: Value(url)));
+  /// A permanent move: the row follows the show to [url], and keeps the
+  /// address it was first followed at (an earlier move's, if any).
+  Future<void> adoptUrl(int feedId, String url) => customUpdate(
+      'UPDATE feeds SET subscribed_url = COALESCE(subscribed_url, url), '
+      'url = ? WHERE id = ?',
+      variables: [Variable.withString(url), Variable.withInt(feedId)],
+      updates: {feeds});
 
   Future<void> setOrigin(int feedId, String origin) =>
       (update(feeds)..where((f) => f.id.equals(feedId)))
@@ -2798,14 +3039,18 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
   /// list of rows. A transcribed work keeps its place as a sentence
   /// (the cursor law), so that sentence is projected back to its start
   /// time and wins over any raw position left from before the transcript.
-  Future<({Map<int, int> progressMs, Set<int> transcribed})> listeningOf(
-      int profileId) async {
-    final progress = <int, int>{
-      for (final p in await (select(playerPositions)
-            ..where((p) => p.profileId.equals(profileId)))
-          .get())
-        p.workId: p.tMs,
-    };
+  Future<
+      ({
+        Map<int, int> progressMs,
+        Set<int> transcribed,
+        Map<int, int> fileIdx,
+      })> listeningOf(int profileId) async {
+    final players = await (select(playerPositions)
+          ..where((p) => p.profileId.equals(profileId)))
+        .get();
+    final progress = <int, int>{for (final p in players) p.workId: p.tMs};
+    // Which file an audiobook reached, from the same read.
+    final fileIdx = <int, int>{for (final p in players) p.workId: p.fileIdx};
     final aligned = selectOnly(alignments, distinct: true)
       ..addColumns([alignments.workId]);
     final transcribed = {
@@ -2822,7 +3067,7 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
       progress[r.readTable(positions).workId] =
           r.readTable(alignments).tStartMs;
     }
-    return (progressMs: progress, transcribed: transcribed);
+    return (progressMs: progress, transcribed: transcribed, fileIdx: fileIdx);
   }
 
   Future<void> markRead(int workId, int nowMs) =>
@@ -3129,7 +3374,7 @@ class HouseholdDao extends DatabaseAccessor<AppDatabase>
         Episodes, PlayerPositions, Courses, Cards, Revlog, JobsTable,
         WordLedger, HouseholdPin, Captures, DailyReviewCards, QueueTable,
         TranslationSentences, SavedViews, Audiobooks, AudiobookFiles,
-        ReadingDays, DeviceSettings],
+        ReadingDays, DeviceSettings, WorkNotes],
     daos: [ProfilesDao, SpineDao, FeedsDao, StudyDao, JobsDao, LedgerDao,
         HouseholdDao, CapturesDao, DailyReviewDao, QueueDao, LibraryDao,
         AudiobooksDao, DeviceSettingsDao])
@@ -3138,7 +3383,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 28;
+  int get schemaVersion => 29;
   // There is no v14: it was reserved for the reader-depth campaign, which
   // landed as v18 after three sibling campaigns merged ahead of it, so the
   // guard chain skips from 13 to 15. Version gaps are harmless — an
@@ -3436,13 +3681,18 @@ class AppDatabase extends _$AppDatabase {
           }
           if (from < 25) {
             // ADR-0016 section 4: the search index. Unconditional, since
-            // every table it reads exists by now; idempotent, since a file
-            // first made at the current schema already carries it.
-            await installSearchIndex(this);
+            // every table it reads exists by now; a rebuild, since a file
+            // first made at a later schema (every migration fixture)
+            // already carries an index of some shape.
+            await rebuildSearchIndex(this);
           }
           if (from < 26) {
             // ADR-0017: the first secondary indexes. The unique one needs
             // any twin rows folded first, which only a race could have made.
+            // The fold deletes works, and deleting a work clears its notes,
+            // so their v29 table must already exist (created IF NOT EXISTS;
+            // the v29 block's own create is then a no-op).
+            await m.createTable(workNotes);
             await _foldDuplicateEpisodes();
             await installIndexes(this);
             // Guarded like every feeds column: a from < 2 upgrade made
@@ -3473,6 +3723,46 @@ class AppDatabase extends _$AppDatabase {
             await customStatement('UPDATE feeds SET etag = NULL, '
                 'last_modified = NULL, body_hash = NULL');
           }
+          if (from < 29) {
+            // One transaction: drift writes user_version only after the
+            // hop, and SQLite's DDL is transactional, so a kill mid-hop
+            // (the background check runs it too, in an engine the system
+            // stops on a timer) leaves v28 as it was rather than a file
+            // whose next open fails on a column added twice.
+            await transaction(() async {
+              // 1.5.4: full show notes and the work page's language. Both
+              // unconditional: `works` is never created inside onUpgrade and
+              // `work_notes` is new.
+              await m.createTable(workNotes);
+              await m.addColumn(works, works.readLang);
+              await m.addColumn(works, works.lastMode);
+              await m.addColumn(works, works.lastModeAtMs);
+              // Guarded like every feeds column: the from < 2 block creates
+              // `feeds` fresh with this column already present.
+              if (from >= 2) {
+                await m.addColumn(feeds, feeds.subscribedUrl);
+                await m.addColumn(feeds, feeds.notesFillPending);
+              }
+              // The index is rebuilt whole: it stems now, show notes and
+              // post bodies join the items table, and followed shows get
+              // their own. Folded in here rather than a v30 of its own:
+              // 1.5.4 is still unreleased, and one schema bump per release
+              // keeps the hop count honest. The rebuild also replaces every
+              // v28 file's unguarded show trigger. It builds the tables and
+              // triggers only: SearchBackfill fills them once the app may
+              // write, and search answers by LIKE until then.
+              await rebuildSearchIndex(this);
+              // Stored items get their notes from a full parse of their
+              // feed, which an unchanged feed would skip (304, same hash).
+              // Forgetting every validator would refetch every show on the
+              // first refresh after the upgrade; each show is marked
+              // instead, and refreshes take a few at a time. Only empty
+              // notes are filled; nothing is replaced or removed.
+              await customStatement('UPDATE feeds SET notes_fill_pending = 1 '
+                  'WHERE EXISTS (SELECT 1 FROM episodes e '
+                  'WHERE e.feed_id = feeds.id AND e.enclosure_url IS NOT NULL)');
+            });
+          }
         },
         beforeOpen: (details) async {
           await customStatement('PRAGMA foreign_keys = ON');
@@ -3484,7 +3774,9 @@ class AppDatabase extends _$AppDatabase {
             await customSelect('PRAGMA journal_mode = WAL').get();
             await customStatement('PRAGMA synchronous = NORMAL');
           }
-          await customStatement('PRAGMA busy_timeout = 5000');
+          // The same wait configureConnection gives every connection;
+          // a smaller one here undid it for the writer once open.
+          await customStatement('PRAGMA busy_timeout = 15000');
         },
       );
 }

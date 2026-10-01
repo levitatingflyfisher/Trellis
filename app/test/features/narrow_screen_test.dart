@@ -135,6 +135,10 @@ void main() {
     await toTab(tester, 'Library'); // library list row + nav bar
 
     await tester.tap(find.textContaining('A Rather Longer Title'));
+    await tester.pumpAndSettle(); // the work page (1.5.4), at 320dp and 2x
+    await tester.ensureVisible(find.byKey(const Key('mode-read')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('mode-read')));
     await tester.pumpAndSettle(); // reader, RSVP (long word incoming)
 
     final rect = tester.getRect(find.byKey(const Key('reader-tapzone')));
@@ -149,6 +153,8 @@ void main() {
     await tester.tap(find.byKey(const Key('mode-item-scroll')));
     await tester.pumpAndSettle(); // scroll mode with heading + code tile
 
+    await tester.tap(find.byType(BackButton));
+    await tester.pumpAndSettle(); // back to the work page
     await tester.tap(find.byType(BackButton));
     await tester.pumpAndSettle(); // back through the library
 

@@ -21,9 +21,29 @@ class _PageGate extends QueryInterceptor {
   Completer<void>? hold;
   bool fail = false;
 
+  /// Holds the next read of the queue: a row's re-read after an action.
+  Completer<void>? holdQueue;
+
+  /// Holds the next text-size lookup: a landing page's sizes.
+  Completer<void>? holdSizes;
+
   @override
   Future<List<Map<String, Object?>>> runSelect(
       QueryExecutor executor, String statement, List<Object?> args) async {
+    if (statement.contains('"segments"') && statement.contains('GROUP BY')) {
+      final h = holdSizes;
+      if (h != null) {
+        holdSizes = null;
+        await h.future;
+      }
+    }
+    if (statement.contains('FROM "queue"')) {
+      final h = holdQueue;
+      if (h != null) {
+        holdQueue = null;
+        await h.future;
+      }
+    }
     if (statement.contains('"work_id" < ?')) {
       if (fail) {
         fail = false;
@@ -63,6 +83,9 @@ void main() {
           firstSeenEpochDay: 100);
       await db.feedsDao.insertEpisode(
           workId: id, feedId: feedId, guid: 'g$i', publishedAtMs: i * 1000);
+      // Enough text for a reading time on the row.
+      await db.spineDao.insertSegments(
+          id, [(idx: 0, kind: 'prose', text: 'Words on the marsh. ' * 80)]);
       ids[i] = id;
     }
     return ids;
@@ -80,13 +103,16 @@ void main() {
   }
 
   final list = find.byType(Scrollable).last;
+  // Every scroll here steps by less than a screen: a drag far past the
+  // end while the next page loads trips the stretch indicator's
+  // debug-only build-during-frame check (Flutter's, not the app's).
 
   testWidgets('scrolling reaches the oldest item, page after page',
       (tester) async {
     await seed(riverPageSize * 2 + 5);
     await openLatest(tester);
     expect(find.text('Item ${riverPageSize * 2 + 5}'), findsOneWidget);
-    await tester.scrollUntilVisible(find.text('Item 1'), 600,
+    await tester.scrollUntilVisible(find.text('Item 1'), 300,
         scrollable: list, maxScrolls: 400);
     expect(find.text('Item 1'), findsOneWidget);
   });
@@ -95,7 +121,7 @@ void main() {
       (tester) async {
     final ids = await seed(riverPageSize + 20);
     await openLatest(tester);
-    await tester.scrollUntilVisible(find.text('Item 5'), 600,
+    await tester.scrollUntilVisible(find.text('Item 5'), 300,
         scrollable: list, maxScrolls: 400);
     await tester.pumpAndSettle();
 
@@ -112,7 +138,7 @@ void main() {
       'position', (tester) async {
     await seed(riverPageSize + 20);
     await openLatest(tester);
-    await tester.scrollUntilVisible(find.text('Item 5'), 600,
+    await tester.scrollUntilVisible(find.text('Item 5'), 300,
         scrollable: list, maxScrolls: 400);
     await tester.pumpAndSettle();
     final y = tester.getTopLeft(find.text('Item 5')).dy;
@@ -131,7 +157,7 @@ void main() {
     await openLatest(tester);
     final release = gate.hold = Completer<void>();
     await tester.scrollUntilVisible(
-        find.byType(CircularProgressIndicator), 600,
+        find.byType(CircularProgressIndicator), 300,
         scrollable: list, maxScrolls: 400);
     await tester.pump();
     expect(gate.hold, isNull, reason: 'the page below is in flight');
@@ -146,7 +172,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 50));
     }
 
-    await tester.scrollUntilVisible(find.text('Item 1'), 600,
+    await tester.scrollUntilVisible(find.text('Item 1'), 300,
         scrollable: list, maxScrolls: 50);
     expect(find.text('Item 1'), findsOneWidget);
   });
@@ -157,14 +183,94 @@ void main() {
     await openLatest(tester);
     gate.fail = true;
     await tester.scrollUntilVisible(
-        find.byKey(const Key('river-more-retry')), 600,
+        find.byKey(const Key('river-more-retry')), 300,
         scrollable: list, maxScrolls: 400);
     expect(find.byType(CircularProgressIndicator), findsNothing);
 
     await tester.tap(find.byKey(const Key('river-more-retry')));
     await tester.pumpAndSettle();
-    await tester.scrollUntilVisible(find.text('Item 1'), 600,
+    await tester.scrollUntilVisible(find.text('Item 1'), 300,
         scrollable: list, maxScrolls: 50);
     expect(find.text('Item 1'), findsOneWidget);
+  });
+
+  group('a row re-read and a page landing merge, whichever comes first', () {
+    Future<void> markFinished(WidgetTester tester, int id) async {
+      // No pumpAndSettle: the footer's spinner never settles.
+      await tester.tap(find.byKey(Key('menu-$id')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+      await tester.tap(find.byKey(Key('mark-finished-$id')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 400));
+    }
+
+    Future<void> holdNextPage(WidgetTester tester) async {
+      await tester.scrollUntilVisible(
+          find.byType(CircularProgressIndicator), 300,
+          scrollable: list, maxScrolls: 400);
+      await tester.pump();
+    }
+
+    testWidgets('the re-read lands first: the page keeps its In Queue',
+        (tester) async {
+      final ids = await seed(riverPageSize + 5);
+      await openLatest(tester);
+      // The page's rows arrive; its sizes are held, so the re-read below
+      // lands in between.
+      final page = gate.holdSizes = Completer<void>();
+      await holdNextPage(tester);
+      expect(gate.holdSizes, isNull, reason: 'the page below is in flight');
+
+      // Item 6 is page one's last row, on screen by the spinner.
+      await db.queueDao
+          .playLast(profileId: 1, workId: ids[6]!, nowMs: 1);
+      await markFinished(tester, ids[6]!);
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(find.byKey(Key('queued-${ids[6]}')), findsOneWidget);
+
+      page.complete();
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(find.byKey(Key('queued-${ids[6]}')), findsOneWidget,
+          reason: 'the landing page must not put back an older state');
+      await tester.scrollUntilVisible(find.text('Item 1'), 300,
+          scrollable: list, maxScrolls: 50);
+      expect(find.textContaining('min\u00A0read'), findsWidgets);
+    });
+
+    testWidgets('the page lands first: the re-read keeps its reading times',
+        (tester) async {
+      final ids = await seed(riverPageSize + 5);
+      await openLatest(tester);
+      final page = gate.hold = Completer<void>();
+      await holdNextPage(tester);
+
+      final reread = gate.holdQueue = Completer<void>();
+      await markFinished(tester, ids[6]!);
+      await tester.pump();
+      expect(gate.holdQueue, isNull, reason: 'the re-read is in flight');
+
+      page.complete();
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      reread.complete();
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      await tester.scrollUntilVisible(find.text('Item 1'), 300,
+          scrollable: list, maxScrolls: 50);
+      await tester.pump();
+      final meta = find.descendant(
+          of: find.byKey(Key('swipe-${ids[1]}')),
+          matching: find.textContaining('min\u00A0read'));
+      expect(meta, findsOneWidget,
+          reason: 'page two’s sizes survive a re-read that started before '
+              'the page landed');
+    });
   });
 }

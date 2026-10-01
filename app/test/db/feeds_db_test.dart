@@ -8,6 +8,7 @@ import 'package:trellis/db/database.dart';
 import 'package:trellis/features/reader/reader_prefs.dart';
 
 import '../support/schema_strip.dart';
+import '../support/statement_counter.dart';
 
 /// The P2 feeds slice storage contract: feeds carry their refresh
 /// bookkeeping, every feed item IS a spine work (ADR-0002) with a small
@@ -388,6 +389,37 @@ void main() {
       expect(candidates.map((c) => c.workId), [a]);
     });
 
+    test('dedupCandidatesOf reads only the columns dedup compares',
+        () async {
+      final counter = StatementCounter();
+      final slim = AppDatabase.forTesting(
+          NativeDatabase.memory().interceptWith(counter));
+      addTearDown(slim.close);
+      final profileId = await slim.profilesDao.create('Ada');
+      final feedId = await slim.feedsDao
+          .insertFeed(profileId: profileId, url: 'https://a/f');
+      final w = await slim.spineDao.insertWork(
+          profileId: profileId,
+          kind: 'article',
+          title: 'a',
+          persistence: 'ephemeron',
+          firstSeenEpochDay: 1,
+          sourceUrl: 'https://a/1');
+      await slim.feedsDao.insertEpisode(
+          workId: w, feedId: feedId, guid: 'g', publishedAtMs: 5);
+      counter.calls.clear();
+      final rows = await slim.feedsDao.dedupCandidatesOf(profileId);
+      expect(rows.single,
+          (workId: w, feedId: feedId, sourceUrl: 'https://a/1', title: 'a',
+              publishedAtMs: 5));
+      final sql = counter.calls.single;
+      // 25k rows on a real profile: every other column was mapped for
+      // nothing.
+      for (final unused in ['persistence', 'enclosure_url', 'guid']) {
+        expect(sql, isNot(contains(unused)), reason: unused);
+      }
+    });
+
     test('setDedup then clearDedup round-trips both fields', () async {
       final profileId = await seedProfile();
       final feedId =
@@ -406,6 +438,46 @@ void main() {
       episode = await db.feedsDao.episodeOf(b);
       expect(episode!.dedupReason, isNull);
       expect(episode.duplicateOfWorkId, isNull);
+    });
+  });
+
+  group('episodeArtworkOf (what a refresh fetches up front)', () {
+    test('the newest distinct images, the show\'s own left out, capped',
+        () async {
+      final profileId = await seedProfile();
+      final feedId =
+          await db.feedsDao.insertFeed(profileId: profileId, url: 'https://a/f');
+      Future<void> ep(String title, int at, String? image) async {
+        final w = await db.spineDao.insertWork(
+            profileId: profileId,
+            kind: 'episode',
+            title: title,
+            persistence: 'ephemeron',
+            firstSeenEpochDay: 1);
+        await db.feedsDao.insertEpisode(
+            workId: w,
+            feedId: feedId,
+            guid: title,
+            enclosureUrl: 'https://a/$title.mp3',
+            imageUrl: image,
+            publishedAtMs: at);
+      }
+
+      await ep('old', 1, 'https://img/shared');
+      await ep('show', 2, 'https://img/show');
+      await ep('none', 3, null);
+      await ep('mid', 4, 'https://img/mid');
+      await ep('new', 5, 'https://img/shared');
+      expect(
+          await db.feedsDao.episodeArtworkOf(feedId,
+              except: 'https://img/show', limit: 20),
+          ['https://img/shared', 'https://img/mid']);
+      expect(
+          await db.feedsDao.episodeArtworkOf(feedId,
+              except: 'https://img/show', limit: 1),
+          ['https://img/shared']);
+      expect(await db.feedsDao.episodeArtworkOf(feedId, limit: 20),
+          ['https://img/shared', 'https://img/mid', 'https://img/show']);
     });
   });
 

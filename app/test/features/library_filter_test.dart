@@ -2,6 +2,7 @@ import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart' hide Alignment;
+import 'package:trellis/features/search/search_store.dart';
 import 'package:trellis/main.dart';
 import '../support/pick_reader.dart';
 import '../support/tabs.dart';
@@ -77,7 +78,7 @@ void main() {
       (tester) async {
     final profileId = await seedProfile();
     await seedWork(
-        profileId: profileId, kind: 'book', title: 'Pinned', pinned: true);
+        profileId: profileId, kind: 'book', title: 'Kept close', pinned: true);
     await seedWork(profileId: profileId, kind: 'book', title: 'Not pinned');
     await pumpApp(tester);
 
@@ -86,7 +87,7 @@ void main() {
     await tester.tap(find.byKey(const Key('filter-pinned-only')));
     await tester.pump();
 
-    expect(find.text('Pinned'), findsOneWidget);
+    expect(find.text('Kept close'), findsOneWidget);
     expect(find.text('Not pinned'), findsNothing);
   });
 
@@ -100,9 +101,57 @@ void main() {
     await tester.tap(find.byKey(const Key('open-filter')));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('filter-search')), 'aurora');
-    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pumpAndSettle();
 
     expect(find.text('Aurora season'), findsOneWidget);
+    expect(find.text('Perseid peak'), findsNothing);
+  });
+
+  testWidgets('search is the same engine as Latest\'s, kept to the Library: '
+      'a word in a kept episode\'s notes finds it, in another form',
+      (tester) async {
+    final profileId = await seedProfile();
+    final feed = await db.feedsDao.insertFeed(
+        profileId: profileId, url: 'https://c.test/f', title: 'Coastal');
+    Future<int> episode(String title, {required bool kept}) async {
+      final id = await db.spineDao.insertWork(
+          profileId: profileId,
+          kind: 'episode',
+          title: title,
+          persistence: kept ? 'work' : 'ephemeron',
+          firstSeenEpochDay: 100);
+      await db.feedsDao.insertEpisode(
+          workId: id,
+          feedId: feed,
+          guid: title,
+          enclosureUrl: 'https://c.test/$title.mp3',
+          publishedAtMs: 1);
+      await db.feedsDao.fillNotes(id,
+          html: '<p>lighthouses</p>', plain: 'All about lighthouses.');
+      return id;
+    }
+
+    await episode('Kept one', kept: true);
+    await episode('Passing one', kept: false);
+    await seedWork(profileId: profileId, kind: 'book', title: 'Perseid peak');
+    final everywhere = await SearchStore(db).search(profileId, 'lighthouse');
+    expect({for (final i in everywhere.items) i.work.title},
+        {'Kept one', 'Passing one'});
+    await pumpApp(tester);
+
+    await tester.tap(find.byKey(const Key('open-filter')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+        find.byKey(const Key('filter-search')), 'lighthouse');
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('filter-sheet-done')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Kept one'), findsOneWidget);
+    expect(find.text('Passing one'), findsNothing,
+        reason: 'the Library holds only what was kept');
     expect(find.text('Perseid peak'), findsNothing);
   });
 

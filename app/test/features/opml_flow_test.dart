@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:comms_core/comms_core.dart' as comms;
+import 'package:drift/drift.dart' show ApplyInterceptor;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -10,6 +11,7 @@ import 'package:trellis/features/feeds/feeds_repository.dart';
 import 'package:trellis/features/feeds/feeds_screen.dart';
 
 import '../support/scripted_fetcher.dart';
+import '../support/statement_counter.dart';
 
 const _rss = '''
 <?xml version="1.0" encoding="UTF-8"?>
@@ -46,6 +48,14 @@ const _opmlThreeWithRepeat = '''
     <outline type="rss" text="Third Cast" xmlUrl="https://third.test/feed"/>
   </body>
 </opml>
+''';
+
+/// A synthetic list of [n] made-up shows.
+String _opmlOf(int n) => '''
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0"><head><title>subs</title></head><body>
+${[for (var i = 0; i < n; i++) '<outline type="rss" text="Show $i" xmlUrl="https://s$i.test/feed"/>'].join('\n')}
+</body></opml>
 ''';
 
 /// OPML both ways through the feeds screen, with the platform file seams
@@ -140,6 +150,54 @@ void main() {
     expect(await db.feedsDao.feedsOf(profile.id), hasLength(2));
   });
 
+  testWidgets('a file of shows all already followed says how many, and '
+      'Show them lists just those', (tester) async {
+    for (final (url, title) in [
+      ('https://cast.test/feed', 'Night Sky'),
+      ('https://second.test/feed', 'Second Cast'),
+      ('https://other.test/feed', 'Not In The File'),
+    ]) {
+      await db.feedsDao
+          .insertFeed(profileId: profile.id, url: url, title: title);
+    }
+    final fetcher = ScriptedFetcher((u, h) => textResponse(_rss));
+    await pumpFeeds(tester,
+        fetcher: fetcher, opmlToPick: utf8.encode(_opmlTwo));
+
+    await tester.tap(find.byKey(const Key('opml-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Import OPML'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Already following all 2.'), findsOneWidget);
+    expect(fetcher.calls, isEmpty);
+    await tester.tap(find.widgetWithText(SnackBarAction, 'Show them'));
+    await tester.pumpAndSettle();
+    expect(find.text('Night Sky'), findsOneWidget);
+    expect(find.text('Second Cast'), findsOneWidget);
+    expect(find.text('Not In The File'), findsNothing);
+    final chip = find.byKey(const Key('from-file-chip'));
+    expect(find.descendant(of: chip, matching: find.text('From that file 2')),
+        findsOneWidget);
+    // Letting the chip go brings every show back.
+    await tester.tap(find.byTooltip('Show every show'));
+    await tester.pumpAndSettle();
+    expect(find.text('Not In The File'), findsOneWidget);
+  });
+
+  testWidgets('a file whose addresses are all blank says so, not "all 0"',
+      (tester) async {
+    await pumpFeeds(tester,
+        fetcher: ScriptedFetcher((u, h) => textResponse(_rss)),
+        opmlToPick: utf8.encode('<opml version="2.0"><body>'
+            '<outline text="Nothing" xmlUrl="   "/></body></opml>'));
+    await tester.tap(find.byKey(const Key('opml-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Import OPML'));
+    await tester.pumpAndSettle();
+    expect(find.text('No feed URLs found in that file.'), findsOneWidget);
+  });
+
   testWidgets('a long import lists every new feed at once, shows how far '
       'it has got, and counts the ones that could not be reached', (
     tester,
@@ -188,6 +246,112 @@ void main() {
     );
     expect(await db.feedsDao.feedsOf(profile.id), hasLength(3),
         reason: 'the repeated outline was followed once');
+  });
+
+  testWidgets('going to the background stops the import: what is in '
+      'flight finishes, nothing new starts, and the toast says so', (
+    tester,
+  ) async {
+    final gates = <Completer<comms.FetchResponse>>[];
+    final fetcher = ScriptedFetcher((u, h) {
+      final gate = Completer<comms.FetchResponse>();
+      gates.add(gate);
+      return gate.future;
+    });
+    await pumpFeeds(tester,
+        fetcher: fetcher, opmlToPick: utf8.encode(_opmlOf(8)));
+    await tester.tap(find.byKey(const Key('opml-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Import OPML'));
+    for (var i = 0; i < 50 && gates.length < 4; i++) {
+      await tester.pump();
+    }
+    expect(gates, hasLength(4), reason: 'four at a time');
+
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    for (final g in gates) {
+      g.complete(textResponse(_rss));
+    }
+    await tester.pumpAndSettle();
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    await tester.pumpAndSettle();
+
+    expect(fetcher.calls, hasLength(4));
+    expect(find.byKey(const Key('opml-import-progress')), findsNothing);
+    expect(
+        find.text('Following 8 new feeds. 4 aren’t checked yet; the next '
+            'refresh checks them.'),
+        findsOneWidget);
+  });
+
+  testWidgets('the system file picker hiding the app does not stop the '
+      'import it is picking for', (tester) async {
+    final fetcher = ScriptedFetcher((u, h) => textResponse(_rss));
+    await tester.pumpWidget(MaterialApp(
+        home: FeedsScreen(
+            db: db,
+            repository: FeedsRepository(db: db, fetcher: fetcher),
+            profile: profile,
+            // On Android the picker is its own activity: the app goes
+            // to the background and back before the file arrives.
+            pickOpmlBytes: () async {
+              final b = tester.binding;
+              b.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+              b.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+              b.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+              b.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+              b.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+              b.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+              return utf8.encode(_opmlOf(6));
+            })));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('opml-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Import OPML'));
+    await tester.pumpAndSettle();
+    expect(fetcher.calls, hasLength(6));
+    expect(find.text('Following 6 new feeds.'), findsOneWidget);
+  });
+
+  testWidgets('leaving Subscriptions stops the import', (tester) async {
+    final gates = <Completer<comms.FetchResponse>>[];
+    final fetcher = ScriptedFetcher((u, h) {
+      final gate = Completer<comms.FetchResponse>();
+      gates.add(gate);
+      return gate.future;
+    });
+    await tester.pumpWidget(MaterialApp(
+        home: Builder(
+            builder: (context) => TextButton(
+                onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                        builder: (_) => FeedsScreen(
+                            db: db,
+                            repository:
+                                FeedsRepository(db: db, fetcher: fetcher),
+                            profile: profile,
+                            pickOpmlBytes: () async =>
+                                utf8.encode(_opmlOf(8))))),
+                child: const Text('open')))));
+    await tester.tap(find.text('open'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('opml-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Import OPML'));
+    for (var i = 0; i < 50 && gates.length < 4; i++) {
+      await tester.pump();
+    }
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    for (final g in gates) {
+      g.complete(textResponse(_rss));
+    }
+    await tester.pumpAndSettle();
+    expect(fetcher.calls, hasLength(4));
+    expect(await db.feedsDao.feedsOf(profile.id), hasLength(8),
+        reason: 'the follows themselves stay');
   });
 
   testWidgets('one unreachable feed gets the singular sentence', (
@@ -568,4 +732,74 @@ void main() {
       expect(await db.profilesDao.dspGlobalDefault(profile.id), isFalse);
     });
   });
+
+  group('a big import', () {
+    late StatementCounter counter;
+    late AppDatabase big;
+    late Profile reader;
+    setUp(() async {
+      counter = StatementCounter();
+      big = AppDatabase.forTesting(
+          NativeDatabase.memory().interceptWith(counter));
+      await big.profilesDao.create('Ada');
+      reader = (await big.profilesDao.all()).single;
+    });
+    tearDown(() => big.close());
+
+
+    testWidgets('118 progress beats reload the list a handful of times, not '
+        'once a beat', (tester) async {
+      final repo = _BeatingRepository(big);
+      await tester.pumpWidget(MaterialApp(
+          home: FeedsScreen(
+              db: big,
+              repository: repo,
+              profile: reader,
+              // Synthetic: 118 made-up shows, the size of one listener's list.
+              pickOpmlBytes: () async => utf8.encode(_opmlOf(118)))));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('opml-menu')));
+      await tester.pumpAndSettle();
+      counter.calls.clear();
+      await tester.tap(find.text('Import OPML'));
+      for (var i = 0; i < 400 && repo.beats < 118; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      await tester.pumpAndSettle();
+      expect(repo.beats, 118);
+      expect(find.text('Following 118 new feeds.'), findsOneWidget);
+      // feedsOf, the list's own read (not the follow's per-URL checks).
+      final reloads = counter.selectsMatching(
+          RegExp(r'FROM "feeds" WHERE "profile_id" = \? ORDER BY'));
+      expect(reloads, lessThanOrEqualTo(10), reason: '$reloads list reads');
+      // No books, so the books' row facts are never read.
+      expect(counter.selectsMatching('queue'), 0);
+    });
+  });
+}
+
+/// Follows for real, then reports 118 progress beats 20 ms apart without
+/// fetching anything.
+class _BeatingRepository extends FeedsRepository {
+  _BeatingRepository(AppDatabase db)
+      : super(db: db, fetcher: ScriptedFetcher((u, h) => textResponse('')));
+
+  var beats = 0;
+
+  @override
+  Future<Map<int, RefreshOutcome>> refreshMany(List<Feed> feeds,
+      {bool force = false,
+      int maxConcurrent = 4,
+      int maxPerHost = 2,
+      void Function(int done, int total)? onProgress,
+      bool Function()? shouldStop}) async {
+    for (var i = 0; i < feeds.length; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      beats++;
+      onProgress?.call(i + 1, feeds.length);
+    }
+    return {
+      for (final f in feeds) f.id: (status: RefreshStatus.fresh, newItems: 0)
+    };
+  }
 }

@@ -43,17 +43,20 @@ void main() {
           readAtMs: readAtMs,
           archivedAtMs: null);
 
-  group('text search — matches the title, case-insensitive', () {
-    test('a substring match passes', () {
+  group('text search: the search engine\'s matches, by work id', () {
+    test('a work the engine matched passes', () {
       final e = (work: work(title: 'Attention Sovereignty'), episode: null, feedTitle: null);
       expect(
-          matchesLibraryQuery(e, const LibraryQuery(textSearch: 'sovereignty')),
+          matchesLibraryQuery(e, const LibraryQuery(textSearch: 'sovereign'),
+              textMatches: {e.work.id}),
           isTrue);
     });
 
-    test('no match fails', () {
+    test('a work it did not match fails, whatever its title holds', () {
       final e = (work: work(title: 'Attention Sovereignty'), episode: null, feedTitle: null);
-      expect(matchesLibraryQuery(e, const LibraryQuery(textSearch: 'xyz')),
+      expect(
+          matchesLibraryQuery(e, const LibraryQuery(textSearch: 'sovereignty'),
+              textMatches: const {}),
           isFalse);
     });
 
