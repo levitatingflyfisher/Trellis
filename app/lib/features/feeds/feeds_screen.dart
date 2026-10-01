@@ -24,6 +24,7 @@ import 'feed_settings_screen.dart';
 import 'feeds_repository.dart';
 import 'subscribe_screen.dart';
 import '../shared/capped_body.dart';
+import '../shared/coalesced_reload.dart';
 
 /// The platform seams for OPML files — injectable so widget tests never
 /// touch a platform channel. Pure parsing/serialization is comms_core's.
@@ -138,6 +139,10 @@ class _FeedsScreenState extends State<FeedsScreen> {
 
   /// Each followed show's artwork that is on disk, by feed id.
   Map<int, File> _art = const {};
+
+  /// Import progress beats once per feed; this folds those into one
+  /// reload at a time.
+  late final _reloads = CoalescedReload(_load);
 
   Future<void> _load() async {
     final profileId = widget.profile.id;
@@ -271,7 +276,7 @@ class _FeedsScreenState extends State<FeedsScreen> {
       onProgress: (done, total) {
         if (!mounted) return;
         setState(() => _importProgress = (done: done, total: total));
-        _load();
+        _reloads.request();
       },
     );
     final wanted = {for (final f in added) f.id};

@@ -652,10 +652,13 @@ class FeedsRepository {
   Future<void> _runDedupPass(int profileId) async {
     final candidates = await db.feedsDao.dedupCandidatesOf(profileId);
     final verdicts = findDuplicates(candidates);
-    for (final entry in verdicts.entries) {
-      await db.feedsDao.setDedup(entry.key,
-          reason: entry.value.reason,
-          canonicalWorkId: entry.value.canonicalWorkId);
-    }
+    // One commit, not one per verdict: a first import can carry thousands.
+    await db.transaction(() async {
+      for (final entry in verdicts.entries) {
+        await db.feedsDao.setDedup(entry.key,
+            reason: entry.value.reason,
+            canonicalWorkId: entry.value.canonicalWorkId);
+      }
+    });
   }
 }

@@ -19,6 +19,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:jobs_core/jobs_core.dart';
 import 'package:ml_runtime/ml_runtime.dart';
 import 'package:transcribe_core/transcribe_core.dart';
@@ -175,9 +176,10 @@ Future<TranscribeOutcome> _runCore({
   required void Function(TranscribeProgress) onProgress,
   required CancelToken cancelToken,
 }) async {
+  final transcriber = spec.engine.build();
   final task = TranscribeEpisodeTask(
     source: FilePcmSource(File(spec.pcmPath)),
-    transcriber: spec.engine.build(),
+    transcriber: transcriber,
     task: spec.task,
     lang: spec.lang,
     plan: WindowPlan(windowMs: spec.windowMs, overlapMs: spec.overlapMs),
@@ -213,11 +215,22 @@ Future<TranscribeOutcome> _runCore({
     onProgress: (p) => onProgress(TranscribeProgress(
         doneUnits: p.doneUnits, totalUnits: p.totalUnits, etaMs: p.etaMs)),
   );
+  final startedUnits = existing?.doneUnits ?? 0;
+  final clock = Stopwatch()..start();
   final row = await runner.run(
       jobId: spec.jobId,
       kind: 'transcribe',
       task: task,
       cancelToken: cancelToken);
+  if (transcriber is WhisperTranscriber) {
+    // One logcat line per run, so a pasted phone log carries the speed
+    // the device actually achieved (an emulator can't stand in for one).
+    final windows = row.doneUnits - startedUnits;
+    final perWindow = windows > 0 ? clock.elapsedMilliseconds ~/ windows : 0;
+    debugPrint('Trellis transcribe: $windows windows, $perWindow ms each, '
+        'threads ${transcriber.threads}, lang ${spec.lang ?? 'auto'}, '
+        '${spec.task.name}, ${row.state.name}');
+  }
   return TranscribeOutcome(
       row.state, row.state == JobState.done ? task.buildResult() : null);
 }

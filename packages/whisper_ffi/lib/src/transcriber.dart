@@ -9,6 +9,7 @@ import 'package:ffi/ffi.dart';
 import 'package:ml_runtime/ml_runtime.dart';
 
 import 'bindings.dart';
+import 'threads.dart';
 
 /// A whisper engine failure (model load or inference), carrying the reason.
 class WhisperException implements Exception {
@@ -38,8 +39,8 @@ class WhisperTranscriber implements Transcriber {
   final WhisperBindings bindings;
   final String modelPath;
 
-  /// Whisper's own worker threads per inference; defaults to cores − 1
-  /// (floored at 1), per the ML plan.
+  /// Whisper's own worker threads per inference; defaults to
+  /// [defaultWhisperThreads].
   final int threads;
 
   /// Maps to `whisper_full_params.no_context`. On (the default), each
@@ -53,7 +54,7 @@ class WhisperTranscriber implements Transcriber {
     required this.modelPath,
     int? threads,
     this.noContext = true,
-  }) : threads = threads ?? math.max(1, Platform.numberOfProcessors - 1) {
+  }) : threads = threads ?? defaultWhisperThreads() {
     if (this.threads < 1) {
       throw ArgumentError.value(threads, 'threads', 'must be >= 1');
     }
@@ -193,4 +194,24 @@ class WhisperTranscriber implements Transcriber {
     flush();
     return words;
   }
+}
+
+/// [whisperThreadsFor] this device, reading each core's top frequency from
+/// Linux's cpufreq (Android included); where that can't be read the cores
+/// count as uniform.
+int defaultWhisperThreads() {
+  final cores = Platform.numberOfProcessors;
+  final freqs = <int>[];
+  try {
+    for (var i = 0; i < cores; i++) {
+      final f = File(
+          '/sys/devices/system/cpu/cpu$i/cpufreq/cpuinfo_max_freq');
+      final khz = int.tryParse(f.readAsStringSync().trim());
+      if (khz == null) break;
+      freqs.add(khz);
+    }
+  } on FileSystemException {
+    // Not Linux, or cpufreq hidden: the uniform fallback applies.
+  }
+  return whisperThreadsFor(cores: cores, maxFreqsKhz: freqs);
 }

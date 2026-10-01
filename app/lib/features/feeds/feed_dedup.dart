@@ -44,26 +44,53 @@ String _normalizeTitle(String title) =>
 /// suppressed (younger) workId to its verdict — reason and the
 /// canonical (older) workId it duplicates. Candidates absent from the
 /// result are not suppressed.
+///
+/// The result is what an all-pairs loop gives — each younger item takes
+/// the verdict of its first matching pair in (i, j) list order — but only
+/// pairs that share a canonical URL or a normalized title are ever
+/// compared, so the cost follows the duplicates, not the river squared.
+/// (The all-pairs loop took minutes over a 20,000-item OPML import and
+/// Android killed the app as not responding.)
 Map<int, DedupVerdict> findDuplicates(List<DedupCandidate> candidates) {
-  final suppressed = <int, DedupVerdict>{};
+  final byUrl = <String, List<int>>{};
+  final byTitle = <String, List<int>>{};
   for (var i = 0; i < candidates.length; i++) {
-    for (var j = i + 1; j < candidates.length; j++) {
-      final a = candidates[i];
-      final b = candidates[j];
-      if (a.feedId == b.feedId) continue; // reposts are the author's choice
-
-      final reason = _matchReason(a, b);
-      if (reason == null) continue;
-
-      final aIsYounger = a.publishedAtMs != b.publishedAtMs
-          ? a.publishedAtMs > b.publishedAtMs
-          : a.workId > b.workId;
-      final younger = aIsYounger ? a : b;
-      final older = aIsYounger ? b : a;
-      suppressed.putIfAbsent(
-          younger.workId,
-          () => (reason: reason, canonicalWorkId: older.workId));
+    final url = candidates[i].sourceUrl;
+    if (url != null && url.isNotEmpty) {
+      (byUrl[canonicalizeForDedup(url)] ??= []).add(i);
     }
+    final title = _normalizeTitle(candidates[i].title);
+    if (title.isNotEmpty) (byTitle[title] ??= []).add(i);
+  }
+
+  // Each pair once, as i * n + j, whichever key brought it here.
+  final n = candidates.length;
+  final pairs = <int>{};
+  for (final group in [...byUrl.values, ...byTitle.values]) {
+    for (var x = 0; x < group.length; x++) {
+      for (var y = x + 1; y < group.length; y++) {
+        final i = group[x], j = group[y];
+        if (candidates[i].feedId == candidates[j].feedId) continue;
+        pairs.add(i * n + j);
+      }
+    }
+  }
+
+  final suppressed = <int, DedupVerdict>{};
+  for (final key in pairs.toList()..sort()) {
+    final a = candidates[key ~/ n];
+    final b = candidates[key % n];
+    final reason = _matchReason(a, b);
+    if (reason == null) continue;
+
+    final aIsYounger = a.publishedAtMs != b.publishedAtMs
+        ? a.publishedAtMs > b.publishedAtMs
+        : a.workId > b.workId;
+    final younger = aIsYounger ? a : b;
+    final older = aIsYounger ? b : a;
+    suppressed.putIfAbsent(
+        younger.workId,
+        () => (reason: reason, canonicalWorkId: older.workId));
   }
   return suppressed;
 }

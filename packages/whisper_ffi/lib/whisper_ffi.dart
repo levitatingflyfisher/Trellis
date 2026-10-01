@@ -22,3 +22,4 @@ export 'src/bindings.dart'
     if (dart.library.js_interop) 'src/unsupported.dart';
 export 'src/transcriber.dart'
     if (dart.library.js_interop) 'src/unsupported.dart';
+export 'src/threads.dart';

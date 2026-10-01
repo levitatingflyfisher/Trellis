@@ -1,3 +1,6 @@
+import 'dart:math';
+
+import 'package:comms_core/comms_core.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/features/feeds/feed_dedup.dart';
 
@@ -178,4 +181,83 @@ void main() {
     expect(result[2]!.canonicalWorkId, 1);
     expect(result[3]!.canonicalWorkId, 1);
   });
+
+  group('at the size of a real OPML import', () {
+    // 117 feeds with back catalogues came to about 20,000 river items; the
+    // all-pairs pass took minutes on the UI isolate and Android killed
+    // the app as not responding.
+    test('20,000 items resolve in well under a second', () {
+      final items = [
+        for (var i = 0; i < 20000; i++)
+          c(
+              workId: i,
+              feedId: i % 117,
+              sourceUrl: 'https://host${i % 117}.test/ep/$i?utm_source=x',
+              title: 'Episode $i',
+              publishedAtMs: i * hour),
+        c(workId: 90001, feedId: 500, sourceUrl: 'https://host3.test/ep/3',
+            publishedAtMs: 10 * day),
+        c(workId: 90002, feedId: 501, title: 'episode  7',
+            publishedAtMs: 7 * hour + hour),
+      ];
+      final clock = Stopwatch()..start();
+      final result = findDuplicates(items);
+      expect(clock.elapsedMilliseconds, lessThan(1000));
+      expect(result.keys.toSet(), {90001, 90002});
+      expect(result[90001]!.canonicalWorkId, 3);
+      expect(result[90002]!.canonicalWorkId, 7);
+    });
+
+    test('agrees with the all-pairs definition on mixed, colliding input',
+        () {
+      final rng = Random(7);
+      for (var round = 0; round < 30; round++) {
+        final items = [
+          for (var i = 0; i < 120; i++)
+            c(
+                workId: rng.nextInt(1000),
+                feedId: rng.nextInt(4),
+                sourceUrl: switch (rng.nextInt(4)) {
+                  0 => null,
+                  1 => '',
+                  _ => 'https://h.test/${rng.nextInt(15)}'
+                      '${rng.nextBool() ? '?utm_medium=a' : ''}',
+                },
+                title: '${rng.nextBool() ? 'T' : 't'}itle '
+                    '${rng.nextInt(10)}${rng.nextBool() ? '  ' : ''}',
+                publishedAtMs: rng.nextInt(6) * day),
+        ];
+        expect(findDuplicates(items), _allPairs(items), reason: 'round $round');
+      }
+    });
+  });
+}
+
+/// The definition, written as the obvious all-pairs loop: for each
+/// younger item, the verdict of the first matching pair in (i, j) order.
+Map<int, DedupVerdict> _allPairs(List<DedupCandidate> cs) {
+  String norm(String t) => t.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+  final out = <int, DedupVerdict>{};
+  for (var i = 0; i < cs.length; i++) {
+    for (var j = i + 1; j < cs.length; j++) {
+      final a = cs[i], b = cs[j];
+      if (a.feedId == b.feedId) continue;
+      String? reason;
+      final au = a.sourceUrl, bu = b.sourceUrl;
+      if (au != null && au.isNotEmpty && bu != null && bu.isNotEmpty &&
+          canonicalizeForDedup(au) == canonicalizeForDedup(bu)) {
+        reason = 'url';
+      } else if (norm(a.title).isNotEmpty && norm(a.title) == norm(b.title) &&
+          (a.publishedAtMs - b.publishedAtMs).abs() <= 48 * 60 * 60 * 1000) {
+        reason = 'title';
+      }
+      if (reason == null) continue;
+      final aYounger = a.publishedAtMs != b.publishedAtMs
+          ? a.publishedAtMs > b.publishedAtMs
+          : a.workId > b.workId;
+      out.putIfAbsent((aYounger ? a : b).workId,
+          () => (reason: reason!, canonicalWorkId: (aYounger ? b : a).workId));
+    }
+  }
+  return out;
 }
