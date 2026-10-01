@@ -163,6 +163,11 @@ class ReaderScreen extends StatefulWidget {
   /// shows nothing.
   final bool offerRecap;
 
+  /// Opens at this segment instead of the saved place (a search hit).
+  /// The saved place is left alone until the reader moves from here, so
+  /// a look at a match never costs the reader where they were.
+  final int? startSegmentIdx;
+
   const ReaderScreen(
       {super.key,
       required this.db,
@@ -178,7 +183,8 @@ class ReaderScreen extends StatefulWidget {
       this.player,
       this.resolveTranslator,
       this.availableTranslationTargets,
-      this.offerRecap = false});
+      this.offerRecap = false,
+      this.startSegmentIdx});
 
   @override
   State<ReaderScreen> createState() => _ReaderScreenState();
@@ -189,6 +195,13 @@ class _ReaderScreenState extends State<ReaderScreen>
   List<core.Segment>? _blocks;
   core.TokenizedDocument? _doc;
   int _wordIdx = 0;
+
+  /// Where a search hit opened the reader; null otherwise. Saving waits
+  /// until the cursor leaves it (see [ReaderScreen.startSegmentIdx]).
+  int? _hitWordIdx;
+
+  /// Whether [ReaderScreen.startSegmentIdx] still applies to a load.
+  bool _startPending = true;
   ReaderMode _mode = ReaderMode.rsvp;
   int _scrollAnchor = 0; // segment the scroll view opens around
 
@@ -456,7 +469,20 @@ class _ReaderScreenState extends State<ReaderScreen>
     final saved = await widget.db.spineDao
         .position(profileId: widget.profileId, workId: widget.work.id);
     var wordIdx = 0;
-    if (saved != null && doc.words.isNotEmpty) {
+    // One-shot: once the cursor has left the hit, a reload (a language
+    // change) goes back to the saved place like any other.
+    if (_hitWordIdx != null && _wordIdx != _hitWordIdx) {
+      _startPending = false;
+      _hitWordIdx = null;
+    }
+    final start = _startPending ? widget.startSegmentIdx : null;
+    if (start != null && doc.words.isNotEmpty) {
+      final blockPos = blocks.indexWhere((b) => b.idx == start);
+      if (blockPos >= 0) {
+        wordIdx = globalWordIndex(doc, blockPos, 0);
+        _hitWordIdx = wordIdx;
+      }
+    } else if (saved != null && doc.words.isNotEmpty) {
       var blockPos = blocks.indexWhere((b) => b.idx == saved.segmentIdx);
       if (blockPos < 0) blockPos = 0;
       wordIdx = globalWordIndex(doc, blockPos, saved.wordIdx);
@@ -613,6 +639,11 @@ class _ReaderScreenState extends State<ReaderScreen>
     final doc = _doc;
     final blocks = _blocks;
     if (doc == null || blocks == null || doc.words.isEmpty) return;
+    if (_hitWordIdx != null) {
+      if (_hitWordIdx == _wordIdx) return;
+      _hitWordIdx = null;
+      _startPending = false;
+    }
     final c = cursorAt(doc, _wordIdx);
     await widget.db.spineDao.savePosition(
         profileId: widget.profileId,

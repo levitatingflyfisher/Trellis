@@ -6,6 +6,7 @@ import 'package:loom_core/loom_core.dart' as core;
 import 'package:study_core/study_core.dart' as study;
 
 import '../features/reader/reader_prefs.dart';
+import 'search_index.dart';
 
 part 'database.g.dart';
 
@@ -3011,7 +3012,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 24;
+  int get schemaVersion => 25;
   // There is no v14: it was reserved for the reader-depth campaign, which
   // landed as v18 after three sibling campaigns merged ahead of it, so the
   // guard chain skips from 13 to 15. Version gaps are harmless — an
@@ -3026,6 +3027,11 @@ class AppDatabase extends _$AppDatabase {
 
   @override
   MigrationStrategy get migration => MigrationStrategy(
+        onCreate: (m) async {
+          await m.createAll();
+          // drift's createAll knows nothing of virtual tables or triggers.
+          await installSearchIndex(this);
+        },
         onUpgrade: (m, from, to) async {
           if (from < 2) {
             // P2: feeds + river metadata + the no-alignments player fallback.
@@ -3272,6 +3278,12 @@ class AppDatabase extends _$AppDatabase {
                 AND NOT EXISTS (SELECT 1 FROM episodes
                   WHERE feed_id = feeds.id AND enclosure_url IS NOT NULL)
             ''');
+          }
+          if (from < 25) {
+            // ADR-0016 section 4: the search index. Unconditional, since
+            // every table it reads exists by now; idempotent, since a file
+            // first made at the current schema already carries it.
+            await installSearchIndex(this);
           }
         },
         beforeOpen: (details) async {

@@ -11,7 +11,10 @@ import '../../db/database.dart';
 import '../../services/picked_save.dart';
 import '../dsp/dsp_coordinator.dart';
 import '../player/player_controller.dart';
+import '../episodes/episode_actions.dart';
 import '../reader/reader_doors.dart';
+import '../search/search_entry.dart';
+import '../search/search_screen.dart';
 import 'episode_download_coordinator.dart';
 import 'feed_detail_screen.dart';
 import 'feed_ingest.dart';
@@ -338,6 +341,9 @@ class _FeedsScreenState extends State<FeedsScreen> {
                 label: const Text('Follow'),
               ),
         body: CappedBody(child: Column(children: [
+          if (feeds != null && !empty)
+            SearchEntry(
+                key: const Key('feeds-search'), onPressed: _openSearch),
           if (_importProgress case final p?) _ImportProgress(progress: p),
           Expanded(child: switch (feeds) {
             null => const Center(child: CircularProgressIndicator()),
@@ -380,6 +386,24 @@ class _FeedsScreenState extends State<FeedsScreen> {
         for (final b in _books) _bookTile(b),
       ],
     ];
+  }
+
+  Future<void> _openSearch() async {
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+        builder: (_) => SearchScreen(
+            doors: SearchDoors(
+                db: widget.db,
+                profile: widget.profile,
+                actions: EpisodeActions(
+                    db: widget.db,
+                    profileId: widget.profile.id,
+                    player: widget.playerController,
+                    downloader: widget.downloadCoordinator,
+                    dsp: widget.dspCoordinator,
+                    services: widget.repository.services,
+                    localMlAvailable: widget.localMlAvailable),
+                readerDoors: widget.readerDoors))));
+    await _load();
   }
 
   Future<void> _openBook(_Book b) async {

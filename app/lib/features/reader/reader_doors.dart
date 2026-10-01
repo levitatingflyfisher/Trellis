@@ -48,6 +48,7 @@ class ReaderDoors {
     required Work work,
     required Position? position,
     required int segmentCount,
+    int? startSegmentIdx,
   }) async {
     final resolver = resolveSpeechEngine;
     final hasVoice =
@@ -74,7 +75,8 @@ class ReaderDoors {
           player: player,
           resolveTranslator: resolveTranslator,
           availableTranslationTargets: availableTranslationTargets,
-          offerRecap: offerRecap),
+          offerRecap: offerRecap,
+          startSegmentIdx: startSegmentIdx),
     ));
   }
 }

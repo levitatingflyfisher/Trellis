@@ -23,6 +23,8 @@ import '../../services/device_services.dart' show TtsSpeaker;
 import '../reader/reader_doors.dart';
 import '../reader/reader_screen.dart';
 import '../reader/speech/speech_engine.dart';
+import '../search/search_entry.dart';
+import '../search/search_screen.dart';
 import '../reader/speech/speech_temp_files.dart';
 import '../reader/translation/marian_engine.dart';
 import '../transcribe/job_cards.dart';
@@ -226,6 +228,22 @@ class _RiverScreenState extends State<RiverScreen> {
     if (followed == true) await _load();
   }
 
+  ReaderDoors get _readerDoors => ReaderDoors(
+      tts: widget.tts,
+      localMlAvailable: widget.localMlAvailable,
+      resolveSpeechEngine: widget.resolveSpeechEngine,
+      lookupDefinition: widget.lookupDefinition,
+      createSpeechTempFiles: widget.createSpeechTempFiles,
+      player: widget.playerController,
+      resolveTranslator: widget.resolveTranslator,
+      availableTranslationTargets: widget.availableTranslationTargets);
+
+  SearchDoors get _searchDoors => SearchDoors(
+      db: widget.db,
+      profile: widget.profile,
+      actions: _actions,
+      readerDoors: _readerDoors);
+
   Future<void> _manageFeeds() async {
     await Navigator.of(context).push<void>(
       MaterialPageRoute(
@@ -237,18 +255,22 @@ class _RiverScreenState extends State<RiverScreen> {
           playerController: widget.playerController,
           downloadCoordinator: widget.downloadCoordinator,
           dspCoordinator: widget.dspCoordinator,
-          readerDoors: ReaderDoors(
-              tts: widget.tts,
-              localMlAvailable: widget.localMlAvailable,
-              resolveSpeechEngine: widget.resolveSpeechEngine,
-              lookupDefinition: widget.lookupDefinition,
-              createSpeechTempFiles: widget.createSpeechTempFiles,
-              player: widget.playerController,
-              resolveTranslator: widget.resolveTranslator,
-              availableTranslationTargets: widget.availableTranslationTargets),
+          readerDoors: _readerDoors,
         ),
       ),
     );
+    await _load();
+  }
+
+  Future<void> _openSearch() async {
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+        builder: (_) => SearchScreen(doors: _searchDoors)));
+    await _load();
+  }
+
+  Future<void> _openHistory() async {
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+        builder: (_) => HistoryScreen(doors: _searchDoors)));
     await _load();
   }
 
@@ -429,10 +451,17 @@ class _RiverScreenState extends State<RiverScreen> {
             const TrellisThemeToggle(),
             OhBarOverflow<String>(
               key: const Key('river-more'),
-              onSelected: (choice) => choice == 'jobs'
-                  ? widget.onOpenJobs?.call()
-                  : _openQueue(),
+              onSelected: (choice) => switch (choice) {
+                'jobs' => widget.onOpenJobs?.call(),
+                'history' => _openHistory(),
+                _ => _openQueue(),
+              },
               itemBuilder: (_) => [
+                const PopupMenuItem(
+                  key: Key('river-open-history'),
+                  value: 'history',
+                  child: Text('History'),
+                ),
                 const PopupMenuItem(
                   key: Key('river-open-queue'),
                   value: 'queue',
@@ -453,6 +482,8 @@ class _RiverScreenState extends State<RiverScreen> {
         null => const Center(child: CircularProgressIndicator()),
         [] => Column(
           children: [
+            SearchEntry(
+                key: const Key('river-search'), onPressed: _openSearch),
             TranscribeJobCards(coordinator: widget.coordinator),
             _decayedNotice(),
             Expanded(
@@ -473,6 +504,8 @@ class _RiverScreenState extends State<RiverScreen> {
         ),
         _ => Column(
           children: [
+            SearchEntry(
+                key: const Key('river-search'), onPressed: _openSearch),
             TranscribeJobCards(coordinator: widget.coordinator),
             _decayedNotice(),
             _filterChips(),

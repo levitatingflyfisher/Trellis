@@ -110,3 +110,40 @@ piece of work.
   video support is undecided.
 - Blog rows show no count. "Unplayed" means audio not yet finished, and
   articles have none; an unread count for them would be a separate ruling.
+
+## Notes from building step 3
+
+- History means actually listened to or read (coordinator ruling): a
+  listening place past the start, a reading place past the first word,
+  or a finish by ear (the work's finished day, which only playback
+  reaching the end stamps). "Mark played" alone does not count, so
+  step 4's bulk clean-up won't flood history, and neither does "seen"
+  (`readAtMs`), which opening a row and Let it pass both set. No new
+  column: those timestamps already exist.
+- Search results and history are ordered by time (publish date, or the
+  history timestamp), never by a relevance score. A ranked list is what
+  ADR-0003 law 1 keeps out, and the item the user is after is found by
+  when they heard it.
+- The index is two FTS5 tables kept in step by triggers: one row per
+  work with its title and its show's name side by side, so every word
+  of "serial episode 5" may land in either; and transcript sentences. Only sentences with an alignment
+  are indexed, so a book's or article's body is not searched; the brief
+  asked for transcripts, and indexing whole books would double their
+  storage. FTS5 is in the bundled native SQLite and in the shipped
+  `sqlite3.wasm`; a build without it opens normally and searches with
+  LIKE.
+- A transcript hit with audio plays from its sentence through the
+  player's existing projection (`listenFrom`). Without audio, the reader
+  opens on the sentence and leaves the saved place alone until the cursor
+  moves; after that the hit is spent, and a reload goes to the saved
+  place. Audiobooks are never transcribed today, so they have no
+  transcript hits to seek; when they are, a hit should seek through the
+  file-aware `playAudiobookAt`.
+- Share hands the title, show and enclosure link to the platform sheet on
+  Android. On the web tier, or when the sheet fails, it copies the same
+  text and says so.
+- Search is a worded field at the top of the Inbox and Subscriptions
+  lists, not a bar action. At 360 dp and 1.3x text a Search word on the
+  Inbox bar folded the theme toggle's visible "Auto" into its tooltip,
+  and the bar ruling forbids trading one visible label for another.
+  History sits in the Inbox's More menu and is search's empty state.
