@@ -8,6 +8,7 @@ import '../settings/theme_preference.dart';
 import '../dsp/dsp_coordinator.dart';
 import '../episodes/episode_actions.dart';
 import '../episodes/episode_row.dart';
+import '../episodes/episode_selection.dart';
 import '../feeds/episode_download_coordinator.dart';
 import '../jobs/jobs_screen.dart' show downloadFraction, downloadStatus;
 import '../feeds/feeds_repository.dart';
@@ -133,12 +134,48 @@ class _RiverScreenState extends State<RiverScreen> {
     localMlAvailable: widget.localMlAvailable,
   );
   EpisodeListState _rowState = EpisodeListState.empty;
+  final _selection = EpisodeSelection();
+  final _undo = OhUndoController();
+  late final EpisodeBulk _bulk =
+      EpisodeBulk(actions: _actions, selection: _selection, undo: _undo);
 
   @override
   void initState() {
     super.initState();
+    _selection.reload = _load;
+    _selection.addListener(_onSelection);
     _load();
   }
+
+  @override
+  void dispose() {
+    _selection.removeListener(_onSelection);
+    _selection.dispose();
+    _undo.dispose();
+    super.dispose();
+  }
+
+  void _onSelection() => setState(() {});
+
+  /// A filter change keeps only the selected rows still on screen, so a
+  /// bulk action never reaches rows the listener can't see.
+  void _setFilter(_RiverFilter filter) {
+    setState(() => _filter = filter);
+    _selection.universe = _entriesOf(_visible);
+  }
+
+  /// Older means published strictly earlier, among the rows the filter
+  /// shows: the podcast page's rule, so a tie is never swept up because
+  /// of where the list happened to place it.
+  static List<EpisodeEntry> _olderUnplayed(
+          List<RiverEntry> visible, RiverEntry e) =>
+      unplayedAudio(_entriesOf([
+        for (final o in visible)
+          if (o.episode.publishedAtMs < e.episode.publishedAtMs) o,
+      ]));
+
+  static List<EpisodeEntry> _entriesOf(List<RiverEntry> rows) =>
+      [for (final e in rows) (work: e.work, episode: e.episode)];
 
   /// Queued or captured works: they do not decay (see heldWorkIds).
   Set<int> _held = const {};
@@ -439,7 +476,8 @@ class _RiverScreenState extends State<RiverScreen> {
   Widget build(BuildContext context) {
     final entries = _entries;
     return Scaffold(
-      appBar: AppBar(
+      bottomSheet: OhUndoBar(controller: _undo),
+      appBar: _selection.active ? _bulk.bar(context) : AppBar(
         title: const Text('Inbox'),
         actions: [
           OhBarActions(children: [
@@ -455,9 +493,16 @@ class _RiverScreenState extends State<RiverScreen> {
               onSelected: (choice) => switch (choice) {
                 'jobs' => widget.onOpenJobs?.call(),
                 'history' => _openHistory(),
+                'select' => _selection.enter(),
                 _ => _openQueue(),
               },
               itemBuilder: (_) => [
+                if (_entries?.isNotEmpty ?? false)
+                  const PopupMenuItem(
+                    key: Key('river-select'),
+                    value: 'select',
+                    child: Text('Select'),
+                  ),
                 const PopupMenuItem(
                   key: Key('river-open-history'),
                   value: 'history',
@@ -479,7 +524,7 @@ class _RiverScreenState extends State<RiverScreen> {
           ]),
         ],
       ),
-      body: CappedBody(child: switch (entries) {
+      body: CappedBody(child: _bulk.scope(child: switch (entries) {
         null => const Center(child: CircularProgressIndicator()),
         [] => Column(
           children: [
@@ -504,7 +549,7 @@ class _RiverScreenState extends State<RiverScreen> {
           ],
         ),
         _ => _riverList(),
-      }),
+      })),
     );
   }
 
@@ -512,6 +557,7 @@ class _RiverScreenState extends State<RiverScreen> {
     // Once per build: the filter rebuilds a list of every item, and the
     // builder used to ask for it again for every row it laid out.
     final visible = _visible;
+    _selection.universe = _entriesOf(visible);
     return Column(
       children: [
         SearchEntry(
@@ -525,7 +571,7 @@ class _RiverScreenState extends State<RiverScreen> {
             child: ListView.builder(
               physics: const AlwaysScrollableScrollPhysics(),
               itemCount: visible.length,
-              itemBuilder: (_, i) => _itemTile(visible[i]),
+              itemBuilder: (_, i) => _itemTile(visible, i),
             ),
           ),
         ),
@@ -543,29 +589,31 @@ class _RiverScreenState extends State<RiverScreen> {
             key: const Key('chip-all'),
             label: const Text('All'),
             selected: _filter == _RiverFilter.all,
-            onSelected: (_) => setState(() => _filter = _RiverFilter.all),
+            onSelected: (_) => _setFilter(_RiverFilter.all),
           ),
           const SizedBox(width: 8),
           ChoiceChip(
             key: const Key('chip-text'),
             label: const Text('Text'),
             selected: _filter == _RiverFilter.text,
-            onSelected: (_) => setState(() => _filter = _RiverFilter.text),
+            onSelected: (_) => _setFilter(_RiverFilter.text),
           ),
           const SizedBox(width: 8),
           ChoiceChip(
             key: const Key('chip-audio'),
             label: const Text('Audio'),
             selected: _filter == _RiverFilter.audio,
-            onSelected: (_) => setState(() => _filter = _RiverFilter.audio),
+            onSelected: (_) => _setFilter(_RiverFilter.audio),
           ),
         ],
       ),
     );
   }
 
-  Widget _itemTile(RiverEntry e) {
+  Widget _itemTile(List<RiverEntry> visible, int index) {
+    final e = visible[index];
     final theme = Theme.of(context);
+    final selecting = _selection.active;
     final isAudio = e.episode.enclosureUrl != null;
     // The shed-leaves law (proposal-2 §12): an ephemeron carries a leaf that
     // fades toward its sweep day; promoted works persist and carry nothing.
@@ -592,8 +640,14 @@ class _RiverScreenState extends State<RiverScreen> {
           downloaded: isAudio && _actions.isDownloaded(e.episode)),
       showTitle: e.feedTitle,
       artwork: _actions.artworkFor(e.episode),
-      onTap: () => _openItem(e),
+      onTap: selecting
+          ? () => _selection.toggle(e.work.id)
+          : () => _openItem(e),
       onPlay: isAudio ? () => _playItem(e) : null,
+      selected: selecting ? _selection.contains(e.work.id) : null,
+      onLongPress: selecting
+          ? () => _selection.toggle(e.work.id)
+          : () => _selection.enter(e.work.id),
       metaLead: isEphemeron
           ? Padding(
               padding: const EdgeInsets.only(right: 4),
@@ -629,6 +683,7 @@ class _RiverScreenState extends State<RiverScreen> {
         'pass' => _letItPass(e),
         'transcribe' => _transcribe(e, translate: false),
         'translate' => _transcribe(e, translate: true),
+        'mark-older' => _bulk.markOlderPlayed(context, _olderUnplayed(visible, e)),
         _ => _common(choice, e),
       },
       menuBuilder: (_) => [
@@ -641,6 +696,11 @@ class _RiverScreenState extends State<RiverScreen> {
             value: 'pass',
             child: const Text('Let it pass')),
         ..._actions.commonMenuItems(entry),
+        if (isAudio && _olderUnplayed(visible, e).isNotEmpty)
+          PopupMenuItem(
+              key: Key('mark-older-${e.work.id}'),
+              value: 'mark-older',
+              child: const Text('Mark everything older as played')),
         if (isAudio && widget.localMlAvailable) ...[
           PopupMenuItem(
               key: Key('transcribe-${e.work.id}'),
@@ -663,7 +723,10 @@ class _RiverScreenState extends State<RiverScreen> {
     // here, and only via the unread dot.
     return Dismissible(
       key: Key('swipe-${e.work.id}'),
-      direction: DismissDirection.horizontal,
+      // A swipe while selecting would Keep or Let pass one row behind the
+      // listener's back.
+      direction:
+          selecting ? DismissDirection.none : DismissDirection.horizontal,
       background: Container(
         color: theme.colorScheme.primaryContainer,
         alignment: Alignment.centerLeft,

@@ -7,10 +7,12 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:loom_core/loom_core.dart' as core;
+import 'package:openhearth_design/openhearth_design.dart';
 
 import '../../db/database.dart' hide Alignment;
 import '../episodes/episode_actions.dart';
 import '../episodes/episode_row.dart';
+import '../episodes/episode_selection.dart';
 import '../models/format.dart';
 import '../reader/reader_doors.dart';
 import '../shared/capped_body.dart';
@@ -93,12 +95,17 @@ class SearchItemTile extends StatelessWidget {
   final EpisodeListState state;
   final VoidCallback onChanged;
 
+  /// Null where rows can't be selected. Books and notes never can: the
+  /// clean-up's actions are about episodes.
+  final EpisodeSelection? selection;
+
   const SearchItemTile(
       {super.key,
       required this.doors,
       required this.item,
       required this.state,
-      required this.onChanged});
+      required this.onChanged,
+      this.selection});
 
   @override
   Widget build(BuildContext context) {
@@ -110,12 +117,15 @@ class SearchItemTile extends StatelessWidget {
       onChanged();
     }
 
+    final sel = selection;
+    final selecting = sel?.active ?? false;
     if (episode == null) {
       return ListTile(
         key: Key('item-${work.id}'),
         leading: Icon(_kindIcon(work.kind)),
         title: Text(work.title, maxLines: 2, overflow: TextOverflow.ellipsis),
         subtitle: Text(_kindLabel(work.kind)),
+        enabled: !selecting,
         onTap: open,
         trailing: IconButton(
           key: Key('share-${work.id}'),
@@ -135,7 +145,13 @@ class SearchItemTile extends StatelessWidget {
           downloaded: isAudio && actions.isDownloaded(episode)),
       showTitle: item.showTitle,
       artwork: actions.artworkFor(episode),
-      onTap: open,
+      onTap: selecting ? () => sel!.toggle(work.id) : open,
+      selected: selecting ? sel!.contains(work.id) : null,
+      onLongPress: sel == null
+          ? null
+          : selecting
+              ? () => sel.toggle(work.id)
+              : () => sel.enter(work.id),
       onPlay: isAudio
           ? () async {
               await actions.play(work);
@@ -193,7 +209,8 @@ class _Heading extends StatelessWidget {
 /// Everything played or read, newest first, under day headings.
 class HistoryList extends StatefulWidget {
   final SearchDoors doors;
-  const HistoryList({super.key, required this.doors});
+  final EpisodeSelection? selection;
+  const HistoryList({super.key, required this.doors, this.selection});
 
   @override
   State<HistoryList> createState() => _HistoryListState();
@@ -214,6 +231,14 @@ class _HistoryListState extends State<HistoryList> {
     final entries = await SearchStore(d.db).history(d.profile.id);
     final state = await EpisodeListState.load(d.db, d.profile.id);
     if (!mounted) return;
+    final sel = widget.selection;
+    if (sel != null) {
+      sel.universe = [
+        for (final h in entries)
+          if (h.item.episode case final ep?) (work: h.item.work, episode: ep),
+      ];
+      sel.reload = _load;
+    }
     setState(() {
       _entries = entries;
       _state = state;
@@ -245,6 +270,7 @@ class _HistoryListState extends State<HistoryList> {
                 doors: widget.doors,
                 item: e.item,
                 state: _state,
+                selection: widget.selection,
                 onChanged: _load),
         ],
       ],
@@ -252,16 +278,65 @@ class _HistoryListState extends State<HistoryList> {
   }
 }
 
-class HistoryScreen extends StatelessWidget {
+class HistoryScreen extends StatefulWidget {
   final SearchDoors doors;
   const HistoryScreen({super.key, required this.doors});
 
   @override
+  State<HistoryScreen> createState() => _HistoryScreenState();
+}
+
+class _HistoryScreenState extends State<HistoryScreen> {
+  final _selection = EpisodeSelection();
+  final _undo = OhUndoController();
+  late final EpisodeBulk _bulk = EpisodeBulk(
+      actions: widget.doors.actions, selection: _selection, undo: _undo);
+
+  @override
+  void initState() {
+    super.initState();
+    _selection.addListener(_onSelection);
+  }
+
+  @override
+  void dispose() {
+    _selection.removeListener(_onSelection);
+    _selection.dispose();
+    _undo.dispose();
+    super.dispose();
+  }
+
+  void _onSelection() => setState(() {});
+
+  @override
   Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('History')),
-        body: CappedBody(child: HistoryList(doors: doors)),
+        bottomSheet: OhUndoBar(controller: _undo),
+        appBar: _selection.active
+            ? _bulk.bar(context)
+            : AppBar(
+                title: const Text('History'),
+                actions: [
+                  OhBarActions(children: [_selectMenu(_selection)]),
+                ],
+              ),
+        body: CappedBody(
+            child: _bulk.scope(
+                child: HistoryList(
+                    doors: widget.doors, selection: _selection))),
       );
 }
+
+/// The bar's worded way into selection, for anyone who can't long-press.
+Widget _selectMenu(EpisodeSelection selection) => OhBarOverflow<String>(
+      key: const Key('select-more'),
+      onSelected: (_) => selection.enter(),
+      itemBuilder: (_) => const [
+        PopupMenuItem(
+            key: Key('select-episodes'),
+            value: 'select',
+            child: Text('Select')),
+      ],
+    );
 
 class SearchScreen extends StatefulWidget {
   final SearchDoors doors;
@@ -291,6 +366,24 @@ class _SearchScreenState extends State<SearchScreen> {
   SearchResults? _results;
   bool _failed = false;
   EpisodeListState _state = EpisodeListState.empty;
+  final _selection = EpisodeSelection();
+  final _undo = OhUndoController();
+  late final EpisodeBulk _bulk = EpisodeBulk(
+      actions: widget.doors.actions, selection: _selection, undo: _undo);
+
+  /// The field asks for the keyboard when the screen opens, and only
+  /// then: leaving selection rebuilds it, and a keyboard springing up
+  /// over the rows just acted on is not what anyone asked for.
+  bool _autofocus = true;
+
+  @override
+  void initState() {
+    super.initState();
+    _selection.addListener(_onSelection);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _autofocus = false);
+  }
+
+  void _onSelection() => setState(() {});
 
   /// Each search's own number, so a slow early answer never replaces a
   /// later one.
@@ -300,10 +393,16 @@ class _SearchScreenState extends State<SearchScreen> {
   void dispose() {
     _timer?.cancel();
     _field.dispose();
+    _selection.removeListener(_onSelection);
+    _selection.dispose();
+    _undo.dispose();
     super.dispose();
   }
 
   void _onChanged(String text) {
+    // New words, new rows: a selection made against the old ones would
+    // act on rows no longer on screen.
+    _selection.exit();
     _timer?.cancel();
     _timer = Timer(widget.debounce, () => _run(text));
   }
@@ -324,6 +423,12 @@ class _SearchScreenState extends State<SearchScreen> {
       final results = await _store.search(d.profile.id, query);
       final state = await EpisodeListState.load(d.db, d.profile.id);
       if (!mounted || gen != _generation) return;
+      _selection
+        ..universe = [
+          for (final i in results.items)
+            if (i.episode case final ep?) (work: i.work, episode: ep),
+        ]
+        ..reload = () => _run(_field.text);
       setState(() {
         _query = query;
         _results = results;
@@ -344,11 +449,13 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
+      bottomSheet: OhUndoBar(controller: _undo),
+      appBar: _selection.active ? _bulk.bar(context) : AppBar(
+        actions: [OhBarActions(children: [_selectMenu(_selection)])],
         title: TextField(
           key: const Key('search-field'),
           controller: _field,
-          autofocus: true,
+          autofocus: _autofocus,
           textInputAction: TextInputAction.search,
           decoration: const InputDecoration(
             hintText: 'Titles, shows, what was said',
@@ -361,7 +468,7 @@ class _SearchScreenState extends State<SearchScreen> {
           },
         ),
       ),
-      body: CappedBody(child: _body()),
+      body: CappedBody(child: _bulk.scope(child: _body())),
     );
   }
 
@@ -382,7 +489,8 @@ class _SearchScreenState extends State<SearchScreen> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           const _Heading('History', key: Key('search-history-heading')),
-          Expanded(child: HistoryList(doors: widget.doors)),
+          Expanded(
+              child: HistoryList(doors: widget.doors, selection: _selection)),
         ],
       );
     }
@@ -404,6 +512,7 @@ class _SearchScreenState extends State<SearchScreen> {
                 doors: widget.doors,
                 item: item,
                 state: _state,
+                selection: _selection,
                 onChanged: () => _run(_field.text)),
         ],
         if (results.said.isNotEmpty) ...[

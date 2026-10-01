@@ -2,11 +2,13 @@ import 'dart:io';
 
 import 'package:comms_core/comms_core.dart' show feedUnreachableReason;
 import 'package:flutter/material.dart';
+import 'package:openhearth_design/openhearth_design.dart';
 
 import '../../db/database.dart';
 import '../dsp/dsp_coordinator.dart';
 import '../episodes/episode_actions.dart';
 import '../episodes/episode_row.dart';
+import '../episodes/episode_selection.dart';
 import '../player/player_controller.dart';
 import '../reader/reader_screen.dart';
 import 'episode_download_coordinator.dart';
@@ -67,12 +69,36 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
     localMlAvailable: widget.localMlAvailable,
   );
 
+  final _selection = EpisodeSelection();
+  final _undo = OhUndoController();
+  late final EpisodeBulk _bulk =
+      EpisodeBulk(actions: _actions, selection: _selection, undo: _undo);
+
   @override
   void initState() {
     super.initState();
     _feed = widget.feed;
+    _selection.reload = _load;
+    _selection.addListener(_onSelection);
     _load();
   }
+
+  @override
+  void dispose() {
+    _selection.removeListener(_onSelection);
+    _selection.dispose();
+    _undo.dispose();
+    super.dispose();
+  }
+
+  void _onSelection() => setState(() {});
+
+  /// Older means published earlier in this feed, whichever way the page
+  /// is sorted; ties are neither older nor newer.
+  List<EpisodeEntry> _olderUnplayed(EpisodeEntry e) => unplayedAudio([
+        for (final o in _episodes ?? const <EpisodeEntry>[])
+          if (o.episode.publishedAtMs < e.episode.publishedAtMs) o,
+      ]);
 
   /// The show's artwork, if it is on disk; checked in [_load].
   File? _art;
@@ -87,6 +113,7 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
     final art = widget.localMlAvailable
         ? widget.repository.services?.artworkFileFor(_feed.id)
         : null;
+    _selection.universe = episodes;
     setState(() {
       _episodes = episodes;
       _rowState = rowState;
@@ -164,6 +191,9 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
     final e = _episodes![index];
     if (choice == 'play-from-here') {
       await _actions.playFromHere(_episodes!, index);
+    } else if (choice == 'mark-older') {
+      await _bulk.markOlderPlayed(context, _olderUnplayed(e));
+      return;
     } else {
       await _actions.handleCommon(context, choice, e);
     }
@@ -174,17 +204,36 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
   Widget build(BuildContext context) {
     final episodes = _episodes;
     return Scaffold(
-      appBar: AppBar(
-        title: Text(_feed.title.isEmpty ? _feed.url : _feed.title,
-            overflow: TextOverflow.ellipsis),
-      ),
-      body: CappedBody(child: switch (episodes) {
+      bottomSheet: OhUndoBar(controller: _undo),
+      appBar: _selection.active
+          ? _bulk.bar(context)
+          : AppBar(
+              title: Text(_feed.title.isEmpty ? _feed.url : _feed.title,
+                  overflow: TextOverflow.ellipsis),
+              actions: [
+                if (episodes?.isNotEmpty ?? false)
+                  OhBarActions(children: [
+                    OhBarOverflow<String>(
+                      key: const Key('podcast-more'),
+                      onSelected: (_) => _selection.enter(),
+                      itemBuilder: (_) => const [
+                        PopupMenuItem(
+                          key: Key('podcast-select'),
+                          value: 'select',
+                          child: Text('Select'),
+                        ),
+                      ],
+                    ),
+                  ]),
+              ],
+            ),
+      body: CappedBody(child: _bulk.scope(child: switch (episodes) {
         null => const Center(child: CircularProgressIndicator()),
         // Built as rows scroll in: a back catalogue of 2,000 episodes
         // used to build 2,000 rows (and check their artwork on disk)
         // before the first frame.
         _ => _list(episodes),
-      }),
+      })),
     );
   }
 
@@ -287,13 +336,18 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
     final e = episodes[i];
     final isAudio = e.episode.enclosureUrl != null;
     final canPlay = isAudio && widget.playerController != null;
+    final selecting = _selection.active;
     return EpisodeRow(
       work: e.work,
       episode: e.episode,
       facts: EpisodeRowFacts.of(e.episode, _rowState,
           downloaded: isAudio && _actions.isDownloaded(e.episode)),
       artwork: _actions.artworkFor(e.episode),
-      onTap: () => _open(e),
+      onTap: selecting ? () => _selection.toggle(e.work.id) : () => _open(e),
+      selected: selecting ? _selection.contains(e.work.id) : null,
+      onLongPress: selecting
+          ? () => _selection.toggle(e.work.id)
+          : () => _selection.enter(e.work.id),
       onPlay: canPlay
           ? () async {
               await _actions.play(e.work);
@@ -308,6 +362,11 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
               value: 'play-from-here',
               child: const Text('Play from here')),
         ..._actions.commonMenuItems(e),
+        if (isAudio && _olderUnplayed(e).isNotEmpty)
+          PopupMenuItem(
+              key: Key('mark-older-${e.work.id}'),
+              value: 'mark-older',
+              child: const Text('Mark everything older as played')),
       ],
     );
   }

@@ -4,6 +4,7 @@
 /// law 6).
 library;
 
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -148,6 +149,55 @@ class EpisodeActions {
     await d.start(workId: e.work.id, url: url, title: e.work.title);
     await _maybeProcess(e, url);
     return true;
+  }
+
+  /// Deletes the downloaded audio of each entry and stops any download
+  /// still running for it. An episode in use keeps its file: the one
+  /// playing now, and any with a transcribe or DSP job (running or
+  /// paused), since those read the file and would fail or resume onto
+  /// nothing. The row is not marked archived: that dims it, and removing
+  /// a file says nothing about whether it was listened to.
+  Future<({int removed, int cancelled, int kept})> removeDownloads(
+      List<EpisodeEntry> entries) async {
+    final s = services;
+    final d = downloader;
+    if (s == null || d == null) return (removed: 0, cancelled: 0, kept: 0);
+    final busy = {
+      ?player?.current?.id,
+      for (final j in await db.jobsDao.unfinished())
+        if (j.kind == 'transcribe' || j.kind == 'dsp') ?_workIdOf(j),
+    };
+    final running = {for (final j in d.entries) j.workId};
+    var removed = 0, cancelled = 0, kept = 0;
+    for (final e in entries) {
+      final url = e.episode.enclosureUrl;
+      if (url == null) continue;
+      final file = s.audioFileFor(e.work.id, url);
+      if (busy.contains(e.work.id)) {
+        if (file.existsSync() || running.contains(e.work.id)) kept++;
+        continue;
+      }
+      // Sync on purpose: real-io futures never complete under a widget
+      // test's fake-async zone.
+      if (file.existsSync()) {
+        if (running.contains(e.work.id)) await d.dismiss(e.work.id);
+        file.deleteSync();
+        removed++;
+      } else if (running.contains(e.work.id)) {
+        await d.dismiss(e.work.id);
+        cancelled++;
+      }
+    }
+    return (removed: removed, cancelled: cancelled, kept: kept);
+  }
+
+  static int? _workIdOf(JobRow job) {
+    try {
+      final payload = jsonDecode(job.payloadJson);
+      return payload is Map ? (payload['workId'] as num?)?.toInt() : null;
+    } on FormatException {
+      return null;
+    }
   }
 
   /// "Processed on download, on this device" (ADR-0012): only after a

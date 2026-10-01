@@ -147,3 +147,54 @@ piece of work.
   Inbox bar folded the theme toggle's visible "Auto" into its tooltip,
   and the bar ruling forbids trading one visible label for another.
   History sits in the Inbox's More menu and is search's empty state.
+
+## Notes from building step 4
+
+- Selection lives on every list built from the shared row: the Inbox,
+  the podcast page, History (its own screen and search's empty state)
+  and search results. Long-press a row, or use Select in the bar's More
+  menu, which needs no long-press. While selecting, a tap toggles, the
+  row shows a checkbox in place of play and its menu, the Inbox's swipes
+  are off, and Back or Escape leave selection before the screen. Books
+  and notes in History and search are not selectable: the actions are
+  about episodes.
+- The bar shows Select all and Mark played; Mark unplayed, Let it pass,
+  Add to Up Next and Remove download sit in its worded More menu. Any
+  reload or filter change drops selected rows no longer on screen, so
+  the count and the actions cover only visible rows, and new search
+  words clear the selection.
+- Each bulk action is one transaction (`lib/db/bulk_episodes.dart`), IN
+  lists chunked as in ADR-0017. Undo goes through `OhUndoController`, so
+  it lasts until the listener moves on, and restores the exact prior
+  state. Mark played and Let it pass fill only blank stamps, and Undo
+  blanks exactly those; unlike the single Let it pass, a bulk one keeps
+  an earlier seen day. Mark unplayed copies the finished stamps and
+  every saved place before clearing them, and Undo puts them back. A
+  half-heard episode that was never finished counts as changed, since
+  clearing its place takes it out of History. Undo is offered whenever
+  anything was written, even when the count of newly played rows is 0.
+  Add to Up Next appends what was not queued, oldest to newest by
+  publish date whatever the list's sort (coordinator ruling: binge
+  order), and Undo removes only that. A write that fails rolls back
+  whole, says so, and keeps the selection for another try.
+- Remove download deletes the files at once and has no Undo; its message
+  says the episodes can be downloaded again. Keeping files until the
+  offer lapsed would mean a second "downloaded but pending delete"
+  state for every reader of the disk. The episode playing now keeps its
+  file, as does any episode with a transcribe or DSP job, running or
+  paused, since those read it. A download still under way is stopped
+  and worded as stopped, not removed. The message says what happened
+  to each; the row is not marked archived: that dims it, and removing a
+  file says nothing about listening.
+- "Mark everything older as played" sits in an audio row's menu. On the
+  podcast page older means published earlier in that feed, whatever the
+  sort; a tie is not older. On the Inbox it is the same rule over the
+  rows the current filter shows, so a tie the list happens to place
+  below is not swept up. The Inbox breaks publish-time ties by id,
+  newest first, so the order holds across reloads. Only unplayed audio counts, since articles have
+  no played state, and the item is absent when that count is zero. It
+  asks first with the count ("Mark 214 older episodes as played?").
+- Bulk marking never adds to History, per step 3's ruling: it stamps
+  `finishedAtMs` but never the work's finished day. Nothing ranks,
+  nothing fills Up Next unasked, and the bar reports only what the
+  listener just did.

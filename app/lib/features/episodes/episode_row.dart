@@ -119,6 +119,15 @@ class EpisodeRow extends StatelessWidget {
   final PopupMenuItemBuilder<String> menuBuilder;
   final PopupMenuItemSelected<String> onMenu;
 
+  /// Null outside selection; while selecting, whether this row is chosen.
+  /// The row then shows a checkbox in place of play and the menu, and
+  /// [onTap] is the screen's toggle.
+  final bool? selected;
+
+  /// Enters selection (or toggles within it); null where rows can't be
+  /// selected.
+  final VoidCallback? onLongPress;
+
   const EpisodeRow(
       {super.key,
       required this.work,
@@ -131,7 +140,9 @@ class EpisodeRow extends StatelessWidget {
       this.onTap,
       this.onPlay,
       required this.menuBuilder,
-      required this.onMenu});
+      required this.onMenu,
+      this.selected,
+      this.onLongPress});
 
   int get _id => work.id;
 
@@ -143,6 +154,9 @@ class EpisodeRow extends StatelessWidget {
     final fade = facts.played && !facts.archived;
     final tile = ListTile(
       onTap: onTap,
+      onLongPress: onLongPress,
+      // Carries the selected state to screen readers as well as the eye.
+      selected: selected ?? false,
       leading: _leading(context, fade),
       title: Text(
         work.title,
@@ -189,26 +203,33 @@ class EpisodeRow extends StatelessWidget {
           ...below,
         ],
       ),
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (onPlay != null)
-            IconButton(
-              key: Key('play-$_id'),
-              tooltip: 'Play',
-              icon: Icon(Icons.play_circle_outline,
-                  size: 32,
-                  color: fade ? theme.colorScheme.onSurfaceVariant : null),
-              onPressed: onPlay,
+      trailing: selected != null
+          ? Checkbox(
+              key: Key('select-$_id'),
+              value: selected,
+              onChanged: (_) => onTap?.call(),
+            )
+          : Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (onPlay != null)
+                  IconButton(
+                    key: Key('play-$_id'),
+                    tooltip: 'Play',
+                    icon: Icon(Icons.play_circle_outline,
+                        size: 32,
+                        color:
+                            fade ? theme.colorScheme.onSurfaceVariant : null),
+                    onPressed: onPlay,
+                  ),
+                PopupMenuButton<String>(
+                  key: Key('menu-$_id'),
+                  tooltip: 'More',
+                  onSelected: onMenu,
+                  itemBuilder: menuBuilder,
+                ),
+              ],
             ),
-          PopupMenuButton<String>(
-            key: Key('menu-$_id'),
-            tooltip: 'More',
-            onSelected: onMenu,
-            itemBuilder: menuBuilder,
-          ),
-        ],
-      ),
     );
     if (facts.archived) {
       return Opacity(key: Key('archived-$_id'), opacity: 0.55, child: tile);

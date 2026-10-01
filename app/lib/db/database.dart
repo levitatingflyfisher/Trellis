@@ -2590,7 +2590,12 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
       ..where(works.profileId.equals(profileId) &
           works.persistence.isNotValue('decayed') &
           episodes.dedupReason.isNull())
-      ..orderBy([OrderingTerm.desc(episodes.publishedAtMs)]);
+      // The id settles a tie, so two items published in the same second
+      // keep one order across reloads.
+      ..orderBy([
+        OrderingTerm.desc(episodes.publishedAtMs),
+        OrderingTerm.desc(episodes.workId),
+      ]);
     final rows = await q.get();
     return [
       for (final r in rows)
