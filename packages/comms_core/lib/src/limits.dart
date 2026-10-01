@@ -16,8 +16,14 @@ const int maxTextFetchBytes = 25 * 1024 * 1024;
 /// Podcast episode ceiling (donor MAX_AUDIO_FETCH_BYTES).
 const int maxAudioFetchBytes = 300 * 1024 * 1024;
 
-/// Feed/OPML parse ceiling (donor MAX_XML_BYTES, M19 entity-expansion guard).
+/// OPML and whole-tree XML parse ceiling (donor MAX_XML_BYTES, M19 guard).
 const int maxXmlBytes = 8 * 1024 * 1024;
+
+/// Feed parse ceiling. Higher than [maxXmlBytes] because [parseRssFeed]
+/// streams (one item in memory at a time) while OPML still builds a whole
+/// tree; real podcast feeds reach 20 MB. Matches the text-fetch cap, so a
+/// feed that downloads can be parsed.
+const int maxFeedXmlBytes = maxTextFetchBytes;
 
 /// The hard stop on an RFC 5005 archive walk (`walkFeedArchive`): a looping
 /// or hostile chain of rel="next"/rel="prev-archive" links must not spin.

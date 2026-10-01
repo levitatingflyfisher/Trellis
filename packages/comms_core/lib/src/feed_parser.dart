@@ -8,6 +8,7 @@
 library;
 
 import 'package:xml/xml.dart';
+import 'package:xml/xml_events.dart';
 
 import 'exceptions.dart';
 import 'feed_models.dart';
@@ -119,22 +120,13 @@ String _nsText(XmlElement el, String local) {
   return (chapters: null, chaptersUrl: null);
 }
 
-/// The first direct-child `channel` or `feed` element in document order —
-/// RSS 2.0 nests items under `<channel>`; Atom's own root IS `<feed>`.
-XmlElement? _channelOrFeedRoot(XmlDocument d) {
-  for (final e in d.descendantElements) {
-    if (e.name.local == 'channel' || e.name.local == 'feed') return e;
-  }
-  return null;
-}
-
 /// RFC 5005 archive discovery: a channel/feed-level `<atom:link rel="next">`
 /// (or, absent that, `rel="prev-archive"`) among its DIRECT children only —
 /// an item/entry carrying the same rel must not leak into the feed level.
 /// A relative href is resolved against [feedUrl]; an unresolvable or empty
 /// href is treated as absent rather than thrown.
-({String? url, String? rel}) _findNextPage(XmlDocument d, String feedUrl) {
-  final container = _channelOrFeedRoot(d);
+({String? url, String? rel}) _findNextPage(
+    XmlElement? container, String feedUrl) {
   if (container == null) return (url: null, rel: null);
   final links = _allLocal(container.childElements, 'link').toList();
   for (final rel in const ['next', 'prev-archive']) {
@@ -161,8 +153,7 @@ XmlElement? _channelOrFeedRoot(XmlDocument d) {
 /// against an item-level `rel="next"` leaking into the archive link. A
 /// relative href resolves against [feedUrl], the same law as
 /// [_findNextPage]'s own href resolution.
-String? _findChannelImageUrl(XmlDocument d, String feedUrl) {
-  final container = _channelOrFeedRoot(d);
+String? _findChannelImageUrl(XmlElement? container, String feedUrl) {
   if (container == null) return null;
   final imageEls = _allLocal(container.childElements, 'image').toList();
   String? resolve(String href) {
@@ -215,112 +206,176 @@ Enclosure? _findAudio(XmlElement el) {
   return null;
 }
 
+FeedItem _rssItem(XmlElement item) {
+  final linkEl = _firstLocal(item.descendantElements, 'link');
+  var link = linkEl?.innerText.trim() ?? '';
+  if (link.isEmpty) link = linkEl?.getAttribute('href') ?? '';
+  var rawDesc =
+      _firstLocal(item.descendantElements, 'description')?.innerText ?? '';
+  // content:encoded read unconditionally (Campaign 9 Phase 4) —
+  // independent of whether description was present, so a Substack-shaped
+  // item (a short excerpt AND a full content:encoded body) keeps both.
+  final encoded = _nsText(item, 'encoded');
+  if (rawDesc.isEmpty) rawDesc = encoded;
+  if (rawDesc.isEmpty) rawDesc = _nsText(item, 'summary');
+  final ch = _findChapters(item);
+  return FeedItem(
+    title: decodeHtmlEntities(
+        (_firstLocal(item.descendantElements, 'title')?.innerText ?? '')
+            .trim()),
+    link: link,
+    date: _firstLocal(item.descendantElements, 'pubDate')?.innerText ?? '',
+    desc: _cleanDesc(rawDesc),
+    enclosure: _findAudio(item),
+    chapters: ch.chapters,
+    chaptersUrl: ch.chaptersUrl,
+    contentHtml: _cleanContentHtml(encoded),
+  );
+}
+
+FeedItem _atomEntry(XmlElement entry) {
+  final links = _allLocal(entry.descendantElements, 'link').toList();
+  XmlElement? linkEl;
+  for (final l in links) {
+    if (l.getAttribute('rel') == 'alternate') {
+      linkEl = l;
+      break;
+    }
+  }
+  linkEl ??= links.isEmpty ? null : links.first;
+  var date =
+      _firstLocal(entry.descendantElements, 'published')?.innerText ?? '';
+  if (date.isEmpty) {
+    date = _firstLocal(entry.descendantElements, 'updated')?.innerText ?? '';
+  }
+  var rawDesc =
+      _firstLocal(entry.descendantElements, 'summary')?.innerText ?? '';
+  // <content> read unconditionally too (Campaign 9 Phase 4) — same
+  // independence from summary as content:encoded's from description above.
+  final content =
+      _firstLocal(entry.descendantElements, 'content')?.innerText ?? '';
+  if (rawDesc.isEmpty) rawDesc = content;
+  final ch = _findChapters(entry);
+  return FeedItem(
+    title: decodeHtmlEntities(
+        (_firstLocal(entry.descendantElements, 'title')?.innerText ?? '')
+            .trim()),
+    link: linkEl?.getAttribute('href') ?? '',
+    date: date,
+    desc: _cleanDesc(rawDesc),
+    enclosure: _findAudio(entry),
+    chapters: ch.chapters,
+    chaptersUrl: ch.chaptersUrl,
+    contentHtml: _cleanContentHtml(content),
+  );
+}
+
+XmlElement _toElement(List<XmlEvent> events) =>
+    const XmlNodeDecoder().convert(events).whereType<XmlElement>().first;
+
 /// Parses an RSS 2.0 / Atom / Media-RSS document into typed models.
 /// Throws [FeedParseException] on oversized input (M19) or invalid XML.
+///
+/// Streams: the document is read as events and only one item (or one
+/// channel-level element) is ever built as a tree, then dropped. A whole-
+/// document tree costs many times the feed's size, which a 20 MB feed on a
+/// cheap phone cannot afford.
 ParsedFeed parseRssFeed(String xml, String feedUrl) {
-  if (xml.length > maxXmlBytes) {
+  if (xml.length > maxFeedXmlBytes) {
     throw const FeedParseException('Feed is too large to parse safely.');
   }
-  XmlDocument d;
+
+  final rssItems = <FeedItem>[];
+  final atomItems = <FeedItem>[];
+  // The first channel/feed element's own direct children, minus its items:
+  // title, artwork and archive links live here and are small.
+  final container = XmlElement(XmlName('channel'));
+  var containerDepth = -1; // stack depth of the first channel/feed, if open
+  var containerSeen = false;
+
+  final open = <String>[]; // local names of the open elements
+  List<XmlEvent>? capture;
+  var captureDepth = 0;
+  String? captureKind; // 'item', 'entry' or 'head'
+
+  void finishCapture() {
+    final el = _toElement(capture!);
+    switch (captureKind) {
+      case 'item':
+        rssItems.add(_rssItem(el));
+      case 'entry':
+        atomItems.add(_atomEntry(el));
+      default:
+        container.children.add(el);
+    }
+    capture = null;
+    captureKind = null;
+  }
+
   try {
-    d = XmlDocument.parse(xml);
-  } catch (_) {
+    for (final e in parseEvents(xml,
+        validateNesting: true, validateDocument: true)) {
+      if (capture != null) {
+        capture!.add(e);
+        if (e is XmlStartElementEvent && !e.isSelfClosing) {
+          open.add(e.localName);
+        } else if (e is XmlEndElementEvent) {
+          open.removeLast();
+          if (open.length == captureDepth) finishCapture();
+        }
+        continue;
+      }
+      if (e is XmlStartElementEvent) {
+        final local = e.localName;
+        final kind = local == 'item' || local == 'entry'
+            ? local
+            : (containerDepth >= 0 && open.length == containerDepth + 1)
+                ? 'head'
+                : null;
+        if (kind != null) {
+          capture = [e];
+          captureKind = kind;
+          captureDepth = open.length;
+          if (e.isSelfClosing) {
+            finishCapture();
+          } else {
+            open.add(local);
+          }
+          continue;
+        }
+        if (e.isSelfClosing) continue;
+        if (!containerSeen && (local == 'channel' || local == 'feed')) {
+          containerSeen = true;
+          containerDepth = open.length;
+        }
+        open.add(local);
+      } else if (e is XmlEndElementEvent) {
+        open.removeLast();
+        if (open.length == containerDepth) containerDepth = -1;
+      }
+    }
+  } on XmlException {
     throw const FeedParseException(
         'Not valid XML. Check the URL is an RSS or Atom feed.');
   }
 
-  final items = <FeedItem>[];
+  // Atom entries count only when no RSS items were found (donor rule).
+  final items = rssItems.isNotEmpty ? rssItems : atomItems;
 
-  // RSS 2.0
-  for (final item in _allLocal(d.descendantElements, 'item')) {
-    final linkEl = _firstLocal(item.descendantElements, 'link');
-    var link = linkEl?.innerText.trim() ?? '';
-    if (link.isEmpty) link = linkEl?.getAttribute('href') ?? '';
-    var rawDesc =
-        _firstLocal(item.descendantElements, 'description')?.innerText ?? '';
-    // content:encoded read unconditionally (Campaign 9 Phase 4) —
-    // independent of whether description was present, so a Substack-shaped
-    // item (a short excerpt AND a full content:encoded body) keeps both.
-    final encoded = _nsText(item, 'encoded');
-    if (rawDesc.isEmpty) rawDesc = encoded;
-    if (rawDesc.isEmpty) rawDesc = _nsText(item, 'summary');
-    final ch = _findChapters(item);
-    items.add(FeedItem(
-      title: decodeHtmlEntities(
-          (_firstLocal(item.descendantElements, 'title')?.innerText ?? '')
-              .trim()),
-      link: link,
-      date: _firstLocal(item.descendantElements, 'pubDate')?.innerText ?? '',
-      desc: _cleanDesc(rawDesc),
-      enclosure: _findAudio(item),
-      chapters: ch.chapters,
-      chaptersUrl: ch.chaptersUrl,
-      contentHtml: _cleanContentHtml(encoded),
-    ));
-  }
-
-  // Atom (donor: only when no RSS items were found)
-  if (items.isEmpty) {
-    for (final entry in _allLocal(d.descendantElements, 'entry')) {
-      final links = _allLocal(entry.descendantElements, 'link').toList();
-      XmlElement? linkEl;
-      for (final l in links) {
-        if (l.getAttribute('rel') == 'alternate') {
-          linkEl = l;
-          break;
-        }
-      }
-      linkEl ??= links.isEmpty ? null : links.first;
-      var date =
-          _firstLocal(entry.descendantElements, 'published')?.innerText ?? '';
-      if (date.isEmpty) {
-        date =
-            _firstLocal(entry.descendantElements, 'updated')?.innerText ?? '';
-      }
-      var rawDesc =
-          _firstLocal(entry.descendantElements, 'summary')?.innerText ?? '';
-      // <content> read unconditionally too (Campaign 9 Phase 4) — same
-      // independence from summary as content:encoded's from description
-      // above.
-      final content =
-          _firstLocal(entry.descendantElements, 'content')?.innerText ?? '';
-      if (rawDesc.isEmpty) rawDesc = content;
-      final ch = _findChapters(entry);
-      items.add(FeedItem(
-        title: decodeHtmlEntities(
-            (_firstLocal(entry.descendantElements, 'title')?.innerText ?? '')
-                .trim()),
-        link: linkEl?.getAttribute('href') ?? '',
-        date: date,
-        desc: _cleanDesc(rawDesc),
-        enclosure: _findAudio(entry),
-        chapters: ch.chapters,
-        chaptersUrl: ch.chaptersUrl,
-        contentHtml: _cleanContentHtml(content),
-      ));
-    }
-  }
-
-  // channel > title, feed > title — first in document order.
   var feedTitle = '';
-  for (final t in _allLocal(d.descendantElements, 'title')) {
-    final p = t.parent;
-    if (p is XmlElement &&
-        (p.name.local == 'channel' || p.name.local == 'feed')) {
-      feedTitle = decodeHtmlEntities(t.innerText.trim());
-      break;
-    }
-  }
+  final titleEl = _firstLocal(container.childElements, 'title');
+  if (titleEl != null) feedTitle = decodeHtmlEntities(titleEl.innerText.trim());
   if (feedTitle.isEmpty) feedTitle = feedUrl;
 
-  final nextPage = _findNextPage(d, feedUrl);
+  final c = containerSeen ? container : null;
+  final nextPage = _findNextPage(c, feedUrl);
 
   return ParsedFeed(
       title: feedTitle,
       items: items,
       nextPageUrl: nextPage.url,
       nextPageRel: nextPage.rel,
-      imageUrl: _findChannelImageUrl(d, feedUrl));
+      imageUrl: _findChannelImageUrl(c, feedUrl));
 }
 
 /// Common named HTML entities (the full HTML5 table has ~2200; feeds in the

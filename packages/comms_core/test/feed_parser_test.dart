@@ -488,8 +488,37 @@ void main() {
               contains('Not valid XML'))));
     });
 
+    test('a feed far above the old 8 MB cap parses every item', () {
+      // Real feeds run past 8 MB (Bankless ~21 MB, 1,351 episodes); the old
+      // whole-document parse refused them outright.
+      final body = 'word ' * 2000;
+      const n = 1000;
+      final xml = StringBuffer(
+          '<rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">'
+          '<channel><title>Big</title>'
+          '<itunes:image href="https://ex.com/show.jpg"/>');
+      for (var i = 0; i < n; i++) {
+        xml.write('<item><title>Ep $i</title>'
+            '<itunes:image href="https://ex.com/ep$i.jpg"/>'
+            '<pubDate>Mon, 0${1 + i % 9} Jan 2024 00:00:00 GMT</pubDate>'
+            '<description><![CDATA[$body]]></description>'
+            '<enclosure url="https://ex.com/$i.mp3" type="audio/mpeg"/>'
+            '</item>');
+      }
+      xml.write('</channel></rss>');
+      final s = xml.toString();
+      expect(s.length, greaterThan(8 * 1024 * 1024));
+
+      final f = parseRssFeed(s, 'https://ex.com/feed');
+      expect(f.title, 'Big');
+      expect(f.imageUrl, 'https://ex.com/show.jpg');
+      expect(f.items, hasLength(n));
+      expect(f.items.last.title, 'Ep ${n - 1}');
+      expect(f.items.last.enclosure?.url, 'https://ex.com/${n - 1}.mp3');
+    });
+
     test('oversized input refuses to parse (M19)', () {
-      final big = 'x' * (8 * 1024 * 1024 + 1);
+      final big = 'x' * (maxFeedXmlBytes + 1);
       expect(
           () => parseRssFeed(big, 'u'),
           throwsA(isA<FeedParseException>().having((e) => e.message, 'message',

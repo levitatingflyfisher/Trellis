@@ -2,7 +2,7 @@
 
 **You train the tree; the tree never trains you.**
 
-Trellis is the OpenHearth answer to the
+Trellis is the OpenHearth **learn-everything app**, and its answer to the
 attention economy: one local-first app where a family reads, listens to, and
 *retains* anything — any format to any format, any language to any language —
 on whatever compute they happen to own, from a $90 phone to the family desktop.
@@ -13,6 +13,13 @@ gradient: **ephemera decay by default; works persist; what you keep, you keep
 because your own hand promoted it.** No feed ranking. No streaks. No
 engagement optimization. The app must never develop an interest in your
 attention — that is a design law with tests, not a promise.
+
+**The scope test.** Trellis is not a do-everything app; it is a learn-everything
+app. A feature belongs only if it serves learning: taking something in, paying
+attention to it, understanding it, keeping it, or finding it again. A podcast
+player, a feed reader and a lecture video pass; an endless feed or autoplay does
+not. Success is what you understood and still remember, never time spent — the
+app is glad when you put it down.
 
 ## The three loads it carries
 
