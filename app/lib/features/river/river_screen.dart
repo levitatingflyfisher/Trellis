@@ -19,6 +19,8 @@ import '../models/format.dart';
 import '../models/models_screen.dart' show modelLabel;
 import '../player/player_controller.dart';
 import '../player/queue_screen.dart';
+import '../../services/device_services.dart' show TtsSpeaker;
+import '../reader/reader_doors.dart';
 import '../reader/reader_screen.dart';
 import '../reader/speech/speech_engine.dart';
 import '../reader/speech/speech_temp_files.dart';
@@ -84,6 +86,10 @@ class RiverScreen extends StatefulWidget {
   final Future<List<String>> Function({required String sourceLang})?
       availableTranslationTargets;
 
+  /// The speak-mode voice, only for books the Subscriptions page opens;
+  /// see `LibraryScreen.tts`.
+  final TtsSpeaker? tts;
+
   const RiverScreen(
       {super.key,
       required this.db,
@@ -99,7 +105,8 @@ class RiverScreen extends StatefulWidget {
       this.lookupDefinition,
       this.createSpeechTempFiles,
       this.resolveTranslator,
-      this.availableTranslationTargets});
+      this.availableTranslationTargets,
+      this.tts});
 
   @override
   State<RiverScreen> createState() => _RiverScreenState();
@@ -230,6 +237,15 @@ class _RiverScreenState extends State<RiverScreen> {
           playerController: widget.playerController,
           downloadCoordinator: widget.downloadCoordinator,
           dspCoordinator: widget.dspCoordinator,
+          readerDoors: ReaderDoors(
+              tts: widget.tts,
+              localMlAvailable: widget.localMlAvailable,
+              resolveSpeechEngine: widget.resolveSpeechEngine,
+              lookupDefinition: widget.lookupDefinition,
+              createSpeechTempFiles: widget.createSpeechTempFiles,
+              player: widget.playerController,
+              resolveTranslator: widget.resolveTranslator,
+              availableTranslationTargets: widget.availableTranslationTargets),
         ),
       ),
     );

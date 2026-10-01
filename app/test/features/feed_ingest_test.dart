@@ -17,6 +17,24 @@ import 'package:trellis/services/device_services.dart';
 import '../support/fake_services.dart';
 import '../support/scripted_fetcher.dart';
 
+const _rssBlog = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel>
+  <title>Field Notes</title>
+  <item>
+    <title>On hedges</title>
+    <link>https://notes.test/hedges</link>
+    <pubDate>Wed, 05 Aug 2026 12:00:00 GMT</pubDate>
+    <description>Laid, not trimmed.</description>
+  </item>
+</channel></rss>
+''';
+
+const _rssEmpty = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0"><channel><title>Quiet</title></channel></rss>
+''';
+
 const _rssTwo = '''
 <?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0"><channel>
@@ -706,6 +724,62 @@ void main() {
       expect(state.lastError, contains('Not valid XML'));
     });
 
+    group('origin (ADR-0016 section 3)', () {
+      Future<String> originAfter(String body, {String? before}) async {
+        final feed = await seedFeed();
+        if (before != null) {
+          await db.feedsDao.setOrigin(feed.id, before);
+        }
+        final fresh = (await db.feedsDao.feedsOf(profileId)).single;
+        await repo(ScriptedFetcher((url, headers) => textResponse(body)))
+            .refreshFeed(fresh);
+        return (await db.feedsDao.feedsOf(profileId)).single.origin;
+      }
+
+      test('any item with audio makes it a podcast', () async {
+        expect(await originAfter(_rssTwo, before: 'blog'), 'podcast');
+      });
+
+      test('items with no audio make it a blog', () async {
+        expect(await originAfter(_rssBlog), 'blog');
+      });
+
+      test('one text-only listing does not move a podcast with stored audio',
+          () async {
+        var body = _rssTwo;
+        final r = repo(ScriptedFetcher((url, headers) => textResponse(body)));
+        await seedFeed();
+        await r.refreshFeed((await db.feedsDao.feedsOf(profileId)).single);
+        body = _rssBlog;
+        await r.refreshFeed((await db.feedsDao.feedsOf(profileId)).single,
+            force: true);
+        expect((await db.feedsDao.feedsOf(profileId)).single.origin,
+            'podcast');
+      });
+
+      test('a parse with no items leaves the shelf alone', () async {
+        expect(await originAfter(_rssEmpty, before: 'blog'), 'blog');
+      });
+
+      test('a body that will not parse leaves the shelf alone', () async {
+        expect(await originAfter('not xml', before: 'blog'), 'blog');
+      });
+
+      test('origin is judged before rules, which may skip every item',
+          () async {
+        final feed = await seedFeed();
+        await db.feedsDao.setRules(feed.id,
+            encodeFeedRules(const [FeedRule(
+                field: FeedRuleField.title, match: FeedRuleMatch.notContains,
+                text: 'zzz', action: FeedRuleAction.skip)]));
+        final fresh = (await db.feedsDao.feedsOf(profileId)).single;
+        await repo(ScriptedFetcher((url, headers) => textResponse(_rssTwo)))
+            .refreshFeed(fresh);
+        expect((await db.feedsDao.feedsOf(profileId)).single.origin,
+            'podcast');
+      });
+    });
+
     test('a fresh fetch adopts the archive link the parse found', () async {
       final fetcher = ScriptedFetcher((url, headers) => textResponse('''
 <rss><channel><title>t</title>
@@ -987,6 +1061,21 @@ void main() {
       expect((await db.feedsDao.feedsOf(profileId)).single.title,
           'The Night Sky Cast');
       expect(await db.feedsDao.riverItems(profileId), hasLength(2));
+    });
+
+    test('subscribing records where the source came from', () async {
+      final r = repo(ScriptedFetcher((url, headers) =>
+          textResponse(url.path == '/blog' ? _rssBlog : _rssTwo)));
+      await r.subscribe(profileId: profileId, rawUrl: 'https://cast.test/feed');
+      await r.subscribe(
+          profileId: profileId, rawUrl: 'https://notes.test/blog');
+      final byUrl = {
+        for (final f in await db.feedsDao.feedsOf(profileId)) f.url: f.origin
+      };
+      expect(byUrl, {
+        'https://cast.test/feed': 'podcast',
+        'https://notes.test/blog': 'blog',
+      });
     });
 
     test('an HTML page is sniffed for its <link> feed discovery', () async {

@@ -240,6 +240,7 @@ void main() {
         ALTER TABLE episodes DROP COLUMN finished_at_ms;
         ALTER TABLE episodes DROP COLUMN image_url;
         ALTER TABLE feeds DROP COLUMN sort_oldest_first;
+        ALTER TABLE feeds DROP COLUMN origin;
         PRAGMA user_version = 10;
       ''');
       v10.dispose();

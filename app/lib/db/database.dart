@@ -255,6 +255,12 @@ class Feeds extends Table {
   /// start. Still chronological either way, so ADR-0003 law 1 holds.
   BoolColumn get sortOldestFirst =>
       boolean().withDefault(const Constant(false))();
+
+  /// Where this source came from (ADR-0016): `podcast` when its items
+  /// carry audio, `blog` when they don't (blogs and newsletters). Learned
+  /// from each fresh parse; it only picks the Subscriptions shelf and
+  /// never limits how an item is read or heard.
+  TextColumn get origin => text().withDefault(const Constant('podcast'))();
 }
 
 /// River metadata for a feed item. The item itself IS a spine work
@@ -1367,6 +1373,35 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
 
   Future<Work?> workById(int id) =>
       (select(works)..where((w) => w.id.equals(id))).getSingleOrNull();
+
+  /// The Subscriptions page's Books shelf (ADR-0016): every book the
+  /// library shows, with its reading cursor and length for progress. One
+  /// query, so the shelf costs the same with three books or three hundred.
+  Future<List<({Work work, int segmentCount, Position? position})>>
+      booksOf(int profileId) async {
+    final count = subqueryExpression<int>(selectOnly(segments)
+      ..addColumns([countAll()])
+      ..where(segments.workId.equalsExp(works.id)));
+    final q = select(works).join([
+      leftOuterJoin(
+          positions,
+          positions.workId.equalsExp(works.id) &
+              positions.profileId.equals(profileId)),
+    ])
+      ..addColumns([count])
+      ..where(works.profileId.equals(profileId) &
+          works.kind.equals('book') &
+          works.persistence.isNotValue('ephemeron') &
+          works.persistence.isNotValue('decayed'));
+    return [
+      for (final r in await q.get())
+        (
+          work: r.readTable(works),
+          segmentCount: r.read(count) ?? 0,
+          position: r.readTableOrNull(positions),
+        )
+    ];
+  }
 
   /// Pin is a user's hand on the work (ADR-0002); callers promoting via pin
   /// pair this with [promoteWork].
@@ -2536,6 +2571,40 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
     ];
   }
 
+  Future<void> setOrigin(int feedId, String origin) =>
+      (update(feeds)..where((f) => f.id.equals(feedId)))
+          .write(FeedsCompanion(origin: Value(origin)));
+
+  /// Whether any stored episode of this feed has audio: what keeps a
+  /// podcast on its shelf when one listing happens to carry none.
+  Future<bool> hasAudioEpisodes(int feedId) async {
+    final q = selectOnly(episodes)
+      ..addColumns([episodes.workId])
+      ..where(episodes.feedId.equals(feedId) & episodes.enclosureUrl.isNotNull())
+      ..limit(1);
+    return (await q.get()).isNotEmpty;
+  }
+
+  /// Unplayed episodes per feed for the Subscriptions page, keyed by feed
+  /// id; a feed with none is absent. The same test as the podcast page's
+  /// "N unplayed" (audio, not finished, not let pass), so the two numbers
+  /// always agree. One grouped query rather than one per feed.
+  Future<Map<int, int>> unplayedCountsOf(int profileId) async {
+    final n = episodes.workId.count();
+    final q = selectOnly(episodes).join([
+      innerJoin(works, works.id.equalsExp(episodes.workId)),
+    ])
+      ..addColumns([episodes.feedId, n])
+      ..where(works.profileId.equals(profileId) &
+          works.persistence.isNotValue('decayed') &
+          episodes.enclosureUrl.isNotNull() &
+          episodes.finishedAtMs.isNull())
+      ..groupBy([episodes.feedId]);
+    return {
+      for (final r in await q.get()) r.read(episodes.feedId)!: r.read(n)!,
+    };
+  }
+
   /// Fills an already-stored episode's missing length and artwork from a
   /// later listing of the feed; never overwrites, so a length the player
   /// measured stays.
@@ -2942,7 +3011,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 23;
+  int get schemaVersion => 24;
   // There is no v14: it was reserved for the reader-depth campaign, which
   // landed as v18 after three sibling campaigns merged ahead of it, so the
   // guard chain skips from 13 to 15. Version gaps are harmless — an
@@ -3189,6 +3258,19 @@ class AppDatabase extends _$AppDatabase {
                 WHERE works.id = episodes.work_id)
               WHERE finished_at_ms IS NULL AND work_id IN (
                 SELECT id FROM works WHERE finished_epoch_day IS NOT NULL)
+            ''');
+          }
+          if (from >= 2 && from < 24) {
+            // ADR-0016 section 3: the source's origin. Guarded on from >= 2
+            // like every feeds column. A feed with no stored items yet
+            // keeps the default; its next fresh parse decides, so a podcast
+            // that has never answered doesn't land among the blogs.
+            await m.addColumn(feeds, feeds.origin);
+            await customStatement('''
+              UPDATE feeds SET origin = 'blog'
+              WHERE EXISTS (SELECT 1 FROM episodes WHERE feed_id = feeds.id)
+                AND NOT EXISTS (SELECT 1 FROM episodes
+                  WHERE feed_id = feeds.id AND enclosure_url IS NOT NULL)
             ''');
           }
         },

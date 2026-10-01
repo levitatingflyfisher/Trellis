@@ -11,6 +11,7 @@ import '../../db/database.dart';
 import '../../services/picked_save.dart';
 import '../dsp/dsp_coordinator.dart';
 import '../player/player_controller.dart';
+import '../reader/reader_doors.dart';
 import 'episode_download_coordinator.dart';
 import 'feed_detail_screen.dart';
 import 'feed_ingest.dart';
@@ -47,8 +48,10 @@ Future<bool> saveOpmlWithFilePicker(
   return finishPickedSave(path, bytes);
 }
 
-/// Manage subscriptions: follow, unfollow (cascading unpromoted ephemera —
-/// ADR-0003 law 2), OPML both ways.
+/// Subscriptions (ADR-0016 section 3): every source, shelved by where it
+/// came from (Podcasts, Blogs and newsletters, Books), plus follow,
+/// unfollow (cascading unpromoted ephemera — ADR-0003 law 2) and OPML both
+/// ways. Shelves are alphabetical, never ranked (ADR-0003 law 1).
 class FeedsScreen extends StatefulWidget {
   final AppDatabase db;
   final FeedsRepository repository;
@@ -68,6 +71,10 @@ class FeedsScreen extends StatefulWidget {
   final EpisodeDownloadCoordinator? downloadCoordinator;
   final DspCoordinator? dspCoordinator;
 
+  /// How the Books shelf opens a book: the Library's own way, so voice,
+  /// recap and translation behave the same from either door.
+  final ReaderDoors readerDoors;
+
   const FeedsScreen({
     super.key,
     required this.db,
@@ -77,6 +84,7 @@ class FeedsScreen extends StatefulWidget {
     this.playerController,
     this.downloadCoordinator,
     this.dspCoordinator,
+    this.readerDoors = const ReaderDoors(),
     OpmlBytesPicker? pickOpmlBytes,
     OpmlBytesSaver? saveOpmlBytes,
   }) : pickOpmlBytes = pickOpmlBytes ?? pickOpmlWithFilePicker,
@@ -88,6 +96,8 @@ class FeedsScreen extends StatefulWidget {
 
 class _FeedsScreenState extends State<FeedsScreen> {
   List<Feed>? _feeds;
+  Map<int, int> _unplayed = const {};
+  List<_Book> _books = const [];
   bool _dspGlobalDefault = false;
 
   /// Set while an OPML import is checking its new feeds.
@@ -121,13 +131,20 @@ class _FeedsScreenState extends State<FeedsScreen> {
   }
 
   Future<void> _load() async {
-    final feeds = await widget.db.feedsDao.feedsOf(widget.profile.id);
+    final profileId = widget.profile.id;
+    final feeds = await widget.db.feedsDao.feedsOf(profileId);
+    final unplayed = await widget.db.feedsDao.unplayedCountsOf(profileId);
+    final books = await widget.db.spineDao.booksOf(profileId);
     final dspGlobalDefault = await widget.db.profilesDao.dspGlobalDefault(
-      widget.profile.id,
+      profileId,
     );
     if (!mounted) return;
     setState(() {
-      _feeds = feeds;
+      _feeds = feeds..sort((a, b) => shelfKey(_feedName(a))
+          .compareTo(shelfKey(_feedName(b))));
+      _unplayed = unplayed;
+      _books = books..sort((a, b) => shelfKey(a.work.title)
+          .compareTo(shelfKey(b.work.title)));
       _dspGlobalDefault = dspGlobalDefault;
     });
   }
@@ -274,6 +291,7 @@ class _FeedsScreenState extends State<FeedsScreen> {
             for (final f in _feeds!)
               if (!_unfollowing.contains(f.id)) f
           ];
+    final empty = feeds != null && feeds.isEmpty && _books.isEmpty;
     return PopScope(
       canPop: _unfollowing.isEmpty,
       onPopInvokedWithResult: (didPop, _) {
@@ -282,7 +300,7 @@ class _FeedsScreenState extends State<FeedsScreen> {
       child: Scaffold(
         bottomSheet: OhUndoBar(controller: _undo),
         appBar: AppBar(
-          title: const Text('Feeds'),
+          title: const Text('Subscriptions'),
           actions: [
             OhBarActions(children: [
             OhBarOverflow<String>(
@@ -309,9 +327,12 @@ class _FeedsScreenState extends State<FeedsScreen> {
             ]),
           ],
         ),
-        floatingActionButton: (feeds == null || feeds.isEmpty)
+        // The empty state carries its own Follow; everywhere else this
+        // stays in reach, since following is why most people come here.
+        floatingActionButton: (feeds == null || empty)
             ? null
             : FloatingActionButton.extended(
+                key: const Key('follow'),
                 onPressed: _follow,
                 icon: const Icon(Icons.add),
                 label: const Text('Follow'),
@@ -320,16 +341,97 @@ class _FeedsScreenState extends State<FeedsScreen> {
           if (_importProgress case final p?) _ImportProgress(progress: p),
           Expanded(child: switch (feeds) {
             null => const Center(child: CircularProgressIndicator()),
-            [] => _EmptyFeeds(onFollow: _follow),
-            _ => ListView.builder(
+            _ when empty => _EmptyFeeds(onFollow: _follow),
+            _ => ListView(
               padding: const EdgeInsets.only(bottom: 88),
-              itemCount: feeds.length,
-              itemBuilder: (_, i) => _feedTile(feeds[i]),
+              children: _shelves(feeds),
             ),
           }),
         ])),
       ),
     );
+  }
+
+  /// Empty shelves are left out rather than shown with a zero: there is
+  /// nothing to see there.
+  List<Widget> _shelves(List<Feed> feeds) {
+    final podcasts = [for (final f in feeds) if (f.origin != 'blog') f];
+    final blogs = [for (final f in feeds) if (f.origin == 'blog') f];
+    return [
+      if (podcasts.isNotEmpty) ...[
+        _ShelfHeader(
+            key: const Key('shelf-podcasts'),
+            title: 'Podcasts',
+            count: podcasts.length),
+        for (final f in podcasts) _feedTile(f),
+      ],
+      if (blogs.isNotEmpty) ...[
+        _ShelfHeader(
+            key: const Key('shelf-blogs'),
+            title: 'Blogs and newsletters',
+            count: blogs.length),
+        for (final f in blogs) _feedTile(f),
+      ],
+      if (_books.isNotEmpty) ...[
+        _ShelfHeader(
+            key: const Key('shelf-books'),
+            title: 'Books',
+            count: _books.length),
+        for (final b in _books) _bookTile(b),
+      ],
+    ];
+  }
+
+  Future<void> _openBook(_Book b) async {
+    await widget.readerDoors.open(context,
+        db: widget.db,
+        profileId: widget.profile.id,
+        work: b.work,
+        position: b.position,
+        segmentCount: b.segmentCount);
+    await _load(); // progress may have moved
+  }
+
+  Widget _bookTile(_Book b) {
+    final small = Theme.of(context).textTheme.bodySmall;
+    final progress = _bookProgress(b);
+    return ListTile(
+      key: Key('book-${b.work.id}'),
+      onTap: () => _openBook(b),
+      leading: const _Thumb(child: Icon(Icons.menu_book_outlined)),
+      title: Text(b.work.title, overflow: TextOverflow.ellipsis, maxLines: 2),
+      subtitle: progress == null
+          ? null
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: Text(
+                      progress >= 1
+                          ? 'Finished'
+                          : '${(progress * 100).round()}% read',
+                      style: small),
+                ),
+                Padding(
+                  padding: const EdgeInsets.only(top: 4),
+                  child: LinearProgressIndicator(
+                      value: progress,
+                      borderRadius: BorderRadius.circular(2)),
+                ),
+              ],
+            ),
+    );
+  }
+
+  /// Null when nothing is known yet: an unopened book shows no bar rather
+  /// than a misleading empty one.
+  double? _bookProgress(_Book b) {
+    if (b.work.finishedEpochDay != null) return 1;
+    final position = b.position;
+    if (position == null || b.segmentCount == 0) return null;
+    return (position.segmentIdx / b.segmentCount).clamp(0.0, 1.0);
   }
 
   Future<void> _openFeed(Feed feed) async {
@@ -349,30 +451,47 @@ class _FeedsScreenState extends State<FeedsScreen> {
     await _load();
   }
 
-  /// The address, unless the feed is failing: then the reason, because that
-  /// is what the listener needs to see while scanning the list.
-  Widget _feedSubtitle(Feed feed) {
+  /// The unplayed count, and the reason when the feed is failing: that is
+  /// what the listener needs to see while scanning the list. Null when
+  /// there is neither, so a caught-up healthy row stays one line.
+  Widget? _feedSubtitle(Feed feed) {
     final small = Theme.of(context).textTheme.bodySmall;
     final state = stateOfFeed(feed);
-    if (state.consecutiveFailures == 0 && !state.broken) {
-      return Text(feed.url,
-          overflow: TextOverflow.ellipsis, maxLines: 1, style: small);
-    }
-    return Text(state.lastError ?? comms.feedUnreachableReason,
-        overflow: TextOverflow.ellipsis,
-        maxLines: 2,
-        style: small?.copyWith(color: Theme.of(context).colorScheme.error));
+    final unplayed = _unplayed[feed.id] ?? 0;
+    final failing = state.consecutiveFailures > 0 || state.broken;
+    if (unplayed == 0 && !failing) return null;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        if (unplayed > 0)
+          Text('$unplayed unplayed',
+              key: Key('unplayed-${feed.id}'), style: small),
+        if (failing)
+          Text(state.lastError ?? comms.feedUnreachableReason,
+              overflow: TextOverflow.ellipsis,
+              maxLines: 2,
+              style: small?.copyWith(
+                  color: Theme.of(context).colorScheme.error)),
+      ],
+    );
   }
 
   Widget _feedTile(Feed feed) {
+    final name = _feedName(feed);
+    final art = widget.localMlAvailable
+        ? widget.repository.services?.artworkFileFor(feed.id)
+        : null;
+    final initial = _Initial(name);
     return ListTile(
       onTap: () => _openFeed(feed),
-      leading: const Icon(Icons.rss_feed),
-      title: Text(
-        feed.title.isEmpty ? feed.url : feed.title,
-        overflow: TextOverflow.ellipsis,
-        maxLines: 1,
+      leading: _Thumb(
+        child: art != null && art.existsSync()
+            ? Image.file(art,
+                fit: BoxFit.cover, errorBuilder: (_, _, _) => initial)
+            : initial,
       ),
+      title: Text(name, overflow: TextOverflow.ellipsis, maxLines: 2),
       subtitle: _feedSubtitle(feed),
       trailing: PopupMenuButton<String>(
         key: Key('feed-menu-${feed.id}'),
@@ -384,6 +503,82 @@ class _FeedsScreenState extends State<FeedsScreen> {
           PopupMenuItem(value: 'unfollow', child: Text('Unfollow')),
         ],
       ),
+    );
+  }
+}
+
+typedef _Book = ({Work work, int segmentCount, Position? position});
+
+String _feedName(Feed feed) => feed.title.isEmpty ? feed.url : feed.title;
+
+/// How a shelf sorts a name: by its letters, not its case, and without a
+/// leading "The ", so "The Night Sky Cast" files under N as people look
+/// for it.
+@visibleForTesting
+String shelfKey(String name) {
+  final lower = name.trim().toLowerCase();
+  return lower.startsWith('the ') ? lower.substring(4).trimLeft() : lower;
+}
+
+class _ShelfHeader extends StatelessWidget {
+  const _ShelfHeader({super.key, required this.title, required this.count});
+  final String title;
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Semantics(
+      header: true,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 20, 16, 4),
+        child: Text.rich(
+          TextSpan(children: [
+            TextSpan(text: title, style: theme.textTheme.titleMedium),
+            TextSpan(
+                text: '  $count',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant)),
+          ]),
+        ),
+      ),
+    );
+  }
+}
+
+/// A row's square picture. Fixed size so long titles at large text wrap
+/// beside it instead of pushing it around.
+class _Thumb extends StatelessWidget {
+  const _Thumb({required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => ClipRRect(
+        borderRadius: BorderRadius.circular(8),
+        child: SizedBox.square(
+          dimension: 48,
+          child: ColoredBox(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            child: Center(child: child),
+          ),
+        ),
+      );
+}
+
+/// The show's first letter, for a feed with no artwork (or none yet).
+class _Initial extends StatelessWidget {
+  const _Initial(this.name);
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final trimmed = shelfKey(name);
+    final letter = trimmed.isEmpty ? '?' : trimmed.characters.first;
+    return Center(
+      child: Text(letter.toUpperCase(),
+          // The box is fixed, so the letter must not grow with text scale.
+          textScaler: TextScaler.noScaling,
+          style: Theme.of(context).textTheme.titleLarge),
     );
   }
 }

@@ -336,7 +336,8 @@ class _HomeShellState extends State<HomeShell> {
             createSpeechTempFiles: widget.services.createSpeechTempFiles,
             resolveTranslator: widget.services.resolveTranslator,
             availableTranslationTargets:
-                widget.services.availableTranslationTargets),
+                widget.services.availableTranslationTargets,
+            tts: widget.services.tts),
         _ => CoursesScreen(
           db: widget.db,
           profile: widget.profile,

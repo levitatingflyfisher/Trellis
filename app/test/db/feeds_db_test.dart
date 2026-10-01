@@ -1017,6 +1017,7 @@ void main() {
         ALTER TABLE episodes DROP COLUMN finished_at_ms;
         ALTER TABLE episodes DROP COLUMN image_url;
         ALTER TABLE feeds DROP COLUMN sort_oldest_first;
+        ALTER TABLE feeds DROP COLUMN origin;
         PRAGMA user_version = 11;
       ''');
       v11.dispose();
@@ -1120,6 +1121,7 @@ void main() {
         ALTER TABLE episodes DROP COLUMN finished_at_ms;
         ALTER TABLE episodes DROP COLUMN image_url;
         ALTER TABLE feeds DROP COLUMN sort_oldest_first;
+        ALTER TABLE feeds DROP COLUMN origin;
         PRAGMA user_version = 12;
       ''');
         v12.dispose();
@@ -1197,6 +1199,7 @@ void main() {
         ALTER TABLE episodes DROP COLUMN finished_at_ms;
         ALTER TABLE episodes DROP COLUMN image_url;
         ALTER TABLE feeds DROP COLUMN sort_oldest_first;
+        ALTER TABLE feeds DROP COLUMN origin;
         PRAGMA user_version = 22;
       ''');
       v22.dispose();
@@ -1219,6 +1222,107 @@ void main() {
       expect((await migrated.feedsDao.episodeOf(workId))!.finishedAtMs, 42);
       expect((await migrated.feedsDao.feedById(feedId))!.sortOldestFirst,
           isTrue);
+    });
+  });
+
+  group('unplayed counts for Subscriptions (ADR-0016)', () {
+    test('counts audio not finished and not let pass, per feed, matching '
+        'the podcast page', () async {
+      final p = await seedProfile();
+      final a = await db.feedsDao.insertFeed(profileId: p, url: 'a');
+      final b = await db.feedsDao.insertFeed(profileId: p, url: 'b');
+      final blog = await db.feedsDao.insertFeed(profileId: p, url: 'c');
+      await seedEpisode(
+          profileId: p, feedId: a, title: 'a1', publishedAtMs: 1,
+          enclosureUrl: 'https://a/1.mp3');
+      final played = await seedEpisode(
+          profileId: p, feedId: a, title: 'a2', publishedAtMs: 2,
+          enclosureUrl: 'https://a/2.mp3');
+      await db.feedsDao.markPlayed(played, 5);
+      final passed = await seedEpisode(
+          profileId: p, feedId: a, title: 'a3', publishedAtMs: 3,
+          enclosureUrl: 'https://a/3.mp3');
+      await db.spineDao.setPersistence(passed, 'decayed');
+      await seedEpisode(
+          profileId: p, feedId: b, title: 'b1', publishedAtMs: 1,
+          enclosureUrl: 'https://b/1.mp3');
+      await seedEpisode(
+          profileId: p, feedId: b, title: 'b2', publishedAtMs: 2,
+          enclosureUrl: 'https://b/2.mp3');
+      await seedEpisode(
+          profileId: p, feedId: blog, title: 'c1', publishedAtMs: 1);
+
+      final counts = await db.feedsDao.unplayedCountsOf(p);
+      expect(counts, {a: 1, b: 2});
+
+      final page = (await db.feedsDao.episodesOfFeed(a))
+          .where((e) =>
+              e.episode.enclosureUrl != null && e.episode.finishedAtMs == null)
+          .length;
+      expect(counts[a], page);
+    });
+
+    test('another profile\'s episodes are not counted', () async {
+      final p = await seedProfile();
+      final q = await db.profilesDao.create('Bo');
+      final f = await db.feedsDao.insertFeed(profileId: q, url: 'a');
+      await seedEpisode(
+          profileId: q, feedId: f, title: 'x', publishedAtMs: 1,
+          enclosureUrl: 'https://a/x.mp3');
+      expect(await db.feedsDao.unplayedCountsOf(p), isEmpty);
+    });
+  });
+
+  group('schema migration v23 -> v24', () {
+    test('a v23 database gains feed origin, backfilled from its episodes',
+        () async {
+      final dir = Directory.systemTemp.createTempSync('trellis-migration-v24');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final file = File('${dir.path}/v23.sqlite');
+
+      final seed = AppDatabase.forTesting(NativeDatabase(file));
+      final profileId = await seed.profilesDao.create('Ada');
+      Future<int> episode(int feedId, String guid, String? audio) async {
+        final workId = await seed.spineDao.insertWork(
+            profileId: profileId,
+            kind: audio == null ? 'article' : 'episode',
+            title: guid,
+            persistence: 'ephemeron',
+            firstSeenEpochDay: 100);
+        await seed.feedsDao.insertEpisode(
+            workId: workId,
+            feedId: feedId,
+            guid: guid,
+            enclosureUrl: audio,
+            publishedAtMs: 1);
+        return workId;
+      }
+
+      final podcast = await seed.feedsDao
+          .insertFeed(profileId: profileId, url: 'https://a.test/pod');
+      await episode(podcast, 'p1', null);
+      await episode(podcast, 'p2', 'https://a.test/p2.mp3');
+      final blog = await seed.feedsDao
+          .insertFeed(profileId: profileId, url: 'https://a.test/blog');
+      await episode(blog, 'b1', null);
+      final unfetched = await seed.feedsDao
+          .insertFeed(profileId: profileId, url: 'https://a.test/new');
+      await seed.close();
+      final v23 = raw.sqlite3.open(file.path);
+      v23.execute('''
+        ALTER TABLE feeds DROP COLUMN origin;
+        PRAGMA user_version = 23;
+      ''');
+      v23.dispose();
+
+      final migrated = AppDatabase.forTesting(NativeDatabase(file));
+      addTearDown(migrated.close);
+      Future<String> originOf(int id) async =>
+          (await migrated.feedsDao.feedById(id))!.origin;
+      expect(await originOf(podcast), 'podcast');
+      expect(await originOf(blog), 'blog');
+      expect(await originOf(unfetched), 'podcast',
+          reason: 'no items yet: the next fresh parse decides');
     });
   });
 
@@ -1268,6 +1372,7 @@ void main() {
         ALTER TABLE episodes DROP COLUMN finished_at_ms;
         ALTER TABLE episodes DROP COLUMN image_url;
         ALTER TABLE feeds DROP COLUMN sort_oldest_first;
+        ALTER TABLE feeds DROP COLUMN origin;
         PRAGMA user_version = 18;
       ''');
         v18.dispose();
@@ -1346,6 +1451,7 @@ void main() {
         ALTER TABLE episodes DROP COLUMN finished_at_ms;
         ALTER TABLE episodes DROP COLUMN image_url;
         ALTER TABLE feeds DROP COLUMN sort_oldest_first;
+        ALTER TABLE feeds DROP COLUMN origin;
         PRAGMA user_version = 19;
       ''');
         v19.dispose();

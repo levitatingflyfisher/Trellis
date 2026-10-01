@@ -96,3 +96,17 @@ piece of work.
 - The feed detail screen's "not a second river" note is retired; its
   RFC 5005 "Fetch older episodes" action stays.
 - AntennaPod (GPL) was studied for what its rows show, never for code.
+
+## Notes from building step 2
+
+- Origin is learned from each fresh parse: audio on any item makes a
+  podcast, none makes a blog. An empty listing leaves it unchanged, and a
+  feed with nothing stored yet (an OPML import never reached) stays on
+  Podcasts until it answers.
+- The Books shelf holds `kind == 'book'` works the Library shows (EPUB and
+  Gutenberg). Audiobooks stay in the Library for now; whether they belong
+  on this shelf is open.
+- There is no Video shelf: the parser keeps only audio enclosures, and
+  video support is undecided.
+- Blog rows show no count. "Unplayed" means audio not yet finished, and
+  articles have none; an unread count for them would be a separate ruling.

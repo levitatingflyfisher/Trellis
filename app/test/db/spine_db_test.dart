@@ -33,6 +33,45 @@ void main() {
     expect(all.length, 1, reason: 'upsert, never a second row per work');
   });
 
+  test('booksOf lists kept books with their cursor and length, and nothing '
+      'else', () async {
+    final p = await db.profilesDao.create('Ada');
+    final other = await db.profilesDao.create('Bo');
+    Future<int> work(int profileId, String kind, String title,
+            {String persistence = 'work'}) =>
+        db.spineDao.insertWork(
+            profileId: profileId,
+            kind: kind,
+            title: title,
+            persistence: persistence,
+            firstSeenEpochDay: 100);
+    final read = await work(p, 'book', 'Middlemarch');
+    await db.spineDao.insertSegments(read, [
+      for (var i = 0; i < 4; i++) (idx: i, kind: 'prose', text: 'p$i'),
+    ]);
+    await db.spineDao.savePosition(
+        profileId: p, workId: read, segmentIdx: 2, wordIdx: 0,
+        lastModality: 'read');
+    // Another reader's cursor in the same book must not leak in.
+    await db.spineDao.savePosition(
+        profileId: other, workId: read, segmentIdx: 3, wordIdx: 0,
+        lastModality: 'read');
+    final unopened = await work(p, 'book', 'Emma');
+    await work(p, 'article', 'An essay');
+    await work(p, 'audiobook', 'Heard');
+    await work(p, 'book', 'Gone', persistence: 'decayed');
+    await work(other, 'book', 'Not mine');
+
+    final books = await db.spineDao.booksOf(p);
+    expect({for (final b in books) b.work.id}, {read, unopened});
+    final m = books.firstWhere((b) => b.work.id == read);
+    expect(m.segmentCount, 4);
+    expect(m.position!.segmentIdx, 2);
+    final e = books.firstWhere((b) => b.work.id == unopened);
+    expect(e.segmentCount, 0);
+    expect(e.position, isNull);
+  });
+
   test('segments and per-language layers round-trip in order', () async {
     final profileId = await db.profilesDao.create('Ada');
     final workId = await db.spineDao.insertWork(
@@ -315,6 +354,7 @@ void main() {
         ALTER TABLE episodes DROP COLUMN finished_at_ms;
         ALTER TABLE episodes DROP COLUMN image_url;
         ALTER TABLE feeds DROP COLUMN sort_oldest_first;
+        ALTER TABLE feeds DROP COLUMN origin;
         PRAGMA user_version = 12;
       ''');
       v12.dispose();
@@ -384,6 +424,7 @@ void main() {
         ALTER TABLE episodes DROP COLUMN finished_at_ms;
         ALTER TABLE episodes DROP COLUMN image_url;
         ALTER TABLE feeds DROP COLUMN sort_oldest_first;
+        ALTER TABLE feeds DROP COLUMN origin;
         PRAGMA user_version = 18;
       ''');
       v18.dispose();

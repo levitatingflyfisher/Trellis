@@ -99,6 +99,16 @@ const String noFeedArchiveNote =
 
 typedef FetchOlderOutcome = ({int newItems, String message});
 
+/// What one parsed listing says about its Subscriptions shelf (ADR-0016):
+/// audio on any item says podcast, none says blog or newsletter. Judged on
+/// the whole listing, before rules skip anything. Null when the listing is
+/// empty, which says nothing either way. A blog verdict is only a hint;
+/// see [FeedsRepository._settleOrigin].
+String? originOf(ParsedFeed parsed) {
+  if (parsed.items.isEmpty) return null;
+  return parsed.items.any((i) => i.enclosure != null) ? 'podcast' : 'blog';
+}
+
 /// How many distinct episode images one refresh may fetch.
 const episodeArtworkFetchLimit = 20;
 
@@ -242,6 +252,7 @@ class FeedsRepository {
         feedId: feedId,
         items: parsed.items,
         nowMs: nowMs);
+    await _settleOrigin(feedId, parsed);
     if (added > 0) await _runDedupPass(profileId);
     _fetchArtworkLater(() async {
       await _maybeFetchArtwork(feedId, newUrl: parsed.imageUrl, oldUrl: null);
@@ -293,6 +304,7 @@ class FeedsRepository {
           items: parsed.items,
           nowMs: nowMs,
           rules: decodeFeedRules(feed.rulesJson));
+      await _settleOrigin(feed.id, parsed);
       // Every fresh refresh, not only one with new episodes: a fetch
       // that failed, or a URL filled in on an episode already stored,
       // still needs its file.
@@ -445,6 +457,19 @@ class FeedsRepository {
     if (newUrl == null || newUrl == oldUrl) return;
     await deviceServices.audioFetcher
         .fetch(newUrl, deviceServices.artworkFileFor(feedId));
+  }
+
+  /// Runs after the parse is ingested. Audio in this listing always makes
+  /// a podcast; a text-only listing makes a blog only when no stored
+  /// episode has audio either, so one show-notes post or a trimmed feed
+  /// can't move a podcast off its shelf.
+  Future<void> _settleOrigin(int feedId, ParsedFeed parsed) async {
+    final origin = originOf(parsed);
+    if (origin == null) return;
+    if (origin == 'blog' && await db.feedsDao.hasAudioEpisodes(feedId)) {
+      return;
+    }
+    await db.feedsDao.setOrigin(feedId, origin);
   }
 
   Future<void> _artwork = Future.value();

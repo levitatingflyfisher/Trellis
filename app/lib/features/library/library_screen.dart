@@ -13,8 +13,7 @@ import '../intake/paste_intake.dart';
 import '../intake/url_intake.dart';
 import '../models/format.dart' show formatDay, formatEpochDay;
 import '../player/player_controller.dart';
-import '../reader/reader_logic.dart' show shouldOfferRecap;
-import '../reader/reader_screen.dart';
+import '../reader/reader_doors.dart';
 import '../reader/speech/speech_engine.dart';
 import '../reader/speech/speech_temp_files.dart';
 import '../reader/translation/marian_engine.dart';
@@ -408,6 +407,16 @@ class _LibraryScreenState extends State<LibraryScreen> {
     );
   }
 
+  ReaderDoors get _readerDoors => ReaderDoors(
+      tts: widget.tts,
+      localMlAvailable: widget.localMlAvailable,
+      resolveSpeechEngine: widget.resolveSpeechEngine,
+      lookupDefinition: widget.lookupDefinition,
+      createSpeechTempFiles: widget.createSpeechTempFiles,
+      player: widget.player,
+      resolveTranslator: widget.resolveTranslator,
+      availableTranslationTargets: widget.availableTranslationTargets);
+
   Future<void> _open(_Entry e) async {
     // Campaign 7 (ADR-0013): "the audiobook opens into the EXISTING
     // player surface" — there is no separate audiobook reader screen,
@@ -420,43 +429,13 @@ class _LibraryScreenState extends State<LibraryScreen> {
       await _load();
       return;
     }
-    // Resolved before the push (ADR-0006): the neural-voice hint and the
-    // settings-escape menu both need to know whether a voice exists BEFORE
-    // the reader ever shows its first frame — cheap (a directory-exists
-    // check at most), never touched on a tier that can't run local ML.
-    final resolver = widget.resolveSpeechEngine;
-    final hasVoice = resolver == null
-        ? false
-        : await resolver(lang: e.work.lang) != null;
+    await _readerDoors.open(context,
+        db: widget.db,
+        profileId: widget.profile.id,
+        work: e.work,
+        position: e.position,
+        segmentCount: e.segmentCount);
     if (!mounted) return;
-    // Campaign 4 Phase 4: same "resolved before the push" shape as
-    // offerNeuralVoice above — shouldOfferRecap's own trigger rules are
-    // pure and tested in isolation (reader_logic_test.dart); this is just
-    // the real Position/segmentCount data feeding them.
-    final position = e.position;
-    final offerRecap = shouldOfferRecap(
-        lastTouchedEpochDay: position == null
-            ? null
-            : position.updatedAtMs ~/ Duration.millisecondsPerDay,
-        todayEpochDay: epochDayUtcNow(),
-        progress: e.segmentCount == 0
-            ? 0
-            : (position?.segmentIdx ?? 0) / e.segmentCount);
-    await Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => ReaderScreen(
-          db: widget.db,
-          profileId: widget.profile.id,
-          work: e.work,
-          tts: widget.tts,
-          offerNeuralVoice: widget.localMlAvailable && !hasVoice,
-          resolveSpeechEngine: widget.resolveSpeechEngine,
-          lookupDefinition: widget.lookupDefinition,
-          createSpeechTempFiles: widget.createSpeechTempFiles,
-          player: widget.player,
-          resolveTranslator: widget.resolveTranslator,
-          availableTranslationTargets: widget.availableTranslationTargets,
-          offerRecap: offerRecap),
-    ));
     await _load(); // progress may have moved
   }
 
