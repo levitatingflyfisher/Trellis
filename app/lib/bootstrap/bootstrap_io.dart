@@ -15,6 +15,7 @@ import 'package:drift_flutter/drift_flutter.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:sqlite3/common.dart' show CommonDatabase;
 
 import '../db/database.dart';
 import '../features/reader/speech/speech_temp_files.dart';
@@ -22,7 +23,20 @@ import '../net/io_fetcher.dart';
 import '../services/device_services.dart';
 
 /// drift_flutter's native convention: documents-dir/NAME.sqlite.
-AppDatabase createDb() => AppDatabase(driftDatabase(name: 'trellis'));
+AppDatabase createDb() => AppDatabase(
+  driftDatabase(
+    name: 'trellis',
+    native: const DriftNativeOptions(setup: configureConnection),
+  ),
+);
+
+/// Runs on every native connection before drift reads the schema version,
+/// so a second connection (the background feed check, ADR-0018) waits for
+/// the first instead of failing with "database is locked" mid-migration.
+/// AppDatabase's beforeOpen sets the same timeout again, but only after
+/// the migrations, which is too late for an upgrade.
+void configureConnection(CommonDatabase db) =>
+    db.execute('PRAGMA busy_timeout = 15000');
 
 /// Where drift keeps the database — named so the storage panel can weigh
 /// the real file, not a guess.
@@ -41,8 +55,10 @@ File databaseFileIn(Directory documentsDir) =>
 /// wrapper, never in [servicesFor]'s channel-free core, and never on the
 /// web side (dart:io Directory operations throw under dart2js).
 Future<DeviceServices> createServices() async {
-  final services = servicesFor(await getApplicationSupportDirectory(),
-      databaseFile: databaseFileIn(await getApplicationDocumentsDirectory()));
+  final services = servicesFor(
+    await getApplicationSupportDirectory(),
+    databaseFile: databaseFileIn(await getApplicationDocumentsDirectory()),
+  );
   await sweepStaleSpeechTempFiles(services.speechTempDir);
   return services;
 }
@@ -83,8 +99,8 @@ HttpFetcher createFetcher({WebFetchLane lane = WebFetchLane.direct}) =>
 const audioNotificationIcon = 'drawable/ic_notification';
 
 Future<void> initAudioBackground() => JustAudioBackground.init(
-      androidNotificationChannelId: 'com.openhearth.trellis.channel.audio',
-      androidNotificationChannelName: 'Trellis playback',
-      androidNotificationIcon: audioNotificationIcon,
-      androidNotificationOngoing: true,
-    );
+  androidNotificationChannelId: 'com.openhearth.trellis.channel.audio',
+  androidNotificationChannelName: 'Trellis playback',
+  androidNotificationIcon: audioNotificationIcon,
+  androidNotificationOngoing: true,
+);

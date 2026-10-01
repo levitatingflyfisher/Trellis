@@ -7,6 +7,8 @@ import 'package:comms_core/comms_core.dart';
 import 'package:drift/drift.dart' show driftRuntimeOptions;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:sqlite3/sqlite3.dart' show sqlite3;
+import 'package:trellis/bootstrap/bootstrap_io.dart' show configureConnection;
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/feeds/feed_dedup.dart';
 import 'package:trellis/features/feeds/feed_ingest.dart';
@@ -27,14 +29,29 @@ void main() {
       AppDatabase.forTesting(NativeDatabase.createInBackground(file));
 
   List<FeedItem> items(String prefix, int n) => [
-        for (var i = 0; i < n; i++)
-          FeedItem(
-              title: '$prefix $i',
-              link: 'https://cast.test/$prefix/$i',
-              date: 'Wed, 05 Aug 2026 12:00:00 GMT',
-              desc: 'Episode $i.',
-              enclosure: Enclosure(url: 'https://cast.test/$prefix/$i.mp3')),
-      ];
+    for (var i = 0; i < n; i++)
+      FeedItem(
+        title: '$prefix $i',
+        link: 'https://cast.test/$prefix/$i',
+        date: 'Wed, 05 Aug 2026 12:00:00 GMT',
+        desc: 'Episode $i.',
+        enclosure: Enclosure(url: 'https://cast.test/$prefix/$i.mp3'),
+      ),
+  ];
+
+  test('every native connection waits on a busy file from its first '
+      'statement', () {
+    // 1.5.3 on a phone: the background feed check and the app opened at
+    // once after the upgrade. One was recovering the WAL the killed old
+    // process left; the other's PRAGMA user_version failed at once with
+    // SQLITE_BUSY_RECOVERY, because busy_timeout was only set in
+    // beforeOpen, after the migrations. drift runs `setup` before it
+    // reads the schema version (NativeDatabase._initializeDatabase).
+    final db = sqlite3.openInMemory();
+    addTearDown(db.dispose);
+    configureConnection(db);
+    expect(db.select('PRAGMA busy_timeout').single.values.single, 15000);
+  });
 
   test('two connections ingesting the same feeds at once store each item '
       'once and never throw', () async {
@@ -45,20 +62,23 @@ void main() {
     final profileId = await a.profilesDao.create('Reader');
     final feedIds = [
       for (var f = 0; f < 6; f++)
-        await a.feedsDao
-            .insertFeed(profileId: profileId, url: 'https://cast.test/f$f'),
+        await a.feedsDao.insertFeed(
+          profileId: profileId,
+          url: 'https://cast.test/f$f',
+        ),
     ];
     final batches = {for (final id in feedIds) id: items('f$id', 40)};
 
     Future<void> ingestAll(AppDatabase db) => Future.wait([
-          for (final id in feedIds)
-            ingestFeedItems(
-                db: db,
-                profileId: profileId,
-                feedId: id,
-                items: batches[id]!,
-                nowMs: 1),
-        ]);
+      for (final id in feedIds)
+        ingestFeedItems(
+          db: db,
+          profileId: profileId,
+          feedId: id,
+          items: batches[id]!,
+          nowMs: 1,
+        ),
+    ]);
 
     await Future.wait([ingestAll(a), ingestAll(b)]);
 
@@ -81,29 +101,37 @@ void main() {
     // The same 30 stories syndicated by three feeds: one pass hides the
     // younger copies and keeps the oldest of each visible.
     for (var f = 0; f < 3; f++) {
-      final feedId = await a.feedsDao
-          .insertFeed(profileId: profileId, url: 'https://news.test/f$f');
+      final feedId = await a.feedsDao.insertFeed(
+        profileId: profileId,
+        url: 'https://news.test/f$f',
+      );
       await ingestFeedItems(
-          db: a,
-          profileId: profileId,
-          feedId: feedId,
-          nowMs: 1,
-          items: [
-            for (var i = 0; i < 30; i++)
-              FeedItem(
-                  title: 'Story $i',
-                  link: 'https://news.test/story/$i',
-                  date: 'Wed, 05 Aug 2026 1$f:00:00 GMT',
-                  desc: ''),
-          ]);
+        db: a,
+        profileId: profileId,
+        feedId: feedId,
+        nowMs: 1,
+        items: [
+          for (var i = 0; i < 30; i++)
+            FeedItem(
+              title: 'Story $i',
+              link: 'https://news.test/story/$i',
+              date: 'Wed, 05 Aug 2026 1$f:00:00 GMT',
+              desc: '',
+            ),
+        ],
+      );
     }
 
     Future<void> pass(AppDatabase db) async {
-      final verdicts =
-          findDuplicates(await db.feedsDao.dedupCandidatesOf(profileId));
+      final verdicts = findDuplicates(
+        await db.feedsDao.dedupCandidatesOf(profileId),
+      );
       for (final e in verdicts.entries) {
-        await db.feedsDao.setDedup(e.key,
-            reason: e.value.reason, canonicalWorkId: e.value.canonicalWorkId);
+        await db.feedsDao.setDedup(
+          e.key,
+          reason: e.value.reason,
+          canonicalWorkId: e.value.canonicalWorkId,
+        );
       }
     }
 
