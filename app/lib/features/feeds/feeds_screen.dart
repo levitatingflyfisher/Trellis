@@ -78,6 +78,10 @@ class _FeedsScreenState extends State<FeedsScreen> {
   List<Feed>? _feeds;
   bool _dspGlobalDefault = false;
 
+  /// Set while an OPML import is checking its new feeds.
+  ({int done, int total})? _importProgress;
+  bool _importing = false;
+
   /// Feeds unfollowed but still on offer to Undo (fleet delete ruling:
   /// a deliberate unfollow doesn't ask; its Undo never times out). The
   /// cascade runs only when the offer is let go.
@@ -169,6 +173,17 @@ class _FeedsScreenState extends State<FeedsScreen> {
   }
 
   Future<void> _importOpml() async {
+    // One import at a time: a second would race the first's progress.
+    if (_importing) return;
+    _importing = true;
+    try {
+      await _importOpmlUnguarded();
+    } finally {
+      _importing = false;
+    }
+  }
+
+  Future<void> _importOpmlUnguarded() async {
     final bytes = await widget.pickOpmlBytes();
     if (bytes == null) return;
     final List<comms.OpmlOutline> outlines;
@@ -184,32 +199,43 @@ class _FeedsScreenState extends State<FeedsScreen> {
       _toast('No feed URLs found in that file.');
       return;
     }
-    var added = 0;
-    for (final o in outlines) {
-      final existing = await widget.db.feedsDao.feedByUrl(
-        widget.profile.id,
-        o.url,
-      );
-      if (existing != null) continue;
-      final id = await widget.db.feedsDao.insertFeed(
-        profileId: widget.profile.id,
-        url: o.url,
-        title: o.title,
-      );
-      added++;
-      // The donor validated each import by fetching; the breaker records
-      // the ones that fail.
-      final feed = (await widget.db.feedsDao.feedsOf(
-        widget.profile.id,
-      )).firstWhere((f) => f.id == id);
-      await widget.repository.refreshFeed(feed);
+    final added = await widget.repository.followOutlines(
+      widget.profile.id,
+      outlines,
+    );
+    if (added.isEmpty) {
+      _toast('Already following all of those.');
+      return;
     }
     await _load();
-    _toast(
-      added == 0
-          ? 'Already following all of those.'
-          : 'Following $added new ${added == 1 ? 'feed' : 'feeds'}.',
+    if (mounted) {
+      setState(() => _importProgress = (done: 0, total: added.length));
+    }
+    // The donor validated each import by fetching; the breaker records the
+    // ones that fail, so their rows can say why.
+    await widget.repository.refreshMany(
+      added,
+      onProgress: (done, total) {
+        if (!mounted) return;
+        setState(() => _importProgress = (done: done, total: total));
+        _load();
+      },
     );
+    final wanted = {for (final f in added) f.id};
+    final failed = (await widget.db.feedsDao.feedsOf(widget.profile.id))
+        .where((f) => wanted.contains(f.id))
+        .map(stateOfFeed)
+        .where((s) => s.consecutiveFailures > 0 || s.broken)
+        .length;
+    if (mounted) setState(() => _importProgress = null);
+    await _load();
+    final n = added.length;
+    final followed = 'Following $n new ${n == 1 ? 'feed' : 'feeds'}.';
+    _toast(switch (failed) {
+      0 => followed,
+      1 => '$followed 1 couldn’t be reached; its row says why.',
+      _ => '$followed $failed couldn’t be reached; their rows say why.',
+    });
   }
 
   Future<void> _exportOpml() async {
@@ -278,15 +304,18 @@ class _FeedsScreenState extends State<FeedsScreen> {
                 icon: const Icon(Icons.add),
                 label: const Text('Follow'),
               ),
-        body: CappedBody(child: switch (feeds) {
-          null => const Center(child: CircularProgressIndicator()),
-          [] => _EmptyFeeds(onFollow: _follow),
-          _ => ListView.builder(
-            padding: const EdgeInsets.only(bottom: 88),
-            itemCount: feeds.length,
-            itemBuilder: (_, i) => _feedTile(feeds[i]),
-          ),
-        }),
+        body: CappedBody(child: Column(children: [
+          if (_importProgress case final p?) _ImportProgress(progress: p),
+          Expanded(child: switch (feeds) {
+            null => const Center(child: CircularProgressIndicator()),
+            [] => _EmptyFeeds(onFollow: _follow),
+            _ => ListView.builder(
+              padding: const EdgeInsets.only(bottom: 88),
+              itemCount: feeds.length,
+              itemBuilder: (_, i) => _feedTile(feeds[i]),
+            ),
+          }),
+        ])),
       ),
     );
   }
@@ -378,6 +407,33 @@ class _EmptyFeeds extends StatelessWidget {
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// "Checking 37 of 118…" over a bar, so a long import visibly moves.
+class _ImportProgress extends StatelessWidget {
+  const _ImportProgress({required this.progress});
+  final ({int done, int total}) progress;
+
+  @override
+  Widget build(BuildContext context) {
+    final (:done, :total) = progress;
+    // Counts the feed being worked on, so it never reads "Checking 0".
+    final current = done < total ? done + 1 : total;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            'Checking $current of $total…',
+            key: const Key('opml-import-progress'),
+          ),
+          const SizedBox(height: 8),
+          LinearProgressIndicator(value: done / total),
+        ],
       ),
     );
   }

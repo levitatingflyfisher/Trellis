@@ -24,6 +24,7 @@ import 'package:jobs_core/jobs_core.dart';
 
 import '../../db/database.dart';
 import '../../services/device_services.dart';
+import '../jobs/failure_reason.dart';
 import '../transcribe/transcribe_coordinator.dart' show transcribeJobId;
 import 'dsp_encoder.dart';
 import 'dsp_params.dart';
@@ -55,6 +56,7 @@ class DspCardState {
 
 class _Flow {
   bool cancelRequested = false;
+  final ended = Completer<void>();
   void cancel() => cancelRequested = true;
 }
 
@@ -98,6 +100,9 @@ class DspCoordinator extends ChangeNotifier {
         phase: row.state == JobState.failed.name
             ? DspPhase.failed
             : DspPhase.paused,
+        error: row.state == JobState.failed.name
+            ? row.failureReason ?? genericFailureReason
+            : null,
       );
     }
     notifyListeners();
@@ -215,8 +220,10 @@ class DspCoordinator extends ChangeNotifier {
     required _Flow flow,
   }) async {
     final gate = services.foregroundGate;
+    var holdsGate = false;
     try {
       await gate.jobStarted(title, 'Measuring…');
+      holdsGate = true;
       final audio = services.audioFileFor(workId, url);
       if (!audio.existsSync()) {
         throw DspEncodeException('no downloaded audio to process for “$title”');
@@ -283,7 +290,8 @@ class DspCoordinator extends ChangeNotifier {
       await _fail(workId, jobId, err);
     } finally {
       _flows.remove(workId);
-      await gate.jobFinished();
+      if (holdsGate) await gate.jobFinished();
+      flow.ended.complete();
     }
   }
 
@@ -296,14 +304,31 @@ class DspCoordinator extends ChangeNotifier {
   }
 
   Future<void> _fail(int workId, String jobId, Object err) async {
+    final reason = plainFailureReason(err);
     final row = await db.jobsDao.load(jobId);
     if (row != null && row.state == JobState.running) {
       await db.jobsDao.save(row.copyWith(state: JobState.failed));
     }
+    if (row != null) await db.jobsDao.setFailureReason(jobId, reason);
     _update(
       workId,
-      (c) => c._with(phase: DspPhase.failed, error: err.toString()),
+      (c) => c._with(phase: DspPhase.failed, error: reason),
     );
+  }
+
+  /// Stop every running pass at its next stage boundary and wait for it.
+  Future<void> stopAll() async {
+    final flows = [..._flows.values];
+    for (final f in flows) {
+      f.cancel();
+    }
+    await Future.wait([for (final f in flows) f.ended.future]);
+  }
+
+  /// After a backup restore: forget every card. Call after [stopAll].
+  void discardAll() {
+    _cards.clear();
+    notifyListeners();
   }
 
   void _update(int workId, DspCardState Function(DspCardState) fn) {

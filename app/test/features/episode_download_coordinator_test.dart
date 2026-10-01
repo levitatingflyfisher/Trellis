@@ -1,82 +1,104 @@
+import 'dart:convert';
 import 'dart:io';
 
+import 'package:dio/dio.dart' as dio;
+import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jobs_core/jobs_core.dart';
+import 'package:trellis/db/database.dart';
 import 'package:trellis/features/feeds/episode_download_coordinator.dart';
+import 'package:trellis/features/transcribe/audio_fetcher.dart';
+import 'package:trellis/features/transcribe/foreground_gate.dart';
 import 'package:trellis/services/device_services.dart';
 
 import '../support/fake_services.dart';
 
-/// The standalone "Download" action (Campaign 6, Part 2): the door onto
-/// disk that isn't transcription. One consent chokepoint lives in the UI
-/// (confirmDownload) — this coordinator is what runs after the user has
-/// already said yes, over the fleet's one download engine (AudioFetcher).
-/// No persisted job row: the `.part` file AudioFetcher's own resumable
-/// engine leaves beside the target IS the resumability checkpoint, same
-/// as the transcribe pipeline's own audio-fetch step.
+/// The standalone "Download" action (Campaign 6, Part 2), now a job with
+/// a row: the user can see it, pause it, walk away, and find it again
+/// after the app was killed. The bytes themselves resume through the
+/// engine's `.part` + HTTP Range law; the row is what remembers that a
+/// download was ever under way.
 void main() {
   late Directory dir;
   late DeviceServices services;
+  late AppDatabase db;
   const url = 'https://cast.test/1.mp3';
   const workId = 1;
+  const jobId = 'download-1';
 
   setUp(() {
     dir = Directory.systemTemp.createTempSync('trellis-dl-coord');
+    db = AppDatabase.forTesting(NativeDatabase.memory());
   });
-  tearDown(() => dir.deleteSync(recursive: true));
+  tearDown(() async {
+    await db.close();
+    dir.deleteSync(recursive: true);
+  });
 
-  test(
-    'start downloads the audio and the file lands at audioFileFor\'s path',
-    () async {
-      final fetcher = FakeAudioFetcher();
-      services = testServices(dir, audioFetcher: fetcher);
-      final coordinator = EpisodeDownloadCoordinator(services: services);
+  EpisodeDownloadCoordinator coordinatorWith(AudioFetcher fetcher,
+      {RecordingForegroundGate? gate}) {
+    services = testServices(dir, audioFetcher: fetcher, gate: gate);
+    return EpisodeDownloadCoordinator(services: services, db: db);
+  }
 
-      await coordinator.start(workId: workId, url: url);
+  Future<void> seedRow(JobState state, {int totalBytes = 0}) async {
+    await db.jobsDao.save(Job(
+        id: jobId,
+        kind: 'download',
+        state: state,
+        checkpoint: null,
+        totalUnits: totalBytes,
+        doneUnits: 0,
+        createdAtMs: 1));
+    await db.jobsDao.setPayload(
+        jobId, jsonEncode({'workId': workId, 'title': 'Episode one', 'url': url}));
+  }
 
-      expect(fetcher.fetched, [url]);
-      expect(services.audioFileFor(workId, url).existsSync(), isTrue);
-      expect(coordinator.stateOf(workId).downloading, isFalse);
-    },
-  );
+  void seedPartial(int bytes) {
+    final part = File('${services.audioFileFor(workId, url).path}.part');
+    part.parent.createSync(recursive: true);
+    part.writeAsBytesSync(List.filled(bytes, 0));
+  }
 
-  test(
-    'already on disk: start is a no-op, the fetcher is never called',
-    () async {
-      final fetcher = FakeAudioFetcher();
-      services = testServices(dir, audioFetcher: fetcher);
-      final target = services.audioFileFor(workId, url);
-      target.parent.createSync(recursive: true);
-      target.writeAsBytesSync([1, 2, 3]);
+  test('start downloads the audio, and the finished job leaves no row',
+      () async {
+    final fetcher = FakeAudioFetcher();
+    final coordinator = coordinatorWith(fetcher);
 
-      final coordinator = EpisodeDownloadCoordinator(services: services);
-      await coordinator.start(workId: workId, url: url);
+    final outcome = await coordinator.start(workId: workId, url: url);
 
-      expect(fetcher.fetched, isEmpty);
-    },
-  );
+    expect(outcome, DownloadOutcome.done);
+    expect(fetcher.fetched, [url]);
+    expect(services.audioFileFor(workId, url).existsSync(), isTrue);
+    expect(coordinator.stateOf(workId).downloading, isFalse);
+    expect(await db.jobsDao.load(jobId), isNull);
+  });
 
-  test(
-    'isDownloaded reflects disk truth before and after a download',
-    () async {
-      final fetcher = FakeAudioFetcher();
-      services = testServices(dir, audioFetcher: fetcher);
-      final coordinator = EpisodeDownloadCoordinator(services: services);
+  test('already on disk: start is a no-op, the fetcher is never called',
+      () async {
+    final fetcher = FakeAudioFetcher();
+    final coordinator = coordinatorWith(fetcher);
+    final target = services.audioFileFor(workId, url);
+    target.parent.createSync(recursive: true);
+    target.writeAsBytesSync([1, 2, 3]);
 
-      expect(coordinator.isDownloaded(workId, url), isFalse);
-      await coordinator.start(workId: workId, url: url);
-      expect(coordinator.isDownloaded(workId, url), isTrue);
-    },
-  );
+    expect(await coordinator.start(workId: workId, url: url),
+        DownloadOutcome.done);
+    expect(fetcher.fetched, isEmpty);
+  });
 
-  test('while in flight, stateOf reports downloading and progress', () async {
+  test('while in flight, a row records the job and stateOf reports bytes',
+      () async {
     final fetcher = ControllableAudioFetcher();
-    services = testServices(dir, audioFetcher: fetcher);
-    final coordinator = EpisodeDownloadCoordinator(services: services);
-    var notifications = 0;
-    coordinator.addListener(() => notifications++);
+    final coordinator = coordinatorWith(fetcher);
 
-    final future = coordinator.start(workId: workId, url: url);
+    final future =
+        coordinator.start(workId: workId, url: url, title: 'Episode one');
+    await pumpEventQueue();
     expect(coordinator.stateOf(workId).downloading, isTrue);
+    final row = await db.jobsDao.load(jobId);
+    expect(row!.kind, 'download');
+    expect(row.state, JobState.running);
 
     fetcher.emitProgress(500, 1000);
     expect(coordinator.stateOf(workId).receivedBytes, 500);
@@ -84,64 +106,205 @@ void main() {
 
     fetcher.completeDownload();
     await future;
-
     expect(coordinator.stateOf(workId).downloading, isFalse);
-    expect(notifications, greaterThan(0));
   });
 
-  test('cancel stops the download; the state clears rather than sticking '
-      'in "downloading"', () async {
+  test('pause keeps the row as paused, for a later resume', () async {
     final fetcher = ControllableAudioFetcher();
-    services = testServices(dir, audioFetcher: fetcher);
-    final coordinator = EpisodeDownloadCoordinator(services: services);
+    final coordinator = coordinatorWith(fetcher);
 
     final future = coordinator.start(workId: workId, url: url);
-    expect(coordinator.stateOf(workId).downloading, isTrue);
-
+    await pumpEventQueue();
     coordinator.cancel(workId);
-    await future;
 
+    expect(await future, DownloadOutcome.paused);
     expect(coordinator.stateOf(workId).downloading, isFalse);
-    expect(
-      services.audioFileFor(workId, url).existsSync(),
-      isFalse,
-      reason: 'a cancelled fetch never promotes a partial into place',
-    );
+    expect(coordinator.stateOf(workId).paused, isTrue);
+    expect((await db.jobsDao.load(jobId))!.state, JobState.cancelled);
+    expect(services.audioFileFor(workId, url).existsSync(), isFalse,
+        reason: 'a paused fetch never promotes a partial into place');
   });
 
-  test(
-    'a fetch error surfaces as an honest error state, never a crash',
-    () async {
-      final fetcher = ControllableAudioFetcher();
-      services = testServices(dir, audioFetcher: fetcher);
-      final coordinator = EpisodeDownloadCoordinator(services: services);
+  test('a failure is kept with a reason a person can act on', () async {
+    final fetcher = ControllableAudioFetcher();
+    final coordinator = coordinatorWith(fetcher);
 
-      final future = coordinator.start(workId: workId, url: url);
-      fetcher.failDownload(Exception('the host closed the connection'));
-      await future;
+    final future = coordinator.start(workId: workId, url: url);
+    await pumpEventQueue();
+    final req = dio.RequestOptions(path: url);
+    fetcher.failDownload(dio.DioException(
+        requestOptions: req,
+        type: dio.DioExceptionType.badResponse,
+        response: dio.Response(requestOptions: req, statusCode: 404)));
 
-      expect(coordinator.stateOf(workId).downloading, isFalse);
-      expect(
-        coordinator.stateOf(workId).error,
-        contains('closed the connection'),
-      );
-    },
-  );
+    expect(await future, DownloadOutcome.failed);
+    expect(coordinator.stateOf(workId).error, contains('isn’t there'));
+    final row = (await db.jobsDao.unfinished()).single;
+    expect(row.state, JobState.failed.name);
+    expect(row.failureReason, contains('isn’t there'));
+  });
 
-  test(
-    'calling start twice while one is already in flight only fetches once',
-    () async {
-      final fetcher = ControllableAudioFetcher();
-      services = testServices(dir, audioFetcher: fetcher);
-      final coordinator = EpisodeDownloadCoordinator(services: services);
+  test('losing the connection says so, yet the job still resumes on the '
+      'next launch', () async {
+    final fetcher = ControllableAudioFetcher();
+    final coordinator = coordinatorWith(fetcher);
 
-      final first = coordinator.start(workId: workId, url: url);
-      final second = coordinator.start(workId: workId, url: url);
-      fetcher.completeDownload();
-      await first;
-      await second;
+    final future = coordinator.start(workId: workId, url: url);
+    await pumpEventQueue();
+    fetcher.failDownload(dio.DioException(
+        requestOptions: dio.RequestOptions(path: url),
+        type: dio.DioExceptionType.connectionError));
+
+    expect(await future, DownloadOutcome.failed);
+    expect(coordinator.stateOf(workId).error, contains('connection'));
+
+    final online = FakeAudioFetcher();
+    final relaunched = EpisodeDownloadCoordinator(
+        services: testServices(dir, audioFetcher: online), db: db);
+    await relaunched.restore();
+    await relaunched.resumeInterrupted();
+    expect(online.fetched, [url]);
+  });
+
+  test('a second start while one is in flight joins it, never a second fetch',
+      () async {
+    final fetcher = ControllableAudioFetcher();
+    final coordinator = coordinatorWith(fetcher);
+
+    final first = coordinator.start(workId: workId, url: url);
+    final second = coordinator.start(workId: workId, url: url);
+    await pumpEventQueue();
+    fetcher.completeDownload();
+
+    expect(await first, DownloadOutcome.done);
+    expect(await second, DownloadOutcome.done);
+    expect(fetcher.fetched, [url]);
+  });
+
+  test('a running download holds the screen-off service until it ends',
+      () async {
+    final gate = RecordingForegroundGate();
+    final coordinator = coordinatorWith(FakeAudioFetcher(), gate: gate);
+
+    await coordinator.start(workId: workId, url: url, title: 'Episode one');
+
+    expect(gate.events.first, 'start:Episode one');
+    expect(gate.events.last, 'finished');
+  });
+
+  test('a file already on disk clears a leftover row instead of leaving a '
+      'ghost "paused" job', () async {
+    final fetcher = FakeAudioFetcher();
+    final coordinator = coordinatorWith(fetcher);
+    await seedRow(JobState.cancelled);
+    await coordinator.restore();
+    // Killed after the rename but before the row was deleted.
+    services.audioFileFor(workId, url)
+      ..parent.createSync(recursive: true)
+      ..writeAsBytesSync([1, 2, 3]);
+
+    expect(await coordinator.resume(workId), DownloadOutcome.done);
+
+    expect(fetcher.fetched, isEmpty);
+    expect(await db.jobsDao.load(jobId), isNull);
+    expect(coordinator.entries, isEmpty);
+  });
+
+  test('a job that fails before it holds the screen-off service never '
+      'releases it out from under another job', () async {
+    final inner = RecordingForegroundGate();
+    final shared = SharedJobForegroundGate(inner);
+    services =
+        testServices(dir, audioFetcher: FakeAudioFetcher(), gate: shared);
+    final coordinator = EpisodeDownloadCoordinator(services: services, db: db);
+    await shared.jobStarted('Another episode', 'Transcribing…');
+    // The job's first write fails, before the gate is ever taken.
+    await db.customStatement('DROP TABLE jobs');
+
+    expect(await coordinator.start(workId: workId, url: url),
+        DownloadOutcome.failed);
+
+    expect(inner.events, isNot(contains('finished')));
+  });
+
+  group('after the app was killed', () {
+    test('restore shows the interrupted download with its bytes on disk',
+        () async {
+      final coordinator = coordinatorWith(ControllableAudioFetcher());
+      await seedRow(JobState.running, totalBytes: 1000);
+      seedPartial(400);
+
+      await coordinator.restore();
+
+      final s = coordinator.stateOf(workId);
+      expect(s.title, 'Episode one');
+      expect(s.receivedBytes, 400);
+      expect(s.totalBytes, 1000);
+      expect(coordinator.entries.map((e) => e.workId), [workId]);
+    });
+
+    test('resumeInterrupted continues a killed download from its partial',
+        () async {
+      final fetcher = FakeAudioFetcher();
+      final coordinator = coordinatorWith(fetcher);
+      await seedRow(JobState.running, totalBytes: 1000);
+      seedPartial(400);
+
+      await coordinator.restore();
+      await coordinator.resumeInterrupted();
 
       expect(fetcher.fetched, [url]);
-    },
-  );
+      expect(services.audioFileFor(workId, url).existsSync(), isTrue);
+      expect(await db.jobsDao.load(jobId), isNull);
+    });
+
+    test('a download the user paused stays paused', () async {
+      final fetcher = FakeAudioFetcher();
+      final coordinator = coordinatorWith(fetcher);
+      await seedRow(JobState.cancelled);
+
+      await coordinator.restore();
+      await coordinator.resumeInterrupted();
+
+      expect(fetcher.fetched, isEmpty);
+      expect(coordinator.stateOf(workId).paused, isTrue);
+    });
+
+    test('a failed download waits for Try again, reason intact', () async {
+      final fetcher = FakeAudioFetcher();
+      final coordinator = coordinatorWith(fetcher);
+      await seedRow(JobState.failed);
+      await db.jobsDao.setFailureReason(jobId, 'No connection.');
+
+      await coordinator.restore();
+      await coordinator.resumeInterrupted();
+
+      expect(fetcher.fetched, isEmpty);
+      expect(coordinator.stateOf(workId).error, 'No connection.');
+    });
+
+    test('resume picks the job back up from its stored address', () async {
+      final fetcher = FakeAudioFetcher();
+      final coordinator = coordinatorWith(fetcher);
+      await seedRow(JobState.cancelled);
+
+      await coordinator.restore();
+      expect(await coordinator.resume(workId), DownloadOutcome.done);
+      expect(fetcher.fetched, [url]);
+    });
+  });
+
+  test('dismiss forgets the row and deletes the partial', () async {
+    final coordinator = coordinatorWith(FakeAudioFetcher());
+    await seedRow(JobState.cancelled);
+    seedPartial(400);
+    await coordinator.restore();
+
+    await coordinator.dismiss(workId);
+
+    expect(await db.jobsDao.load(jobId), isNull);
+    expect(File('${services.audioFileFor(workId, url).path}.part').existsSync(),
+        isFalse);
+    expect(coordinator.entries, isEmpty);
+  });
 }

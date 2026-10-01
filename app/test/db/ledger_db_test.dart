@@ -175,6 +175,7 @@ void main() {
         ALTER TABLE episodes DROP COLUMN dsp_processed_duration_ms;
         ALTER TABLE profiles DROP COLUMN dsp_global_default;
         ALTER TABLE player_positions DROP COLUMN file_idx;
+        ALTER TABLE jobs DROP COLUMN failure_reason;
         PRAGMA user_version = 4;
       ''');
       v4.dispose();

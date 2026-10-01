@@ -8,6 +8,7 @@ import '../settings/theme_preference.dart';
 import '../dsp/dsp_coordinator.dart';
 import '../dsp/dsp_params.dart' show effectiveDspEnabled;
 import '../feeds/episode_download_coordinator.dart';
+import '../jobs/jobs_screen.dart' show downloadFraction, downloadStatus;
 import '../feeds/feeds_repository.dart';
 import '../feeds/feeds_screen.dart';
 import '../feeds/subscribe_screen.dart';
@@ -50,6 +51,9 @@ class RiverScreen extends StatefulWidget {
   /// [downloadCoordinator].
   final DspCoordinator? dspCoordinator;
 
+  /// Opens the Jobs screen; null hides the menu item.
+  final VoidCallback? onOpenJobs;
+
   /// DeviceServices.localMlAvailable, handed down by the shell. Where
   /// false (the web tier) the transcribe AND download menu items are
   /// simply not offered — play still works; the UI never offers what
@@ -88,6 +92,7 @@ class RiverScreen extends StatefulWidget {
       required this.coordinator,
       this.downloadCoordinator,
       this.dspCoordinator,
+      this.onOpenJobs,
       this.localMlAvailable = true,
       this.resolveSpeechEngine,
       this.lookupDefinition,
@@ -330,7 +335,7 @@ class _RiverScreenState extends State<RiverScreen> {
       ],
     );
     if (!ok) return;
-    await downloader.start(workId: e.work.id, url: url);
+    await downloader.start(workId: e.work.id, url: url, title: e.work.title);
     await _maybeProcess(e, url);
     await _load(); // the quiet downloaded indicator picks up disk truth
   }
@@ -454,13 +459,21 @@ class _RiverScreenState extends State<RiverScreen> {
             const TrellisThemeToggle(),
             OhBarOverflow<String>(
               key: const Key('river-more'),
-              onSelected: (_) => _openQueue(),
-              itemBuilder: (_) => const [
-                PopupMenuItem(
+              onSelected: (choice) => choice == 'jobs'
+                  ? widget.onOpenJobs?.call()
+                  : _openQueue(),
+              itemBuilder: (_) => [
+                const PopupMenuItem(
                   key: Key('river-open-queue'),
                   value: 'queue',
                   child: Text('Up Next'),
                 ),
+                if (widget.onOpenJobs != null)
+                  const PopupMenuItem(
+                    key: Key('river-open-jobs'),
+                    value: 'jobs',
+                    child: Text('Jobs'),
+                  ),
               ],
             ),
           ]),
@@ -734,6 +747,9 @@ class _RiverScreenState extends State<RiverScreen> {
               overflow: TextOverflow.ellipsis,
               maxLines: 1,
             ),
+          if (isAudio && widget.downloadCoordinator != null)
+            _RowDownload(
+                coordinator: widget.downloadCoordinator!, workId: e.work.id),
         ],
       ),
       // Overflow parity (ergonomic-ux): every row gets the menu, audio or
@@ -816,6 +832,65 @@ class _RiverScreenState extends State<RiverScreen> {
     );
   }
 
+}
+
+/// The row's own honest download line: bytes while it runs, "paused" or
+/// the reason after it stops, beside the one verb that helps. Listens
+/// per row so a progress beat rebuilds one row, not the whole list.
+class _RowDownload extends StatelessWidget {
+  final EpisodeDownloadCoordinator coordinator;
+  final int workId;
+  const _RowDownload({required this.coordinator, required this.workId});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: coordinator,
+      builder: (context, _) {
+        if (!coordinator.entries.any((e) => e.workId == workId)) {
+          return const SizedBox.shrink();
+        }
+        final s = coordinator.stateOf(workId);
+        final theme = Theme.of(context);
+        return Padding(
+          key: Key('row-download-$workId'),
+          padding: const EdgeInsets.only(top: 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Row(
+                children: [
+                  Expanded(
+                    child: Text(
+                      downloadStatus(s),
+                      style: theme.textTheme.bodySmall,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                  if (s.downloading)
+                    TextButton(
+                      key: Key('row-download-pause-$workId'),
+                      onPressed: () => coordinator.cancel(workId),
+                      child: const Text('Pause'),
+                    )
+                  else
+                    TextButton(
+                      key: Key('row-download-resume-$workId'),
+                      onPressed: () => coordinator.resume(workId),
+                      child: Text(s.failed ? 'Try again' : 'Resume'),
+                    ),
+                ],
+              ),
+              if (s.downloading)
+                LinearProgressIndicator(value: downloadFraction(s)),
+            ],
+          ),
+        );
+      },
+    );
+  }
 }
 
 class _EmptyRiver extends StatelessWidget {

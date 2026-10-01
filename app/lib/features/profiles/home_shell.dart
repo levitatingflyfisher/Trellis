@@ -14,6 +14,8 @@ import '../feeds/feeds_repository.dart';
 import '../intake/audiobook_import.dart';
 import '../intake/audiobook_import_screen.dart';
 import '../intake/audiobook_picker_gateway.dart';
+import '../jobs/job_center.dart';
+import '../jobs/jobs_screen.dart';
 import '../library/library_screen.dart';
 import '../models/models_screen.dart';
 import '../player/accelerometer_samples.dart';
@@ -49,7 +51,11 @@ class HomeShell extends StatefulWidget {
     required this.fetcher,
     required this.createPlayer,
     required this.services,
+    required this.jobs,
   });
+
+  /// Every long job on the device; owned above this shell (see JobCenter).
+  final JobCenter jobs;
 
   @override
   State<HomeShell> createState() => _HomeShellState();
@@ -82,32 +88,16 @@ class _HomeShellState extends State<HomeShell> {
         ? widget.services.artworkFileFor
         : null,
   );
-  late final TranscribeCoordinator _coordinator = TranscribeCoordinator(
-    db: widget.db,
-    services: widget.services,
-    // A transcript landing mid-playback opens the karaoke door live, and
-    // backfills the sentence-snap on any capture taken before it existed
-    // (the study crown, Phase 2).
-    onTranscribed: (workId) {
-      _player.reloadAlignments(workId);
-      unawaited(widget.db.capturesDao.backfillForWork(workId));
-    },
-  );
+  TranscribeCoordinator get _coordinator => widget.jobs.transcribe;
 
-  /// The standalone Download door (Campaign 6) — null on the web tier,
-  /// same law as `_player`'s localAudioFileFor: never construct a flow
-  /// that would call a real dart:io method where none works.
-  late final EpisodeDownloadCoordinator? _downloadCoordinator =
-      widget.services.localMlAvailable
-      ? EpisodeDownloadCoordinator(services: widget.services)
-      : null;
+  /// Null on the web tier (see JobCenter.forDevice).
+  EpisodeDownloadCoordinator? get _downloadCoordinator =>
+      widget.jobs.downloads;
+  DspCoordinator? get _dspCoordinator => widget.jobs.dsp;
 
-  /// The offline DSP preprocess (Campaign 6, ADR-0012) — same web-tier
-  /// null law as `_downloadCoordinator`, since it shares the same
-  /// dart:io/ffmpeg dependency.
-  late final DspCoordinator? _dspCoordinator = widget.services.localMlAvailable
-      ? DspCoordinator(db: widget.db, services: widget.services)
-      : null;
+  // A transcript landing mid-playback opens the karaoke door live (the
+  // capture backfill happens in the coordinator itself).
+  void _onTranscribed(int workId) => _player.reloadAlignments(workId);
 
   /// The audiobook door (Campaign 7, ADR-0013) — same web-tier null law:
   /// the picker never returns a usable path on a browser, so the whole
@@ -145,8 +135,7 @@ class _HomeShellState extends State<HomeShell> {
   void initState() {
     super.initState();
     unawaited(_checkSetupReminder());
-    _coordinator.restore();
-    _dspCoordinator?.restore();
+    _coordinator.onTranscribed = _onTranscribed;
     // Campaign 9 Phase 2 ("resume after restart"): shows the mini bar
     // paused at wherever playback last was, before anything is tapped —
     // see PlayerController.rehydrateLastPlayed's own doc for why this is
@@ -156,9 +145,9 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   void dispose() {
-    _coordinator.dispose();
-    _downloadCoordinator?.dispose();
-    _dspCoordinator?.dispose();
+    if (_coordinator.onTranscribed == _onTranscribed) {
+      _coordinator.onTranscribed = null;
+    }
     _player.dispose();
     super.dispose();
   }
@@ -187,10 +176,12 @@ class _HomeShellState extends State<HomeShell> {
         builder: (_) => BackupScreen(
             db: widget.db,
             profile: widget.profile,
-            custody: widget.services.backupCustody),
+            custody: widget.services.backupCustody,
+            beforeRestore: widget.jobs.stopAll),
       ),
     );
     if (restored == true) {
+      await widget.jobs.reload();
       widget.onSwitchProfile();
       return;
     }
@@ -252,6 +243,11 @@ class _HomeShellState extends State<HomeShell> {
             CapturesScreen(db: widget.db, controller: _player, work: work),
       ),
     );
+  }
+
+  void _openJobs() {
+    Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => JobsScreen(jobs: widget.jobs)));
   }
 
   void _openQueue() {
@@ -333,6 +329,7 @@ class _HomeShellState extends State<HomeShell> {
             coordinator: _coordinator,
             downloadCoordinator: _downloadCoordinator,
             dspCoordinator: _dspCoordinator,
+            onOpenJobs: _openJobs,
             localMlAvailable: widget.services.localMlAvailable,
             resolveSpeechEngine: widget.services.resolveSpeechEngine,
             lookupDefinition: widget.services.lookupDefinition,
@@ -354,6 +351,7 @@ class _HomeShellState extends State<HomeShell> {
           if (_showSetupReminder)
             _SetupReminder(
                 onOpen: _openBackup, onDismiss: _dismissSetupReminder),
+          _JobsStrip(jobs: widget.jobs, onOpen: _openJobs),
           MiniPlayerBar(
             controller: _player,
             onOpenSyncedText: _openSyncedText,
@@ -388,6 +386,56 @@ class _HomeShellState extends State<HomeShell> {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// The door to the Jobs screen, on every tab, present only while some job
+/// exists: one line of counts, no badge, no colour beyond the theme's.
+class _JobsStrip extends StatelessWidget {
+  final JobCenter jobs;
+  final VoidCallback onOpen;
+  const _JobsStrip({required this.jobs, required this.onOpen});
+
+  @override
+  Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: jobs,
+      builder: (context, _) {
+        final counts = jobs.counts;
+        if (counts.total == 0) return const SizedBox.shrink();
+        final theme = Theme.of(context);
+        return Material(
+          color: theme.colorScheme.surfaceContainerHigh,
+          child: InkWell(
+            key: const Key('jobs-strip'),
+            onTap: onOpen,
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(minHeight: 48),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: Row(
+                  children: [
+                    Icon(
+                        counts.running > 0
+                            ? Icons.downloading
+                            : Icons.pause_circle_outline,
+                        size: 20),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(jobsSummary(counts),
+                          style: theme.textTheme.bodyMedium),
+                    ),
+                    Text('See jobs',
+                        style: theme.textTheme.labelLarge
+                            ?.copyWith(color: theme.colorScheme.primary)),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

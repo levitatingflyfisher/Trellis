@@ -23,17 +23,18 @@ class TranscribeJobCards extends StatelessWidget {
         if (cards.isEmpty) return const SizedBox.shrink();
         return Column(
           mainAxisSize: MainAxisSize.min,
-          children: [for (final c in cards) _JobCard(coordinator: coordinator, card: c)],
+          children: [for (final c in cards) TranscribeJobCard(coordinator: coordinator, card: c)],
         );
       },
     );
   }
 }
 
-class _JobCard extends StatelessWidget {
+class TranscribeJobCard extends StatelessWidget {
   final TranscribeCoordinator coordinator;
   final TranscribeCardState card;
-  const _JobCard({required this.coordinator, required this.card});
+  const TranscribeJobCard(
+      {super.key, required this.coordinator, required this.card});
 
   bool get _running =>
       card.phase != TranscribePhase.paused &&
@@ -49,7 +50,17 @@ class _JobCard extends StatelessWidget {
             '${total == null ? '' : ' of ${formatBytes(total)}'}'
             '${eta.isEmpty ? '' : ' · $eta'}';
       case TranscribePhase.fetchingAudio:
-        return 'Getting the episode audio…';
+        final total = card.totalBytes;
+        final got = card.receivedBytes;
+        if (got == null) return 'Getting the episode audio…';
+        return 'Getting the episode audio: ${formatBytes(got)}'
+            '${total == null ? '' : ' of ${formatBytes(total)}'}';
+      case TranscribePhase.waiting:
+        final total = card.totalUnits;
+        return total == null
+            ? 'Picking up where it stopped…'
+            : 'Picking up where it stopped: ${card.doneUnits ?? 0} of '
+                '$total parts already done';
       case TranscribePhase.preparing:
         return 'Preparing audio…';
       case TranscribePhase.transcribing:
@@ -67,25 +78,32 @@ class _JobCard extends StatelessWidget {
             ? 'Paused'
             : 'Paused: ${card.doneUnits ?? 0} of $total parts done';
       case TranscribePhase.failed:
-        return "Didn’t finish. Your progress is saved.";
+        final why = card.error;
+        return why == null
+            ? 'Didn’t finish. Your progress is saved.'
+            : 'Didn’t finish. $why';
     }
   }
 
   double? get _progressValue {
     switch (card.phase) {
       case TranscribePhase.fetchingModel:
+      case TranscribePhase.fetchingAudio:
         final total = card.totalBytes;
         if (total == null || total == 0) return null;
         return (card.receivedBytes ?? 0) / total;
       case TranscribePhase.transcribing:
       case TranscribePhase.translating:
+      case TranscribePhase.waiting:
       case TranscribePhase.paused:
         final total = card.totalUnits;
         if (total == null || total == 0) {
-          return card.phase == TranscribePhase.paused ? 0 : null;
+          return card.phase == TranscribePhase.transcribing ||
+                  card.phase == TranscribePhase.translating
+              ? null
+              : 0;
         }
         return (card.doneUnits ?? 0) / total;
-      case TranscribePhase.fetchingAudio:
       case TranscribePhase.preparing:
         return null;
       case TranscribePhase.failed:

@@ -6,6 +6,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jobs_core/jobs_core.dart';
 import 'package:trellis/db/database.dart';
+import 'package:trellis/features/transcribe/decoder.dart';
+import 'package:trellis/features/transcribe/transcribe_coordinator.dart';
 import 'package:trellis/main.dart';
 
 import '../support/fake_player.dart';
@@ -286,28 +288,53 @@ void main() {
     expect(find.byKey(Key('job-card-${seeded.workId}')), findsNothing);
   });
 
-  testWidgets('reopening the app shows the resumable job card; tapping '
-      'Resume continues from the checkpoint', (tester) async {
-    final seeded = await seedEpisode();
-    // A job orphaned by a process kill: row still "running".
-    final jobId = 'transcribe-${seeded.workId}';
+  Future<void> seedJob(int workId,
+      {required JobState state,
+      String? checkpoint,
+      int totalUnits = 0,
+      int doneUnits = 0}) async {
+    final jobId = 'transcribe-$workId';
     await db.jobsDao.save(Job(
         id: jobId,
         kind: 'transcribe',
-        state: JobState.running,
-        checkpoint: null,
-        totalUnits: 0,
-        doneUnits: 0,
+        state: state,
+        checkpoint: checkpoint,
+        totalUnits: totalUnits,
+        doneUnits: doneUnits,
         createdAtMs: 5));
     await db.jobsDao.setPayload(
         jobId,
         jsonEncode({
-          'workId': seeded.workId,
+          'workId': workId,
           'title': 'Um episódio',
           'url': enclosure,
           'lang': null,
           'translate': false,
         }));
+  }
+
+  testWidgets('a job a kill interrupted picks itself back up on reopen, '
+      'from its checkpoint, with no tap', (tester) async {
+    final seeded = await seedEpisode();
+    // A job orphaned by a process kill: row still "running".
+    await seedJob(seeded.workId, state: JobState.running);
+
+    final store = FakeModelStore(downloadedIds: {'whisper-tiny-ggml'});
+    final services = testServices(tmp, modelStore: store);
+    await openRiver(tester, services);
+    await tester.pumpAndSettle();
+
+    final segments = await db.spineDao.segmentsOf(seeded.workId);
+    expect([for (final s in segments) s.body],
+        containsAll(['Ola mundo.', 'Tudo bem?']));
+    expect(find.byKey(Key('job-card-${seeded.workId}')), findsNothing);
+    expect(await db.jobsDao.load('transcribe-${seeded.workId}'), isNull);
+  });
+
+  testWidgets('a job the user paused stays paused on reopen; Resume '
+      'continues it', (tester) async {
+    final seeded = await seedEpisode();
+    await seedJob(seeded.workId, state: JobState.cancelled);
 
     final store = FakeModelStore(downloadedIds: {'whisper-tiny-ggml'});
     final services = testServices(tmp, modelStore: store);
@@ -315,6 +342,7 @@ void main() {
 
     expect(find.byKey(Key('job-card-${seeded.workId}')), findsOneWidget);
     expect(find.textContaining('Paused'), findsOneWidget);
+    expect(await db.spineDao.alignmentsOf(seeded.workId), isEmpty);
 
     await tester.tap(find.byKey(Key('job-resume-${seeded.workId}')));
     await tester.pumpAndSettle();
@@ -322,7 +350,70 @@ void main() {
     final segments = await db.spineDao.segmentsOf(seeded.workId);
     expect([for (final s in segments) s.body],
         containsAll(['Ola mundo.', 'Tudo bem?']));
-    expect(find.byKey(Key('job-card-${seeded.workId}')), findsNothing);
+  });
+
+  testWidgets('a failure says what went wrong, and remembers it',
+      (tester) async {
+    final seeded = await seedEpisode();
+    final store = FakeModelStore(downloadedIds: {'whisper-tiny-ggml'});
+    final services = testServices(tmp,
+        modelStore: store,
+        decoder: FakeDecoder(failWith: DecodeException('unknown codec')));
+    services.audioFileFor(seeded.workId, enclosure)
+      ..parent.createSync(recursive: true)
+      ..writeAsBytesSync([1, 2, 3]);
+
+    await openRiver(tester, services);
+    await chooseTranscribe(tester, seeded.workId);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(Key('job-status-${seeded.workId}')), findsOneWidget);
+    expect(find.textContaining('couldn’t be read'), findsOneWidget);
+    expect((await db.jobsDao.unfinished()).single.failureReason,
+        contains('couldn’t be read'));
+  });
+
+  test('a transcript that lands with no reader open still binds earlier '
+      'captures to their sentences', () async {
+    final seeded = await seedEpisode();
+    final captureId = await db.capturesDao.capture(
+        profileId: seeded.profileId,
+        workId: seeded.workId,
+        positionMs: 500,
+        nowMs: 1);
+    final services = testServices(tmp,
+        modelStore: FakeModelStore(downloadedIds: {'whisper-tiny-ggml'}));
+    services.audioFileFor(seeded.workId, enclosure)
+      ..parent.createSync(recursive: true)
+      ..writeAsBytesSync([1, 2, 3]);
+    final coordinator = TranscribeCoordinator(db: db, services: services);
+
+    await coordinator.start(
+        workId: seeded.workId,
+        title: 'Um episódio',
+        enclosureUrl: enclosure,
+        translate: false);
+
+    final capture = (await db.capturesDao.capturesOf(seeded.workId))
+        .singleWhere((c) => c.id == captureId);
+    expect(capture.segmentIdx, isNotNull);
+  });
+
+  test('a refused screen-off service is never released', () async {
+    final seeded = await seedEpisode();
+    final gate = ThrowingStartGate();
+    final services = testServices(tmp,
+        gate: gate,
+        modelStore: FakeModelStore(downloadedIds: {'whisper-tiny-ggml'}));
+    final coordinator = TranscribeCoordinator(db: db, services: services);
+
+    await coordinator.start(
+        workId: seeded.workId,
+        title: 'Um episódio',
+        enclosureUrl: enclosure,
+        translate: false);
+
+    expect(gate.events, isNot(contains('finished')));
   });
 
   testWidgets('Discard forgets the job and its rows', (tester) async {

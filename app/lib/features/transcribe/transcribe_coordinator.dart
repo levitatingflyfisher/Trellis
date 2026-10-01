@@ -27,6 +27,8 @@ import 'package:transcribe_core/transcribe_core.dart';
 
 import '../../db/database.dart';
 import '../../services/device_services.dart';
+import '../feeds/episode_download_coordinator.dart';
+import '../jobs/failure_reason.dart';
 import '../models/model_store.dart';
 import 'foreground_gate.dart';
 import 'transcribe_executor.dart';
@@ -41,6 +43,10 @@ enum TranscribePhase {
   preparing,
   transcribing,
   translating,
+
+  /// Interrupted by a kill and queued to pick itself back up; jobs resume
+  /// one at a time so two whisper runs never fight over the CPU.
+  waiting,
   paused,
   failed,
 }
@@ -109,6 +115,7 @@ class TranscribePlan {
 class _Flow {
   bool cancelRequested = false;
   void Function()? cancelStage;
+  final ended = Completer<void>();
 
   void cancel() {
     cancelRequested = true;
@@ -120,18 +127,28 @@ class TranscribeCoordinator extends ChangeNotifier {
   final AppDatabase db;
   final DeviceServices services;
 
+  /// The one owner of each episode's `.part`; null keeps the old direct
+  /// fetch (tests that predate the shared owner).
+  final EpisodeDownloadCoordinator? downloads;
+
   /// Fired after a work's transcript lands (the player re-reads its
-  /// alignments through this).
-  final void Function(int workId)? onTranscribed;
+  /// alignments through this). Settable because this coordinator outlives
+  /// any one reader's shell.
+  void Function(int workId)? onTranscribed;
 
   final DateTime Function() _now;
 
   final Map<int, _Flow> _flows = {};
   final Map<int, TranscribeCardState> _cards = {};
 
+  /// Cards whose row was still `running` at restore: a kill stopped them,
+  /// not the user.
+  final Set<int> _interrupted = {};
+
   TranscribeCoordinator(
       {required this.db,
       required this.services,
+      this.downloads,
       this.onTranscribed,
       DateTime Function()? now})
       : _now = now ?? DateTime.now;
@@ -141,26 +158,46 @@ class TranscribeCoordinator extends ChangeNotifier {
   bool isActive(int workId) => _flows.containsKey(workId);
 
   /// Rebuild cards from unfinished job rows — the reopened app's resumable
-  /// state (kill/resume at the UI level).
+  /// state. Only the primary row of each work makes a card: the translate
+  /// row shares its payload, and the person thinks of one episode, one job.
   Future<void> restore() async {
     for (final row in await db.jobsDao.unfinished()) {
-      if (row.kind != 'transcribe') continue;
-      final payload =
-          jsonDecode(await db.jobsDao.payloadOf(row.id)) as Map<String, dynamic>;
+      if (row.kind != 'transcribe' || !row.id.startsWith('transcribe-')) {
+        continue;
+      }
+      final payload = jsonDecode(row.payloadJson) as Map<String, dynamic>;
       final workId = (payload['workId'] as num?)?.toInt();
       if (workId == null || _cards.containsKey(workId)) continue;
+      final killed = row.state == JobState.running.name;
+      if (killed) _interrupted.add(workId);
       _cards[workId] = TranscribeCardState(
         workId: workId,
         title: payload['title'] as String? ?? 'Episode',
         translate: payload['translate'] as bool? ?? false,
         phase: row.state == JobState.failed.name
             ? TranscribePhase.failed
-            : TranscribePhase.paused,
+            : killed
+                ? TranscribePhase.waiting
+                : TranscribePhase.paused,
         doneUnits: row.doneUnits,
         totalUnits: row.totalUnits == 0 ? null : row.totalUnits,
+        error: row.state == JobState.failed.name
+            ? row.failureReason ?? genericFailureReason
+            : null,
       );
     }
     notifyListeners();
+  }
+
+  /// Continue every job a kill interrupted, one at a time, from its
+  /// checkpoint. Paused and failed jobs wait for the user's hand.
+  Future<void> resumeInterrupted() async {
+    final queue = [..._interrupted];
+    _interrupted.clear();
+    for (final workId in queue) {
+      if (_cards[workId]?.phase != TranscribePhase.waiting) continue;
+      await resume(workId);
+    }
   }
 
   /// The ASR model this device would use, and what starting would download.
@@ -229,11 +266,24 @@ class TranscribeCoordinator extends ChangeNotifier {
 
   /// Pause: the running stage stops at its next safe point; every committed
   /// byte and checkpoint stays.
-  void cancel(int workId) => _flows[workId]?.cancel();
+  void cancel(int workId) {
+    final flow = _flows[workId];
+    if (flow != null) return flow.cancel();
+    if (_cards[workId]?.phase == TranscribePhase.waiting) {
+      _interrupted.remove(workId);
+      unawaited(_pause(workId));
+    }
+  }
 
-  /// Throw the job away: rows, checkpoint, decoded PCM and cached audio.
+  /// Throw the job away: rows, checkpoint, decoded PCM and any partial
+  /// audio download it left.
   Future<void> dismiss(int workId) async {
     _flows[workId]?.cancel();
+    _interrupted.remove(workId);
+    final dl = downloads;
+    if (dl != null && dl.entries.any((e) => e.workId == workId)) {
+      await dl.dismiss(workId);
+    }
     await db.jobsDao.deleteJob(transcribeJobId(workId));
     await db.jobsDao.deleteJob(translateJobId(workId));
     final payloadless = _cards.remove(workId);
@@ -248,19 +298,29 @@ class TranscribeCoordinator extends ChangeNotifier {
 
   Future<void> _drive(int workId) async {
     final jobId = transcribeJobId(workId);
-    final payloadJson = await db.jobsDao.payloadOf(jobId);
+    // Registered before the first await, so stopAll can always see it.
+    final flow = _Flow();
+    _flows[workId] = flow;
+    final String payloadJson;
+    try {
+      payloadJson = await db.jobsDao.payloadOf(jobId);
+    } catch (_) {
+      _flows.remove(workId);
+      flow.ended.complete();
+      rethrow;
+    }
     final payload = jsonDecode(payloadJson) as Map<String, dynamic>;
     final title = payload['title'] as String? ?? 'Episode';
     final url = payload['url'] as String;
     final lang = payload['lang'] as String?;
     final translate = payload['translate'] as bool? ?? false;
 
-    final flow = _Flow();
-    _flows[workId] = flow;
     final gate = services.foregroundGate;
+    var holdsGate = false;
 
     try {
       await gate.jobStarted(title, 'Preparing…');
+      holdsGate = true;
 
       // 1. The model (sha-pinned, resumable, cancel keeps the .part).
       final model = services.registry
@@ -297,7 +357,39 @@ class TranscribeCoordinator extends ChangeNotifier {
 
       // 2. The episode's audio (resumable; no pinned hash exists for it).
       final audio = services.audioFileFor(workId, url);
-      if (!audio.existsSync()) {
+      final dl = downloads;
+      if (!audio.existsSync() && dl != null) {
+        _update(workId,
+            (c) => c._with(phase: TranscribePhase.fetchingAudio));
+        void mirror() {
+          final s = dl.stateOf(workId);
+          if (_cards[workId]?.phase != TranscribePhase.fetchingAudio) return;
+          _update(workId, (c) => c._with(
+              phase: TranscribePhase.fetchingAudio,
+              receivedBytes: s.receivedBytes,
+              totalBytes: s.totalBytes));
+        }
+
+        dl.addListener(mirror);
+        flow.cancelStage = () => dl.cancel(workId);
+        final DownloadOutcome outcome;
+        try {
+          outcome = await dl.start(workId: workId, url: url, title: title);
+        } finally {
+          dl.removeListener(mirror);
+          flow.cancelStage = null;
+        }
+        if (outcome == DownloadOutcome.paused) return await _pause(workId);
+        if (outcome == DownloadOutcome.failed) {
+          final failed = dl.stateOf(workId);
+          final reason = failed.error ?? genericFailureReason;
+          // The failure now belongs to this job's card; one episode, one
+          // line saying what went wrong.
+          if (!failed.retriesOnLaunch) await dl.dismissKeepingPartial(workId);
+          return await _fail(workId, JobGaveUp(reason),
+              retriesOnLaunch: failed.retriesOnLaunch);
+        }
+      } else if (!audio.existsSync()) {
         _update(workId,
             (c) => c._with(phase: TranscribePhase.fetchingAudio));
         final token = dio.CancelToken();
@@ -379,6 +471,9 @@ class TranscribeCoordinator extends ChangeNotifier {
       // 6. The spine rows, in one transaction; then the job is over.
       await writeTranscript(
           db: db, workId: workId, result: first.result!, translation: mt);
+      // Here rather than in a shell's callback: a resumed job can land
+      // before any reader is open.
+      await db.capturesDao.backfillForWork(workId);
       // Sync delete on purpose (see dismiss).
       if (pcm.existsSync()) pcm.deleteSync();
       await db.jobsDao.deleteJob(jobId);
@@ -390,7 +485,8 @@ class TranscribeCoordinator extends ChangeNotifier {
       await _fail(workId, err);
     } finally {
       _flows.remove(workId);
-      await gate.jobFinished();
+      if (holdsGate) await gate.jobFinished();
+      flow.ended.complete();
     }
   }
 
@@ -440,8 +536,11 @@ class TranscribeCoordinator extends ChangeNotifier {
 
   Future<void> _afterStoppedStage(int workId, JobState state) async {
     if (state == JobState.cancelled) return _pause(workId);
-    await _fail(workId,
-        StateError('a transcription step gave up after several tries'));
+    await _fail(
+        workId,
+        const JobGaveUp(
+            'Transcription kept stopping partway, even after several tries. '
+            'Your progress is saved.'));
   }
 
   Future<void> _pause(int workId) async {
@@ -457,16 +556,52 @@ class TranscribeCoordinator extends ChangeNotifier {
         totalUnits: c.totalUnits));
   }
 
-  Future<void> _fail(int workId, Object err) async {
-    final row = await db.jobsDao.load(transcribeJobId(workId));
-    if (row != null && row.state == JobState.running) {
-      await db.jobsDao.save(row.copyWith(state: JobState.failed));
+  /// [retriesOnLaunch] (or a lost connection) leaves the row `running`,
+  /// so the next launch carries on by itself.
+  Future<void> _fail(int workId, Object err,
+      {bool retriesOnLaunch = false}) async {
+    final reason = plainFailureReason(err);
+    final jobId = transcribeJobId(workId);
+    final row = await db.jobsDao.load(jobId);
+    final keepResumable = retriesOnLaunch || isTransientFailure(err);
+    if (row != null && !keepResumable) {
+      if (row.state == JobState.running) {
+        await db.jobsDao.save(row.copyWith(state: JobState.failed));
+      }
+      await db.jobsDao.setFailureReason(jobId, reason);
     }
     _update(workId, (c) => c._with(
         phase: TranscribePhase.failed,
         doneUnits: c.doneUnits,
         totalUnits: c.totalUnits,
-        error: err.toString()));
+        error: reason));
+  }
+
+  /// Pause every running job and wait until each has let go; queued
+  /// resumes are dropped so none starts afterwards.
+  Future<void> stopAll() async {
+    _interrupted.clear();
+    for (final id in [..._cards.keys]) {
+      if (_cards[id]?.phase == TranscribePhase.waiting) {
+        _cards[id] = _cards[id]!._with(phase: TranscribePhase.paused);
+      }
+    }
+    final flows = [..._flows.values];
+    for (final f in flows) {
+      f.cancel();
+    }
+    await Future.wait([for (final f in flows) f.ended.future]);
+  }
+
+  /// After a backup restore: forget every card and its decoded audio,
+  /// whose ids now name other works. Call after [stopAll].
+  void discardAll() {
+    for (final id in _cards.keys) {
+      final pcm = services.pcmFileFor(id);
+      if (pcm.existsSync()) pcm.deleteSync();
+    }
+    _cards.clear();
+    notifyListeners();
   }
 
   void _update(

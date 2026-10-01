@@ -140,6 +140,63 @@ void main() {
     );
   });
 
+  group('failure reasons', () {
+    test('a failed row keeps a plain-language reason the UI can show',
+        () async {
+      await db.jobsDao.save(job('j1', state: JobState.failed));
+      await db.jobsDao.setFailureReason('j1', 'No connection.');
+
+      expect((await db.jobsDao.unfinished()).single.failureReason,
+          'No connection.');
+    });
+
+    test('going back to running clears the old reason', () async {
+      await db.jobsDao.save(job('j1', state: JobState.failed));
+      await db.jobsDao.setFailureReason('j1', 'No connection.');
+
+      await db.jobsDao.save(job('j1'));
+
+      expect((await db.jobsDao.unfinished()).single.failureReason, isNull);
+    });
+
+    test('a pause keeps the reason from an earlier failure out of sight',
+        () async {
+      await db.jobsDao.save(job('j1', state: JobState.failed));
+      await db.jobsDao.setFailureReason('j1', 'No connection.');
+      await db.jobsDao.save(job('j1', state: JobState.cancelled));
+
+      expect((await db.jobsDao.unfinished()).single.failureReason, isNull);
+    });
+  });
+
+  group('schema migration v21 → v22', () {
+    test('a v21 jobs table gains failure_reason and keeps its rows',
+        () async {
+      final dir = Directory.systemTemp.createTempSync('trellis-migration-v22');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final file = File('${dir.path}/v21.sqlite');
+
+      final seed = AppDatabase.forTesting(NativeDatabase(file));
+      await seed.jobsDao.save(job('kept', doneUnits: 4));
+      await seed.close();
+      final v21 = raw.sqlite3.open(file.path);
+      v21.execute('''
+        ALTER TABLE jobs DROP COLUMN failure_reason;
+        PRAGMA user_version = 21;
+      ''');
+      v21.dispose();
+
+      final migrated = AppDatabase.forTesting(NativeDatabase(file));
+      addTearDown(migrated.close);
+
+      expect((await migrated.jobsDao.load('kept'))!.doneUnits, 4);
+      await migrated.jobsDao.save(job('kept', state: JobState.failed));
+      await migrated.jobsDao.setFailureReason('kept', 'Out of space.');
+      expect((await migrated.jobsDao.unfinished()).single.failureReason,
+          'Out of space.');
+    });
+  });
+
   group('schema migration v3 → v4', () {
     test('a v3 database gains the jobs table and keeps its data', () async {
       final dir = Directory.systemTemp.createTempSync('trellis-migration-v4');

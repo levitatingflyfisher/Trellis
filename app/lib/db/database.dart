@@ -590,6 +590,11 @@ class JobsTable extends Table {
   IntColumn get createdAtMs => integer()();
   TextColumn get payloadJson => text().withDefault(const Constant('{}'))();
 
+  /// What went wrong, in words a person can act on ("No connection."),
+  /// never a stack trace. Null unless [state] is failed: any other save
+  /// clears it, so a retried job can't show yesterday's failure.
+  TextColumn get failureReason => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {id};
 }
@@ -1008,8 +1013,16 @@ class JobsDao extends DatabaseAccessor<AppDatabase> with _$JobsDaoMixin {
       totalUnits: job.totalUnits,
       doneUnits: job.doneUnits,
       createdAtMs: job.createdAtMs,
+      failureReason: job.state == jobs.JobState.failed
+          ? const Value.absent()
+          : const Value(null),
     ),
   );
+
+  Future<void> setFailureReason(String jobId, String reason) =>
+      (update(jobsTable)..where((j) => j.id.equals(jobId))).write(
+        JobsTableCompanion(failureReason: Value(reason)),
+      );
 
   Future<void> saveCheckpoint(String jobId, String checkpoint, int doneUnits) =>
       transaction(() async {
@@ -2753,7 +2766,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 21;
+  int get schemaVersion => 22;
   // There is no v14: it was reserved for the reader-depth campaign, which
   // landed as v18 after three sibling campaigns merged ahead of it, so the
   // guard chain skips from 13 to 15. Version gaps are harmless — an
@@ -2975,6 +2988,13 @@ class AppDatabase extends _$AppDatabase {
             // Device-level settings (theme, last active reader). A new
             // table, so every upgrader simply creates it.
             await m.createTable(deviceSettings);
+          }
+          if (from >= 4 && from < 22) {
+            // Plain-language failure reasons on job rows. Guarded on
+            // from >= 4: `jobs` is created fresh by the from < 4 block
+            // with this column already present, so adding it again there
+            // would be a duplicate column.
+            await m.addColumn(jobsTable, jobsTable.failureReason);
           }
         },
         beforeOpen: (details) async {

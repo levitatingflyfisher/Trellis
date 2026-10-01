@@ -4,6 +4,7 @@ import 'package:backup_core/backup_core.dart';
 import 'package:drift/drift.dart' hide isNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jobs_core/jobs_core.dart' as jobs;
 import 'package:study_core/study_core.dart' as study;
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/backup/db_bridge.dart';
@@ -214,6 +215,26 @@ void main() {
   });
 
   group('encrypt -> decrypt -> full-replace restore', () {
+    test('clears this device\'s job rows: they name works by id, and the '
+        'restored ids mean other works', () async {
+      await seedRichly(db);
+      final payload = RowPayload.decode(RowPayload.encode(
+          await bridge.exportTables(),
+          createdAt: DateTime.utc(2026, 8, 11)));
+      await db.jobsDao.save(jobs.Job(
+          id: 'transcribe-7',
+          kind: 'transcribe',
+          state: jobs.JobState.running,
+          checkpoint: null,
+          totalUnits: 0,
+          doneUnits: 0,
+          createdAtMs: 1));
+
+      await bridge.restoreFullReplace(payload);
+
+      expect(await db.jobsDao.unfinished(), isEmpty);
+    });
+
     test('reproduces every row on a second device, ids intact', () async {
       await seedRichly(db);
       final payload = RowPayload.encode(await bridge.exportTables(),

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../../db/database.dart';
 import '../../services/device_services.dart';
 import '../intake/paste_intake.dart' show epochDayUtcNow;
+import '../jobs/job_center.dart';
 import '../player/episode_player.dart';
 import 'home_shell.dart';
 import 'parent_dashboard.dart';
@@ -44,10 +45,21 @@ class _HomeFlowState extends State<HomeFlow> {
   bool _pinSet = false;
   late final ParentPinService _pin = ParentPinService(widget.db);
 
+  /// Held here, above any reader's shell, so switching reader never
+  /// builds a second runner for a job already in flight.
+  late final JobCenter _jobs = JobCenter.forDevice(widget.db, widget.services);
+
   @override
   void initState() {
     super.initState();
     _load();
+    _jobs.restoreAndResume();
+  }
+
+  @override
+  void dispose() {
+    _jobs.dispose();
+    super.dispose();
   }
 
   Future<void> _load() async {
@@ -156,6 +168,7 @@ class _HomeFlowState extends State<HomeFlow> {
       fetcher: widget.fetcher,
       createPlayer: widget.createPlayer,
       services: widget.services,
+      jobs: _jobs,
     );
   }
 }

@@ -150,8 +150,10 @@ class DbBridge {
         Map<String, dynamic>.from(row);
 
     return db.transaction(() async {
-      // Children before parents; `jobs` is device-local and untouched.
+      // Children before parents. `jobs` is device-local, but its rows
+      // name works by id, and the restored ids mean other works.
       for (final table in <TableInfo>[
+        db.jobsTable,
         db.revlog,
         db.cards,
         db.courses,

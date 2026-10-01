@@ -35,6 +35,19 @@ const _opmlTwo = '''
 </opml>
 ''';
 
+const _opmlThreeWithRepeat = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<opml version="2.0">
+  <head><title>subs</title></head>
+  <body>
+    <outline type="rss" text="Night Sky" xmlUrl="https://cast.test/feed"/>
+    <outline type="rss" text="Second Cast" xmlUrl="https://second.test/feed"/>
+    <outline type="rss" text="Night Sky again" xmlUrl=" https://cast.test/feed "/>
+    <outline type="rss" text="Third Cast" xmlUrl="https://third.test/feed"/>
+  </body>
+</opml>
+''';
+
 /// OPML both ways through the feeds screen, with the platform file seams
 /// faked — the pure interchange logic is comms_core's, already tested
 /// there; this pins the wiring: import subscribes + validates by fetching,
@@ -125,6 +138,80 @@ void main() {
 
     expect(find.text('Following 1 new feed.'), findsOneWidget);
     expect(await db.feedsDao.feedsOf(profile.id), hasLength(2));
+  });
+
+  testWidgets('a long import lists every new feed at once, shows how far '
+      'it has got, and counts the ones that could not be reached', (
+    tester,
+  ) async {
+    final gates = <Completer<comms.FetchResponse>>[];
+    final fetcher = ScriptedFetcher((u, h) {
+      final gate = Completer<comms.FetchResponse>();
+      gates.add(gate);
+      return gate.future;
+    });
+    await pumpFeeds(
+      tester,
+      fetcher: fetcher,
+      opmlToPick: utf8.encode(_opmlThreeWithRepeat),
+    );
+
+    await tester.tap(find.byKey(const Key('opml-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Import OPML'));
+    for (var i = 0; i < 50 && gates.length < 3; i++) {
+      await tester.pump();
+    }
+
+    // All three rows are up before any fetch has answered.
+    expect(find.text('Night Sky'), findsOneWidget);
+    expect(find.text('Second Cast'), findsOneWidget);
+    expect(find.text('Third Cast'), findsOneWidget);
+    expect(find.text('Checking 1 of 3…'), findsOneWidget);
+
+    gates[0].complete(textResponse(_rss));
+    for (var i = 0; i < 50; i++) {
+      await tester.pump();
+      if (find.text('Checking 2 of 3…').evaluate().isNotEmpty) break;
+    }
+    expect(find.text('Checking 2 of 3…'), findsOneWidget);
+
+    gates[1].complete(textResponse('', status: 500));
+    gates[2].complete(textResponse('', status: 404));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('opml-import-progress')), findsNothing);
+    expect(
+      find.text('Following 3 new feeds. 2 couldn’t be reached; their rows '
+          'say why.'),
+      findsOneWidget,
+    );
+    expect(await db.feedsDao.feedsOf(profile.id), hasLength(3),
+        reason: 'the repeated outline was followed once');
+  });
+
+  testWidgets('one unreachable feed gets the singular sentence', (
+    tester,
+  ) async {
+    final fetcher = ScriptedFetcher((u, h) => u.host == 'second.test'
+        ? textResponse('', status: 500)
+        : textResponse(_rss));
+    await pumpFeeds(
+      tester,
+      fetcher: fetcher,
+      opmlToPick: utf8.encode(_opmlTwo),
+    );
+
+    await tester.tap(find.byKey(const Key('opml-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Import OPML'));
+    await tester.pumpAndSettle();
+
+    expect(
+      find.text('Following 2 new feeds. 1 couldn’t be reached; its row says '
+          'why.'),
+      findsOneWidget,
+    );
   });
 
   testWidgets('an invalid OPML file is refused calmly', (tester) async {

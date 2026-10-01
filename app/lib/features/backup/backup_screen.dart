@@ -54,6 +54,10 @@ class BackupScreen extends StatefulWidget {
   /// Where the confirmed phrase is kept. Null on a surface with no keychain
   /// (plain widget tests): the phrase is then typed every time.
   final BackupCustody? custody;
+
+  /// Runs after the person confirms a restore and before any row is
+  /// replaced: the shell stops running jobs here.
+  final Future<void> Function()? beforeRestore;
   BackupScreen(
       {super.key,
       required this.db,
@@ -61,7 +65,8 @@ class BackupScreen extends StatefulWidget {
       BackupGateway? gateway,
       String Function()? newPhrase,
       BackupSealer? seal,
-      this.custody})
+      this.custody,
+      this.beforeRestore})
       : gateway = gateway ?? FilePickerBackupGateway(),
         newPhrase = newPhrase ?? EspalierBackup.newPhrase,
         seal = seal ?? EspalierBackup.encrypt;
@@ -318,6 +323,7 @@ class _BackupScreenState extends State<BackupScreen> {
           ),
         );
         if (confirmed != true) return;
+        await widget.beforeRestore?.call();
         await _bridge.restoreFullReplace(decoded);
         _snack('Backup restored.');
         if (!mounted) return;

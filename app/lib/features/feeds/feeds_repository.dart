@@ -247,6 +247,14 @@ class FeedsRepository {
 
   /// One feed's conditional refresh under the breaker's verdict.
   Future<RefreshOutcome> refreshFeed(Feed feed, {bool force = false}) async {
+    final outcome = await _refreshOne(feed, force: force);
+    if (outcome.newItems > 0) await _runDedupPass(feed.profileId);
+    return outcome;
+  }
+
+  /// [refreshFeed] minus the dedup pass, which scans the whole profile and
+  /// so runs once per batch in [refreshMany] rather than once per feed.
+  Future<RefreshOutcome> _refreshOne(Feed feed, {bool force = false}) async {
     final nowMs = _nowMs;
     var state = stateOfFeed(feed);
     if (shouldSkipRefresh(state, nowMs: nowMs, force: force) !=
@@ -279,7 +287,6 @@ class FeedsRepository {
           items: parsed.items,
           nowMs: nowMs,
           rules: decodeFeedRules(feed.rulesJson));
-      if (added > 0) await _runDedupPass(feed.profileId);
       final deviceServices = services;
       if (deviceServices != null) {
         await evictStaleAudio(
@@ -304,12 +311,96 @@ class FeedsRepository {
   /// Pull-to-refresh: every feed of the profile, breaker rules applied
   /// per feed. Returns the total number of new items.
   Future<int> refreshAll(int profileId, {bool force = false}) async {
-    var added = 0;
-    for (final feed in await db.feedsDao.feedsOf(profileId)) {
-      final outcome = await refreshFeed(feed, force: force);
-      added += outcome.newItems;
+    final outcomes =
+        await refreshMany(await db.feedsDao.feedsOf(profileId), force: force);
+    return outcomes.values.fold<int>(0, (sum, o) => sum + o.newItems);
+  }
+
+  /// Refreshes [feeds] a few at a time, keyed by feed id. The caps keep a
+  /// 100-feed import from taking minutes one-by-one without opening a
+  /// hundred sockets, or hammering one host that serves many of the feeds.
+  /// A feed that throws counts as an error and never stalls the rest.
+  Future<Map<int, RefreshOutcome>> refreshMany(List<Feed> feeds,
+      {bool force = false,
+      int maxConcurrent = 4,
+      int maxPerHost = 2,
+      void Function(int done, int total)? onProgress}) async {
+    final outcomes = <int, RefreshOutcome>{};
+    if (feeds.isEmpty) return outcomes;
+    final pending = [...feeds];
+    final perHost = <String, int>{};
+    final finished = Completer<void>();
+    var running = 0;
+
+    String hostOf(Feed f) {
+      final host = Uri.tryParse(f.url)?.host ?? '';
+      // Malformed URLs must not all queue behind one shared empty host.
+      return host.isEmpty ? f.url : host;
     }
-    return added;
+
+    void pump() {
+      // Skip past feeds whose host is at its cap so other hosts still run.
+      for (var i = 0; i < pending.length && running < maxConcurrent;) {
+        final feed = pending[i];
+        final host = hostOf(feed);
+        if ((perHost[host] ?? 0) >= maxPerHost) {
+          i++;
+          continue;
+        }
+        pending.removeAt(i);
+        running++;
+        perHost[host] = (perHost[host] ?? 0) + 1;
+        () async {
+          RefreshOutcome outcome;
+          try {
+            outcome = await _refreshOne(feed, force: force);
+          } catch (_) {
+            outcome = (status: RefreshStatus.error, newItems: 0);
+          } finally {
+            running--;
+            perHost[host] = perHost[host]! - 1;
+          }
+          outcomes[feed.id] = outcome;
+          onProgress?.call(outcomes.length, feeds.length);
+          if (outcomes.length == feeds.length) {
+            finished.complete();
+          } else {
+            pump();
+          }
+        }();
+      }
+    }
+
+    pump();
+    await finished.future;
+    if (outcomes.values.any((o) => o.newItems > 0)) {
+      await _runDedupPass(feeds.first.profileId);
+    }
+    return outcomes;
+  }
+
+  /// Follows each OPML outline not already followed, in one transaction so
+  /// the list can show them all before any is fetched. URLs are only
+  /// trimmed: rewriting them further could merge feeds that differ.
+  Future<List<Feed>> followOutlines(
+      int profileId, List<OpmlOutline> outlines) async {
+    final ids = await db.transaction(() async {
+      final seen = <String>{};
+      final ids = <int>[];
+      for (final o in outlines) {
+        final url = o.url.trim();
+        if (url.isEmpty || !seen.add(url)) continue;
+        if (await db.feedsDao.feedByUrl(profileId, url) != null) continue;
+        ids.add(await db.feedsDao
+            .insertFeed(profileId: profileId, url: url, title: o.title));
+      }
+      return ids;
+    });
+    final wanted = ids.toSet();
+    return [
+      for (final f in await db.feedsDao.feedsOf(profileId))
+        if (wanted.contains(f.id)) f,
+    ];
   }
 
   Future<void> _persistState(int feedId, FeedRefreshState s,
@@ -382,12 +473,8 @@ class FeedsRepository {
   /// visible episode in the profile's river and suppresses any new
   /// duplicate pair — see `feed_dedup.dart`. Runs after any ingest that
   /// actually added something; a no-op refresh (304, throttled, error)
-  /// never touches dedup state. Called once per ingest site rather than
-  /// once per [refreshAll] pass — [refreshAll] loops [refreshFeed] per
-  /// feed, so a multi-feed pull-to-refresh may run this more than once;
-  /// each pass is correct on its own (already-suppressed rows are
-  /// excluded from the candidate pool) and the repeat cost is a full
-  /// profile scan, acceptable at a personal river's size.
+  /// never touches dedup state. Runs once per batch in [refreshMany]:
+  /// concurrent passes would interleave their whole-profile read-then-write.
   Future<void> _runDedupPass(int profileId) async {
     final candidates = await db.feedsDao.dedupCandidatesOf(profileId);
     final verdicts = findDuplicates(candidates);

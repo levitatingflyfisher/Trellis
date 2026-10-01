@@ -696,6 +696,54 @@ void main() {
       },
     );
 
+    testWidgets('a download in flight shows its bytes on the row and in the '
+        'jobs strip; Pause stops it and the row says paused', (tester) async {
+      final controllable = ControllableAudioFetcher();
+      services = testServices(dir, audioFetcher: controllable);
+      final profileId = await seedProfile();
+      final feedId = await db.feedsDao.insertFeed(
+        profileId: profileId,
+        url: 'https://a/f',
+      );
+      final workId = await seedRiverItem(
+        profileId: profileId,
+        feedId: feedId,
+        title: 'An audio item',
+        publishedAtMs: 1000,
+        enclosureUrl: 'https://a/1.mp3',
+      );
+
+      await pumpApp(
+        tester,
+        ScriptedFetcher((u, h) => textResponse(_rssOne)),
+        services: services,
+      );
+      await openRiver(tester);
+      await tester.tap(find.byKey(Key('menu-$workId')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Download'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('consent-accept')));
+      // The bar is indeterminate until the first byte, so never settles.
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+
+      controllable.emitProgress(2000000, 8000000);
+      await tester.pump();
+      expect(find.byKey(Key('row-download-$workId')), findsOneWidget);
+      expect(find.textContaining('2.0 MB of 8.0 MB'), findsOneWidget);
+      expect(find.byKey(const Key('jobs-strip')), findsOneWidget);
+
+      await tester.tap(find.byKey(Key('row-download-pause-$workId')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Download paused'), findsOneWidget);
+
+      await tester.tap(find.byKey(const Key('jobs-strip')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(Key('download-card-$workId')), findsOneWidget);
+    });
+
     group('the offline DSP preprocess composes with Download', () {
       testWidgets(
         'a feed with DSP enabled: downloading also processes the audio',

@@ -40,7 +40,7 @@ class AndroidJobForegroundGate implements JobForegroundGate {
       androidNotificationOptions: AndroidNotificationOptions(
         channelId: 'trellis_jobs',
         channelName: 'Background jobs',
-        channelDescription: 'Live progress of transcription jobs',
+        channelDescription: 'Live progress of downloads and transcriptions',
         channelImportance: NotificationChannelImportance.LOW,
         priority: NotificationPriority.LOW,
       ),
@@ -78,5 +78,37 @@ class AndroidJobForegroundGate implements JobForegroundGate {
     if (!_isAndroid || !_running) return;
     _running = false;
     await FlutterForegroundTask.stopService();
+  }
+}
+
+/// One screen-off service shared by every job: downloads, transcription
+/// and DSP each start and finish on their own clocks, so the service may
+/// stop only when the last of them is done.
+class SharedJobForegroundGate implements JobForegroundGate {
+  final JobForegroundGate inner;
+  int _active = 0;
+  SharedJobForegroundGate(this.inner);
+
+  @override
+  Future<void> jobStarted(String title, String text) async {
+    // Counted only once the start succeeded: a refused start is never
+    // finished, so counting it would hold the service up forever.
+    if (_active == 0) {
+      await inner.jobStarted(title, text);
+    } else {
+      await inner.jobProgress(title, text);
+    }
+    _active++;
+  }
+
+  @override
+  Future<void> jobProgress(String title, String text) =>
+      inner.jobProgress(title, text);
+
+  @override
+  Future<void> jobFinished() async {
+    if (_active == 0) return;
+    _active--;
+    if (_active == 0) await inner.jobFinished();
   }
 }

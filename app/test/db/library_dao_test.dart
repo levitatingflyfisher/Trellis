@@ -254,6 +254,7 @@ void main() {
         ALTER TABLE captures DROP COLUMN file_idx;
         ALTER TABLE profiles DROP COLUMN reader_prefs_json;
         DROP TABLE reading_days;
+        ALTER TABLE jobs DROP COLUMN failure_reason;
         PRAGMA user_version = 12;
       ''');
       v12.dispose();

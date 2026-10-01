@@ -280,4 +280,38 @@ void main() {
 
     expect(reopened.stateOf(workId)?.phase, DspPhase.failed);
   });
+
+  test('a failure keeps a plain reason, on the card and after reopen',
+      () async {
+    final workId = await seedEpisode();
+    final encoder = FakeDspEncoder()
+      ..processError = const FileSystemException(
+          'write failed', '/x', OSError('No space left on device', 28));
+    final services = testServices(dir, dspEncoder: encoder);
+    final audio = services.audioFileFor(workId, url);
+    audio.parent.createSync(recursive: true);
+    audio.writeAsBytesSync([1, 2, 3]);
+    final first = DspCoordinator(db: db, services: services);
+    await first.start(workId: workId, title: 'Ep 1', url: url);
+    expect(first.stateOf(workId)?.error, contains('out of space'));
+
+    final reopened = DspCoordinator(db: db, services: services);
+    await reopened.restore();
+    expect(reopened.stateOf(workId)?.error, contains('out of space'));
+  });
+
+  test('a refused screen-off service is never released', () async {
+    final workId = await seedEpisode();
+    final gate = ThrowingStartGate();
+    final services =
+        testServices(dir, dspEncoder: FakeDspEncoder(), gate: gate);
+    final audio = services.audioFileFor(workId, url);
+    audio.parent.createSync(recursive: true);
+    audio.writeAsBytesSync([1, 2, 3]);
+
+    await DspCoordinator(db: db, services: services)
+        .start(workId: workId, title: 'Ep 1', url: url);
+
+    expect(gate.events, isNot(contains('finished')));
+  });
 }

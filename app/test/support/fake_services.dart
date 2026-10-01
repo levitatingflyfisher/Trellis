@@ -213,11 +213,16 @@ class FakeDecoder implements Decoder {
   final int seconds;
   final List<String> decoded = [];
 
-  FakeDecoder({this.seconds = 60});
+  /// When set, every decode throws this instead of writing PCM.
+  Object? failWith;
+
+  FakeDecoder({this.seconds = 60, this.failWith});
 
   @override
   Future<void> decodeToPcm16kMono(String inputPath, String outputPath) async {
     decoded.add(inputPath);
+    final err = failWith;
+    if (err != null) throw err;
     File(outputPath)
       ..parent.createSync(recursive: true)
       ..writeAsBytesSync(Uint8List(seconds * 16000 * 4));
@@ -244,6 +249,16 @@ class RecordingForegroundGate implements JobForegroundGate {
   }
 }
 
+/// A gate whose start fails (the platform refused the service): nothing
+/// started, so nothing may be finished either.
+class ThrowingStartGate extends RecordingForegroundGate {
+  @override
+  Future<void> jobStarted(String title, String text) async {
+    events.add('start-failed:$title');
+    throw StateError('foreground service refused');
+  }
+}
+
 /// The default two-sentence script the scripted engine replays per window
 /// (times are window-relative; the task shifts them into episode time).
 List<String> defaultScript() => [
@@ -266,7 +281,7 @@ DeviceServices testServices(
   AudioFetcher? audioFetcher,
   FakeDecoder? decoder,
   DspEncoder? dspEncoder,
-  RecordingForegroundGate? gate,
+  JobForegroundGate? gate,
   List<String>? script,
   bool localMlAvailable = true,
   DeviceTier tier = DeviceTier.t1,

@@ -195,7 +195,7 @@ class DeviceServices {
         audioFetcher: DioAudioFetcher(),
         executor: IsolateTranscribeExecutor(),
         foregroundGate: _isAndroid
-            ? AndroidJobForegroundGate()
+            ? SharedJobForegroundGate(AndroidJobForegroundGate())
             : NoopJobForegroundGate(),
         tts: FlutterTtsSpeaker(),
         dspEncoder: _isAndroid ? FfmpegDspEncoder() : UnavailableDspEncoder(),

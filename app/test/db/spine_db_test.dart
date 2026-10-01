@@ -311,6 +311,7 @@ void main() {
         ALTER TABLE captures DROP COLUMN file_idx;
         ALTER TABLE profiles DROP COLUMN reader_prefs_json;
         DROP TABLE reading_days;
+        ALTER TABLE jobs DROP COLUMN failure_reason;
         PRAGMA user_version = 12;
       ''');
       v12.dispose();
@@ -376,6 +377,7 @@ void main() {
         ALTER TABLE translation_sentences DROP COLUMN engine;
         ALTER TABLE works DROP COLUMN active_translation_lang;
         ALTER TABLE feeds DROP COLUMN image_url;
+        ALTER TABLE jobs DROP COLUMN failure_reason;
         PRAGMA user_version = 18;
       ''');
       v18.dispose();
