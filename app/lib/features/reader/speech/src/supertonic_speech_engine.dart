@@ -473,7 +473,9 @@ class SupertonicSpeechEngine implements SynthesisSpeechEngine {
 
   @override
   Future<SynthResult> synthesize(String sentence, {String? lang}) {
-    final resolvedLang = lang ?? 'en';
+    // A region tag names the same voice language (`en-US` is `en`).
+    final base = lang?.trim().toLowerCase().split(RegExp('[-_]')).first;
+    final resolvedLang = base == null || base.isEmpty ? 'en' : base;
     if (!supertonicSupportedLangs.contains(resolvedLang)) {
       throw SupertonicUnsupportedLangException(
           'This voice can’t speak “$resolvedLang”. Try the system voice.');

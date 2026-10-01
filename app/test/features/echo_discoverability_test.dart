@@ -56,7 +56,6 @@ void main() {
         home: CoursesScreen(
             db: db,
             profile: profile,
-            onOpenBackup: () {},
             onOpenEcho: () {})));
     await tester.pumpAndSettle();
 

@@ -44,13 +44,13 @@ void main() {
     expect(engine!.canPause, isTrue);
   });
 
-  test('below the voice\'s own minTier (t2), the honesty gate refuses even '
+  test('below the voice\'s own minTier (t1), the honesty gate refuses even '
       'if the store claims it is present — the same tier check '
       'resolveSpeechEngine\'s pickModel already applies, one layer '
       'deeper', () async {
     final services = testServices(dir,
         modelStore: FakeModelStore(downloadedIds: {'supertonic-en-m1'}),
-        tier: DeviceTier.t1);
+        tier: DeviceTier.t0);
     expect(await services.speechEngineFor(voiceSpec()), isNull);
   });
 
@@ -75,11 +75,19 @@ void main() {
       expect(engine!.canPause, isTrue);
     });
 
-    test('below t2 the registry has nothing to pick — the same honesty as '
-        'today\'s system-voice fallback, now with an accurate tier', () async {
+    test('at t1, the tier the app runs at, a downloaded voice resolves '
+        '(1.5.8)', () async {
       final services = testServices(dir,
           modelStore: FakeModelStore(downloadedIds: {'supertonic-en-m1'}),
           tier: DeviceTier.t1);
+      expect(await services.resolveSpeechEngine(lang: 'en'), isNotNull);
+    });
+
+    test('below t1 the registry has nothing to pick — the system voice',
+        () async {
+      final services = testServices(dir,
+          modelStore: FakeModelStore(downloadedIds: {'supertonic-en-m1'}),
+          tier: DeviceTier.t0);
       expect(await services.resolveSpeechEngine(lang: 'en'), isNull);
     });
 

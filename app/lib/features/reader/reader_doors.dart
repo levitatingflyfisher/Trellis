@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../db/database.dart' hide Alignment;
 import '../../services/device_services.dart';
 import '../intake/paste_intake.dart' show epochDayUtcNow;
-import '../player/karaoke_screen.dart';
 import '../player/player_controller.dart';
 import 'reader_logic.dart' show shouldOfferRecap;
 import 'reader_screen.dart';
@@ -65,7 +64,10 @@ class ReaderDoors {
         progress: segmentCount == 0
             ? 0
             : (position?.segmentIdx ?? 0) / segmentCount);
-    await Navigator.of(context).push(MaterialPageRoute<void>(
+    // The reader takes the whole screen (1.5.8): it opens on the app's
+    // Navigator, over the tabs and their bars, wherever it is opened from.
+    await Navigator.of(context, rootNavigator: true)
+        .push(MaterialPageRoute<void>(
       builder: (_) => ReaderScreen(
           db: db,
           profileId: profileId,
@@ -87,24 +89,7 @@ class ReaderDoors {
     ));
   }
 
-  /// Opens [work]'s transcript without playing it: a podcast is readable
-  /// as well as playable. Needs [player], which a tap on a line plays
-  /// from, so a screen offers Read only when [canOpenTranscript].
+  /// Whether a transcript can be read here: Read on a transcript opens
+  /// the reader with [player], which a tapped word plays from.
   bool get canOpenTranscript => player != null;
-
-  Future<void> openTranscript(BuildContext context,
-      {required AppDatabase db, required Work work}) async {
-    final p = player;
-    if (p == null) return;
-    await Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => KaraokeScreen(
-          db: db,
-          controller: p,
-          work: work,
-          tts: tts,
-          resolveSpeechEngine: resolveSpeechEngine,
-          createSpeechTempFiles: createSpeechTempFiles,
-          translation: translation),
-    ));
-  }
 }

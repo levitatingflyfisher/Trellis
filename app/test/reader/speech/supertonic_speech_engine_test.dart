@@ -128,6 +128,16 @@ void main() {
     expect(handle.calls.single.lang, 'en');
   });
 
+  test('a region tag speaks its base language (en-US is English)', () async {
+    final handle = _FakeVoiceHandle();
+    final engine =
+        SupertonicSpeechEngine(files: files, openHandle: (_) async => handle);
+
+    await engine.synthesize('Hello.', lang: 'en-US');
+
+    expect(handle.calls.single.lang, 'en');
+  });
+
   test('the native handle is created lazily — never at construction', () {
     var opened = false;
     SupertonicSpeechEngine(

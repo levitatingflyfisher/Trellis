@@ -14,15 +14,20 @@ import 'work_row.dart';
 /// item values the caller already shows as buttons (the work page's Play
 /// next, Download, Translate…): they are left out, so ⋮ holds only what
 /// isn't on screen. Filtered by value, never forked.
+///
+/// [sourceLang] is what the work is in (see [WorkListState.sourceLangOf]):
+/// with [transcribed] it decides [offersEnglishTranslate].
 List<PopupMenuEntry<String>> workMenuItems(
   EpisodeActions actions,
   WorkEntry e, {
   List<PopupMenuEntry<String>> extras = const [],
   bool transcribed = false,
+  String? sourceLang,
   Set<String> shownAsButtons = const {},
 }) {
   final core = [
-    for (final i in actions.sharedMenuItems(e, transcribed: transcribed))
+    for (final i in actions.sharedMenuItems(e,
+        transcribed: transcribed, sourceLang: sourceLang))
       if (i is! PopupMenuItem<String> || !shownAsButtons.contains(i.value)) i,
   ];
   return [

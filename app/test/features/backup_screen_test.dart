@@ -118,7 +118,7 @@ void main() {
     }
   }
 
-  testWidgets('the Courses tab offers the door and the shell opens it',
+  testWidgets('the Library ⋮ offers the door and the shell opens it',
       (tester) async {
     await tester.pumpWidget(TrellisApp(
         db: db,
@@ -126,9 +126,11 @@ void main() {
         createPlayer: () => FakeEpisodePlayer()));
     await tester.pumpAndSettle();
     // A first launch opens straight into the new reader's Library.
-    await tester.tap(tabLabel('Courses'));
+    await tester.tap(tabLabel('Library'));
     await tester.pumpAndSettle();
 
+    await tester.tap(find.byKey(const Key('library-more')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('open-backup')));
     await tester.pumpAndSettle();
     expect(find.text('Backup & migrate'), findsOneWidget);

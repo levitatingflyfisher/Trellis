@@ -21,6 +21,10 @@ abstract class SpeechAudioQueue {
   Future<void> pause();
   Future<void> resume();
 
+  /// Playback speed, the reader's shared speed control (1.5.8): 1.0 is
+  /// the voice's own pace.
+  Future<void> setSpeed(double speed);
+
   /// Empties the queue and stops playback. Does not delete files — that's
   /// the pipeline's job, since it owns the temp-file lifecycle.
   Future<void> clear();

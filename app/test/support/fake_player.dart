@@ -52,6 +52,10 @@ class FakeEpisodePlayer implements EpisodePlayer {
     _positionCtrl.add(p);
   }
 
+  /// Moves the playhead without a stream tick: what a real player's
+  /// position getter reports between its (at most five a second) ticks.
+  void movePositionQuietly(Duration p) => _position = p;
+
   void emitDuration(Duration? d) {
     _duration = d;
     _durationCtrl.add(d);

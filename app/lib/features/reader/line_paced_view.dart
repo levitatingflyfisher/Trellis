@@ -114,6 +114,33 @@ List<LinePacedLine> computeLinePacedLines({
   return lines;
 }
 
+/// Which of [words] (laid out as [computeLinePacedLines] lays them) sits
+/// under [offset] — the word a tap on Line means. A tap in the gap between
+/// two words takes the one before it; past the end, the last word.
+int wordIndexAtOffset({
+  required List<String> words,
+  required TextStyle style,
+  required double maxWidth,
+  required Offset offset,
+  double textScaleFactor = 1.0,
+}) {
+  if (words.isEmpty) return 0;
+  final painter = TextPainter(
+    text: TextSpan(text: words.join(' '), style: style),
+    textDirection: TextDirection.ltr,
+    textScaler: TextScaler.linear(textScaleFactor),
+  )..layout(maxWidth: maxWidth);
+  final at = painter.getPositionForOffset(offset).offset;
+  painter.dispose();
+  var start = 0;
+  for (var i = 0; i < words.length; i++) {
+    final end = start + words[i].length;
+    if (at <= end) return i;
+    start = end + 1;
+  }
+  return words.length - 1;
+}
+
 /// Renders one block's words as flowing text with the visual line
 /// containing [currentLocalWordIdx] painted as a highlight band behind
 /// it. [currentLocalWordIdx] is block-relative (`globalWordIdx -
@@ -131,12 +158,17 @@ class LinePacedBlock extends StatelessWidget {
     required this.style,
     required this.currentLocalWordIdx,
     this.highlightColor,
+    this.onTapWord,
   });
 
   final List<String> words;
   final TextStyle style;
   final int currentLocalWordIdx;
   final Color? highlightColor;
+
+  /// A tap on a word, by its local index: the same seek a tapped word
+  /// means on Follow along (1.5.8 — Line had none).
+  final ValueChanged<int>? onTapWord;
 
   @override
   Widget build(BuildContext context) {
@@ -159,7 +191,8 @@ class LinePacedBlock extends StatelessWidget {
         textScaleFactor: scaler.scale(1.0),
       );
       final current = lines.where((l) => l.contains(currentLocalWordIdx));
-      return Stack(
+      final tap = onTapWord;
+      final block = Stack(
         children: [
           for (final line in current)
             Positioned.fromRect(
@@ -173,6 +206,17 @@ class LinePacedBlock extends StatelessWidget {
             textScaler: scaler,
           ),
         ],
+      );
+      if (tap == null) return block;
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTapUp: (d) => tap(wordIndexAtOffset(
+            words: words,
+            style: style,
+            maxWidth: maxWidth,
+            offset: d.localPosition,
+            textScaleFactor: scaler.scale(1.0))),
+        child: block,
       );
     });
   }

@@ -21,7 +21,9 @@ import 'package:flutter/material.dart';
 import 'package:openhearth_design/openhearth_design.dart';
 import 'package:ml_runtime/ml_runtime.dart';
 
+import '../../db/database.dart' show AppDatabase;
 import '../../services/device_services.dart';
+import '../episodes/episode_actions.dart';
 import '../feeds/background/feed_check_settings.dart';
 import '../reader/translation/language_names.dart';
 import '../reader/translation/translation_service.dart';
@@ -29,6 +31,7 @@ import 'consent.dart';
 import 'format.dart';
 import 'model_store.dart';
 import '../shared/capped_body.dart';
+import '../storage/storage_by_item_screen.dart';
 
 /// Human names for the registry ids; unknown ids fall back to the id.
 const Map<String, String> kModelLabels = {
@@ -78,6 +81,12 @@ class ModelsScreen extends StatefulWidget {
   /// run a check, and then the section is absent.
   final FeedCheckSettings? feedCheck;
 
+  /// The library, for "Storage by item" (1.5.8); with [services], the
+  /// entry shows. [actions] removes a download the way every list does.
+  final AppDatabase? db;
+  final int? profileId;
+  final EpisodeActions? actions;
+
   const ModelsScreen({
     super.key,
     required this.store,
@@ -85,6 +94,9 @@ class ModelsScreen extends StatefulWidget {
     this.services,
     this.databaseFile,
     this.feedCheck,
+    this.db,
+    this.profileId,
+    this.actions,
   });
 
   @override
@@ -332,6 +344,27 @@ class _ModelsScreenState extends State<ModelsScreen> {
           style: theme.textTheme.bodySmall,
         ),
       ),
+      if ((widget.db, widget.profileId) case (final db?, final profileId?))
+        Card(
+          margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          child: ListTile(
+            key: const Key('storage-by-item'),
+            title: const Text('Storage by item'),
+            subtitle: const Text(
+                'Downloads, transcripts and translations, one item at a '
+                'time.'),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () async {
+              await Navigator.of(context).push(MaterialPageRoute<void>(
+                  builder: (_) => StorageByItemScreen(
+                      db: db,
+                      services: widget.services!,
+                      profileId: profileId,
+                      actions: widget.actions)));
+              await _refresh();
+            },
+          ),
+        ),
       for (final spec in onDisk)
         ListTile(
           key: Key('storage-model-${spec.id}'),

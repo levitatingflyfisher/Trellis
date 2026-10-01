@@ -86,14 +86,15 @@ void main() {
     await pumpAt(tester, const Size(360, 780), 1.3);
     await toTab(tester, 'Library');
     seen('Filter');
-    barHolds(tester, 'Library', [('Filter', 'Filter'), more]);
+    barHolds(tester, 'Library',
+        [('Filter', 'Filter'), ('Subscriptions', 'Subscriptions'), more]);
     await toTab(tester, 'Latest');
     seen('Subscriptions');
     barHolds(tester, 'Latest', [('Subscriptions', 'Subscriptions'), more]);
     await toTab(tester, 'Queue');
     barHolds(tester, 'Queue', [more]);
     await toTab(tester, 'Courses');
-    seen('Backup');
+    barHolds(tester, 'Courses', [more]);
     await toTab(tester, 'Library');
     await tester.tap(find.text('A Rather Longer Title Than Any Bar Would Prefer'));
     await tester.pumpAndSettle();
@@ -133,7 +134,8 @@ void main() {
     }
     // The house floor: titles stay whole at 320 x 3.0, commands named.
     await toTab(tester, 'Library');
-    barHolds(tester, 'Library', [('Filter', 'Filter'), more]);
+    barHolds(tester, 'Library',
+        [('Filter', 'Filter'), ('Subscriptions', 'Subscriptions'), more]);
     await toTab(tester, 'Latest');
     barHolds(tester, 'Latest', [('Subscriptions', 'Subscriptions'), more]);
     await toTab(tester, 'Library');

@@ -393,7 +393,8 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
       onMenu: (choice) => _onMenu(choice, i),
       // The shared items first, then this page's own.
       menuBuilder: (_) => workMenuItems(_actions, e,
-          transcribed: _rowState.transcribed.contains(e.work.id), extras: [
+          transcribed: _rowState.transcribed.contains(e.work.id),
+          sourceLang: _rowState.sourceLangOf(e), extras: [
         if (canPlay)
           PopupMenuItem(
               key: Key('play-from-here-${e.work.id}'),

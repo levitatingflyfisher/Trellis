@@ -14,6 +14,8 @@ import '../feeds/background/feed_check_settings.dart';
 import '../feeds/episode_download_coordinator.dart';
 import '../feeds/feeds_repository.dart';
 import '../feeds/feed_detail_screen.dart';
+import '../feeds/feeds_screen.dart';
+import '../feeds/subscribe_screen.dart';
 import '../home_widget/home_widget_host.dart';
 import '../home_widget/widget_snapshot_writer.dart';
 import '../intake/audiobook_import.dart';
@@ -97,10 +99,81 @@ class HomeShell extends StatefulWidget {
 
 class _HomeShellState extends State<HomeShell> {
   static const _queueTab = 1;
+  static const _libraryTab = 2;
 
   /// Latest first, and where a reader lands: what arrived is the usual
   /// reason to open a podcast app.
   int _tab = 0;
+
+  /// One Navigator per tab (1.5.8, user: "like AntennaPod, the bottom nav
+  /// bar almost never goes away"): a page opened from a tab opens inside
+  /// it, under the same top and bottom bars, and each tab keeps its own
+  /// pages while another is in view. Only the reader takes the whole
+  /// screen, on the app's Navigator.
+  final _tabNavigators = List.generate(4, (_) => GlobalKey<NavigatorState>());
+  late final _tabRoutes =
+      List.generate(4, (_) => _TabRoutes()..addListener(_onTabRoutesChanged));
+
+  /// Tabs are built on first visit and then kept, so their pages survive
+  /// a trip elsewhere; launch still builds only Latest.
+  final Set<int> _builtTabs = {0};
+
+  /// Bumped when a tab other than Latest is revisited at its root, so its
+  /// screen reads its data again, as it did when tabs were built per
+  /// visit (a Keep in Latest, a Library removal show at once).
+  final List<int> _tabEpochs = [0, 0, 0, 0];
+
+  // canPop below changes as pages come and go.
+  void _onTabRoutesChanged() {
+    if (mounted) setState(() {});
+  }
+
+  NavigatorState? _tabNavigator(int tab) => _tabNavigators[tab].currentState;
+
+  bool get _tabCanPop => _tabNavigator(_tab)?.canPop() ?? false;
+
+  /// Shows [tab]. A tap on the tab already in view goes back to its root.
+  void _selectTab(int tab) {
+    if (tab == _tab) {
+      _popTabToRoot(tab);
+      return;
+    }
+    _goToTab(tab);
+  }
+
+  void _goToTab(int tab) {
+    setState(() {
+      if (tab != 0 &&
+          _builtTabs.contains(tab) &&
+          !(_tabNavigator(tab)?.canPop() ?? false)) {
+        _tabEpochs[tab]++;
+      }
+      _builtTabs.add(tab);
+      _tab = tab;
+    });
+  }
+
+  /// Pops [tab] to its root, but never past a page that is holding its
+  /// pop (Subscriptions lets a pending unfollow land first): that one is
+  /// asked to close the usual way and closes itself.
+  void _popTabToRoot(int tab) {
+    final nav = _tabNavigator(tab);
+    if (nav == null) return;
+    nav.popUntil((r) =>
+        r.isFirst || r.popDisposition == RoutePopDisposition.doNotPop);
+    if (nav.canPop()) unawaited(nav.maybePop());
+  }
+
+  /// Where a page the shell opens goes: into the tab in view, or over a
+  /// full-screen page (the reader) when one is up, so it is never hidden
+  /// beneath it.
+  BuildContext get _pageContext {
+    if (_host?.routes.pageOverRoot ?? false) return context;
+    return _tabNavigators[_tab].currentContext ?? context;
+  }
+
+  Future<T?> _pushPage<T>(Widget page) => Navigator.of(_pageContext)
+      .push<T>(MaterialPageRoute<T>(builder: (_) => page));
   late final FeedsRepository _repository = FeedsRepository(
     db: widget.db,
     fetcher: widget.fetcher,
@@ -135,7 +208,7 @@ class _HomeShellState extends State<HomeShell> {
       widget.jobs.downloads;
   DspCoordinator? get _dspCoordinator => widget.jobs.dsp;
 
-  // A transcript landing mid-playback opens the karaoke door live (the
+  // A transcript landing mid-playback opens the Page door live (the
   // capture backfill happens in the coordinator itself).
   void _onTranscribed(int workId) => _player.reloadAlignments(workId);
 
@@ -231,10 +304,8 @@ class _HomeShellState extends State<HomeShell> {
         // Shared before: the work it made opens, and nothing is added.
         unawaited(_openSharedWork(outcome.workId));
       case ShareSaved():
-        setState(() {
-          _tab = outcome.inLatest ? 0 : 2;
-          if (outcome.inLatest) _latestChanges++;
-        });
+        _goToTab(outcome.inLatest ? 0 : _libraryTab);
+        if (outcome.inLatest) setState(() => _latestChanges++);
         final where = outcome.inLatest ? 'Latest' : 'your Library';
         final what = outcome.count > 1 ? '${outcome.count} items' : '';
         final saved = outcome.existing
@@ -302,7 +373,7 @@ class _HomeShellState extends State<HomeShell> {
     final found = await _ownWork(workId);
     if (found == null || !mounted) return;
     await _workDoors.open(
-        context, (work: found.work, episode: found.row?.episode),
+        _pageContext, (work: found.work, episode: found.row?.episode),
         showTitle: found.row?.feedTitle);
     if (mounted) setState(() => _latestChanges++);
   }
@@ -396,10 +467,8 @@ class _HomeShellState extends State<HomeShell> {
           case SubscribeSuccess(title: final title):
             await _shareIntake.dropLink(offer);
             if (!mounted) return;
-            setState(() {
-              _tab = 0;
-              _latestChanges++;
-            });
+            _goToTab(0);
+            setState(() => _latestChanges++);
             _toast('Following ${title.isEmpty ? offer.name : title}.');
           case AlreadySubscribed(title: final title):
             _toast('Already following $title.');
@@ -482,6 +551,9 @@ class _HomeShellState extends State<HomeShell> {
       host.onArrival = null;
     }
     _host?.detach(_player);
+    for (final r in _tabRoutes) {
+      r.dispose();
+    }
     _player.dispose();
     super.dispose();
   }
@@ -521,25 +593,24 @@ class _HomeShellState extends State<HomeShell> {
             feedCheck: (widget.feedCheck?.scheduler.available ?? false)
                 ? widget.feedCheck
                 : null,
+            db: widget.db,
+            profileId: widget.profile.id,
+            actions: _episodeActions,
           )
         : const WebTierModelsNotice();
-    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => screen));
+    unawaited(_pushPage<void>(screen));
   }
 
-  /// Backup & migrate, offered from the Courses tab (the _openModels
+  /// Backup & migrate, offered from the Library ⋮ (the _openModels
   /// pattern). A restore is full-replace, so the profile this shell holds
   /// may not exist afterwards — the screen pops `true` and we walk back to
   /// the profile picker rather than sit on a dangling id.
   Future<void> _openBackup() async {
-    final restored = await Navigator.of(context).push<bool>(
-      MaterialPageRoute<bool>(
-        builder: (_) => BackupScreen(
-            db: widget.db,
-            profile: widget.profile,
-            custody: widget.services.backupCustody,
-            beforeRestore: widget.jobs.stopAll),
-      ),
-    );
+    final restored = await _pushPage<bool>(BackupScreen(
+        db: widget.db,
+        profile: widget.profile,
+        custody: widget.services.backupCustody,
+        beforeRestore: widget.jobs.stopAll));
     if (restored == true) {
       await widget.jobs.reload();
       widget.onSwitchProfile();
@@ -553,11 +624,10 @@ class _HomeShellState extends State<HomeShell> {
   /// screen with no share button rather than a dead one, the same law
   /// [_openModels] already follows for a different door.
   void _openEcho() {
-    Navigator.of(context).push(MaterialPageRoute<void>(
-        builder: (_) => EchoScreen(
-            db: widget.db,
-            profile: widget.profile,
-            shareImage: kIsWeb ? null : shareEchoImage)));
+    unawaited(_pushPage<void>(EchoScreen(
+        db: widget.db,
+        profile: widget.profile,
+        shareImage: kIsWeb ? null : shareEchoImage)));
   }
 
   /// The player's Page door: the playing work's text in the reader, on
@@ -592,26 +662,23 @@ class _HomeShellState extends State<HomeShell> {
   void _openCaptures() {
     final work = _player.current;
     if (work == null) return;
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) =>
-            CapturesScreen(db: widget.db, controller: _player, work: work),
-      ),
-    );
+    unawaited(_pushPage<void>(
+        CapturesScreen(db: widget.db, controller: _player, work: work)));
   }
 
   void _openJobs() {
-    Navigator.of(context).push(MaterialPageRoute<void>(
-        builder: (_) => JobsScreen(jobs: widget.jobs)));
+    unawaited(_pushPage<void>(JobsScreen(jobs: widget.jobs)));
   }
 
   /// The queue is a tab now (user: "I freaking hate how hidden the up
   /// next and up last screen is"), so the mini bar's door switches to it
   /// rather than stacking a second copy over the shell.
   void _openQueue() {
-    // From a pushed page, the Queue tab is under it.
+    // From the reader, the Queue tab is under it; from a page in the
+    // Queue tab, its root is the queue.
     Navigator.of(context).popUntil((r) => r.isFirst);
-    setState(() => _tab = _queueTab);
+    if (_tab != _queueTab) _goToTab(_queueTab);
+    _popTabToRoot(_queueTab);
   }
 
   /// The episode actions and reader seams every list of works shares, so
@@ -656,18 +723,42 @@ class _HomeShellState extends State<HomeShell> {
   /// History, from the Queue bar: the queue is what plays next, history
   /// is what played. Built here, not in the Queue tab, because opening a
   /// row needs the reader's and the episode actions' whole kit.
-  Future<void> _openHistory() => Navigator.of(context).push<void>(
-        MaterialPageRoute(
-          builder: (_) => HistoryScreen(
-            doors: SearchDoors(
-              db: widget.db,
-              profile: widget.profile,
-              actions: _episodeActions,
-              readerDoors: _readerDoors,
-            ),
-          ),
+  Future<void> _openHistory() => _pushPage<void>(HistoryScreen(
+        doors: SearchDoors(
+          db: widget.db,
+          profile: widget.profile,
+          actions: _episodeActions,
+          readerDoors: _readerDoors,
         ),
-      );
+      ));
+
+  /// Subscriptions, from the Library's bar (Latest opens its own): inside
+  /// the tab. Latest reads again after, since a follow or an unfollow
+  /// changes it.
+  Future<void> _openSubscriptions(BuildContext context) async {
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+        builder: (_) => FeedsScreen(
+              db: widget.db,
+              repository: _repository,
+              profile: widget.profile,
+              localMlAvailable: widget.services.localMlAvailable,
+              playerController: _player,
+              downloadCoordinator: _downloadCoordinator,
+              dspCoordinator: _dspCoordinator,
+              readerDoors: _readerDoors,
+              transcriber: _coordinator,
+            )));
+    if (mounted) setState(() => _latestChanges++);
+  }
+
+  /// The + Add sheet's "Subscribe to a feed": the same screen Latest's
+  /// empty state opens, inside the tab it was opened from.
+  Future<void> _subscribe(BuildContext context) async {
+    final followed = await Navigator.of(context).push<bool>(MaterialPageRoute(
+        builder: (_) => SubscribeScreen(
+            repository: _repository, profileId: widget.profile.id)));
+    if (followed == true && mounted) setState(() => _latestChanges++);
+  }
 
   /// The audiobook door (Campaign 7, ADR-0013) — null when the door was
   /// never constructed (the web tier), which also hides the option on
@@ -695,85 +786,103 @@ class _HomeShellState extends State<HomeShell> {
     final work = _player.current;
     final files = _player.currentAudiobookFiles;
     if (work == null || files == null) return;
-    Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => ChaptersScreen(
-          controller: _player,
-          work: work,
-          files: files,
-          computeChapters: (files) =>
-              chaptersFor(files, readAudiobookChapterPrefix),
+    unawaited(_pushPage<void>(ChaptersScreen(
+      controller: _player,
+      work: work,
+      files: files,
+      computeChapters: (files) =>
+          chaptersFor(files, readAudiobookChapterPrefix),
+    )));
+  }
+
+  /// A tab's root screen.
+  Widget _tabRoot(int tab) => switch (tab) {
+        0 => RiverScreen(
+            active: _tab == 0,
+            changes: _latestChanges,
+            onOpenWork: (id) => unawaited(_refetchOnOpen(id)),
+            db: widget.db,
+            profile: widget.profile,
+            repository: _repository,
+            playerController: _player,
+            coordinator: _coordinator,
+            downloadCoordinator: _downloadCoordinator,
+            dspCoordinator: _dspCoordinator,
+            localMlAvailable: widget.services.localMlAvailable,
+            resolveSpeechEngine: widget.services.resolveSpeechEngine,
+            lookupDefinition: widget.services.lookupDefinition,
+            createSpeechTempFiles: widget.services.createSpeechTempFiles,
+            translation: widget.services.translation,
+            tts: widget.services.tts),
+        _queueTab => QueueScreen(
+            db: widget.db,
+            profile: widget.profile,
+            player: _player,
+            actions: _episodeActions,
+            readerDoors: _readerDoors,
+            onOpenHistory: _openHistory),
+        _libraryTab => LibraryScreen(
+            db: widget.db,
+            profile: widget.profile,
+            onSwitchProfile: widget.onSwitchProfile,
+            onOpenModels: _openModels,
+            onOpenBackup: _openBackup,
+            onSubscribe: _subscribe,
+            onOpenSubscriptions: _openSubscriptions,
+            fetcher: widget.fetcher,
+            tts: widget.services.tts,
+            lane: widget.services.webFetchLane,
+            localMlAvailable: widget.services.localMlAvailable,
+            resolveSpeechEngine: widget.services.resolveSpeechEngine,
+            lookupDefinition: widget.services.lookupDefinition,
+            createSpeechTempFiles: widget.services.createSpeechTempFiles,
+            player: _player,
+            translation: widget.services.translation,
+            actions: _episodeActions,
+            onImportAudiobook: _onImportAudiobook,
+            onDeleteAudiobookFiles: widget.services.localMlAvailable
+                ? _deleteAudiobookFiles
+                : null),
+        _ => CoursesScreen(
+            db: widget.db,
+            profile: widget.profile,
+            onOpenEcho: _openEcho,
+            localMlAvailable: widget.services.localMlAvailable,
+          ),
+      };
+
+  Widget _tabStack(int tab) {
+    if (!_builtTabs.contains(tab)) return const SizedBox.shrink();
+    return Navigator(
+      key: _tabNavigators[tab],
+      observers: [_tabRoutes[tab]],
+      pages: [
+        MaterialPage<void>(
+          key: ValueKey('tab-$tab'),
+          child: KeyedSubtree(
+              key: ValueKey(_tabEpochs[tab]), child: _tabRoot(tab)),
         ),
-      ),
+      ],
+      // A tab's root page is never removed; pages above it are pushed.
+      onDidRemovePage: (_) {},
     );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      // Latest stays mounted under the other tabs, so a trip to the Queue
-      // comes back to the same loaded pages, scroll position and "new
-      // since" line. The others are still built per visit: each reads its
-      // data on mount, which keeps it current after a change made
-      // elsewhere (a Keep in Latest, a Library removal).
-      body: IndexedStack(
-        index: _tab == 0 ? 0 : 1,
-        children: [
-          RiverScreen(
-              active: _tab == 0,
-              changes: _latestChanges,
-              onOpenWork: (id) => unawaited(_refetchOnOpen(id)),
-              db: widget.db,
-              profile: widget.profile,
-              repository: _repository,
-              playerController: _player,
-              coordinator: _coordinator,
-              downloadCoordinator: _downloadCoordinator,
-              dspCoordinator: _dspCoordinator,
-              onOpenJobs: _openJobs,
-              localMlAvailable: widget.services.localMlAvailable,
-              resolveSpeechEngine: widget.services.resolveSpeechEngine,
-              lookupDefinition: widget.services.lookupDefinition,
-              createSpeechTempFiles: widget.services.createSpeechTempFiles,
-              translation: widget.services.translation,
-              tts: widget.services.tts),
-          switch (_tab) {
-            0 => const SizedBox.shrink(),
-            _queueTab => QueueScreen(
-                db: widget.db,
-                profile: widget.profile,
-                player: _player,
-                actions: _episodeActions,
-                readerDoors: _readerDoors,
-                onOpenHistory: _openHistory),
-            2 => LibraryScreen(
-                db: widget.db,
-                profile: widget.profile,
-                onSwitchProfile: widget.onSwitchProfile,
-                onOpenModels: _openModels,
-                fetcher: widget.fetcher,
-                tts: widget.services.tts,
-                lane: widget.services.webFetchLane,
-                localMlAvailable: widget.services.localMlAvailable,
-                resolveSpeechEngine: widget.services.resolveSpeechEngine,
-                lookupDefinition: widget.services.lookupDefinition,
-                createSpeechTempFiles: widget.services.createSpeechTempFiles,
-                player: _player,
-                translation: widget.services.translation,
-                actions: _episodeActions,
-                onImportAudiobook: _onImportAudiobook,
-                onDeleteAudiobookFiles: widget.services.localMlAvailable
-                    ? _deleteAudiobookFiles
-                    : null),
-            _ => CoursesScreen(
-              db: widget.db,
-              profile: widget.profile,
-              onOpenBackup: _openBackup,
-              onOpenEcho: _openEcho,
-              localMlAvailable: widget.services.localMlAvailable,
-            ),
-          },
-        ],
+      // System back closes the page in view in the tab in view; at that
+      // tab's root it leaves the app as before. One handler for all tabs,
+      // since all four share this route: a hidden tab's pages are left be.
+      body: PopScope(
+        canPop: !_tabCanPop,
+        onPopInvokedWithResult: (didPop, _) {
+          if (!didPop) unawaited(_tabNavigator(_tab)?.maybePop());
+        },
+        child: IndexedStack(
+          index: _tab,
+          children: [for (var i = 0; i < 4; i++) _tabStack(i)],
+        ),
       ),
       bottomNavigationBar: Column(
         mainAxisSize: MainAxisSize.min,
@@ -795,7 +904,7 @@ class _HomeShellState extends State<HomeShell> {
             _miniPlayerBar(),
           NavigationBar(
             selectedIndex: _tab,
-            onDestinationSelected: (i) => setState(() => _tab = i),
+            onDestinationSelected: _selectTab,
             destinations: const [
               // "Latest", the industry's word, not the coined "River"
               // (operator naming ruling): every item from every followed
@@ -829,6 +938,39 @@ class _HomeShellState extends State<HomeShell> {
       ),
     );
   }
+}
+
+/// Tells the shell when a tab's pages change, so system back knows
+/// whether the tab in view has a page to close.
+class _TabRoutes extends NavigatorObserver with ChangeNotifier {
+  bool _disposed = false;
+
+  // A tab's pages pop as the shell goes (a switch of reader).
+  void _changed() => WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!_disposed) notifyListeners();
+      });
+
+  @override
+  void dispose() {
+    _disposed = true;
+    super.dispose();
+  }
+
+  @override
+  void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) =>
+      _changed();
+
+  @override
+  void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) =>
+      _changed();
+
+  @override
+  void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) =>
+      _changed();
+
+  @override
+  void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) =>
+      _changed();
 }
 
 /// The door to the Jobs screen, on every tab, present only while some job

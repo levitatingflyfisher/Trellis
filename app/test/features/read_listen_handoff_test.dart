@@ -1,26 +1,20 @@
-import 'dart:io';
 
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
-import 'package:trellis/features/player/karaoke_screen.dart';
 import 'package:trellis/features/player/player_controller.dart';
 import 'package:trellis/features/reader/reader_screen.dart';
-import 'package:trellis/features/reader/speech/speech_engine.dart';
-import 'package:trellis/features/reader/speech/speech_temp_files.dart';
 
 import '../support/fake_player.dart';
-import '../support/fake_translation_service.dart';
-import '../support/fake_tts.dart';
 
-/// The study crown, Phase 3: read<->listen handoff verbs. Both directions'
-/// math already exists (Spine.positionAtAudioTime / projectAudioTime,
-/// proven at packages/loom_core/test/cursor_law_test.dart); this file is
-/// the UI wiring — "Listen from here" in the reader, "Read from here" in
-/// the karaoke (synced-text) view — over the SAME canonical Position row
-/// the player and reader already both read and write (ADR-0002). Neither
-/// verb invents a second position store.
+/// The study crown, Phase 3: the read -> listen handoff. The math already
+/// exists (Spine.projectAudioTime, proven at
+/// packages/loom_core/test/cursor_law_test.dart); this file is the UI
+/// wiring — Listen in the reader — over the SAME canonical Position row
+/// the player and reader already both read and write (ADR-0002). (The
+/// transcript view's "Read from here" left with that view in 1.5.8: Page
+/// is the transcript now.)
 void main() {
   late AppDatabase db;
   late FakeEpisodePlayer fakePlayer;
@@ -145,76 +139,4 @@ void main() {
     });
   });
 
-  group('"Read from here" (player -> reader)', () {
-    testWidgets(
-        'always offered in the karaoke view (alignments are guaranteed '
-        'there — the promise is never dangled before it can be kept)',
-        (tester) async {
-      final work = await seedAlignedEpisode();
-      await controller.playWork(work);
-      await tester.pumpWidget(MaterialApp(
-          home: KaraokeScreen(db: db, controller: controller, work: work)));
-      await tester.pumpAndSettle();
-
-      expect(find.byKey(const Key('read-from-here')), findsOneWidget);
-    });
-
-    testWidgets(
-        'tapping it saves the current playback position through the SAME '
-        'Position row, then opens the reader there', (tester) async {
-      final work = await seedAlignedEpisode();
-      await controller.playWork(work);
-      fakePlayer.emitPosition(const Duration(seconds: 15)); // inside seg 1
-      await tester.pumpWidget(MaterialApp(
-          home: KaraokeScreen(db: db, controller: controller, work: work)));
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.byKey(const Key('read-from-here')));
-      await tester.pumpAndSettle();
-
-      final saved =
-          await db.spineDao.position(profileId: profileId, workId: work.id);
-      expect(saved!.segmentIdx, 1);
-      expect(saved.lastModality, 'listen',
-          reason: 'the write-through is the existing saveProgress path, '
-              'unchanged — no second position store invented for this verb');
-      // And the reader screen is now showing, having read that same row.
-      expect(find.byType(ReaderScreen), findsOneWidget);
-    });
-
-    testWidgets(
-        'threads tts/resolveSpeechEngine/createSpeechTempFiles/'
-        'translation through to the reader it opens — the same '
-        'reachability library/river-opened readers already have '
-        '(ADR-0008 Babel Phase 3)', (tester) async {
-      final work = await seedAlignedEpisode();
-      await controller.playWork(work);
-      final tts = FakeTtsSpeaker();
-      Future<SynthesisSpeechEngine?> resolveSpeechEngine({String? lang}) async =>
-          null;
-      SpeechTempFiles createSpeechTempFiles() =>
-          DiskSpeechTempFiles(dir: Directory.systemTemp);
-      final translation = FakeTranslation().service;
-
-      await tester.pumpWidget(MaterialApp(
-          home: KaraokeScreen(
-              db: db,
-              controller: controller,
-              work: work,
-              tts: tts,
-              resolveSpeechEngine: resolveSpeechEngine,
-              createSpeechTempFiles: createSpeechTempFiles,
-              translation: translation)));
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.byKey(const Key('read-from-here')));
-      await tester.pumpAndSettle();
-
-      final reader = tester.widget<ReaderScreen>(find.byType(ReaderScreen));
-      expect(reader.tts, same(tts));
-      expect(reader.resolveSpeechEngine, same(resolveSpeechEngine));
-      expect(reader.createSpeechTempFiles, same(createSpeechTempFiles));
-      expect(reader.translation, same(translation));
-    });
-  });
 }

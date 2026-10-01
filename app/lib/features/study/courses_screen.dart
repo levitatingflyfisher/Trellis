@@ -24,13 +24,9 @@ class CoursesScreen extends StatefulWidget {
   final AppDatabase db;
   final Profile profile;
 
-  /// Opens Backup & migrate; the shell wires it (the LibraryScreen
-  /// `onOpenModels` pattern — the tab offers the door, the shell owns the
-  /// navigation).
-  final VoidCallback? onOpenBackup;
-
   /// Campaign 4 Phase 5: opens Trellis Echo, the reader's own private
-  /// year-in-review — same door-not-navigation shape as [onOpenBackup].
+  /// year-in-review — the tab offers the door, the shell owns the
+  /// navigation (the LibraryScreen `onOpenModels` pattern).
   /// Never PIN-gated: that's ParentDashboardScreen's, a different
   /// audience (a parent reviewing a household, not a reader reviewing
   /// themselves).
@@ -49,7 +45,6 @@ class CoursesScreen extends StatefulWidget {
       {super.key,
       required this.db,
       required this.profile,
-      this.onOpenBackup,
       this.onOpenEcho,
       this.brainStore,
       this.localMlAvailable});
@@ -233,13 +228,6 @@ class _CoursesScreenState extends State<CoursesScreen> {
         // (fleet ruling on top bars; audit rank 3).
         actions: [
           OhBarActions(children: [
-            if (widget.onOpenBackup != null)
-              OhBarAction(
-                key: const Key('open-backup'),
-                icon: Icons.settings_backup_restore,
-                label: 'Backup',
-                onPressed: widget.onOpenBackup,
-              ),
             OhBarOverflow<String>(
               key: const Key('study-settings'),
               onSelected: (value) {

@@ -35,6 +35,9 @@ class JustAudioSpeechQueue implements SpeechAudioQueue {
   Future<void> pause() => _player.pause();
 
   @override
+  Future<void> setSpeed(double speed) => _player.setSpeed(speed);
+
+  @override
   Future<void> resume() async => unawaited(_player.play());
 
   @override

@@ -368,7 +368,10 @@ class DeviceServices {
   /// download-honesty gate. Null either way means the system voice — this
   /// never throws.
   Future<SynthesisSpeechEngine?> resolveSpeechEngine({String? lang}) async {
-    final spec = registry.pickModel(ModelTask.tts, tier, langHint: lang);
+    // Voices are registered by base language: `en-US` is English.
+    final base = lang?.trim().toLowerCase().split(RegExp('[-_]')).first;
+    final spec = registry.pickModel(ModelTask.tts, tier,
+        langHint: base == null || base.isEmpty ? null : base);
     if (spec == null) return null;
     return speechEngineFor(spec);
   }

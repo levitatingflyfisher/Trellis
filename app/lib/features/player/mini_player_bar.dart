@@ -9,7 +9,7 @@ import 'speed_control.dart';
 
 /// The persistent playback bar: play/pause, ±15/+30, the swipe speed
 /// control (0.5–4×), a seek slider — and, when the playing work has synced text
-/// (alignments), the door to the karaoke view. Compact enough for 320dp at
+/// (alignments), the door to Page, its text lit as it plays. Compact enough for 320dp at
 /// 2× text scale — the fleet's sweep pins that.
 class MiniPlayerBar extends StatelessWidget {
   final PlayerController controller;
@@ -20,7 +20,7 @@ class MiniPlayerBar extends StatelessWidget {
   final VoidCallback? onOpenSyncedText;
 
   /// The study crown, Phase 2: saves a capture at the current playback
-  /// position. Unlike the karaoke door, this works with or without
+  /// position. Unlike the Page door, this works with or without
   /// alignments (a capture is still worth taking before a transcript
   /// exists — see [PlayerController.capture]'s backfill note), so it is
   /// gated only on the callback being wired at all.

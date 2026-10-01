@@ -114,6 +114,11 @@ class Works extends Table {
   /// opened; the stored sentences are the progress, so nothing else
   /// needs keeping.
   TextColumn get translationRunLang => text().nullable()();
+
+  /// How the reader shows this work's translation (1.5.8): `only` puts
+  /// the translated text in place of the original, in every reading
+  /// mode; null is both, each translated sentence under its original.
+  TextColumn get translationView => text().nullable()();
 }
 
 /// An item's full show notes (1.5.4), sanitized before they are stored
@@ -440,7 +445,7 @@ class SavedViews extends Table {
 
 /// The study crown, Phase 2: a captured moment during playback — episode,
 /// position, when it was taken. [segmentIdx] is the sentence it snapped to,
-/// via the SAME alignments the karaoke view and the read<->listen handoff
+/// via the SAME alignments the reader's follow-along and the read<->listen handoff
 /// project through (Snipd's known complaint is wrong clip boundaries from a
 /// raw ±15s guess; sentence-snapped-or-honestly-unbound is the bar here).
 /// Null means the work had no transcript yet when this was taken —
@@ -1749,6 +1754,18 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
               activeTranslationLang: Value(null),
               showTranslationLayer: Value(false)));
 
+  /// Whether the reader shows this work's translation in place of the
+  /// original. See [Works.translationView].
+  Future<bool> translationOnly(int workId) async {
+    final row = await (select(works)..where((w) => w.id.equals(workId)))
+        .getSingleOrNull();
+    return row?.translationView == 'only';
+  }
+
+  Future<void> setTranslationOnly(int workId, bool only) =>
+      (update(works)..where((w) => w.id.equals(workId)))
+          .write(WorksCompanion(translationView: Value(only ? 'only' : null)));
+
   /// The target of this work's unfinished translation run, if any. See
   /// [Works.translationRunLang].
   Future<String?> translationRunLang(int workId) async {
@@ -1781,6 +1798,109 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
   Future<void> setReadLang(int workId, String? lang) =>
       (update(works)..where((w) => w.id.equals(workId)))
           .write(WorksCompanion(readLang: Value(lang)));
+
+  /// Deletes [workId]'s transcript (1.5.8): its sentences, timings and
+  /// layers, and with them every translation, which is keyed to those
+  /// sentences, and the reading place over them. The player's place and
+  /// the captures stay, unbound from sentences that are gone (they keep
+  /// their time, and the next transcript binds them again). Transcribing
+  /// again rebuilds the rest.
+  Future<void> deleteTranscript(int workId) => transaction(() async {
+        await (delete(positions)..where((p) => p.workId.equals(workId))).go();
+        await (update(captures)..where((c) => c.workId.equals(workId)))
+            .write(const CapturesCompanion(segmentIdx: Value(null)));
+        await (delete(alignments)..where((a) => a.workId.equals(workId)))
+            .go();
+        await (delete(translationSentences)
+              ..where((t) => t.workId.equals(workId)))
+            .go();
+        await (delete(layers)..where((l) => l.workId.equals(workId))).go();
+        await (delete(segments)..where((x) => x.workId.equals(workId))).go();
+        await (update(works)..where((w) => w.id.equals(workId))).write(
+            const WorksCompanion(
+                activeTranslationLang: Value(null),
+                showTranslationLayer: Value(false),
+                readLang: Value(null),
+                translationView: Value(null),
+                translationRunLang: Value(null)));
+      });
+
+  /// Deletes [workId]'s translation into [lang] (1.5.8), both kinds: the
+  /// reader's sentences and a transcribe-and-translate `mt` layer. Any
+  /// choice naming that language is cleared, including an unfinished
+  /// run, which would otherwise rebuild it on the next open.
+  Future<void> deleteTranslation(int workId, String lang) =>
+      transaction(() async {
+        await (delete(translationSentences)
+              ..where((t) => t.workId.equals(workId) & t.lang.equals(lang)))
+            .go();
+        await (delete(layers)
+              ..where((l) =>
+                  l.workId.equals(workId) &
+                  l.lang.equals(lang) &
+                  l.kind.equals('mt')))
+            .go();
+        final work = await (select(works)..where((w) => w.id.equals(workId)))
+            .getSingleOrNull();
+        if (work == null) return;
+        final active = work.activeTranslationLang == lang;
+        await (update(works)..where((w) => w.id.equals(workId)))
+            .write(WorksCompanion(
+          activeTranslationLang:
+              active ? const Value(null) : const Value.absent(),
+          showTranslationLayer:
+              active ? const Value(false) : const Value.absent(),
+          translationView: active ? const Value(null) : const Value.absent(),
+          readLang:
+              work.readLang == lang ? const Value(null) : const Value.absent(),
+          translationRunLang: work.translationRunLang == lang
+              ? const Value(null)
+              : const Value.absent(),
+        ));
+      });
+
+  /// What each work keeps as text beyond its own body (1.5.8), for the
+  /// storage page: one row per transcribed work (`lang` null: its
+  /// sentences, layers and word timings) and one per translation language.
+  /// Byte lengths of what is stored; the database file only shrinks by
+  /// that much once SQLite reuses or vacuums the pages. [workId] narrows
+  /// it to one work, so its page doesn't measure every transcript.
+  Future<List<({int workId, String? lang, int bytes})>> storedText(
+      {int? workId}) async {
+    final only = workId == null ? '' : 'WHERE work_id = ?';
+    final rows = await customSelect('''
+      SELECT work_id, NULL AS lang, SUM(n) AS bytes FROM (
+        SELECT work_id, LENGTH(CAST(body AS BLOB)) AS n FROM segments
+          WHERE work_id IN (SELECT work_id FROM alignments)
+        UNION ALL
+        SELECT work_id, 16 + IFNULL(LENGTH(word_timings), 0) FROM alignments
+        UNION ALL
+        SELECT work_id, LENGTH(CAST(body AS BLOB)) FROM layers
+          WHERE kind != 'mt'
+      ) $only GROUP BY work_id
+      UNION ALL
+      SELECT work_id, lang, SUM(n) FROM (
+        SELECT work_id, lang,
+            LENGTH(CAST(body AS BLOB)) + LENGTH(CAST(source_text AS BLOB))
+              AS n
+          FROM translation_sentences
+        UNION ALL
+        SELECT work_id, lang, LENGTH(CAST(body AS BLOB)) FROM layers
+          WHERE kind = 'mt'
+      ) $only GROUP BY work_id, lang''',
+        variables: [
+          if (workId != null) ...[Variable.withInt(workId), Variable.withInt(workId)],
+        ],
+        readsFrom: {segments, alignments, layers, translationSentences}).get();
+    return [
+      for (final r in rows)
+        (
+          workId: r.read<int>('work_id'),
+          lang: r.readNullable<String>('lang'),
+          bytes: r.read<int>('bytes'),
+        ),
+    ];
+  }
 
   /// Sets a work's declared source language (Campaign 8 "Babel widens"
   /// Phase 1's calm per-work selector — see [Works.lang]). Most intake
@@ -2620,6 +2740,16 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
 
   /// The declared language of the feed [workId]'s episode belongs to; null
   /// when it declares none or the work is no feed episode.
+  /// Every show's declared language for [profileId], by feed id — one
+  /// query for a whole list of rows, which [languageOfWorkFeed] would ask
+  /// once per row.
+  Future<Map<int, String>> feedLanguagesOf(int profileId) async {
+    final rows = await (select(feeds)
+          ..where((f) => f.profileId.equals(profileId) & f.language.isNotNull()))
+        .get();
+    return {for (final f in rows) f.id: f.language!};
+  }
+
   Future<String?> languageOfWorkFeed(int workId) async {
     final row = await (select(feeds).join([
       innerJoin(episodes, episodes.feedId.equalsExp(feeds.id)),
@@ -3548,7 +3678,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 31;
+  int get schemaVersion => 32;
   // There is no v14: it was reserved for the reader-depth campaign, which
   // landed as v18 after three sibling campaigns merged ahead of it, so the
   // guard chain skips from 13 to 15. Version gaps are harmless — an
@@ -3952,6 +4082,13 @@ class AppDatabase extends _$AppDatabase {
                   AND EXISTS (SELECT 1 FROM translation_sentences t
                               WHERE t.work_id = works.id AND t.lang = 'es')
               ''');
+            });
+          }
+          if (from < 32) {
+            await transaction(() async {
+              // 1.5.8: Translation only / Both, per work. Unconditional:
+              // `works` is never created inside onUpgrade.
+              await m.addColumn(works, works.translationView);
             });
           }
         },

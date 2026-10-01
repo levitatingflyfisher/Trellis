@@ -583,6 +583,70 @@ void main() {
           findsOneWidget);
     });
 
+    // 1.5.8: what a work stores can go from its own page, and the page
+    // offers to fetch it again at once.
+    Future<void> menuDelete(WidgetTester tester, String key, String act) async {
+      await tester.tap(find.byKey(const Key('work-page-menu')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(Key(key)));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsOneWidget, reason: 'asks once');
+      await tester.tap(find.descendant(
+          of: find.byType(AlertDialog), matching: find.text(act)));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('nothing stored, nothing to delete in the ⋮', (tester) async {
+      await pumpPage(tester, episode);
+      final values = await pageMenuValues(tester);
+      expect(values, isNot(contains('remove-download')));
+      expect(values, isNot(contains('delete-transcript')));
+    });
+
+    testWidgets('Remove download: the file goes and Download comes back',
+        (tester) async {
+      await pumpPage(tester, episode);
+      final placed =
+          services.audioFileFor(episode, 'https://x.test/aurora.mp3');
+      placed.parent.createSync(recursive: true);
+      placed.writeAsBytesSync([1, 2, 3]);
+      downloader.notifyListeners();
+      await tester.pumpAndSettle();
+      expect(find.byKey(Key('page-download-$episode')), findsNothing);
+      await menuDelete(tester, 'remove-download-$episode', 'Remove download');
+      expect(placed.existsSync(), isFalse);
+      expect(find.byKey(Key('page-download-$episode')), findsOneWidget);
+      expect(find.byType(WorkPage), findsOneWidget);
+    });
+
+    testWidgets('Delete transcript: it goes and Transcribe comes back',
+        (tester) async {
+      await transcribeEpisode();
+      await pumpPage(tester, episode);
+      expect(find.byKey(Key('page-transcribe-$episode')), findsNothing);
+      await menuDelete(
+          tester, 'delete-transcript-$episode', 'Delete transcript');
+      expect(await db.spineDao.alignmentsOf(episode), isEmpty);
+      expect(find.byKey(Key('page-transcribe-$episode')), findsOneWidget);
+    });
+
+    testWidgets('Delete a translation: that language leaves the page',
+        (tester) async {
+      await db.spineDao.upsertTranslationSentence(
+          workId: article,
+          segmentIdx: 0,
+          sentenceIdx: 0,
+          lang: 'es',
+          sourceText: 'The marsh at dawn.',
+          body: 'El pantano al alba.');
+      await pumpPage(tester, article);
+      expect(find.byKey(const Key('lang-es')), findsOneWidget);
+      await menuDelete(tester, 'delete-translation-es-$article',
+          'Delete Spanish translation');
+      expect(await db.spineDao.translationLangsOf(article), isEmpty);
+      expect(find.byKey(const Key('lang-es')), findsNothing);
+    });
+
     testWidgets('a kept episode is un-kept, never deleted, from its page',
         (tester) async {
       await db.spineDao.promoteWork(episode);

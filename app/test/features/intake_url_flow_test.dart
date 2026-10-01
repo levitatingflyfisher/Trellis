@@ -50,7 +50,7 @@ void main() {
   }
 
   Future<void> openAndFetch(WidgetTester tester, String address) async {
-    await tester.tap(find.text('From the web'));
+    await tester.tap(find.text('Open a link'));
     await tester.pumpAndSettle();
     await tester.enterText(find.byKey(const Key('url-intake-field')), address);
     await tester.tap(find.byKey(const Key('url-intake-fetch')));
@@ -110,7 +110,7 @@ void main() {
     // The add sheet offers the web door too, not just the empty state.
     await tester.tap(find.text('Add'));
     await tester.pumpAndSettle();
-    expect(find.text('From the web'), findsOneWidget);
+    expect(find.text('Open a link'), findsOneWidget);
   });
 
   testWidgets('a private-network address is refused BEFORE consent',

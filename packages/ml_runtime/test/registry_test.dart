@@ -456,7 +456,7 @@ void main() {
         'there is no longer an engine license to list (ADR-0007)', () {
       final voice = starter.byId('supertonic-en-m1')!;
       expect(voice.task, ModelTask.tts);
-      expect(voice.minTier, DeviceTier.t2);
+      expect(voice.minTier, DeviceTier.t1);
       expect(voice.langs, {'en'});
       expect(voice.licenses, ['OpenRAIL-M']);
       final layout = voice.supertonicLayout;
@@ -489,6 +489,16 @@ void main() {
       expect(starter.pickModel(ModelTask.llm, DeviceTier.t1), isNull);
       expect(starter.pickModel(ModelTask.llm, DeviceTier.t2)?.id,
           'qwen2.5-0.5b-instruct-litert');
+    });
+
+    test('the neural voice is picked at t1, the tier the app runs at '
+        '(1.5.8: at t2 it downloaded and never played)', () {
+      expect(starter.byId('supertonic-en-m1')!.minTier, DeviceTier.t1);
+      expect(starter.pickModel(ModelTask.tts, DeviceTier.t1, langHint: 'en')?.id,
+          'supertonic-en-m1');
+      // Lowering the voice must not move transcription off tiny.
+      expect(starter.pickModel(ModelTask.asr, DeviceTier.t1)?.id,
+          'whisper-tiny-ggml');
     });
 
     test('sizes carry the research packet size classes', () {

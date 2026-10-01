@@ -26,7 +26,7 @@ Future<int> storeArticle(AppDatabase db,
   return workId;
 }
 
-/// "From the web": paste a URL, pass the ONE consent chokepoint, preview the
+/// "Open a link": paste a URL, pass the ONE consent chokepoint, preview the
 /// extracted article, confirm — and it lands as a persistent spine work.
 ///
 /// The order is a law (ADR-0003 law 6): the lexical SSRF guard runs first
@@ -142,7 +142,7 @@ class _UrlIntakeScreenState extends State<UrlIntakeScreen> {
     final theme = Theme.of(context);
     final preview = _preview;
     return Scaffold(
-      appBar: AppBar(title: const Text('From the web')),
+      appBar: AppBar(title: const Text('Open a link')),
       body: CappedBody(child: SafeArea(
         child: Center(
           child: SingleChildScrollView(

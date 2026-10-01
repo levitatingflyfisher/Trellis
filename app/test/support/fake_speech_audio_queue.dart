@@ -35,6 +35,11 @@ class FakeSpeechAudioQueue implements SpeechAudioQueue {
     _playing = false;
   }
 
+  double speed = 1.0;
+
+  @override
+  Future<void> setSpeed(double s) async => speed = s;
+
   @override
   Future<void> resume() async {
     resumeCalls++;

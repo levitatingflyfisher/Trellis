@@ -7,6 +7,14 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.5.8 — 2026-10-27
+
+- Follow along lights each word as it is heard, at any speed up to 4x; one "Back to audio" button in every mode.
+- Translations show in RSVP, Line and Follow along, as "Translation only" or "Both", remembered per work (schema 32).
+- Pages open inside their tab, so the bottom bar stays; Library gets + Add and Subscriptions; app-wide items sit in the Library menu.
+- Storage by item, and Remove download / Delete transcript / Delete translation on the work page.
+- The downloaded neural voice plays (registered at T1).
+
 ## 1.5.7 — 2026-10-25
 
 - Fix: translating crashed the app on phones. The release build's code shrinker renamed ONNX Runtime's Java classes, which its native library looks up by name. A keep rule and a test now guard it.

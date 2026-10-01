@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:loom_core/loom_core.dart' as core;
 import 'package:openhearth_design/openhearth_design.dart';
@@ -19,6 +20,7 @@ import '../models/consent.dart';
 import '../models/format.dart';
 import '../models/model_store.dart';
 import '../player/player_controller.dart';
+import '../transcribe/transcript_writer.dart' show decodeWordTimingBlob;
 import 'dictionary_sheet.dart';
 import 'ledger_screen.dart';
 import 'line_paced_view.dart';
@@ -234,9 +236,8 @@ class _ReaderScreenState extends State<ReaderScreen>
   int _scrollAnchor = 0; // segment the scroll view opens around
 
   /// Campaign 4 Phase 2 follow-along: one [GlobalKey] per built segment
-  /// tile, the same shape `karaoke_screen.dart`'s `_keys` map uses for its
-  /// own `_followPlayback` -- lazily populated by [_segmentTile] (only
-  /// tiles the sliver has actually built get an entry, same as karaoke).
+  /// tile, lazily populated by [_segmentTile] (only tiles the sliver has
+  /// actually built get an entry).
   final Map<int, GlobalKey> _segKeys = {};
 
   /// Dedupes [_followAlongScroll] so it only calls `ensureVisible` once
@@ -332,7 +333,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   bool _hasAlignedAudio = false;
 
   /// Campaign 9 Phase 7 ("the reader follows the player"): this work's own
-  /// alignments, wrapped the same way [KaraokeScreen] wraps them, resolved
+  /// alignments as a [core.Spine], resolved
   /// once in [_load] alongside [_hasAlignedAudio] rather than re-fetched
   /// per tick. Null exactly when [_hasAlignedAudio] is false — there is
   /// nothing to project audio time through.
@@ -344,9 +345,40 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// moving to a different work). This is independent of
   /// [PlayerController.playing]: a listener stays attached across a pause
   /// (a paused player's position ticks stop arriving, not the attachment
-  /// itself — the chip should still read "Following audio" through a
-  /// pause, the same way a paused karaoke view stays lit on its segment).
+  /// itself), so a pause never raises "Back to audio".
   bool _followingAudio = false;
+
+  /// Whisper's per-word stamps, `[word, t0, t1]` by DB segment idx, for
+  /// the word-by-word motion the transcript view had (1.5.8). Empty for a
+  /// work without them; the word then moves evenly across its segment.
+  Map<int, List<List<Object>>> _wordTimings = const {};
+
+  /// Polls the playhead every frame while following a playing work. The
+  /// player's own position ticks come at most five times a second, which
+  /// at 3-4x skips several words between ticks; its position getter is
+  /// exact in between, so reading it per frame keeps the lit word on the
+  /// voice at any speed.
+  Timer? _followPoll;
+  bool _onScreen = true;
+
+  /// Bumped to rebuild the Page scroll view around [_scrollAnchor] when
+  /// the cursor's tile is too far away to have been built (a lazy sliver
+  /// only builds what is near the viewport, so there is nothing for
+  /// `ensureVisible` to scroll to).
+  int _recenterGen = 0;
+
+  /// Read-aloud's word sweep (1.5.8): moves the lit word through the
+  /// sentence being spoken at an estimated pace for the shared speed.
+  /// Speech engines report sentence starts, not words, so each start
+  /// re-anchors it, and it holds on the sentence's last word rather than
+  /// run into the next. [_sweepStart] is that sentence's first word,
+  /// where a stop leaves the cursor (ADR-0002).
+  Timer? _sweep;
+  int? _sweepStart;
+
+  /// The speed last handed to the voice, so a speed change mid-run is
+  /// passed on once.
+  double? _appliedSpeechSpeed;
 
   /// The translation store overlay (Campaign 8 "Babel widens" Phase 1,
   /// generalizing ADR-0008 "Babel" Phase 3's fixed-Spanish version) —
@@ -390,6 +422,27 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// can never silently keep affecting a later run.
   bool _speakTranslation = false;
 
+  /// Translation only (1.5.8, remembered per work in
+  /// [Works.translationView]): the translated text in place of the
+  /// original, at reading size, in every mode — RSVP, Line and Follow
+  /// along all read [_blocks], so the translation becomes what they read.
+  /// Off is Both: each translated sentence under its original.
+  bool _translationOnly = false;
+
+  /// The original, tokenized once: audio follows its words even while the
+  /// page shows a translation.
+  core.TokenizedDocument? _origDoc;
+
+  /// Under Translation only, each block's translated sentences' first
+  /// words (block-local), by block position: the bridge between a
+  /// translated word and the original sentence the audio is in.
+  Map<int, List<int>> _projStarts = const {};
+
+  /// The page's current translated sentence, as a global word range, lit
+  /// whole while following audio under Translation only: word timings
+  /// don't cross languages, sentences do.
+  (int, int)? _litSentence;
+
   /// Campaign 4 Phase 1: this profile's print-reader typography, loaded
   /// once in [_load] (the residency law — no re-fetch per rebuild). RSVP
   /// and the ticker keep their own tuned displays; only the scroll body
@@ -413,6 +466,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    widget.player?.addListener(_onSpeechSpeed);
     _load();
   }
 
@@ -423,6 +477,9 @@ class _ReaderScreenState extends State<ReaderScreen>
     // no-ops on an unheld listener) — every listener this screen ever
     // adds gets exactly one matching removal on its way out.
     widget.player?.removeListener(_onPlayerTick);
+    _followPoll?.cancel();
+    _sweep?.cancel();
+    widget.player?.removeListener(_onSpeechSpeed);
     _timer?.cancel();
     // Silence the voice without creating one: only an already-used speaker
     // needs stopping (fake-async law 1: fire-and-forget, never await here).
@@ -458,6 +515,10 @@ class _ReaderScreenState extends State<ReaderScreen>
       unawaited(_stopSpeak());
       unawaited(_savePosition().catchError((_) {}));
     }
+    // The per-frame poll is for eyes on the page: off-screen the podcast
+    // plays on, and the player's own ticks keep the cursor close.
+    _onScreen = state == AppLifecycleState.resumed;
+    _syncFollowPoll();
   }
 
   Future<void> _load() async {
@@ -524,12 +585,17 @@ class _ReaderScreenState extends State<ReaderScreen>
     // The study crown: only offer "Listen from here" where it can actually
     // start something (an audio source) AND land somewhere meaningful (an
     // alignment to project the cursor through). The same rows also feed
-    // Phase 7's [_spine] — [KaraokeScreen]'s own construction, wrapped
-    // here so [_onPlayerTick] never re-fetches per tick.
+    // Phase 7's [_spine], built once here so [_onPlayerTick] never
+    // re-fetches per tick.
     final alignmentRows =
         await widget.db.spineDao.alignmentsOf(widget.work.id);
     final hasAlignedAudio =
         widget.work.sourceUrl != null && alignmentRows.isNotEmpty;
+    final wordTimings = {
+      for (final a in alignmentRows)
+        if (a.wordTimings != null)
+          a.segmentIdx: decodeWordTimingBlob(a.wordTimings!),
+    };
     final spine = alignmentRows.isEmpty
         ? null
         : core.Spine(segments: const [], layers: const [], alignments: [
@@ -558,6 +624,8 @@ class _ReaderScreenState extends State<ReaderScreen>
             .translationSentencesOf(widget.work.id, lang: activeLang);
     final unfinishedRun =
         await widget.db.spineDao.translationRunLang(widget.work.id);
+    final translationOnly =
+        await widget.db.spineDao.translationOnly(widget.work.id);
     final readerPrefs = await widget.db.profilesDao.readerPrefs(widget.profileId);
     if (!mounted) return;
     setState(() {
@@ -575,9 +643,13 @@ class _ReaderScreenState extends State<ReaderScreen>
       _workLang = workLang;
       _sourceLang = sourceLang;
       _spine = spine;
+      _wordTimings = wordTimings;
       _activeTranslationLang = activeLang;
       _showTranslation = showTranslation;
       _translatedSentences = translatedSentences;
+      _translationOnly = translationOnly;
+      _origDoc = doc;
+      _projStarts = const {};
       _typography = readerPrefs.typography;
       // How this reader last read: mode, speed, nearby words (persona A1:
       // "the reader forgets their settings" was a reason to quit).
@@ -594,6 +666,15 @@ class _ReaderScreenState extends State<ReaderScreen>
         _scrollAnchor = cursorAt(doc, wordIdx).segment;
       }
     });
+    // The saved place is the original's; Translation only re-reads the
+    // page in translation at the same sentence.
+    if (_translationOnlyActive && doc.words.isNotEmpty) {
+      final c = cursorAt(doc, wordIdx);
+      _applyProjection((
+        segment: c.segment,
+        sentence: _sentenceAt(_origStarts(c.segment), c.word)
+      ));
+    }
     // Campaign 9 Phase 7: audio for THIS work already playing when the
     // reader opens is one of the two attach triggers (the other is
     // [_listenFromHere] itself, below) — a listener already mid-episode
@@ -681,6 +762,204 @@ class _ReaderScreenState extends State<ReaderScreen>
           : globalWordIndex(newDoc, currentSegment, 0);
       _scrollAnchor = currentSegment;
     });
+    if (next == null && _translationOnlyActive) {
+      _applyProjection((segment: currentSegment, sentence: 0));
+    }
+  }
+
+  // ───── Translation only / Both (1.5.8) ─────
+
+  bool get _translationOnlyActive =>
+      _translationOnly &&
+      _showTranslation &&
+      _hasStoredTranslation &&
+      _activeLang == null;
+
+  /// Both: translated sentences under their originals.
+  bool get _interlinear => _showTranslation && !_translationOnlyActive;
+
+  /// The language the page's words are in, when it isn't the work's.
+  String? get _shownLang =>
+      _activeLang ?? (_translationOnlyActive ? _activeTranslationLang : null);
+
+  /// Block [blockPos]'s sentence starts (block-local word indices) in the
+  /// original.
+  List<int> _origStarts(int blockPos) => [
+        for (final s in core.splitSentences(_original[blockPos].text))
+          s.firstWordIdx
+      ];
+
+  /// The same in whatever the page shows now.
+  List<int> _shownStarts(int blockPos) => _translationOnlyActive
+      ? (_projStarts[blockPos] ?? const [])
+      : _origStarts(blockPos);
+
+  static int _sentenceAt(List<int> starts, int local) {
+    var i = 0;
+    for (var k = 0; k < starts.length; k++) {
+      if (starts[k] <= local) i = k;
+    }
+    return i;
+  }
+
+  /// Where the cursor is, as (block, sentence): the same place in any
+  /// projection of the text.
+  ({int segment, int sentence}) _cursorSentence() {
+    final doc = _doc;
+    if (doc == null || doc.words.isEmpty) return (segment: 0, sentence: 0);
+    final c = cursorAt(doc, _wordIdx);
+    return (
+      segment: c.segment,
+      sentence: _sentenceAt(_shownStarts(c.segment), c.word)
+    );
+  }
+
+  /// [_original] with each sentence replaced by its stored translation
+  /// (the original where there is none yet), and where each translated
+  /// sentence starts. Starts are counted by the tokenizer over each
+  /// prefix, the same authority `core.splitSentences` trusts.
+  (List<core.Segment>, Map<int, List<int>>) _translatedProjection() {
+    final blocks = <core.Segment>[];
+    final starts = <int, List<int>>{};
+    for (var bp = 0; bp < _original.length; bp++) {
+      final b = _original[bp];
+      final sentences = b.kind == core.SegmentKind.prose ||
+              b.kind == core.SegmentKind.heading
+          ? core.splitSentences(b.text)
+          : const <core.Sentence>[];
+      if (sentences.isEmpty) {
+        blocks.add(b);
+        continue;
+      }
+      final texts = [
+        for (var i = 0; i < sentences.length; i++)
+          translatedTextFor(
+                  stored: _translatedSentences,
+                  segIdx: b.idx,
+                  sentenceIdx: i,
+                  currentSourceText: sentences[i].text) ??
+              sentences[i].text
+      ];
+      starts[bp] = [
+        for (var i = 0; i < texts.length; i++)
+          i == 0
+              ? 0
+              : core
+                  .tokenizeDocument([
+                    core.Segment(
+                        idx: 0,
+                        kind: core.SegmentKind.prose,
+                        text: texts.sublist(0, i).join(' '))
+                  ])
+                  .words
+                  .length
+      ];
+      blocks.add(core.Segment(idx: b.idx, kind: b.kind, text: texts.join(' ')));
+    }
+    return (blocks, starts);
+  }
+
+  /// Re-reads [_blocks] for the current choices, putting the cursor at
+  /// the start of the same sentence in the new projection.
+  void _applyProjection(({int segment, int sentence}) at) {
+    final List<core.Segment> blocks;
+    var starts = const <int, List<int>>{};
+    if (_activeLang != null) {
+      blocks = _projectedBlocks(_activeLang);
+    } else if (_translationOnlyActive) {
+      (blocks, starts) = _translatedProjection();
+    } else {
+      blocks = _original;
+    }
+    final doc = core.tokenizeDocument(blocks);
+    setState(() {
+      _blocks = blocks;
+      _doc = doc;
+      _projStarts = starts;
+      if (doc.words.isEmpty || blocks.isEmpty) {
+        _wordIdx = 0;
+        return;
+      }
+      final seg = at.segment.clamp(0, blocks.length - 1);
+      final shown = _shownStarts(seg);
+      _wordIdx = globalWordIndex(doc, seg,
+          shown.isEmpty ? 0 : shown[at.sentence.clamp(0, shown.length - 1)]);
+      _scrollAnchor = seg;
+      _recenterGen++;
+    });
+  }
+
+  /// The menu's Translation only / Both: remembered for this work.
+  Future<void> _setTranslationOnly(bool only) async {
+    if (only == _translationOnly) return;
+    _pause();
+    unawaited(_stopSpeak());
+    final at = _cursorSentence();
+    _translationOnly = only;
+    _applyProjection(at);
+    await widget.db.spineDao.setTranslationOnly(widget.work.id, only);
+  }
+
+  /// Under Translation only, the original word a shown word stands for:
+  /// the first word of its sentence (the audio's words are the
+  /// original's). Identity otherwise.
+  int _originalWordOf(int globalIdx) {
+    final doc = _doc;
+    final orig = _origDoc;
+    if (!_translationOnlyActive || doc == null || orig == null) {
+      return globalIdx;
+    }
+    final c = cursorAt(doc, globalIdx);
+    final si = _sentenceAt(_projStarts[c.segment] ?? const [], c.word);
+    final origStarts = _origStarts(c.segment);
+    return globalWordIndex(orig, c.segment,
+        origStarts.isEmpty ? 0 : origStarts[si.clamp(0, origStarts.length - 1)]);
+  }
+
+  /// The inverse of [_originalWordOf], for an audio-driven cursor: the
+  /// shown sentence holding original word [origIdx].
+  int _shownWordOf(int origIdx) {
+    final doc = _doc;
+    final orig = _origDoc;
+    if (!_translationOnlyActive || doc == null || orig == null) return origIdx;
+    final c = cursorAt(orig, origIdx);
+    final si = _sentenceAt(_origStarts(c.segment), c.word);
+    final shown = _projStarts[c.segment] ?? const [];
+    return globalWordIndex(
+        doc, c.segment, shown.isEmpty ? 0 : shown[si.clamp(0, shown.length - 1)]);
+  }
+
+  /// [_litSentence] for this build.
+  (int, int)? _computeLitSentence(core.TokenizedDocument doc) {
+    if (!_translationOnlyActive || !_followingAudio || doc.words.isEmpty) {
+      return null;
+    }
+    final c = cursorAt(doc, _wordIdx);
+    final starts = _projStarts[c.segment] ?? const [];
+    if (starts.isEmpty) return null;
+    final si = _sentenceAt(starts, c.word);
+    final base = doc.blockStartWordIdx[c.segment];
+    return (
+      base + starts[si],
+      si + 1 < starts.length ? base + starts[si + 1] : _blockEnd(doc, c.segment)
+    );
+  }
+
+  /// Under Both, the translation of the sentence the cursor is in — what
+  /// RSVP shows under its word.
+  String? _translationOfCursorSentence() {
+    final doc = _doc;
+    if (!_interlinear || doc == null || doc.words.isEmpty) return null;
+    final c = cursorAt(doc, _wordIdx);
+    final block = _blocks![c.segment];
+    final sentences = core.splitSentences(block.text);
+    if (sentences.isEmpty) return null;
+    final si = _sentenceAt([for (final s in sentences) s.firstWordIdx], c.word);
+    return translatedTextFor(
+        stored: _translatedSentences,
+        segIdx: block.idx,
+        sentenceIdx: si,
+        currentSourceText: sentences[si].text);
   }
 
   Future<void> _savePosition({String modality = 'read'}) async {
@@ -692,7 +971,16 @@ class _ReaderScreenState extends State<ReaderScreen>
       _hitWordIdx = null;
       _startPending = false;
     }
-    final c = cursorAt(doc, _wordIdx);
+    // The saved place is always the original's (under Translation only,
+    // the start of the shown sentence's original): Position knows no
+    // language (ADR-0002).
+    // Mid-sentence while reading aloud (the sweep is an estimate) is
+    // the sentence's start, as a stop leaves it.
+    final at = _sweepStart ?? _wordIdx;
+    final orig = _origDoc;
+    final c = _translationOnlyActive && orig != null
+        ? cursorAt(orig, _originalWordOf(at))
+        : cursorAt(doc, at);
     await widget.db.spineDao.savePosition(
         profileId: widget.profileId,
         workId: widget.work.id,
@@ -724,6 +1012,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (doc == null || doc.words.isEmpty) return;
     _pause();
     setState(() => _speaking = true);
+    _applySpeechSpeed();
     if (widget.offerNeuralVoice && !_offeredNeuralVoice) {
       _offeredNeuralVoice = true;
       ScaffoldMessenger.of(context)
@@ -738,7 +1027,12 @@ class _ReaderScreenState extends State<ReaderScreen>
   Future<void> _stopSpeak() async {
     if (!_speaking) return;
     _speakGen++;
-    setState(() => _speaking = false);
+    final sentenceStart = _sweepStart;
+    _stopSweep();
+    setState(() {
+      _speaking = false;
+      if (sentenceStart != null) _wordIdx = sentenceStart;
+    });
     await _tts.stop();
     // Only touch the pipeline if speech ever actually created one — never
     // spin up the queue's platform player just to stop it.
@@ -770,7 +1064,8 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// mid-run.
   SpeechEngine _resolveEngine() {
     final synth = _synthEngineHolder;
-    final speakingUncoveredTarget = _speakTranslation &&
+    final speakingUncoveredTarget = (_speakTranslation ||
+            _translationOnlyActive) &&
         _activeTranslationLang != null &&
         !supertonicSupportedLangs.contains(_activeTranslationLang);
     if (!_preferSystemVoice && synth != null && !speakingUncoveredTarget) {
@@ -854,10 +1149,20 @@ class _ReaderScreenState extends State<ReaderScreen>
                   sentenceIdx: i,
                   currentSourceText: sentence.text)
               : null;
+          final from = globalWordIndex(doc, seg, sentence.firstWordIdx);
+          if (translated == null) {
+            _sweepSentence(
+                doc,
+                from,
+                i + 1 < units.length
+                    ? globalWordIndex(doc, seg, units[i + 1].firstWordIdx)
+                    : _blockEnd(doc, seg));
+          }
           await engine.speak(translated ?? sentence.text,
               lang: translated != null
                   ? _activeTranslationLang
-                  : (_activeLang ?? _workLang ?? widget.work.lang));
+                  : (_shownLang ?? _workLang ?? widget.work.lang));
+          _stopSweep();
           if (!live()) return;
         }
       }
@@ -942,8 +1247,9 @@ class _ReaderScreenState extends State<ReaderScreen>
       onSentenceStart: _onSynthSentenceStart,
       onDone: _onSynthDone,
     );
+    unawaited(_queue.setSpeed(_speechSpeed).catchError((_) {}));
     await pipeline.start([for (final u in units) u.text],
-        lang: _activeLang ?? _workLang ?? widget.work.lang,
+        lang: _shownLang ?? _workLang ?? widget.work.lang,
         langOverrides: [for (final u in units) u.lang]);
   }
 
@@ -954,13 +1260,86 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// engine obeys.
   void _onSynthSentenceStart(int index) {
     if (!mounted || !_speaking || _synthGen != _speakGen) return;
-    if (index == 0 || index >= _synthUnits.length) return;
+    if (index >= _synthUnits.length) return;
     final doc = _doc;
     if (doc == null) return;
     final unit = _synthUnits[index];
-    setState(
-        () => _wordIdx = globalWordIndex(doc, unit.seg, unit.wordIdx));
-    unawaited(_savePosition(modality: 'speak').catchError((_) {}));
+    final from = globalWordIndex(doc, unit.seg, unit.wordIdx);
+    final next = index + 1 < _synthUnits.length ? _synthUnits[index + 1] : null;
+    _stopSweep();
+    if (index > 0) {
+      setState(() => _wordIdx = from);
+      unawaited(_savePosition(modality: 'speak').catchError((_) {}));
+    }
+    if (unit.lang == null) {
+      _sweepSentence(
+          doc,
+          from,
+          next != null && next.seg == unit.seg
+              ? globalWordIndex(doc, next.seg, next.wordIdx)
+              : _blockEnd(doc, unit.seg));
+    }
+  }
+
+  /// The global index one past block [seg]'s last word.
+  int _blockEnd(core.TokenizedDocument doc, int seg) =>
+      seg + 1 < doc.blockStartWordIdx.length
+          ? doc.blockStartWordIdx[seg + 1]
+          : doc.words.length;
+
+  /// A voice's pace at 1x, by characters (about 165 words a minute):
+  /// only an estimate, which is why the sweep re-anchors every sentence.
+  static const _speechMsPerChar = 66;
+
+  /// Sweeps the cursor over words [from, to) — see [_sweep].
+  void _sweepSentence(core.TokenizedDocument doc, int from, int to) {
+    _stopSweep();
+    if (to - from < 1) return;
+    _sweepStart = from;
+    final ends = <int>[];
+    var chars = 0;
+    for (var w = from; w < to; w++) {
+      chars += doc.words[w].length + 1;
+      ends.add(chars);
+    }
+    _sweep = Timer.periodic(const Duration(milliseconds: 16), (t) {
+      if (!mounted || !_speaking) return;
+      final said = t.tick * 16 * _speechSpeed / _speechMsPerChar;
+      var k = 0;
+      while (k < ends.length - 1 && ends[k] <= said) {
+        k++;
+      }
+      if (from + k != _wordIdx) setState(() => _wordIdx = from + k);
+    });
+  }
+
+  void _stopSweep() {
+    _sweep?.cancel();
+    _sweep = null;
+    _sweepStart = null;
+  }
+
+  /// The shared speed control's value (1.5.8): the player's, for read-
+  /// aloud as for listening; 1x where there is no player.
+  double get _speechSpeed => widget.player?.speed ?? 1.0;
+
+  /// Hands [_speechSpeed] to the voice: flutter_tts counts 0.5 as a
+  /// voice's normal pace on a phone (its Android side doubles the value,
+  /// 4.2.5) but hands the web's speechSynthesis the value as is, where
+  /// 1.0 is normal; the neural voice's queue plays its clips faster. The
+  /// system voice takes a new rate from its next sentence.
+  void _applySpeechSpeed() {
+    final speed = _speechSpeed;
+    _appliedSpeechSpeed = speed;
+    if (_resolveEngine() is UtteranceSpeechEngine) {
+      unawaited(_tts.setRate(kIsWeb ? speed : speed / 2).catchError((_) {}));
+    }
+    final queue = _queueHolder;
+    if (queue != null) unawaited(queue.setSpeed(speed).catchError((_) {}));
+  }
+
+  void _onSpeechSpeed() {
+    if (_speaking && _speechSpeed != _appliedSpeechSpeed) _applySpeechSpeed();
   }
 
   /// The synthesis path's natural end — fired only once every sentence has
@@ -973,6 +1352,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   }
 
   void _finishSpeaking(bool Function() live) {
+    _stopSweep();
     if (live()) {
       setState(() => _speaking = false);
       unawaited(_savePosition(modality: 'speak').catchError((_) {}));
@@ -1201,10 +1581,13 @@ class _ReaderScreenState extends State<ReaderScreen>
     final translatedSentences = await widget.db.spineDao
         .translationSentencesOf(widget.work.id, lang: route.target);
     if (!mounted) return;
+    final at = _cursorSentence();
+    final wasOnly = _translationOnlyActive;
     setState(() {
       _translatedSentences = translatedSentences;
       _translationJob = null;
     });
+    if (wasOnly || _translationOnlyActive) _applyProjection(at);
     if (run.state.phase == TranslationJobPhase.failed) {
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
           content: Text('The translator couldn’t start. Try downloading '
@@ -1227,10 +1610,13 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// see, let alone turn off again.
   Future<void> _toggleShowTranslation() async {
     final next = !_showTranslation;
+    final at = _cursorSentence();
+    final wasOnly = _translationOnlyActive;
     setState(() {
       _showTranslation = next;
       if (!next) _speakTranslation = false;
     });
+    if (wasOnly != _translationOnlyActive) _applyProjection(at);
     await widget.db.spineDao.setShowTranslationLayer(widget.work.id, next);
   }
 
@@ -1265,6 +1651,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     final doc = _doc;
     if (doc == null || doc.words.isEmpty) return;
     unawaited(_stopSpeak()); // one cursor-advancer at a time
+    _detachAudioFollow(); // the pacer is a hand on the cursor too
     // Every fresh play starts follow-along's own dedupe clean, so the
     // segment the cursor is already on gets its ensureVisible call even
     // if a previous follow-along session already visited it once.
@@ -1299,20 +1686,32 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (doc == null || doc.words.isEmpty) return;
     _timer?.cancel();
     unawaited(_stopSpeak());
-    // 1.5.5 ruling: on Page, a tapped word while following audio seeks the
-    // audio there and keeps following, as the transcript view did.
+    // On Page a tapped word is seek + follow (1.5.5, 1.5.8): while this
+    // work is in the player, the audio goes to that word's own stamp and
+    // the page follows it again, as the transcript view did.
     final player = widget.player;
-    if (_followingAudio && _mode != ReaderMode.rsvp && player != null) {
-      final blocks = _blocks!;
+    final spine = _spine;
+    if (_audioFollowable &&
+        _mode != ReaderMode.rsvp &&
+        player != null &&
+        spine != null) {
+      _pause();
       final idx = globalIdx.clamp(0, doc.words.length - 1);
       setState(() => _wordIdx = idx);
-      final c = cursorAt(doc, idx);
-      unawaited(player.listenFrom(
-          widget.work,
-          core.Position(
-              segmentIdx: blocks[c.segment].idx,
-              wordIdx: c.word,
-              lastModality: core.Modality.read)));
+      final only = _translationOnlyActive;
+      final tMs = audioTimeOfWord(
+          spine: spine,
+          doc: only ? _origDoc! : doc,
+          blocks: only ? _original : _blocks!,
+          globalIdx: _originalWordOf(idx),
+          wordTimings: _wordTimings,
+          wordLevel: _wordLevel);
+      unawaited(() async {
+        if (tMs != null) {
+          await player.playWorkAt(widget.work, Duration(milliseconds: tMs));
+        }
+        if (mounted) _attachAudioFollow();
+      }());
       return;
     }
     _detachAudioFollow(); // Campaign 9 Phase 7: the user's hand always wins
@@ -1386,7 +1785,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     await widget.db.ledgerDao.add(
         profileId: widget.profileId,
         word: word,
-        lang: _activeLang ?? _workLang ?? widget.work.lang,
+        lang: _shownLang ?? _workLang ?? widget.work.lang,
         sourceWorkId: widget.work.id,
         nowMs: DateTime.now().millisecondsSinceEpoch);
     if (!mounted) return;
@@ -1432,7 +1831,7 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   /// "Listen from here": hands the reading cursor's own segment/word to
   /// [ReaderScreen.player], which projects it to an audio time via the SAME
-  /// alignments the karaoke view already reads (Spine.projectAudioTime) —
+  /// alignments the page follows the audio through (Spine.projectAudioTime) —
   /// no second cursor, no new persisted state. `blocks[c.segment].idx` is
   /// the translation `_savePosition` already does: [cursorAt] returns a
   /// position in the `_blocks` LIST, not the database's `Segment.idx`.
@@ -1470,11 +1869,22 @@ class _ReaderScreenState extends State<ReaderScreen>
   Widget? _playButton({required bool fab}) {
     if (!_canListen) {
       if (!fab) return null;
-      return FloatingActionButton(
+      final readAloud = FloatingActionButton(
         key: const Key('reader-play'),
         tooltip: _speaking ? 'Stop reading' : 'Read aloud',
         onPressed: _toggleSpeak,
         child: Icon(_speaking ? Icons.pause : Icons.play_arrow),
+      );
+      final player = widget.player;
+      if (player == null) return readAloud;
+      // The same shared speed as listening (1.5.8).
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          _speedControl(player),
+          const SizedBox(height: 8),
+          readAloud,
+        ],
       );
     }
     final player = widget.player!;
@@ -1504,14 +1914,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Material(
-              color: Theme.of(context).colorScheme.surfaceContainerHigh,
-              shape: const StadiumBorder(),
-              child: SpeedControl(
-                  key: const Key('reader-speed'),
-                  speed: player.speed,
-                  onChanged: player.setSpeed),
-            ),
+            _speedControl(player),
             const SizedBox(height: 8),
             FloatingActionButton(
                 key: const Key('reader-play'),
@@ -1524,12 +1927,25 @@ class _ReaderScreenState extends State<ReaderScreen>
     );
   }
 
+  /// The player's speed control, shared by listening and read-aloud.
+  Widget _speedControl(PlayerController player) => ListenableBuilder(
+        listenable: player,
+        builder: (context, _) => Material(
+          color: Theme.of(context).colorScheme.surfaceContainerHigh,
+          shape: const StadiumBorder(),
+          child: SpeedControl(
+              key: const Key('reader-speed'),
+              speed: player.speed,
+              onChanged: player.setSpeed),
+        ),
+      );
+
   // ───── Campaign 9 Phase 7: the reader follows the player ─────
 
   /// True whenever there is ANYTHING to follow, whether or not this
-  /// screen is currently doing so — gates the chip's very presence
-  /// (never shown for a work with no player, no aligned audio, or where
-  /// playback has moved on to something else entirely).
+  /// screen is currently doing so — "Back to audio" is never shown for a
+  /// work with no player, no aligned audio, or where playback has moved
+  /// on to something else entirely.
   bool get _audioFollowable =>
       widget.player != null &&
       _spine != null &&
@@ -1542,7 +1958,36 @@ class _ReaderScreenState extends State<ReaderScreen>
   void _attachAudioFollow() {
     if (_followingAudio || !_audioFollowable) return;
     widget.player!.addListener(_onPlayerTick);
+    // A fresh follow always re-centres, even on the segment it left from.
+    _lastFollowedSegment = -1;
     setState(() => _followingAudio = true);
+    _onPlayerTick();
+  }
+
+  /// "Back to audio" (1.5.8): the one way back after the user's hand took
+  /// the cursor. The same in every mode — the cursor jumps to the voice
+  /// and, on Page, the page re-centres on it ([_followAlongScroll]).
+  void _backToAudio() {
+    _pause();
+    unawaited(_stopSpeak());
+    _attachAudioFollow();
+  }
+
+  /// Word-by-word only while the page shows the words the audio speaks;
+  /// a translation in place keeps to the segment.
+  bool get _wordLevel => _activeLang == null;
+
+  /// Runs [_followPoll] exactly while following a playing work.
+  void _syncFollowPoll() {
+    final want =
+        _onScreen && _followingAudio && (widget.player?.playing ?? false);
+    if (want && _followPoll == null) {
+      _followPoll = Timer.periodic(
+          const Duration(milliseconds: 16), (_) => _onPlayerTick());
+    } else if (!want && _followPoll != null) {
+      _followPoll!.cancel();
+      _followPoll = null;
+    }
   }
 
   /// The user's hand always wins (house law): a manual seek, a manual
@@ -1551,6 +1996,8 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// .removeListener` no-ops on a listener it never held.
   void _detachAudioFollow() {
     widget.player?.removeListener(_onPlayerTick);
+    _followPoll?.cancel();
+    _followPoll = null;
     if (_followingAudio && mounted) setState(() => _followingAudio = false);
   }
 
@@ -1569,12 +2016,18 @@ class _ReaderScreenState extends State<ReaderScreen>
       _detachAudioFollow();
       return;
     }
+    if (!mounted) return;
+    _syncFollowPoll();
     if (spine == null || doc == null || blocks == null) return;
-    final newIdx = wordIndexAtAudioTime(
+    final only = _translationOnlyActive;
+    final origIdx = wordIndexAtAudioTime(
         spine: spine,
-        doc: doc,
-        blocks: blocks,
-        audioTimeMs: player.position.inMilliseconds);
+        doc: only ? _origDoc! : doc,
+        blocks: only ? _original : blocks,
+        audioTimeMs: player.position.inMilliseconds,
+        wordTimings: _wordTimings,
+        wordLevel: _wordLevel);
+    final newIdx = origIdx == null ? null : _shownWordOf(origIdx);
     if (newIdx == null || newIdx == _wordIdx || !mounted) return;
     setState(() => _wordIdx = newIdx);
   }
@@ -1768,6 +2221,12 @@ class _ReaderScreenState extends State<ReaderScreen>
                 unawaited(_toggleShowTranslation());
               }
               if (value == 'speak-translation') _toggleSpeakTranslation();
+              if (value == 'translation-only') {
+                unawaited(_setTranslationOnly(true));
+              }
+              if (value == 'translation-both') {
+                unawaited(_setTranslationOnly(false));
+              }
               if (value == 'reading-style') unawaited(_openTypographySettings());
               if (value == 'work-language') unawaited(_openWorkLanguagePicker());
               if (value == 'lang') _toggleLanguage();
@@ -1846,9 +2305,30 @@ class _ReaderScreenState extends State<ReaderScreen>
               // Speak-in-⟨language⟩ (ADR-0008 Phase 4, generalized): only
               // meaningful once Show ⟨language⟩ is already on — the same
               // stored sentences it displays are what this speaks.
+              // Translation only / Both (1.5.8): where the translation
+              // shows, once there is one showing.
               if (_showTranslation &&
                   _hasStoredTranslation &&
-                  _activeLang == null)
+                  _activeLang == null) ...[
+                CheckedPopupMenuItem<String>(
+                  key: const Key('translation-view-only'),
+                  value: 'translation-only',
+                  checked: _translationOnly,
+                  child: const Text('Translation only'),
+                ),
+                CheckedPopupMenuItem<String>(
+                  key: const Key('translation-view-both'),
+                  value: 'translation-both',
+                  checked: !_translationOnly,
+                  child: const Text('Both'),
+                ),
+              ],
+              // Under Translation only the voice already reads the
+              // translation, so there is nothing to switch.
+              if (_showTranslation &&
+                  _hasStoredTranslation &&
+                  _activeLang == null &&
+                  !_translationOnly)
                 CheckedPopupMenuItem<String>(
                   key: const Key('speak-translation-toggle'),
                   value: 'speak-translation',
@@ -1874,7 +2354,6 @@ class _ReaderScreenState extends State<ReaderScreen>
               doc != null &&
               doc.words.isNotEmpty)
             _recapOfferBar(context),
-          if (_audioFollowable) _followAudioChip(),
           Expanded(
             // Campaign 9 Phase 7: a user-DRAG scroll detaches following —
             // `dragDetails` is non-null only on an update the user's own
@@ -1899,8 +2378,8 @@ class _ReaderScreenState extends State<ReaderScreen>
                   ),
                 _ => switch (_mode) {
                     ReaderMode.rsvp => _rsvpBody(doc),
-                    ReaderMode.scroll => _scrollBody(doc),
-                    ReaderMode.lines => _linesBody(doc),
+                    ReaderMode.scroll => _withBackToAudio(_scrollBody(doc)),
+                    ReaderMode.lines => _withBackToAudio(_linesBody(doc)),
                   },
               },
             ),
@@ -1910,26 +2389,30 @@ class _ReaderScreenState extends State<ReaderScreen>
     );
   }
 
-  /// "Following audio" / "Resume following" — visible exactly while there
-  /// is something to follow ([_audioFollowable]), tappable in both
-  /// states: on, it detaches by the same hand a manual seek would; off
-  /// (a manual interaction already won), it reattaches.
-  Widget _followAudioChip() => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
-        child: Align(
-          alignment: Alignment.centerLeft,
-          child: ActionChip(
-            key: const Key('follow-audio-chip'),
-            avatar: Icon(_followingAudio
-                ? Icons.graphic_eq
-                : Icons.headphones_outlined),
-            label:
-                Text(_followingAudio ? 'Following audio' : 'Resume following'),
-            onPressed:
-                _followingAudio ? _detachAudioFollow : _attachAudioFollow,
-          ),
-        ),
-      );
+  /// "Back to audio" (1.5.8): shown only after the user's hand has taken
+  /// the cursor from the voice, and always that one action — while
+  /// following there is no button at all, so no label ever changes
+  /// meaning. Rebuilt on the player so it leaves when playback moves to
+  /// another work.
+  Widget _backToAudioButton() {
+    final player = widget.player;
+    if (player == null) return const SizedBox.shrink();
+    return ListenableBuilder(
+      listenable: player,
+      builder: (context, _) {
+        if (!_audioFollowable || _followingAudio) {
+          return const SizedBox.shrink();
+        }
+        return FilledButton.tonalIcon(
+          key: const Key('back-to-audio'),
+          style: FilledButton.styleFrom(minimumSize: const Size(48, 48)),
+          onPressed: _backToAudio,
+          icon: const Icon(Icons.headphones_outlined),
+          label: const Text('Back to audio'),
+        );
+      },
+    );
+  }
 
   /// The batch's own calm progress banner (ADR-0008 "Babel" Phase 3) — one
   /// card while translating, mirroring `job_cards.dart`'s status/progress/
@@ -2025,6 +2508,21 @@ class _ReaderScreenState extends State<ReaderScreen>
     );
   }
 
+  /// Page's place for [_backToAudioButton]: bottom centre, in thumb
+  /// reach and clear of the Play button on the right. Overlaid, so the
+  /// text never shifts as it comes and goes.
+  Widget _withBackToAudio(Widget page) => Stack(
+        children: [
+          Positioned.fill(child: page),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 16,
+            child: Center(child: _backToAudioButton()),
+          ),
+        ],
+      );
+
   // ───── RSVP ─────
 
   Widget _rsvpBody(core.TokenizedDocument doc) {
@@ -2063,6 +2561,12 @@ class _ReaderScreenState extends State<ReaderScreen>
                       child: _parafoveal
                           ? _parafovealRow(doc)
                           : _rsvpWord(doc)),
+                  ?_rsvpTranslation(),
+                  Positioned(
+                      left: 0,
+                      right: 0,
+                      bottom: 12,
+                      child: Center(child: _backToAudioButton())),
                 ],
               ),
             ),
@@ -2070,6 +2574,33 @@ class _ReaderScreenState extends State<ReaderScreen>
           _rsvpControls(doc),
         ],
       ),
+    );
+  }
+
+  /// Under Both (1.5.8), RSVP shows the translation of the sentence the
+  /// word belongs to, small, below the word: placed on its own so a
+  /// longer translation never moves the word the eyes rest on, and above
+  /// Back to audio.
+  Widget? _rsvpTranslation() {
+    final translated = _translationOfCursorSentence();
+    if (translated == null) return null;
+    final theme = Theme.of(context);
+    return Positioned(
+      left: 24,
+      right: 24,
+      bottom: 72,
+      child: Text(translated,
+          key: const Key('rsvp-translation'),
+          textAlign: TextAlign.center,
+          maxLines: 4,
+          overflow: TextOverflow.ellipsis,
+          textDirection:
+              isRightToLeft(_activeTranslationLang) ? TextDirection.rtl : null,
+          style: theme.textTheme.bodyLarge?.copyWith(
+              fontFamily: readerTypefaceFontFamily(ReaderTypeface.lora),
+              package: kReaderFontPackage,
+              fontStyle: FontStyle.italic,
+              color: theme.colorScheme.onSurfaceVariant)),
     );
   }
 
@@ -2336,6 +2867,8 @@ class _ReaderScreenState extends State<ReaderScreen>
                 icon: Icon(_playing ? Icons.pause : Icons.play_arrow),
               ),
               ?_playButton(fab: false),
+              // The shared speed, for listening and reading aloud alike.
+              if (widget.player != null) _speedControl(widget.player!),
               // A state control named by a word (audit rank 3; jargon
               // ruling: "parafoveal" is the field's term, not a household
               // one): on shows the neighbouring words, faded, beside the
@@ -2367,11 +2900,10 @@ class _ReaderScreenState extends State<ReaderScreen>
     // Campaign 4 Phase 2 follow-along: the shared cursor (_wordIdx) is
     // already advancing under _play()/_step() exactly as RSVP drives it —
     // this is the only piece RSVP never needed: keeping the viewport
-    // following it. Reused from karaoke_screen.dart's own
-    // _followPlayback idiom (there was no auto-scroll anywhere in this
-    // file before this).
+    // following it (the old transcript view's ensureVisible idiom).
     WidgetsBinding.instance.addPostFrameCallback(
         (_) => _followAlongScroll(cursorAt(doc, _wordIdx).segment));
+    _litSentence = _computeLitSentence(doc);
     // The print measure (proposal-2 §12): on wide screens the page sets as
     // a centered column rather than sprawling wall to wall — 680dp unless
     // the profile's typography prefs (Campaign 4 Phase 1) say otherwise.
@@ -2380,6 +2912,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         key: const Key('print-column'),
         constraints: BoxConstraints(maxWidth: _typography.maxTextWidth),
         child: CustomScrollView(
+          key: ValueKey('page-$_recenterGen'),
           center: centerKey,
           anchor: 0.15,
           slivers: [
@@ -2415,7 +2948,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     switch (block.kind) {
       case core.SegmentKind.heading:
         final translation =
-            _showTranslation ? _translationBelow(block, theme) : null;
+            _interlinear ? _translationBelow(block, theme) : null;
         child = translation == null
             ? Text(block.text,
                 style: theme.textTheme.titleLarge
@@ -2481,14 +3014,31 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// comment): once per segment the cursor newly enters, while [_playing]
   /// and in a scroll-family mode (Scroll, or Lines as of Campaign 9 Phase
   /// 6 — RSVP has its own dedicated full-screen display, nothing to
-  /// scroll), scroll it into view — karaoke_screen.dart's own
-  /// `_followPlayback` idiom (`ensureVisible`, alignment 0.3, 300ms).
+  /// scroll), scroll it into view (`ensureVisible`, alignment 0.3, 300ms,
+  /// the old transcript view's idiom).
+  ///
+  /// Following audio counts as playing (1.5.8: the page stood still under
+  /// the voice). A tile too far off to be built has no context to scroll
+  /// to, so the page is rebuilt around it instead ([_recenterGen]) — the
+  /// difference between a catch-up that works and one that silently
+  /// doesn't.
   void _followAlongScroll(int segment) {
-    if (!(_playing || _speaking) || _mode == ReaderMode.rsvp) return;
+    if (!(_playing || _speaking || _followingAudio) ||
+        _mode == ReaderMode.rsvp) {
+      return;
+    }
     if (segment == _lastFollowedSegment) return;
     _lastFollowedSegment = segment;
     final ctx = _segKeys[segment]?.currentContext;
-    if (ctx == null) return;
+    if (ctx == null) {
+      if (mounted) {
+        setState(() {
+          _scrollAnchor = segment;
+          _recenterGen++;
+        });
+      }
+      return;
+    }
     Scrollable.ensureVisible(ctx,
         alignment: 0.3, duration: const Duration(milliseconds: 300));
   }
@@ -2513,6 +3063,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         key: const Key('lines-print-column'),
         constraints: BoxConstraints(maxWidth: _typography.maxTextWidth),
         child: CustomScrollView(
+          key: ValueKey('page-$_recenterGen'),
           center: centerKey,
           anchor: 0.15,
           slivers: [
@@ -2565,17 +3116,52 @@ class _ReaderScreenState extends State<ReaderScreen>
     final cursor = cursorAt(doc, _wordIdx);
     final localIdx = cursor.segment == blockPos ? cursor.word : -1;
 
+    Widget lines(int from, int to) => LinePacedBlock(
+          words: doc.words.sublist(from, to),
+          style: style,
+          currentLocalWordIdx:
+              _wordIdx >= from && _wordIdx < to ? _wordIdx - from : -1,
+          onTapWord: (local) => _seekToWord(from + local),
+        );
+
+    Widget body = LinePacedBlock(
+      words: doc.words.sublist(start, end),
+      style: style,
+      currentLocalWordIdx: localIdx,
+      onTapWord: (local) => _seekToWord(start + local),
+    );
+    // Both (1.5.8): Line shows each translated sentence under its
+    // original, as Follow along does.
+    final sentences = _interlinear ? core.splitSentences(block.text) : null;
+    if (sentences != null && sentences.isNotEmpty) {
+      final rows = <Widget>[];
+      for (var i = 0; i < sentences.length; i++) {
+        final sStart = start + sentences[i].firstWordIdx;
+        final sEnd = i + 1 < sentences.length
+            ? start + sentences[i + 1].firstWordIdx
+            : end;
+        rows.add(lines(sStart, sEnd));
+        final translated = translatedTextFor(
+            stored: _translatedSentences,
+            segIdx: block.idx,
+            sentenceIdx: i,
+            currentSourceText: sentences[i].text);
+        if (translated != null) {
+          rows.add(_translatedLine(translated, theme,
+              key: Key('translation-${block.idx}-$i'),
+              lit: _wordIdx >= sStart && _wordIdx < sEnd));
+        }
+      }
+      body = Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows);
+    }
+
     return KeyedSubtree(
       key: _segKeys.putIfAbsent(blockPos, GlobalKey.new),
       child: Container(
         key: Key('segment-tile-$blockPos'),
         padding: EdgeInsets.symmetric(
             horizontal: 24, vertical: 8 + _typography.paragraphSpacing),
-        child: LinePacedBlock(
-          words: doc.words.sublist(start, end),
-          style: style,
-          currentLocalWordIdx: localIdx,
-        ),
+        child: body,
       ),
     );
   }
@@ -2601,7 +3187,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         height: _typography.lineHeight,
         fontSize: bodySize == null ? null : bodySize * _typography.fontScale);
 
-    if (!_showTranslation) return _wordWrap(doc, start, end, base, theme);
+    if (!_interlinear) return _wordWrap(doc, start, end, base, theme);
 
     // Dual display (ADR-0008 "Babel"; generalized Campaign 8): one row
     // per ENGLISH sentence — its own word range's [Wrap], unchanged,
@@ -2625,7 +3211,8 @@ class _ReaderScreenState extends State<ReaderScreen>
           currentSourceText: sentences[i].text);
       if (translated != null) {
         rows.add(_translatedLine(translated, theme,
-            key: Key('translation-${block.idx}-$i')));
+            key: Key('translation-${block.idx}-$i'),
+            lit: _wordIdx >= sStart && _wordIdx < sEnd));
       }
     }
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows);
@@ -2663,9 +3250,14 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// original, the same italic-body idiom [_segmentTile] already uses
   /// for a figure caption (its own kind of secondary text under a
   /// primary element).
-  Widget _translatedLine(String text, ThemeData theme, {Key? key}) => Padding(
+  ///
+  /// [lit] marks the translation of the sentence being read or heard (1.5.8:
+  /// word timings don't map across languages, so it lights whole).
+  Widget _translatedLine(String text, ThemeData theme,
+          {Key? key, bool lit = false}) =>
+      Padding(
         padding: const EdgeInsets.only(top: 2, bottom: 6),
-        child: Text(text,
+        child: _litBox(lit, theme, Text(text,
             key: key,
             // Arabic (and any other right-to-left target) reads from the
             // right even under a left-to-right original.
@@ -2676,8 +3268,19 @@ class _ReaderScreenState extends State<ReaderScreen>
                 fontFamily: readerTypefaceFontFamily(ReaderTypeface.lora),
                 package: kReaderFontPackage,
                 fontStyle: FontStyle.italic,
-                color: theme.colorScheme.onSurfaceVariant)),
+                color: lit
+                    ? theme.colorScheme.onSurface
+                    : theme.colorScheme.onSurfaceVariant))),
       );
+
+  Widget _litBox(bool lit, ThemeData theme, Widget child) => lit
+      ? DecoratedBox(
+          key: const Key('translation-lit'),
+          decoration: BoxDecoration(
+              color: theme.colorScheme.tertiaryContainer,
+              borderRadius: BorderRadius.circular(4)),
+          child: child)
+      : child;
 
   /// Every translated sentence in a HEADING block, one line each — headings
   /// render as a single opaque [Text] (no per-word Wrap), so there is no
@@ -2709,12 +3312,22 @@ class _ReaderScreenState extends State<ReaderScreen>
   Widget _flowWord(core.TokenizedDocument doc, int w, TextStyle? base,
       ThemeData theme) {
     final current = w == _wordIdx;
+    final lit = _litSentence;
+    final inLit = lit != null && w >= lit.$1 && w < lit.$2;
     final style = current ? base?.copyWith(fontWeight: FontWeight.w700) : base;
     final Widget child = w == 0
         ? DropCap(word: doc.words[w], bodyStyle: style)
         : Text(doc.words[w],
             key: current ? const Key('cursor-word') : null, style: style);
-    if (!current) return child;
+    if (!current && !inLit) return child;
+    if (!current) {
+      return Container(
+        key: const Key('sentence-lit'),
+        padding: const EdgeInsets.symmetric(horizontal: 3),
+        color: theme.colorScheme.tertiaryContainer,
+        child: child,
+      );
+    }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 3),
       decoration: BoxDecoration(

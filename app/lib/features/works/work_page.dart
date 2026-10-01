@@ -24,6 +24,7 @@ import '../models/format.dart';
 import '../reader/translation/language_names.dart';
 import '../river/river_triage.dart';
 import '../shared/capped_body.dart';
+import '../storage/work_storage.dart';
 import 'notes_view.dart';
 import 'remove_undo.dart';
 import 'work_menu.dart';
@@ -129,6 +130,7 @@ class _WorkPageState extends State<WorkPage> {
   List<WorkLanguage> _translations = const [];
   WorkLanguage _language = const WorkLanguage.original();
   List<CaptureRow> _captures = const [];
+  WorkStorage? _stored;
   bool _loaded = false;
 
   WorkDoors get _doors => widget.doors;
@@ -227,6 +229,8 @@ class _WorkPageState extends State<WorkPage> {
       orElse: () => const WorkLanguage.original(),
     );
     final captures = await _db.capturesDao.capturesOf(id);
+    final stored = await loadWorkStorage(_db,
+        services: _actions?.services, onlyWorkId: id);
     String? opening;
     if (notes == null && isTextWork(work, episode)) {
       opening = await _openingOf(id);
@@ -248,6 +252,7 @@ class _WorkPageState extends State<WorkPage> {
       _translations = translations;
       _language = language;
       _captures = captures;
+      _stored = stored.isEmpty ? null : stored.single;
       _loaded = true;
     });
   }
@@ -274,16 +279,6 @@ class _WorkPageState extends State<WorkPage> {
   String? get _showTitle => widget.showTitle ?? _feed?.title;
 
   String get _originalName => languageNameOf(_work.lang ?? _feed?.language);
-
-  /// Whisper's translate task only writes English, so an English work is
-  /// never offered it.
-  bool get _sourceIsEnglish =>
-      (_work.lang ?? _feed?.language)
-          ?.trim()
-          .toLowerCase()
-          .split(RegExp('[-_]'))
-          .first ==
-      'en';
 
   // ───── modes ─────
 
@@ -360,7 +355,7 @@ class _WorkPageState extends State<WorkPage> {
     } else if (_isAudio && _language.isOriginal) {
       await _doors.readFromRow(context, _entry);
     } else {
-      // Karaoke has no translation view; the reader does.
+      // The reader shows the chosen translation.
       await _doors.read(
         context,
         _entry,
@@ -467,6 +462,10 @@ class _WorkPageState extends State<WorkPage> {
         _remove();
         return;
     }
+    if (_deletablePart(choice) case final part?) {
+      await _deletePart(part);
+      return;
+    }
     if (actions == null || !mounted) return;
     await actions.handleShared(context, choice, _entry, showTitle: _showTitle);
     await _load();
@@ -487,15 +486,50 @@ class _WorkPageState extends State<WorkPage> {
     Navigator.of(context).pop(removal);
   }
 
+  // ───── stored parts (1.5.8) ─────
+
+  /// What this page offers to delete: the download, the transcript and
+  /// each translation. The decoded copy is a cache the storage page
+  /// clears; it isn't something a reader thinks of as this work's.
+  List<StoredPart> get _deletableParts => [
+        for (final p in _stored?.parts ?? const <StoredPart>[])
+          if (p.kind != StoredKind.decoded) p,
+      ];
+
+  static String _partValue(StoredPart p) => switch (p.kind) {
+        StoredKind.audio => 'remove-download',
+        StoredKind.transcript => 'delete-transcript',
+        StoredKind.translation => 'delete-translation-${p.lang}',
+        StoredKind.decoded => 'delete-decoded',
+      };
+
+  StoredPart? _deletablePart(String value) {
+    for (final p in _deletableParts) {
+      if (_partValue(p) == value) return p;
+    }
+    return null;
+  }
+
+  Future<void> _deletePart(StoredPart part) async {
+    final stored = _stored;
+    if (stored == null) return;
+    if (!await confirmDeletePart(context, stored, part)) return;
+    final message = await deletePart(stored, part,
+        db: _db, services: _actions?.services, actions: _actions);
+    // The alignments listener only reloads an untranscribed page.
+    await _load();
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(content: Text(message), persist: false));
+  }
+
   /// The values of the shared items this page shows as buttons, which its
   /// ⋮ leaves out. Mirrors [_visibleActions] and the language row.
   Set<String> get _shownAsButtons => {
     if (_episode?.enclosureUrl != null) ...{'play-next', 'play-last'},
     if (_showsDownload) 'download',
     if (_showsTranscribe) 'transcribe',
-    // Not a button: Whisper's translate needs no text but can only write
-    // English, so it waits like Translate does, and never for English.
-    if ((_isAudio && !_transcribed) || _sourceIsEnglish) 'translate',
   };
 
   bool get _showsTranscribe =>
@@ -505,6 +539,12 @@ class _WorkPageState extends State<WorkPage> {
     final actions = _actions;
     final id = _work.id;
     final extras = <PopupMenuEntry<String>>[
+      for (final p in _deletableParts)
+        PopupMenuItem(
+          key: Key('${_partValue(p)}-$id'),
+          value: _partValue(p),
+          child: Text(p.deleteLabel),
+        ),
       if (_episode != null && _isKept)
         PopupMenuItem(
           key: Key('remove-from-library-$id'),
@@ -524,6 +564,7 @@ class _WorkPageState extends State<WorkPage> {
       _entry,
       extras: extras,
       transcribed: _transcribed,
+      sourceLang: _work.lang ?? _feed?.language,
       shownAsButtons: _shownAsButtons,
     );
   }

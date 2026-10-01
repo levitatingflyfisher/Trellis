@@ -63,8 +63,12 @@ int globalWordIndex(TokenizedDocument doc, int segment, int word) {
 int msPerWord(double wpm, double pacing) => (60000 / wpm * pacing).round();
 
 /// Campaign 9 Phase 7 ("the reader follows the player"): an audio time →
-/// this reader's own global word cursor, through the SAME
-/// `Spine.positionAtAudioTime` mapping `karaoke_screen.dart` already uses.
+/// this reader's own global word cursor, through `Spine
+/// .positionAtAudioTime` for the segment and, within it (1.5.8, the
+/// transcript view's word-by-word motion), [localWordAtAudioTime] over
+/// that segment's [wordTimings] — `[word, t0, t1]` rows keyed by DB
+/// segment idx. [wordLevel] false keeps the cursor at the segment's start:
+/// a translation shown in place has no word timings of its own.
 /// [positionAtAudioTime] answers in the DATABASE's own segment idx — never
 /// the [blocks] LIST position [cursorAt]/[globalWordIndex] work in
 /// (`_load`'s own restore-a-saved-Position code performs the identical
@@ -80,12 +84,89 @@ int? wordIndexAtAudioTime({
   required TokenizedDocument doc,
   required List<Segment> blocks,
   required int audioTimeMs,
+  Map<int, List<List<Object>>> wordTimings = const {},
+  bool wordLevel = true,
 }) {
   if (spine.alignments.isEmpty || doc.words.isEmpty) return null;
   final pos = spine.positionAtAudioTime(audioTimeMs);
   final blockPos = blocks.indexWhere((b) => b.idx == pos.segmentIdx);
   if (blockPos < 0) return null;
-  return globalWordIndex(doc, blockPos, pos.wordIdx);
+  if (!wordLevel) return globalWordIndex(doc, blockPos, 0);
+  final starts = doc.blockStartWordIdx;
+  final end =
+      blockPos + 1 < starts.length ? starts[blockPos + 1] : doc.words.length;
+  final aligned =
+      spine.alignments.firstWhere((a) => a.segmentIdx == pos.segmentIdx);
+  final local = localWordAtAudioTime(
+      audioTimeMs: audioTimeMs,
+      segStartMs: aligned.tStartMs,
+      segEndMs: aligned.tEndMs,
+      stamps: wordTimings[pos.segmentIdx] ?? const [],
+      tokenCount: end - starts[blockPos]);
+  return globalWordIndex(doc, blockPos, local);
+}
+
+/// The inverse of [wordIndexAtAudioTime], for a tapped word: its own
+/// stamp's start, else its even share of its segment's span, else the
+/// segment's start. Null when the word's segment has no alignment.
+int? audioTimeOfWord({
+  required Spine spine,
+  required TokenizedDocument doc,
+  required List<Segment> blocks,
+  required int globalIdx,
+  Map<int, List<List<Object>>> wordTimings = const {},
+  bool wordLevel = true,
+}) {
+  if (doc.words.isEmpty) return null;
+  final c = cursorAt(doc, globalIdx.clamp(0, doc.words.length - 1));
+  final segIdx = blocks[c.segment].idx;
+  Alignment? aligned;
+  for (final a in spine.alignments) {
+    if (a.segmentIdx == segIdx) aligned = a;
+  }
+  if (aligned == null) return null;
+  if (!wordLevel) return aligned.tStartMs;
+  final starts = doc.blockStartWordIdx;
+  final end = c.segment + 1 < starts.length
+      ? starts[c.segment + 1]
+      : doc.words.length;
+  final n = end - starts[c.segment];
+  if (n <= 1) return aligned.tStartMs;
+  final stamps = wordTimings[segIdx] ?? const [];
+  if (stamps.isNotEmpty) {
+    final i = stamps.length == n ? c.word : c.word * stamps.length ~/ n;
+    return stamps[i.clamp(0, stamps.length - 1)][1] as int;
+  }
+  return aligned.tStartMs +
+      (aligned.tEndMs - aligned.tStartMs) * c.word ~/ n;
+}
+
+/// Which of a segment's [tokenCount] display words the playhead is on.
+/// With whisper's word [stamps] the last one started leads, as the
+/// transcript view lit it; whisper and the tokenizer can count words
+/// differently (the tokenizer splits "well-known"), so unequal counts map
+/// proportionally. Without stamps the word moves evenly across the
+/// segment's span — still a motion, never a fabricated precision beyond
+/// the segment's own bounds.
+int localWordAtAudioTime({
+  required int audioTimeMs,
+  required int segStartMs,
+  required int? segEndMs,
+  required List<List<Object>> stamps,
+  required int tokenCount,
+}) {
+  if (tokenCount <= 1) return 0;
+  if (stamps.isNotEmpty) {
+    var lit = 0;
+    for (var i = 0; i < stamps.length; i++) {
+      if ((stamps[i][1] as int) <= audioTimeMs) lit = i;
+    }
+    if (stamps.length == tokenCount) return lit;
+    return (lit * tokenCount ~/ stamps.length).clamp(0, tokenCount - 1);
+  }
+  if (segEndMs == null || segEndMs <= segStartMs) return 0;
+  final frac = (audioTimeMs - segStartMs) / (segEndMs - segStartMs);
+  return (frac * tokenCount).floor().clamp(0, tokenCount - 1);
 }
 
 // ───── Campaign 4 Phase 2: the lost priming visuals ─────

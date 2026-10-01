@@ -235,6 +235,9 @@ class EpisodeActions {
       }
     }
     _downloaded.clear();
+    // Every list sharing the downloader offers Download again; a removed
+    // file alone moves nothing they watch.
+    if (removed > 0) d.notifyListeners();
     return (removed: removed, cancelled: cancelled, kept: kept);
   }
 
@@ -313,7 +316,7 @@ class EpisodeActions {
   /// an article, a feed's text item) or an audiobook: finished, share.
   /// Screens add only their own items after these.
   List<PopupMenuEntry<String>> sharedMenuItems(WorkEntry e,
-      {bool transcribed = false}) {
+      {bool transcribed = false, String? sourceLang}) {
     final id = e.work.id;
     final episode = e.episode;
     final share = PopupMenuItem<String>(
@@ -330,10 +333,12 @@ class EpisodeActions {
                   : transcribed
                       ? 'Transcribe again'
                       : 'Transcribe')),
-          PopupMenuItem(
-              key: Key('translate-$id'),
-              value: 'translate',
-              child: const Text('Transcribe + translate to English')),
+          if (offersEnglishTranslate(
+              transcribed: transcribed, sourceLang: sourceLang))
+            PopupMenuItem(
+                key: Key('translate-$id'),
+                value: 'translate',
+                child: const Text('Transcribe + translate to English')),
         ],
         share,
       ];
@@ -474,4 +479,16 @@ class EpisodeActions {
     }
     return true;
   }
+}
+
+/// Whisper's translate needs no text but can only write English, so it
+/// waits for a transcript as the reader's Translate does, and is never
+/// offered for an English work. An unknown language is not assumed
+/// English. One rule for every row's ⋮ and the work page's.
+bool offersEnglishTranslate(
+    {required bool transcribed, required String? sourceLang}) {
+  if (!transcribed) return false;
+  final base =
+      sourceLang?.trim().toLowerCase().split(RegExp('[-_]')).first;
+  return base != 'en';
 }

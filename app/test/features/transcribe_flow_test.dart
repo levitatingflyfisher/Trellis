@@ -39,7 +39,11 @@ void main() {
 
   const enclosure = 'https://cast.example.test/ep1.mp3';
 
-  Future<({int profileId, int workId})> seedEpisode() async {
+  /// [transcribed] gives it a transcript already: Whisper's
+  /// translate-to-English is offered only then (1.5.8, the work page's
+  /// rule on every row).
+  Future<({int profileId, int workId})> seedEpisode(
+      {bool transcribed = false}) async {
     final profileId = await db.profilesDao.create('Ada');
     final feedId = await db.feedsDao.insertFeed(
         profileId: profileId, url: 'https://cast.example.test/feed.xml');
@@ -59,6 +63,10 @@ void main() {
         guid: 'ep1',
         enclosureUrl: enclosure,
         publishedAtMs: DateTime.utc(2026, 8, 1).millisecondsSinceEpoch);
+    if (transcribed) {
+      await db.spineDao.insertAlignments(
+          workId, const [(segmentIdx: 0, tStartMs: 0, tEndMs: 1000)]);
+    }
     return (profileId: profileId, workId: workId);
   }
 
@@ -182,7 +190,7 @@ void main() {
 
   testWidgets('transcribe + translate writes an English mt layer over the '
       'same segments', (tester) async {
-    final seeded = await seedEpisode();
+    final seeded = await seedEpisode(transcribed: true);
     final store = FakeModelStore(downloadedIds: {'whisper-tiny-ggml'});
     final services = testServices(tmp, modelStore: store);
     services.audioFileFor(seeded.workId, enclosure)
@@ -205,7 +213,7 @@ void main() {
       'artifact-separation law holds because they were never sharing a '
       'store to begin with, not because either was taught about the '
       'other', (tester) async {
-    final seeded = await seedEpisode();
+    final seeded = await seedEpisode(transcribed: true);
     final store = FakeModelStore(downloadedIds: {'whisper-tiny-ggml'});
     final services = testServices(tmp, modelStore: store);
     services.audioFileFor(seeded.workId, enclosure)

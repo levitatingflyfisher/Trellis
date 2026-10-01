@@ -104,7 +104,7 @@ class PlayerController extends ChangeNotifier {
 
   /// Whether the current work is playing through the multi-file audiobook
   /// path — the mini player's Chapters door gates on this exactly like
-  /// [hasAlignments] gates the karaoke door.
+  /// [hasAlignments] gates the mini player's Page door.
   bool get isAudiobook => _currentAudiobookFiles != null;
 
   /// The current audiobook's ordered files, for a Chapters screen to walk
@@ -282,12 +282,12 @@ class PlayerController extends ChangeNotifier {
   /// Whether the current work has synced text (karaoke is possible).
   bool get hasAlignments => _alignments.isNotEmpty;
 
-  /// The current work's alignments — the karaoke view projects through
+  /// The current work's alignments — the reader's follow-along projects through
   /// these.
   List<core.Alignment> get alignments => _alignments;
 
   /// Re-read the current work's alignments — called when a transcription
-  /// lands mid-playback so the karaoke door opens without a restart.
+  /// lands mid-playback so the Page door opens without a restart.
   Future<void> reloadAlignments(int workId) async {
     if (_current?.id != workId) return;
     _alignments = [

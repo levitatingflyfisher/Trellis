@@ -105,8 +105,105 @@ void main() {
           0);
       expect(
           wordIndexAtAudioTime(
-              spine: spine, doc: doc, blocks: blocks, audioTimeMs: 15000),
+              spine: spine, doc: doc, blocks: blocks, audioTimeMs: 10000),
           2);
+    });
+
+    // 1.5.8: the transcript view's word-by-word motion, kept on Page.
+    test('inside a segment, the word stamp holding the playhead leads', () {
+      final spine = spineWith(const [
+        (segmentIdx: 2, tStartMs: 0, tEndMs: 10000),
+        (segmentIdx: 5, tStartMs: 10000, tEndMs: 20000),
+      ]);
+      final stamps = {
+        5: [
+          ['Second', 10000, 18000],
+          ['two.', 18000, 20000],
+        ],
+      };
+      int? at(int t) => wordIndexAtAudioTime(
+          spine: spine,
+          doc: doc,
+          blocks: blocks,
+          audioTimeMs: t,
+          wordTimings: stamps);
+      expect(at(15000), 2, reason: 'still on "Second"');
+      expect(at(18500), 3);
+    });
+
+    test('without stamps the word moves evenly across the segment', () {
+      final spine = spineWith(const [
+        (segmentIdx: 2, tStartMs: 0, tEndMs: 10000),
+        (segmentIdx: 5, tStartMs: 10000, tEndMs: 20000),
+      ]);
+      expect(
+          wordIndexAtAudioTime(
+              spine: spine, doc: doc, blocks: blocks, audioTimeMs: 15000),
+          3);
+      expect(
+          wordIndexAtAudioTime(
+              spine: spine,
+              doc: doc,
+              blocks: blocks,
+              audioTimeMs: 15000,
+              wordLevel: false),
+          2,
+          reason: 'a translation shown in place keeps to the segment');
+    });
+
+    test('a stamp count that differs from the tokens maps proportionally',
+        () {
+      expect(
+          localWordAtAudioTime(
+              audioTimeMs: 2500,
+              segStartMs: 0,
+              segEndMs: 4000,
+              stamps: const [
+                ['a', 0, 1000],
+                ['b', 1000, 2000],
+                ['c', 2000, 3000],
+                ['d', 3000, 4000],
+              ],
+              tokenCount: 8),
+          4);
+      expect(
+          localWordAtAudioTime(
+              audioTimeMs: 0,
+              segStartMs: 0,
+              segEndMs: null,
+              stamps: const [],
+              tokenCount: 5),
+          0);
+    });
+
+    test('a tapped word seeks to its own stamp, else its share of the span',
+        () {
+      final spine = spineWith(const [
+        (segmentIdx: 2, tStartMs: 0, tEndMs: 10000),
+        (segmentIdx: 5, tStartMs: 10000, tEndMs: 20000),
+      ]);
+      expect(
+          audioTimeOfWord(
+              spine: spine,
+              doc: doc,
+              blocks: blocks,
+              globalIdx: 3,
+              wordTimings: const {
+                5: [
+                  ['Second', 10000, 18000],
+                  ['two.', 18000, 20000],
+                ],
+              }),
+          18000);
+      expect(
+          audioTimeOfWord(
+              spine: spine, doc: doc, blocks: blocks, globalIdx: 1),
+          5000);
+      expect(
+          audioTimeOfWord(
+              spine: spineWith(const []), doc: doc, blocks: blocks,
+              globalIdx: 1),
+          isNull);
     });
 
     test('no alignments at all returns null — nothing to follow', () {

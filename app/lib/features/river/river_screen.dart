@@ -54,9 +54,6 @@ class RiverScreen extends StatefulWidget {
   /// [downloadCoordinator].
   final DspCoordinator? dspCoordinator;
 
-  /// Opens the Jobs screen; null hides the menu item.
-  final VoidCallback? onOpenJobs;
-
   /// DeviceServices.localMlAvailable, handed down by the shell. Where
   /// false (the web tier) the transcribe AND download menu items are
   /// simply not offered — play still works; the UI never offers what
@@ -107,7 +104,6 @@ class RiverScreen extends StatefulWidget {
       required this.coordinator,
       this.downloadCoordinator,
       this.dspCoordinator,
-      this.onOpenJobs,
       this.localMlAvailable = true,
       this.resolveSpeechEngine,
       this.lookupDefinition,
@@ -565,7 +561,6 @@ class _RiverScreenState extends State<RiverScreen>
             OhBarOverflow<String>(
               key: const Key('river-more'),
               onSelected: (choice) => switch (choice) {
-                'jobs' => widget.onOpenJobs?.call(),
                 final v when isThemeMenuValue(v) =>
                   chooseThemeFromMenu(theme!, v),
                 _ => _selection.enter(),
@@ -577,13 +572,11 @@ class _RiverScreenState extends State<RiverScreen>
                     value: 'select',
                     child: Text('Select'),
                   ),
-                if (widget.onOpenJobs != null)
-                  const PopupMenuItem(
-                    key: Key('river-open-jobs'),
-                    value: 'jobs',
-                    child: Text('Jobs'),
-                  ),
-                if (theme != null) ...themeMenuItems(theme),
+                // Jobs is app-wide, not Latest's: the strip above the
+                // tabs is its door while any job exists (1.5.8 ⋮ rule).
+                if (theme != null)
+                  ...themeMenuItems(theme,
+                      divided: _entries?.isNotEmpty ?? false),
               ],
             ),
           ]),
@@ -734,7 +727,8 @@ class _RiverScreenState extends State<RiverScreen>
       // The shared items first, then Latest's own: the same menu as this
       // episode has anywhere else, plus triage.
       menuBuilder: (_) => workMenuItems(_actions, entry,
-          transcribed: _rowState.transcribed.contains(e.work.id), extras: [
+          transcribed: _rowState.transcribed.contains(e.work.id),
+          sourceLang: _rowState.sourceLangOf(entry), extras: [
         PopupMenuItem(
             key: Key('keep-${e.work.id}'),
             value: 'keep',

@@ -432,7 +432,7 @@ class ModelRegistry {
           licenses: const ['Apache-2.0'],
           minTier: DeviceTier.t2,
         ),
-        // T2 TTS — the Supertonic rung's starter voice (ADR-0007): the
+        // T1 TTS — the Supertonic rung's starter voice (ADR-0007): the
         // official Supertone/supertonic-2 weights (v2: 66M params,
         // en/ko/es/pt/fr — this entry claims only English, the one
         // speaker embedding shipped and reviewed here), fp32 ONNX
@@ -508,7 +508,10 @@ class ModelRegistry {
             ),
           ],
           licenses: const ['OpenRAIL-M'],
-          minTier: DeviceTier.t2,
+          // t1, like the translation pairs (1.5.8): the app runs at t1
+          // with no tier probe, so at t2 the voice downloaded and was
+          // never picked. The user rules out gating options by device.
+          minTier: DeviceTier.t1,
           langs: const {'en'},
           supertonicLayout: const SupertonicVoiceLayout(
             durationPredictorFileName: 'duration_predictor.onnx',

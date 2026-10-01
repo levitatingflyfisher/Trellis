@@ -11,7 +11,7 @@ import '../support/schema_strip.dart';
 /// position + created-at, saved with one tap during listening. Snipd's
 /// known complaint is wrong clip boundaries from a raw ±15s guess — the
 /// quality bar here is sentence-snapped binding via the SAME alignments
-/// the karaoke view and the read<->listen handoff already use, never a
+/// the reader's follow-along and the read<->listen handoff already use, never a
 /// fabricated window. When a work has no transcript yet, a capture is
 /// still saved (position stays honest, segmentIdx null) and
 /// [CapturesDao.backfillForWork] binds it once transcription completes.

@@ -1,15 +1,9 @@
-import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
-import 'package:trellis/features/player/karaoke_screen.dart';
-import 'package:trellis/features/player/player_controller.dart';
-import 'package:trellis/features/transcribe/transcript_writer.dart'
-    show encodeWordTimingBlob;
 import 'package:trellis/main.dart';
 
-import '../support/fake_player.dart';
 import '../support/pick_reader.dart';
 import '../support/tabs.dart';
 import '../support/open_work.dart';
@@ -21,7 +15,7 @@ import '../support/open_work.dart';
 /// so every add is calm and idempotent — no counter, no streak, just a
 /// snackbar naming what was kept. Since Campaign 4 Phase 3, scroll mode
 /// and RSVP route that long-press through the definition sheet first
-/// (dictionary_sheet_test.dart covers the sheet itself); karaoke's own
+/// (dictionary_sheet_test.dart covers the sheet itself); the reader's own
 /// long-press is untouched, still direct.
 void main() {
   late AppDatabase db;
@@ -157,56 +151,4 @@ void main() {
         reason: 'the empty state is an invitation, not a void');
   });
 
-  testWidgets('long-press on a karaoke word keeps it under the work profile',
-      (tester) async {
-    final profileId = await db.profilesDao.create('Ada');
-    final feedId = await db.feedsDao
-        .insertFeed(profileId: profileId, url: 'https://cast.test/feed');
-    final workId = await db.spineDao.insertWork(
-        profileId: profileId,
-        kind: 'episode',
-        title: 'Ep 1',
-        persistence: 'ephemeron',
-        firstSeenEpochDay: 100,
-        sourceUrl: 'https://cast.test/1.mp3',
-        lang: 'pt');
-    await db.feedsDao.insertEpisode(
-        workId: workId,
-        feedId: feedId,
-        guid: 'g1',
-        enclosureUrl: 'https://cast.test/1.mp3',
-        publishedAtMs: 1000);
-    await db.spineDao.insertSegments(
-        workId, const [(idx: 0, kind: 'prose', text: 'Ola mundo.')]);
-    await db.into(db.alignments).insert(AlignmentsCompanion.insert(
-        workId: workId,
-        segmentIdx: 0,
-        tStartMs: 0,
-        tEndMs: 1500,
-        wordTimings: Value(encodeWordTimingBlob([
-          ['Ola', 0, 700],
-          ['mundo.', 700, 1500],
-        ]))));
-    final work =
-        (await db.spineDao.worksOf(profileId)).single;
-    final player = FakeEpisodePlayer();
-    final controller = PlayerController(
-        db: db, profileId: profileId, createPlayer: () => player);
-    addTearDown(controller.dispose);
-    await controller.playWork(work);
-    player.emitPosition(const Duration(milliseconds: 800));
-
-    await tester.pumpWidget(MaterialApp(
-        home: KaraokeScreen(db: db, controller: controller, work: work)));
-    await tester.pumpAndSettle();
-
-    await tester.longPress(find.text('mundo.'));
-    await tester.pump();
-
-    final rows = await db.ledgerDao.wordsOf(profileId);
-    expect(rows.single.word, 'mundo', reason: 'edge punctuation stripped');
-    expect(rows.single.lang, 'pt');
-    expect(rows.single.sourceWorkId, work.id);
-    expect(find.text('“mundo” is in your word ledger.'), findsOneWidget);
-  });
 }

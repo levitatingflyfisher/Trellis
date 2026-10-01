@@ -44,6 +44,18 @@ class LibraryScreen extends StatefulWidget {
   /// Opens the "Models & storage" model manager; the shell wires it.
   final VoidCallback? onOpenModels;
 
+  /// Opens Backup & migrate. With Models & storage and Switch reader it
+  /// is app-wide, so it lives in this one menu (1.5.8 ⋮ rule).
+  final VoidCallback? onOpenBackup;
+
+  /// The + Add sheet's "Subscribe to a feed": the shell's subscribe
+  /// screen, opened from this tab. Null hides the entry.
+  final Future<void> Function(BuildContext)? onSubscribe;
+
+  /// The shows this reader follows, opened inside this tab (Latest has
+  /// the same door). Null hides it.
+  final Future<void> Function(BuildContext)? onOpenSubscriptions;
+
   /// The HTTP seam for "From the web" intake. Optional so existing call
   /// sites keep compiling; when the shell does not pass one, the real
   /// [IoHttpFetcher] is built lazily on first use — tests always inject a
@@ -116,6 +128,9 @@ class LibraryScreen extends StatefulWidget {
       required this.profile,
       required this.onSwitchProfile,
       this.onOpenModels,
+      this.onOpenBackup,
+      this.onSubscribe,
+      this.onOpenSubscriptions,
       this.fetcher,
       this.tts,
       this.lane = WebFetchLane.direct,
@@ -350,13 +365,31 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (workId != null) await _load();
   }
 
+  Future<void> _subscribe() async {
+    final onSubscribe = widget.onSubscribe;
+    if (onSubscribe != null) await onSubscribe(context);
+  }
+
+  /// Every way in, in one sheet (1.5.8): a feed, a file, pasted text, a
+  /// link. Over the app's Navigator, so it covers the bars like any sheet
+  /// rather than leaving the tabs live beneath it.
   void _addSheet() {
     showModalBottomSheet<void>(
       context: context,
+      useRootNavigator: true,
       builder: (sheet) => SafeArea(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            if (widget.onSubscribe != null)
+              ListTile(
+                leading: const Icon(Icons.rss_feed),
+                title: const Text('Subscribe to a feed'),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  _subscribe();
+                },
+              ),
             ListTile(
               leading: const Icon(Icons.content_paste),
               title: const Text('Paste text'),
@@ -375,7 +408,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
             ),
             ListTile(
               leading: const Icon(Icons.public),
-              title: const Text('From the web'),
+              title: const Text('Open a link'),
               onTap: () {
                 Navigator.pop(sheet);
                 _fromWeb();
@@ -487,10 +520,18 @@ class _LibraryScreenState extends State<LibraryScreen> {
               label: hasFilter ? 'Clear filter' : 'Filter',
               onPressed: _openFilter,
             ),
+            if (widget.onOpenSubscriptions case final open?)
+              OhBarAction(
+                key: const Key('library-subscriptions'),
+                icon: Icons.rss_feed,
+                label: 'Subscriptions',
+                onPressed: () => open(context),
+              ),
             OhBarOverflow<String>(
               key: const Key('library-more'),
               onSelected: (v) => switch (v) {
                 'models' => widget.onOpenModels?.call(),
+                'backup' => widget.onOpenBackup?.call(),
                 final v when isThemeMenuValue(v) =>
                   chooseThemeFromMenu(theme!, v),
                 _ => widget.onSwitchProfile(),
@@ -508,6 +549,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
                     value: 'models',
                     child: Text('Models & storage'),
                   ),
+                if (widget.onOpenBackup != null)
+                  const PopupMenuItem(
+                    key: Key('open-backup'),
+                    value: 'backup',
+                    child: Text('Backup & migrate'),
+                  ),
                 if (theme != null) ...themeMenuItems(theme),
               ],
             ),
@@ -517,12 +564,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
       floatingActionButton: (entries == null || entries.isEmpty)
           ? null
           : FloatingActionButton.extended(
+              key: const Key('library-add'),
               onPressed: _addSheet,
               icon: const Icon(Icons.add),
               label: const Text('Add')),
       body: CappedBody(child: switch (entries) {
         null => const Center(child: CircularProgressIndicator()),
         [] => _EmptyState(
+            onSubscribe: widget.onSubscribe != null ? _subscribe : null,
             onPaste: _pasteText,
             onEpub: _importEpub,
             onWeb: _fromWeb,
@@ -614,7 +663,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
             }
           : null,
       menuBuilder: (_) => workMenuItems(_actions, entry,
-          transcribed: _rowState.transcribed.contains(work.id), extras: [
+          transcribed: _rowState.transcribed.contains(work.id),
+          sourceLang: _rowState.sourceLangOf(entry), extras: [
         PopupMenuItem(
             key: Key('pin-${work.id}'),
             value: 'pin',
@@ -641,13 +691,15 @@ class _LibraryScreenState extends State<LibraryScreen> {
 }
 
 class _EmptyState extends StatelessWidget {
+  final VoidCallback? onSubscribe;
   final VoidCallback onPaste;
   final VoidCallback onEpub;
   final VoidCallback onWeb;
   final VoidCallback onGutenberg;
   final VoidCallback? onAudiobook;
   const _EmptyState(
-      {required this.onPaste,
+      {this.onSubscribe,
+      required this.onPaste,
       required this.onEpub,
       required this.onWeb,
       required this.onGutenberg,
@@ -688,7 +740,7 @@ class _EmptyState extends StatelessWidget {
               OutlinedButton.icon(
                   onPressed: onWeb,
                   icon: const Icon(Icons.public),
-                  label: const Text('From the web')),
+                  label: const Text('Open a link')),
               const SizedBox(height: 12),
               OutlinedButton.icon(
                   onPressed: onGutenberg,
@@ -700,6 +752,13 @@ class _EmptyState extends StatelessWidget {
                     onPressed: onAudiobook,
                     icon: const Icon(Icons.headphones_outlined),
                     label: const Text('Audiobook (pick files)')),
+              ],
+              if (onSubscribe != null) ...[
+                const SizedBox(height: 12),
+                OutlinedButton.icon(
+                    onPressed: onSubscribe,
+                    icon: const Icon(Icons.rss_feed),
+                    label: const Text('Subscribe to a feed')),
               ],
             ],
           ),

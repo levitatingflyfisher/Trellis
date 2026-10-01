@@ -43,6 +43,10 @@ class WorkListState {
   final Map<int, int> fileIdx;
   final Map<int, int> fileCounts;
 
+  /// Each show's declared language, by feed id: a row's source language
+  /// when its work names none (see [sourceLangOf]).
+  final Map<int, String> feedLangs;
+
   /// Works whose size or file count was already asked for, found or not,
   /// so a later page never asks twice.
   final Set<int> _sized;
@@ -55,6 +59,7 @@ class WorkListState {
     this.textSizes = const {},
     this.fileIdx = const {},
     this.fileCounts = const {},
+    this.feedLangs = const {},
   }) : _sized = const {};
 
   const WorkListState._({
@@ -65,10 +70,16 @@ class WorkListState {
     required this.textSizes,
     required this.fileIdx,
     required this.fileCounts,
+    required this.feedLangs,
     required Set<int> sized,
   }) : _sized = sized;
 
   static const empty = WorkListState();
+
+  /// What [e] is spoken or written in: its own language, else its show's
+  /// — the work page's rule, so a row's ⋮ and the page agree.
+  String? sourceLangOf(WorkEntry e) =>
+      e.work.lang ?? feedLangs[e.episode?.feedId];
 
   /// The list-wide facts for [profileId], plus the sizes of [entries].
   /// [carry] keeps sizes an earlier load already found, for a re-read
@@ -95,6 +106,7 @@ class WorkListState {
       textSizes: carry?.textSizes ?? const {},
       fileIdx: {for (final id in books) id: ?listening.fileIdx[id]},
       fileCounts: carry?.fileCounts ?? const {},
+      feedLangs: await db.feedsDao.feedLanguagesOf(profileId),
       sized: carry?._sized ?? const {},
     );
     return base.including(db, entries);
@@ -112,6 +124,7 @@ class WorkListState {
     textSizes: {...other.textSizes, ...textSizes},
     fileIdx: {...other.fileIdx, ...fileIdx},
     fileCounts: {...other.fileCounts, ...fileCounts},
+    feedLangs: feedLangs,
     sized: {...other._sized, ..._sized},
   );
 
@@ -147,6 +160,7 @@ class WorkListState {
       textSizes: {...textSizes, ...sizes},
       fileIdx: fileIdx,
       fileCounts: {...fileCounts, ...counts},
+      feedLangs: feedLangs,
       sized: {..._sized, ...texts, ...books},
     );
   }
