@@ -48,6 +48,8 @@ class FeedItem {
     this.chapters,
     this.chaptersUrl,
     this.contentHtml,
+    this.imageUrl,
+    this.durationMs,
   });
 
   final String title;
@@ -80,6 +82,14 @@ class FeedItem {
 
   /// External chapters document URL (podcast:chapters url form).
   final String? chaptersUrl;
+
+  /// The item's own `itunes:image`, resolved against the feed URL. Null
+  /// when the item has none, so the show's artwork stands in.
+  final String? imageUrl;
+
+  /// `itunes:duration` in ms. Null when absent, zero or unreadable: a
+  /// wrong length on a row is worse than none.
+  final int? durationMs;
 }
 
 class ParsedFeed {

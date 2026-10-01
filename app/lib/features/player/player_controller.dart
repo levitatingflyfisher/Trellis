@@ -122,6 +122,14 @@ class PlayerController extends ChangeNotifier {
   /// per [playWork].
   bool _finishHandled = false;
 
+  /// Whether this episode's played fact is already stamped this load, so
+  /// the last-30-seconds check costs one write, not one per tick.
+  bool _playedStamped = false;
+
+  /// How close to the end counts as played (ADR-0016): credits and
+  /// sign-offs shouldn't leave an episode looking unfinished.
+  static const playedWithin = Duration(seconds: 30);
+
   /// When the current episode was paused (smart resume) — null when playing
   /// or when nothing has been paused this session. Cleared on a fresh
   /// [playWork] so a stale value from a previous episode never leaks in.
@@ -299,6 +307,7 @@ class PlayerController extends ChangeNotifier {
       p.positionStream.listen((_) {
         unawaited(_tickSleepTimer());
         unawaited(_tickOutroCutoff());
+        unawaited(_tickPlayed());
         notifyListeners();
       }),
     );
@@ -325,6 +334,21 @@ class PlayerController extends ChangeNotifier {
     if (p == null || dur == null) return;
     final cutoff = dur - Duration(seconds: outroSeconds);
     if (p.position >= cutoff) await _finish();
+  }
+
+  /// Marks the episode played once it is within [playedWithin] of the
+  /// end, without stopping it: the listener still hears the tail.
+  Future<void> _tickPlayed() async {
+    if (_playedStamped || isAudiobook) return;
+    final p = _player;
+    final dur = p?.duration;
+    final work = _current;
+    if (p == null || dur == null || work == null) return;
+    // A trailer shorter than the window would count as played at once;
+    // it waits for the finish hand instead.
+    if (dur <= playedWithin || p.position < dur - playedWithin) return;
+    _playedStamped = true;
+    await db.feedsDao.setFinished(work.id, _nowMs);
   }
 
   /// Campaign 9 Phase 2 ("resume after restart"): user: "when I pause or
@@ -356,6 +380,7 @@ class PlayerController extends ChangeNotifier {
     _current = work;
     _pausedAtMs = null;
     _finishHandled = false;
+    _playedStamped = false;
     _alignments = [
       for (final a in await db.spineDao.alignmentsOf(work.id))
         core.Alignment(
@@ -396,6 +421,7 @@ class PlayerController extends ChangeNotifier {
     _pausedAtMs = null;
     await db.profilesDao.recordLastPlayed(profileId, work.id);
     _finishHandled = false;
+    _playedStamped = false;
     // Campaign 7 (ADR-0013): a previous audiobook load's state must never
     // leak into an episode/text-work load — this IS the mode switch every
     // audiobook-aware method below reads.
@@ -510,6 +536,7 @@ class PlayerController extends ChangeNotifier {
     _currentFeed = null;
     _pausedAtMs = null;
     _finishHandled = false;
+    _playedStamped = false;
     await db.profilesDao.recordLastPlayed(profileId, work.id);
     await p.setVolume(1.0); // a prior sleep-timer fade never leaks in
     // Phase 3 (ADR-0013) note: a transcribed audiobook's alignments would
@@ -761,6 +788,8 @@ class PlayerController extends ChangeNotifier {
         work.id,
         _nowMs ~/ Duration.millisecondsPerDay,
       );
+      _playedStamped = true;
+      await db.feedsDao.setFinished(work.id, _nowMs);
       await saveProgress();
     }
     // An end-of-episode timer's target WAS this completion — consumed.
@@ -785,9 +814,23 @@ class PlayerController extends ChangeNotifier {
     if (!keep) {
       await db.queueDao.remove(profileId: profileId, workId: finishedWorkId);
     }
-    final head = await db.queueDao.headOf(profileId);
-    if (head == null) return;
-    final next = await db.spineDao.workById(head.workId);
+    // A kept episode stays in the queue, possibly behind things queued
+    // while it played, so position says nothing. Next is the first entry
+    // that isn't this one and isn't already played; kept played ones are
+    // skipped, or two kept episodes would loop forever.
+    final queue = await db.queueDao.queueOf(profileId);
+    QueueRow? upcoming;
+    for (final r in queue) {
+      if (r.workId == finishedWorkId) continue;
+      if (keep) {
+        final ep = await db.feedsDao.episodeOf(r.workId);
+        if (ep?.finishedAtMs != null) continue;
+      }
+      upcoming = r;
+      break;
+    }
+    if (upcoming == null) return;
+    final next = await db.spineDao.workById(upcoming.workId);
     if (next == null) return;
     // Campaign 7 (ADR-0013): an audiobook work carries no sourceUrl for
     // playWork's single-file law to stream — it needs the multi-file

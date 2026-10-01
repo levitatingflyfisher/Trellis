@@ -77,6 +77,43 @@ void main() {
     });
   });
 
+  group('many at once (the podcast page)', () {
+    test('playNextAll puts a run at the head in the order given, moving '
+        'any already queued', () async {
+      final profileId = await seedProfile();
+      final a = await seedWork(profileId, 'A');
+      final b = await seedWork(profileId, 'B');
+      final c = await seedWork(profileId, 'C');
+      final d = await seedWork(profileId, 'D');
+      await db.queueDao.playLast(profileId: profileId, workId: a, nowMs: 1);
+      await db.queueDao.playLast(profileId: profileId, workId: c, nowMs: 2);
+
+      await db.queueDao
+          .playNextAll(profileId: profileId, workIds: [b, c, d], nowMs: 3);
+
+      final rows = await db.queueDao.queueOf(profileId);
+      expect(rows.map((r) => r.workId), [b, c, d, a]);
+      expect(rows.map((r) => r.position), [0, 1, 2, 3]);
+    });
+
+    test('playLastAll appends a run in order, leaving queued ones where '
+        'they are', () async {
+      final profileId = await seedProfile();
+      final a = await seedWork(profileId, 'A');
+      final b = await seedWork(profileId, 'B');
+      final c = await seedWork(profileId, 'C');
+      await db.queueDao.playLast(profileId: profileId, workId: b, nowMs: 1);
+
+      final added = await db.queueDao
+          .playLastAll(profileId: profileId, workIds: [a, b, c], nowMs: 2);
+
+      expect(added, 2);
+      final rows = await db.queueDao.queueOf(profileId);
+      expect(rows.map((r) => r.workId), [b, a, c]);
+      expect(rows.map((r) => r.position), [0, 1, 2]);
+    });
+  });
+
   group('remove', () {
     test('removing a middle item renumbers the rest contiguously',
         () async {

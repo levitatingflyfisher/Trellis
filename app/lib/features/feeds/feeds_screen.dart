@@ -9,6 +9,9 @@ import 'package:openhearth_design/openhearth_design.dart';
 
 import '../../db/database.dart';
 import '../../services/picked_save.dart';
+import '../dsp/dsp_coordinator.dart';
+import '../player/player_controller.dart';
+import 'episode_download_coordinator.dart';
 import 'feed_detail_screen.dart';
 import 'feed_ingest.dart';
 import 'feed_settings_screen.dart';
@@ -59,12 +62,21 @@ class FeedsScreen extends StatefulWidget {
   /// act on (dart:io's File throws on any real op under dart2js).
   final bool localMlAvailable;
 
+  /// Handed on to each podcast page so it can play, download and process
+  /// from its rows; null leaves those doors closed.
+  final PlayerController? playerController;
+  final EpisodeDownloadCoordinator? downloadCoordinator;
+  final DspCoordinator? dspCoordinator;
+
   const FeedsScreen({
     super.key,
     required this.db,
     required this.repository,
     required this.profile,
     this.localMlAvailable = true,
+    this.playerController,
+    this.downloadCoordinator,
+    this.dspCoordinator,
     OpmlBytesPicker? pickOpmlBytes,
     OpmlBytesSaver? saveOpmlBytes,
   }) : pickOpmlBytes = pickOpmlBytes ?? pickOpmlWithFilePicker,
@@ -327,6 +339,10 @@ class _FeedsScreenState extends State<FeedsScreen> {
           db: widget.db,
           repository: widget.repository,
           feed: feed,
+          playerController: widget.playerController,
+          downloadCoordinator: widget.downloadCoordinator,
+          dspCoordinator: widget.dspCoordinator,
+          localMlAvailable: widget.localMlAvailable,
         ),
       ),
     );

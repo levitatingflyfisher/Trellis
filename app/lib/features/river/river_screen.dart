@@ -6,7 +6,8 @@ import 'package:openhearth_design/openhearth_design.dart';
 import '../../db/database.dart' hide Alignment;
 import '../settings/theme_preference.dart';
 import '../dsp/dsp_coordinator.dart';
-import '../dsp/dsp_params.dart' show effectiveDspEnabled;
+import '../episodes/episode_actions.dart';
+import '../episodes/episode_row.dart';
 import '../feeds/episode_download_coordinator.dart';
 import '../jobs/jobs_screen.dart' show downloadFraction, downloadStatus;
 import '../feeds/feeds_repository.dart';
@@ -113,6 +114,16 @@ class _RiverScreenState extends State<RiverScreen> {
   int _decayed = 0;
   _RiverFilter _filter = _RiverFilter.all;
   late final RiverTriage _triage = RiverTriage(widget.db);
+  late final EpisodeActions _actions = EpisodeActions(
+    db: widget.db,
+    profileId: widget.profile.id,
+    player: widget.playerController,
+    downloader: widget.downloadCoordinator,
+    dsp: widget.dspCoordinator,
+    services: widget.repository.services,
+    localMlAvailable: widget.localMlAvailable,
+  );
+  EpisodeListState _rowState = EpisodeListState.empty;
 
   @override
   void initState() {
@@ -127,11 +138,14 @@ class _RiverScreenState extends State<RiverScreen> {
     final entries = await widget.db.feedsDao.riverItems(widget.profile.id);
     final decayed = await widget.db.spineDao.decayedOf(widget.profile.id);
     final held = await widget.db.spineDao.heldWorkIds();
+    final rowState =
+        await EpisodeListState.load(widget.db, widget.profile.id);
     if (!mounted) return;
     setState(() {
       _entries = entries;
       _decayed = decayed.length;
       _held = held;
+      _rowState = rowState;
     });
   }
 
@@ -213,6 +227,9 @@ class _RiverScreenState extends State<RiverScreen> {
           repository: widget.repository,
           profile: widget.profile,
           localMlAvailable: widget.localMlAvailable,
+          playerController: widget.playerController,
+          downloadCoordinator: widget.downloadCoordinator,
+          dspCoordinator: widget.dspCoordinator,
         ),
       ),
     );
@@ -266,22 +283,6 @@ class _RiverScreenState extends State<RiverScreen> {
     await _load(); // the unread dot cleared
   }
 
-  Future<void> _playNext(RiverEntry e) async {
-    await widget.db.queueDao.playNext(
-      profileId: widget.profile.id,
-      workId: e.work.id,
-      nowMs: DateTime.now().millisecondsSinceEpoch,
-    );    await _load(); // the row now says it stays while queued
-  }
-
-  Future<void> _playLast(RiverEntry e) async {
-    await widget.db.queueDao.playLast(
-      profileId: widget.profile.id,
-      workId: e.work.id,
-      nowMs: DateTime.now().millisecondsSinceEpoch,
-    );    await _load(); // the row now says it stays while queued
-  }
-
   /// The transcribe entry: plan → the ONE consent chokepoint when anything
   /// would download (ADR-0003 law 6) → hand the flow to the coordinator.
   Future<void> _transcribe(RiverEntry e, {required bool translate}) async {
@@ -319,59 +320,12 @@ class _RiverScreenState extends State<RiverScreen> {
     );
   }
 
-  /// The standalone Download entry (Campaign 6): the SAME one consent
-  /// chokepoint transcribe uses (ADR-0003 law 6 — there is no second
-  /// door), for the plain "listen offline" case that doesn't touch a
-  /// transcript.
-  Future<void> _download(RiverEntry e) async {
-    final url = e.episode.enclosureUrl;
-    final downloader = widget.downloadCoordinator;
-    if (url == null || downloader == null) return;
-    if (downloader.isDownloaded(e.work.id, url)) return;
-    final ok = await confirmDownload(
-      context,
-      items: const [
-        DownloadItem('This episode’s audio (size depends on the episode)'),
-      ],
-    );
-    if (!ok) return;
-    await downloader.start(workId: e.work.id, url: url, title: e.work.title);
-    await _maybeProcess(e, url);
-    await _load(); // the quiet downloaded indicator picks up disk truth
-  }
-
-  /// "Processed on download, on this device" — the offline DSP
-  /// preprocess's whole promise (Campaign 6, ADR-0012). Runs
-  /// automatically right after a Download that actually landed a file,
-  /// and only when this feed's effective setting (its own override, or
-  /// the household default) says yes. A failed or skipped download
-  /// leaves nothing on disk to process, so the disk check below is the
-  /// same honest guard [EpisodeDownloadCoordinator.isDownloaded] uses
-  /// everywhere else.
-  Future<void> _maybeProcess(RiverEntry e, String url) async {
-    final processor = widget.dspCoordinator;
-    final downloader = widget.downloadCoordinator;
-    if (processor == null || downloader == null) return;
-    if (!downloader.isDownloaded(e.work.id, url)) return;
-    final feed = await widget.db.feedsDao.feedById(e.episode.feedId);
-    final globalDefault = await widget.db.profilesDao.dspGlobalDefault(
-      widget.profile.id,
-    );
-    final enabled = effectiveDspEnabled(
-      feedOverride: feed?.dspEnabled,
-      globalDefault: globalDefault,
-    );
-    if (!enabled) return;
-    await processor.start(workId: e.work.id, title: e.work.title, url: url);
-  }
-
-  /// Disk truth for the quiet indicator — false (never a throw) whenever
-  /// there's no coordinator (web tier) or no enclosure to check.
-  bool _isDownloaded(RiverEntry e) {
-    final url = e.episode.enclosureUrl;
-    final downloader = widget.downloadCoordinator;
-    if (url == null || downloader == null) return false;
-    return downloader.isDownloaded(e.work.id, url);
+  /// The shared menu entries (queue, download, mark played) live with
+  /// [EpisodeActions]; the row shows their result after a reload.
+  Future<void> _common(String choice, RiverEntry e) async {
+    await _actions.handleCommon(
+        context, choice, (work: e.work, episode: e.episode));
+    await _load();
   }
 
   /// Keep: into the library, out of the unread flow. Undo restores the
@@ -555,7 +509,6 @@ class _RiverScreenState extends State<RiverScreen> {
 
   Widget _itemTile(RiverEntry e) {
     final theme = Theme.of(context);
-    final unread = e.episode.readAtMs == null;
     final isAudio = e.episode.enclosureUrl != null;
     // The shed-leaves law (proposal-2 §12): an ephemeron carries a leaf that
     // fades toward its sweep day; promoted works persist and carry nothing.
@@ -574,15 +527,77 @@ class _RiverScreenState extends State<RiverScreen> {
         : held
             ? heldSubtitle
             : driftSubtitle(daysLeft);
-    // P4 "archive, never forget": the row is never gone, only its audio
-    // file — dimmed rather than hidden makes that visible truth instead of
-    // an assertion nobody can check.
-    final isArchived = e.episode.archivedAtMs != null;
-    final tile =
-        _tile(e, theme, unread, isAudio, isEphemeron, daysLeft, drift);
-    final dimmed = isArchived
-        ? Opacity(key: Key('archived-${e.work.id}'), opacity: 0.55, child: tile)
-        : tile;
+    final entry = (work: e.work, episode: e.episode);
+    final row = EpisodeRow(
+      work: e.work,
+      episode: e.episode,
+      facts: EpisodeRowFacts.of(e.episode, _rowState,
+          downloaded: isAudio && _actions.isDownloaded(e.episode)),
+      showTitle: e.feedTitle,
+      artwork: _actions.artworkFor(e.episode),
+      onTap: () => _openItem(e),
+      onPlay: isAudio ? () => _playItem(e) : null,
+      metaLead: isEphemeron
+          ? Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: Opacity(
+                key: Key('leaf-${e.work.id}'),
+                opacity: leafOpacity(daysLeft),
+                child: const Icon(
+                  Icons.eco,
+                  size: 14,
+                  color: OhColors.sage500,
+                ),
+              ),
+            )
+          : null,
+      below: [
+        if (drift != null)
+          Text(
+            drift,
+            key: Key('drift-${e.work.id}'),
+            style: theme.textTheme.bodySmall,
+            overflow: TextOverflow.ellipsis,
+            maxLines: 1,
+          ),
+        if (isAudio && widget.downloadCoordinator != null)
+          _RowDownload(
+              coordinator: widget.downloadCoordinator!, workId: e.work.id),
+      ],
+      // Overflow parity (ergonomic-ux): every row gets the menu, audio or
+      // not — swipe is the fast path, the menu is the reachable-by-anyone
+      // path, and Keep/Let it pass live in both.
+      onMenu: (choice) => switch (choice) {
+        'keep' => _keep(e),
+        'pass' => _letItPass(e),
+        'transcribe' => _transcribe(e, translate: false),
+        'translate' => _transcribe(e, translate: true),
+        _ => _common(choice, e),
+      },
+      menuBuilder: (_) => [
+        PopupMenuItem(
+            key: Key('keep-${e.work.id}'),
+            value: 'keep',
+            child: const Text('Keep')),
+        PopupMenuItem(
+            key: Key('pass-${e.work.id}'),
+            value: 'pass',
+            child: const Text('Let it pass')),
+        ..._actions.commonMenuItems(entry),
+        if (isAudio && widget.localMlAvailable) ...[
+          PopupMenuItem(
+              key: Key('transcribe-${e.work.id}'),
+              value: 'transcribe',
+              child: Text(e.episode.archivedAtMs != null
+                  ? 'Re-download audio'
+                  : 'Transcribe')),
+          PopupMenuItem(
+              key: Key('translate-${e.work.id}'),
+              value: 'translate',
+              child: const Text('Transcribe + translate to English')),
+        ],
+      ],
+    );
     // Swipe Keep / Let it pass (Campaign 5): confirmDismiss performs the
     // gesture then always returns false, so the tile springs back showing
     // its new state — the house idiom (archived rows dim rather than
@@ -612,223 +627,7 @@ class _RiverScreenState extends State<RiverScreen> {
         }
         return false;
       },
-      child: dimmed,
-    );
-  }
-
-  /// The row's leading slot (Campaign 9 Phase 5, "the river gets faces"):
-  /// a ~40dp rounded artwork thumbnail when the feed's channel image was
-  /// already downloaded to its deterministic local file — never fetched
-  /// here, only read — with the unread dot riding as a small corner badge
-  /// instead of the dot's own dedicated 12dp column. A feed with no
-  /// downloaded artwork keeps today's plain dot-only layout unchanged.
-  Widget _leading(RiverEntry e, ThemeData theme, bool unread) {
-    final dot = Container(
-      key: Key('unread-dot-${e.work.id}'),
-      width: 9,
-      height: 9,
-      decoration: BoxDecoration(
-        color: theme.colorScheme.primary,
-        shape: BoxShape.circle,
-      ),
-    );
-    // The web-tier law (see this file's own class doc + `_isDownloaded`
-    // above): never call a real dart:io op where none works. `existsSync()`
-    // throws under dart2js, so the artwork lookup is gated on
-    // localMlAvailable exactly like the download door is, rather than on
-    // services being present — a detached/real DeviceServices is non-null
-    // on every tier, web included.
-    final services = widget.localMlAvailable ? widget.repository.services : null;
-    final artFile = services?.artworkFileFor(e.episode.feedId);
-    if (artFile == null || !artFile.existsSync()) {
-      return SizedBox(
-        width: 12,
-        child: unread ? Center(child: dot) : null,
-      );
-    }
-    return SizedBox(
-      width: 40,
-      height: 40,
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          ClipRRect(
-            borderRadius: BorderRadius.circular(8),
-            child: Opacity(
-              // Calm: full presence while unread, quietly muted once read —
-              // the same "read fades, nothing vanishes" law the ephemeron
-              // leaf already applies elsewhere in this row.
-              opacity: unread ? 1.0 : 0.7,
-              child: Image.file(
-                artFile,
-                key: Key('artwork-${e.work.id}'),
-                width: 40,
-                height: 40,
-                fit: BoxFit.cover,
-                // A partial/corrupt download must never crash a row — it
-                // just reads as "no thumbnail yet", same as a file that
-                // was never downloaded at all.
-                errorBuilder: (_, _, _) => const SizedBox.shrink(),
-              ),
-            ),
-          ),
-          if (unread)
-            Positioned(
-              top: -3,
-              right: -3,
-              child: Container(
-                padding: const EdgeInsets.all(1.5),
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.surface,
-                  shape: BoxShape.circle,
-                ),
-                child: dot,
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _tile(
-    RiverEntry e,
-    ThemeData theme,
-    bool unread,
-    bool isAudio,
-    bool isEphemeron,
-    int daysLeft,
-    String? drift,
-  ) {
-    return ListTile(
-      onTap: () => _openItem(e),
-      leading: _leading(e, theme, unread),
-      title: Text(
-        e.work.title,
-        overflow: TextOverflow.ellipsis,
-        maxLines: 2,
-        style: unread
-            ? theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600)
-            : theme.textTheme.bodyLarge,
-      ),
-      subtitle: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              if (isEphemeron)
-                Padding(
-                  padding: const EdgeInsets.only(right: 4),
-                  child: Opacity(
-                    key: Key('leaf-${e.work.id}'),
-                    opacity: leafOpacity(daysLeft),
-                    child: const Icon(
-                      Icons.eco,
-                      size: 14,
-                      color: OhColors.sage500,
-                    ),
-                  ),
-                ),
-              Expanded(
-                child: Text(
-                  '${e.feedTitle.isEmpty ? 'Feed' : e.feedTitle} · '
-                  '${formatDay(e.episode.publishedAtMs)}',
-                  overflow: TextOverflow.ellipsis,
-                  maxLines: 1,
-                ),
-              ),
-            ],
-          ),
-          if (drift != null)
-            Text(
-              drift,
-              key: Key('drift-${e.work.id}'),
-              style: theme.textTheme.bodySmall,
-              overflow: TextOverflow.ellipsis,
-              maxLines: 1,
-            ),
-          if (isAudio && widget.downloadCoordinator != null)
-            _RowDownload(
-                coordinator: widget.downloadCoordinator!, workId: e.work.id),
-        ],
-      ),
-      // Overflow parity (ergonomic-ux): every row gets the menu, audio or
-      // not — swipe is the fast path, the menu is the reachable-by-anyone
-      // path, and Keep/Let it pass live in both.
-      trailing: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          if (isAudio && _isDownloaded(e))
-            Padding(
-              padding: const EdgeInsets.only(right: 4),
-              child: Icon(
-                Icons.download_done,
-                key: Key('downloaded-${e.work.id}'),
-                size: 18,
-                color: theme.colorScheme.primary,
-              ),
-            ),
-          if (isAudio)
-            IconButton(
-              key: Key('play-${e.work.id}'),
-              tooltip: 'Play',
-              icon: const Icon(Icons.play_circle_outline, size: 32),
-              onPressed: () => _playItem(e),
-            ),
-          PopupMenuButton<String>(
-            key: Key('menu-${e.work.id}'),
-            tooltip: 'More',
-            onSelected: (choice) => switch (choice) {
-              'keep' => _keep(e),
-              'pass' => _letItPass(e),
-              'play-next' => _playNext(e),
-              'play-last' => _playLast(e),
-              'download' => _download(e),
-              _ => _transcribe(e, translate: choice == 'translate'),
-            },
-            itemBuilder: (_) => [
-              PopupMenuItem(
-                  key: Key('keep-${e.work.id}'),
-                  value: 'keep',
-                  child: const Text('Keep')),
-              PopupMenuItem(
-                  key: Key('pass-${e.work.id}'),
-                  value: 'pass',
-                  child: const Text('Let it pass')),
-              if (isAudio) ...[
-                PopupMenuItem(
-                    key: Key('play-next-${e.work.id}'),
-                    value: 'play-next',
-                    child: const Text('Play next')),
-                PopupMenuItem(
-                    key: Key('play-last-${e.work.id}'),
-                    value: 'play-last',
-                    child: const Text('Play last')),
-                if (widget.localMlAvailable &&
-                    widget.downloadCoordinator != null &&
-                    !_isDownloaded(e))
-                  PopupMenuItem(
-                      key: Key('download-${e.work.id}'),
-                      value: 'download',
-                      child: const Text('Download')),
-                if (widget.localMlAvailable) ...[
-                  PopupMenuItem(
-                      key: Key('transcribe-${e.work.id}'),
-                      value: 'transcribe',
-                      child: Text(e.episode.archivedAtMs != null
-                          ? 'Re-download audio'
-                          : 'Transcribe')),
-                  PopupMenuItem(
-                      key: Key('translate-${e.work.id}'),
-                      value: 'translate',
-                      child:
-                          const Text('Transcribe + translate to English')),
-                ],
-              ],
-            ],
-          ),
-        ],
-      ),
+      child: row,
     );
   }
 

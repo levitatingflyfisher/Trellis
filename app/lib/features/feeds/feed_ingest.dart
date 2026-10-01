@@ -187,7 +187,15 @@ Future<int> ingestFeedItems(
   await db.transaction(() async {
     for (final item in items) {
       final guid = guidOf(item);
-      if (!seen.add(guid)) continue;
+      if (!seen.add(guid)) {
+        // Items stored before ingest kept length and artwork still lack
+        // them; a later listing fills the gaps.
+        if (item.durationMs != null || item.imageUrl != null) {
+          await db.feedsDao.fillMissingMetadata(feedId, guid,
+              durationMs: item.durationMs, imageUrl: item.imageUrl);
+        }
+        continue;
+      }
       final action = rules.isEmpty
           ? null
           : evaluateFeedRules(rules,
@@ -218,6 +226,8 @@ Future<int> ingestFeedItems(
           feedId: feedId,
           guid: guid,
           enclosureUrl: enclosureUrl,
+          durationMs: item.durationMs,
+          imageUrl: item.imageUrl,
           publishedAtMs: parsePublishedMs(item.date) ?? nowMs);
       if (action == FeedRuleAction.markReadOnArrival) {
         await db.feedsDao.setReadAt(workId, nowMs);

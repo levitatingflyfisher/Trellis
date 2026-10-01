@@ -442,6 +442,174 @@ void main() {
     });
   });
 
+  group('episode state for rows (ADR-0016)', () {
+    Future<({int profileId, int feedId, int workId})> one() async {
+      final profileId = await seedProfile();
+      final feedId =
+          await db.feedsDao.insertFeed(profileId: profileId, url: 'https://a/f');
+      final workId = await seedEpisode(
+          profileId: profileId,
+          feedId: feedId,
+          title: 'ep',
+          publishedAtMs: 1,
+          enclosureUrl: 'https://a/1.mp3');
+      return (profileId: profileId, feedId: feedId, workId: workId);
+    }
+
+    test('ingest can store an episode\'s own artwork and length', () async {
+      final profileId = await seedProfile();
+      final feedId =
+          await db.feedsDao.insertFeed(profileId: profileId, url: 'https://a/f');
+      final workId = await db.spineDao.insertWork(
+          profileId: profileId,
+          kind: 'episode',
+          title: 'ep',
+          persistence: 'ephemeron',
+          firstSeenEpochDay: 100);
+      await db.feedsDao.insertEpisode(
+          workId: workId,
+          feedId: feedId,
+          guid: 'g',
+          publishedAtMs: 1,
+          durationMs: 60000,
+          imageUrl: 'https://a/ep.jpg');
+      final ep = (await db.feedsDao.episodeOf(workId))!;
+      expect(ep.imageUrl, 'https://a/ep.jpg');
+      expect(ep.durationMs, 60000);
+    });
+
+    test('a new episode is not played', () async {
+      final s = await one();
+      expect((await db.feedsDao.episodeOf(s.workId))!.finishedAtMs, isNull);
+    });
+
+    test('setFinished keeps the first time it was finished', () async {
+      final s = await one();
+      await db.feedsDao.setFinished(s.workId, 500);
+      await db.feedsDao.setFinished(s.workId, 900);
+      expect((await db.feedsDao.episodeOf(s.workId))!.finishedAtMs, 500);
+    });
+
+    test('mark played stamps it played and seen, and promotes nothing',
+        () async {
+      final s = await one();
+      await db.feedsDao.markPlayed(s.workId, 700);
+      final ep = (await db.feedsDao.episodeOf(s.workId))!;
+      expect(ep.finishedAtMs, 700);
+      expect(ep.readAtMs, 700);
+      expect((await db.spineDao.workById(s.workId))!.persistence, 'ephemeron',
+          reason: 'clean-up must not make ephemera permanent (law 2)');
+    });
+
+    test('mark played leaves an earlier read time alone', () async {
+      final s = await one();
+      await db.feedsDao.markRead(s.workId, 100);
+      await db.feedsDao.markPlayed(s.workId, 700);
+      expect((await db.feedsDao.episodeOf(s.workId))!.readAtMs, 100);
+    });
+
+    test('mark unplayed clears the stamp and starts it from the top again',
+        () async {
+      final s = await one();
+      await db.feedsDao.savePlayerPosition(
+          profileId: s.profileId, workId: s.workId, tMs: 5000);
+      await db.spineDao.savePosition(
+          profileId: s.profileId,
+          workId: s.workId,
+          segmentIdx: 3,
+          wordIdx: 0,
+          lastModality: 'listen');
+      await db.feedsDao.markPlayed(s.workId, 700);
+
+      await db.feedsDao.markUnplayed(profileId: s.profileId, workId: s.workId);
+
+      expect((await db.feedsDao.episodeOf(s.workId))!.finishedAtMs, isNull);
+      expect(
+          await db.feedsDao
+              .playerPosition(profileId: s.profileId, workId: s.workId),
+          isNull);
+      expect(
+          await db.spineDao.position(profileId: s.profileId, workId: s.workId),
+          isNull);
+    });
+
+    test('mark unplayed also clears the work\'s finished day, keeping any '
+        'promotion', () async {
+      final s = await one();
+      await db.spineDao.promoteWork(s.workId);
+      await db.spineDao.markFinished(s.workId, 20000);
+
+      await db.feedsDao.markUnplayed(profileId: s.profileId, workId: s.workId);
+
+      final work = (await db.spineDao.workById(s.workId))!;
+      expect(work.finishedEpochDay, isNull);
+      expect(work.persistence, 'work');
+    });
+
+    test('listening progress reads the raw position without a transcript',
+        () async {
+      final s = await one();
+      await db.feedsDao.savePlayerPosition(
+          profileId: s.profileId, workId: s.workId, tMs: 5000);
+      final l = await db.feedsDao.listeningOf(s.profileId);
+      expect(l.progressMs, {s.workId: 5000});
+      expect(l.transcribed, isEmpty);
+    });
+
+    test('listening progress projects a transcribed episode\'s sentence '
+        'back to time', () async {
+      final s = await one();
+      await db.spineDao.insertAlignments(s.workId, [
+        (segmentIdx: 0, tStartMs: 0, tEndMs: 4000),
+        (segmentIdx: 1, tStartMs: 4000, tEndMs: 9000),
+      ]);
+      // A stale raw position from before the transcript must lose.
+      await db.feedsDao.savePlayerPosition(
+          profileId: s.profileId, workId: s.workId, tMs: 100);
+      await db.spineDao.savePosition(
+          profileId: s.profileId,
+          workId: s.workId,
+          segmentIdx: 1,
+          wordIdx: 0,
+          lastModality: 'listen');
+      final l = await db.feedsDao.listeningOf(s.profileId);
+      expect(l.progressMs, {s.workId: 4000});
+      expect(l.transcribed, {s.workId});
+    });
+
+    test('listening progress is per profile', () async {
+      final s = await one();
+      final other = await db.profilesDao.create('Bo');
+      await db.feedsDao.savePlayerPosition(
+          profileId: other, workId: s.workId, tMs: 5000);
+      expect((await db.feedsDao.listeningOf(s.profileId)).progressMs, isEmpty);
+    });
+
+    test('a feed remembers oldest-first, and its episodes follow it',
+        () async {
+      final s = await one();
+      await seedEpisode(
+          profileId: s.profileId,
+          feedId: s.feedId,
+          title: 'later',
+          publishedAtMs: 2);
+      var feed = (await db.feedsDao.feedById(s.feedId))!;
+      expect(feed.sortOldestFirst, isFalse);
+
+      await db.feedsDao.setSortOldestFirst(s.feedId, true);
+      feed = (await db.feedsDao.feedById(s.feedId))!;
+      expect(feed.sortOldestFirst, isTrue);
+      expect(
+          (await db.feedsDao.episodesOfFeed(s.feedId, oldestFirst: true))
+              .map((r) => r.work.title),
+          ['ep', 'later']);
+      expect(
+          (await db.feedsDao.episodesOfFeed(s.feedId))
+              .map((r) => r.work.title),
+          ['later', 'ep']);
+    });
+  });
+
   group('episode metadata', () {
     test('the player writes back a learned duration', () async {
       final profileId = await seedProfile();
@@ -846,6 +1014,9 @@ void main() {
         ALTER TABLE profiles DROP COLUMN reader_prefs_json;
         DROP TABLE reading_days;
         ALTER TABLE jobs DROP COLUMN failure_reason;
+        ALTER TABLE episodes DROP COLUMN finished_at_ms;
+        ALTER TABLE episodes DROP COLUMN image_url;
+        ALTER TABLE feeds DROP COLUMN sort_oldest_first;
         PRAGMA user_version = 11;
       ''');
       v11.dispose();
@@ -946,6 +1117,9 @@ void main() {
         ALTER TABLE profiles DROP COLUMN reader_prefs_json;
         DROP TABLE reading_days;
         ALTER TABLE jobs DROP COLUMN failure_reason;
+        ALTER TABLE episodes DROP COLUMN finished_at_ms;
+        ALTER TABLE episodes DROP COLUMN image_url;
+        ALTER TABLE feeds DROP COLUMN sort_oldest_first;
         PRAGMA user_version = 12;
       ''');
         v12.dispose();
@@ -986,6 +1160,66 @@ void main() {
         );
       },
     );
+  });
+
+  group('schema migration v22 -> v23', () {
+    test('a v22 database gains played, episode artwork and feed sort, and '
+        'keeps its rows', () async {
+      final dir = Directory.systemTemp.createTempSync('trellis-migration-v23');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final file = File('${dir.path}/v22.sqlite');
+
+      final seed = AppDatabase.forTesting(NativeDatabase(file));
+      final profileId = await seed.profilesDao.create('Ada');
+      final feedId = await seed.feedsDao
+          .insertFeed(profileId: profileId, url: 'https://a.test/f');
+      final workId = await seed.spineDao.insertWork(
+          profileId: profileId,
+          kind: 'episode',
+          title: 'Kept',
+          persistence: 'ephemeron',
+          firstSeenEpochDay: 100);
+      await seed.feedsDao.insertEpisode(
+          workId: workId, feedId: feedId, guid: 'g', publishedAtMs: 1);
+      // Finished by ear before v23: only the work knew.
+      final heardId = await seed.spineDao.insertWork(
+          profileId: profileId,
+          kind: 'episode',
+          title: 'Heard',
+          persistence: 'work',
+          firstSeenEpochDay: 100);
+      await seed.feedsDao.insertEpisode(
+          workId: heardId, feedId: feedId, guid: 'h', publishedAtMs: 2);
+      await seed.spineDao.markFinished(heardId, 20000);
+      await seed.close();
+      final v22 = raw.sqlite3.open(file.path);
+      v22.execute('''
+        ALTER TABLE episodes DROP COLUMN finished_at_ms;
+        ALTER TABLE episodes DROP COLUMN image_url;
+        ALTER TABLE feeds DROP COLUMN sort_oldest_first;
+        PRAGMA user_version = 22;
+      ''');
+      v22.dispose();
+
+      final migrated = AppDatabase.forTesting(NativeDatabase(file));
+      addTearDown(migrated.close);
+
+      final ep = (await migrated.feedsDao.episodeOf(workId))!;
+      expect(ep.guid, 'g');
+      expect(ep.finishedAtMs, isNull);
+      expect(ep.imageUrl, isNull);
+      expect((await migrated.feedsDao.feedById(feedId))!.sortOldestFirst,
+          isFalse);
+      expect((await migrated.feedsDao.episodeOf(heardId))!.finishedAtMs,
+          20000 * Duration.millisecondsPerDay,
+          reason: 'episodes already finished must fade from day one');
+
+      await migrated.feedsDao.markPlayed(workId, 42);
+      await migrated.feedsDao.setSortOldestFirst(feedId, true);
+      expect((await migrated.feedsDao.episodeOf(workId))!.finishedAtMs, 42);
+      expect((await migrated.feedsDao.feedById(feedId))!.sortOldestFirst,
+          isTrue);
+    });
   });
 
   group('schema migration v18 -> v20', () {
@@ -1031,6 +1265,9 @@ void main() {
         ALTER TABLE translation_sentences DROP COLUMN engine;
         ALTER TABLE works DROP COLUMN active_translation_lang;
         ALTER TABLE jobs DROP COLUMN failure_reason;
+        ALTER TABLE episodes DROP COLUMN finished_at_ms;
+        ALTER TABLE episodes DROP COLUMN image_url;
+        ALTER TABLE feeds DROP COLUMN sort_oldest_first;
         PRAGMA user_version = 18;
       ''');
         v18.dispose();
@@ -1106,6 +1343,9 @@ void main() {
         v19.execute('''
         ALTER TABLE feeds DROP COLUMN image_url;
         ALTER TABLE jobs DROP COLUMN failure_reason;
+        ALTER TABLE episodes DROP COLUMN finished_at_ms;
+        ALTER TABLE episodes DROP COLUMN image_url;
+        ALTER TABLE feeds DROP COLUMN sort_oldest_first;
         PRAGMA user_version = 19;
       ''');
         v19.dispose();

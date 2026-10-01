@@ -934,6 +934,69 @@ void main() {
     });
   });
 
+  group('rows you can tell apart (ADR-0016)', () {
+    Future<int> seedAudio(int profileId) async {
+      final feedId = await db.feedsDao
+          .insertFeed(profileId: profileId, url: 'https://a/f');
+      final workId = await seedRiverItem(
+          profileId: profileId,
+          feedId: feedId,
+          title: 'An audio item',
+          publishedAtMs: 1000,
+          enclosureUrl: 'https://a/1.mp3');
+      await db.feedsDao.setDuration(workId, 45 * 60000);
+      return workId;
+    }
+
+    testWidgets('Mark played fades the row; Mark unplayed brings it back',
+        (tester) async {
+      final profileId = await seedProfile();
+      final workId = await seedAudio(profileId);
+      await pumpApp(tester, ScriptedFetcher((u, h) => textResponse(_rssOne)));
+      await openRiver(tester);
+      expect(find.byKey(Key('played-$workId')), findsNothing);
+
+      await tester.tap(find.byKey(Key('menu-$workId')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(Key('mark-played-$workId')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(Key('played-$workId')), findsOneWidget);
+      expect((await db.spineDao.workById(workId))!.persistence, 'ephemeron',
+          reason: 'marking is clean-up, not keeping');
+
+      await tester.tap(find.byKey(Key('menu-$workId')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(Key('mark-unplayed-$workId')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(Key('played-$workId')), findsNothing);
+    });
+
+    testWidgets('a half-heard episode shows how long is left',
+        (tester) async {
+      final profileId = await seedProfile();
+      final workId = await seedAudio(profileId);
+      await db.feedsDao.savePlayerPosition(
+          profileId: profileId, workId: workId, tMs: 22 * 60000);
+      await pumpApp(tester, ScriptedFetcher((u, h) => textResponse(_rssOne)));
+      await openRiver(tester);
+
+      expect(find.textContaining('23 min left'), findsOneWidget);
+      expect(find.byKey(Key('progress-$workId')), findsOneWidget);
+    });
+
+    testWidgets('a queued episode says it is in Up Next', (tester) async {
+      final profileId = await seedProfile();
+      final workId = await seedAudio(profileId);
+      await db.queueDao
+          .playLast(profileId: profileId, workId: workId, nowMs: 1);
+      await pumpApp(tester, ScriptedFetcher((u, h) => textResponse(_rssOne)));
+      await openRiver(tester);
+
+      expect(find.byKey(Key('queued-$workId')), findsOneWidget);
+      expect(find.text('In Up Next'), findsOneWidget);
+    });
+  });
+
   group('Up Next reachability (Campaign 9 Phase 2)', () {
     // User: "hiding the queue as only accessible in the playing bar is
     // odd" — Play next/Play last (river_screen.dart) already WRITE to the

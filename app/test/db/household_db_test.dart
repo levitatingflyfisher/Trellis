@@ -126,6 +126,9 @@ void main() {
         ALTER TABLE profiles DROP COLUMN dsp_global_default;
         ALTER TABLE player_positions DROP COLUMN file_idx;
         ALTER TABLE jobs DROP COLUMN failure_reason;
+        ALTER TABLE episodes DROP COLUMN finished_at_ms;
+        ALTER TABLE episodes DROP COLUMN image_url;
+        ALTER TABLE feeds DROP COLUMN sort_oldest_first;
         PRAGMA user_version = 5;
       ''');
       v5.dispose();

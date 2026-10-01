@@ -8,7 +8,10 @@
 /// channel, or an isolate it didn't ask for.
 library;
 
+import 'dart:convert';
 import 'dart:io';
+
+import 'package:crypto/crypto.dart';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_tts/flutter_tts.dart';
@@ -484,6 +487,13 @@ class DeviceServices {
   /// `FeedsRepository`'s fetch-once law).
   File artworkFileFor(int feedId) =>
       File('${supportDir.path}/artwork/$feedId.img');
+
+  /// An episode's own artwork, named by its URL so episodes that share
+  /// one image share one file. Same fetch-once, read-only-at-render law
+  /// as [artworkFileFor].
+  File episodeArtworkFileFor(String imageUrl) => File(
+      '${supportDir.path}/artwork/episodes/'
+      '${sha1.convert(utf8.encode(imageUrl))}.img');
 
   /// Campaign 7 (ADR-0013): where an audiobook's own copied files live —
   /// one directory per book, so removing a book is deleting one directory

@@ -549,4 +549,53 @@ void main() {
       expect(decodeHtmlEntities('no entities'), 'no entities');
     });
   });
+
+  group('episode artwork and length', () {
+    const ns = 'xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd"';
+
+    FeedItem only(String item, {String url = 'https://x.test/feed'}) =>
+        parseRssFeed('<rss $ns><channel><title>t</title>$item</channel></rss>',
+                url)
+            .items
+            .single;
+
+    test('an item\'s own itunes:image is its artwork', () {
+      final it = only('<item><title>e</title>'
+          '<itunes:image href="https://x.test/ep1.jpg"/></item>');
+      expect(it.imageUrl, 'https://x.test/ep1.jpg');
+    });
+
+    test('a relative item image resolves against the feed URL', () {
+      final it = only(
+          '<item><title>e</title><itunes:image href="/ep1.jpg"/></item>',
+          url: 'https://x.test/podcast/feed');
+      expect(it.imageUrl, 'https://x.test/ep1.jpg');
+    });
+
+    test('an item with no image of its own has none', () {
+      expect(only('<item><title>e</title></item>').imageUrl, isNull);
+    });
+
+    test('itunes:duration reads seconds, mm:ss and hh:mm:ss', () {
+      int? dur(String v) =>
+          only('<item><title>e</title><itunes:duration>$v</itunes:duration>'
+                  '</item>')
+              .durationMs;
+      expect(dur('1800'), 1800000);
+      expect(dur('45:30'), (45 * 60 + 30) * 1000);
+      expect(dur('1:02:03'), (3600 + 2 * 60 + 3) * 1000);
+      expect(dur(' 90 '), 90000);
+    });
+
+    test('a missing, zero or garbled duration is unknown, not zero', () {
+      int? dur(String v) =>
+          only('<item><title>e</title><itunes:duration>$v</itunes:duration>'
+                  '</item>')
+              .durationMs;
+      expect(only('<item><title>e</title></item>').durationMs, isNull);
+      expect(dur('0'), isNull);
+      expect(dur('soon'), isNull);
+      expect(dur('1:xx'), isNull);
+    });
+  });
 }

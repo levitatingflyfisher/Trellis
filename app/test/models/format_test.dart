@@ -61,4 +61,20 @@ void main() {
       expect(formatEpochDay(epochDay), '5 Aug');
     });
   });
+
+  group('episode lengths (ADR-0016)', () {
+    test('formatLength reads as a listener would say it', () {
+      expect(formatLength(45 * 60000), '45 min');
+      expect(formatLength(60 * 60000), '1 hr');
+      expect(formatLength(65 * 60000), '1 hr 5 min');
+      expect(formatLength(20000), '1 min', reason: 'never "0 min"');
+    });
+
+    test('formatTimeLeft rounds up, so a sliver never reads as nothing', () {
+      expect(formatTimeLeft(23 * 60000), '23 min left');
+      expect(formatTimeLeft(22 * 60000 + 1), '23 min left');
+      expect(formatTimeLeft(90 * 60000), '1 hr 30 min left');
+      expect(formatTimeLeft(10000), '1 min left');
+    });
+  });
 }

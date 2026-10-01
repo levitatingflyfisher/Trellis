@@ -99,6 +99,9 @@ const String noFeedArchiveNote =
 
 typedef FetchOlderOutcome = ({int newItems, String message});
 
+/// How many distinct episode images one refresh may fetch.
+const episodeArtworkFetchLimit = 20;
+
 class FeedsRepository {
   FeedsRepository(
       {required this.db,
@@ -231,7 +234,6 @@ class FeedsRepository {
     await _persistState(feedId, state,
         nextPageUrl: parsed.nextPageUrl, updateNextPageUrl: true,
         imageUrl: parsed.imageUrl, updateImageUrl: true);
-    await _maybeFetchArtwork(feedId, newUrl: parsed.imageUrl, oldUrl: null);
     // A brand-new feed has no rules yet (rulesJson is still the '[]'
     // default) — nothing to decode, the ingest default applies.
     final added = await ingestFeedItems(
@@ -241,6 +243,10 @@ class FeedsRepository {
         items: parsed.items,
         nowMs: nowMs);
     if (added > 0) await _runDedupPass(profileId);
+    _fetchArtworkLater(() async {
+      await _maybeFetchArtwork(feedId, newUrl: parsed.imageUrl, oldUrl: null);
+      await _fetchEpisodeArtwork(feedId, showImageUrl: parsed.imageUrl);
+    });
     return SubscribeSuccess(
         feedId: feedId, title: state.title, newItems: added);
   }
@@ -287,6 +293,11 @@ class FeedsRepository {
           items: parsed.items,
           nowMs: nowMs,
           rules: decodeFeedRules(feed.rulesJson));
+      // Every fresh refresh, not only one with new episodes: a fetch
+      // that failed, or a URL filled in on an episode already stored,
+      // still needs its file.
+      _fetchArtworkLater(() =>
+          _fetchEpisodeArtwork(feed.id, showImageUrl: parsed.imageUrl));
       final deviceServices = services;
       if (deviceServices != null) {
         await evictStaleAudio(
@@ -434,6 +445,55 @@ class FeedsRepository {
     if (newUrl == null || newUrl == oldUrl) return;
     await deviceServices.audioFetcher
         .fetch(newUrl, deviceServices.artworkFileFor(feedId));
+  }
+
+  Future<void> _artwork = Future.value();
+
+  /// Completes once artwork started by the last subscribe or refresh has
+  /// landed or failed. Nothing waits on it but tests: following a show
+  /// shouldn't hang on a slow image host.
+  Future<void> get artworkSettled => _artwork;
+
+  /// Queues artwork behind any still under way, one fetch at a time, so
+  /// two refreshes never write the same file at once. A failure is just a
+  /// missing thumbnail, retried by the next refresh.
+  void _fetchArtworkLater(Future<void> Function() fetch) {
+    final previous = _artwork;
+    _artwork = () async {
+      await previous;
+      try {
+        await fetch();
+      } catch (_) {}
+    }();
+  }
+
+  /// An episode's own artwork, fetched with the episodes rather than at
+  /// render, through the same engine as the show's. Only images that
+  /// differ from the show's, only for the newest
+  /// [episodeArtworkFetchLimit], so following a 500-episode back
+  /// catalogue doesn't mean 500 image requests; older rows show the
+  /// show's artwork. A failed image is just a missing thumbnail.
+  Future<void> _fetchEpisodeArtwork(int feedId,
+      {required String? showImageUrl}) async {
+    final deviceServices = services;
+    // existsSync throws on the web tier, and nothing there reads the file.
+    if (deviceServices == null || !deviceServices.localMlAvailable) return;
+    final wanted = <String>{};
+    for (final e in await db.feedsDao.episodesOfFeed(feedId)) {
+      final url = e.episode.imageUrl;
+      if (url == null || url == showImageUrl) continue;
+      wanted.add(url);
+      if (wanted.length == episodeArtworkFetchLimit) break;
+    }
+    for (final url in wanted) {
+      final file = deviceServices.episodeArtworkFileFor(url);
+      if (file.existsSync()) continue;
+      try {
+        await deviceServices.audioFetcher.fetch(url, file);
+      } catch (_) {
+        // Retried by the next refresh, since the file is still missing.
+      }
+    }
   }
 
   /// The explicit "Fetch older episodes" action (RFC 5005): walks the

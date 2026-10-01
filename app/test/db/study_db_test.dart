@@ -769,6 +769,9 @@ void main() {
         ALTER TABLE player_positions DROP COLUMN file_idx;
         ALTER TABLE profiles DROP COLUMN reader_prefs_json;
         DROP TABLE reading_days;
+        ALTER TABLE episodes DROP COLUMN finished_at_ms;
+        ALTER TABLE episodes DROP COLUMN image_url;
+        ALTER TABLE feeds DROP COLUMN sort_oldest_first;
         PRAGMA user_version = 2;
       ''');
       v2.dispose();

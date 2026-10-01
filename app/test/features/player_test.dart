@@ -459,6 +459,62 @@ void main() {
     });
   });
 
+  group('the played fact (ADR-0016)', () {
+    test('playing to the end marks the episode played', () async {
+      final work = await seedEpisode();
+      await controller.playWork(work);
+      player.emitCompleted();
+      await pumpEventQueue();
+      expect((await db.feedsDao.episodeOf(work.id))!.finishedAtMs, nowMs);
+    });
+
+    test('reaching the last 30 seconds marks it played and keeps playing',
+        () async {
+      final work = await seedEpisode();
+      await controller.playWork(work);
+      player.emitDuration(const Duration(minutes: 10));
+      player.emitPosition(const Duration(minutes: 9, seconds: 20));
+      await pumpEventQueue();
+      expect((await db.feedsDao.episodeOf(work.id))!.finishedAtMs, isNull,
+          reason: '40 s left is not the end');
+
+      player.emitPosition(const Duration(minutes: 9, seconds: 31));
+      await pumpEventQueue();
+      expect((await db.feedsDao.episodeOf(work.id))!.finishedAtMs, nowMs);
+      expect(player.playing, isTrue,
+          reason: 'the tail of the episode is still heard');
+      expect(controller.current?.id, work.id);
+    });
+
+    test('the outro cutoff marks it played too', () async {
+      final work = await seedEpisode();
+      await db.feedsDao.updatePlaybackSettings(feedId, skipOutroSeconds: 90);
+      await controller.playWork(work);
+      player.emitDuration(const Duration(minutes: 10));
+      player.emitPosition(const Duration(minutes: 8, seconds: 31));
+      await pumpEventQueue();
+      expect((await db.feedsDao.episodeOf(work.id))!.finishedAtMs, nowMs);
+    });
+
+    test('a trailer shorter than 30 s is not played on its first tick',
+        () async {
+      final work = await seedEpisode();
+      await controller.playWork(work);
+      player.emitDuration(const Duration(seconds: 20));
+      player.emitPosition(const Duration(seconds: 1));
+      await pumpEventQueue();
+      expect((await db.feedsDao.episodeOf(work.id))!.finishedAtMs, isNull);
+    });
+
+    test('an episode with no known length is never marked early', () async {
+      final work = await seedEpisode();
+      await controller.playWork(work);
+      player.emitPosition(const Duration(hours: 3));
+      await pumpEventQueue();
+      expect((await db.feedsDao.episodeOf(work.id))!.finishedAtMs, isNull);
+    });
+  });
+
   group('Up Next auto-advance', () {
     test('finishing removes the episode from the queue by default, then '
         'auto-advances to the new head', () async {
@@ -500,6 +556,109 @@ void main() {
       final remaining = await db.queueDao.queueOf(profileId);
       expect(remaining.map((r) => r.workId), contains(first.id),
           reason: 'kept, per the household setting');
+    });
+
+    test('with finished episodes kept, advancing still moves on to the '
+        'next one instead of replaying the one that ended', () async {
+      await db.profilesDao.setKeepFinishedInQueue(profileId, true);
+      final first = await seedEpisode(title: 'One');
+      final second = await seedEpisode(
+          title: 'Two', enclosure: 'https://cast.test/2.mp3');
+      await db.queueDao
+          .playLast(profileId: profileId, workId: first.id, nowMs: 1);
+      await db.queueDao
+          .playLast(profileId: profileId, workId: second.id, nowMs: 2);
+      await controller.playWork(first);
+
+      player.emitCompleted();
+      await pumpEventQueue();
+
+      expect(controller.current?.id, second.id);
+      expect(player.loadedUrl, 'https://cast.test/2.mp3');
+    });
+
+    test('with finished episodes kept, an episode put next while one plays '
+        'is not skipped', () async {
+      await db.profilesDao.setKeepFinishedInQueue(profileId, true);
+      final playing = await seedEpisode(title: 'One');
+      final later = await seedEpisode(
+          title: 'Two', enclosure: 'https://cast.test/2.mp3');
+      final next = await seedEpisode(
+          title: 'Next', enclosure: 'https://cast.test/next.mp3');
+      await db.queueDao
+          .playLast(profileId: profileId, workId: playing.id, nowMs: 1);
+      await db.queueDao
+          .playLast(profileId: profileId, workId: later.id, nowMs: 2);
+      await controller.playWork(playing);
+      await db.queueDao
+          .playNext(profileId: profileId, workId: next.id, nowMs: 3);
+
+      player.emitCompleted();
+      await pumpEventQueue();
+
+      expect(controller.current?.id, next.id);
+    });
+
+    test('with finished episodes kept, a run queued at the head while one '
+        'plays (Play from here) is not skipped', () async {
+      await db.profilesDao.setKeepFinishedInQueue(profileId, true);
+      final playing = await seedEpisode(title: 'One');
+      final later = await seedEpisode(
+          title: 'Two', enclosure: 'https://cast.test/2.mp3');
+      final a = await seedEpisode(
+          title: 'A', enclosure: 'https://cast.test/a.mp3');
+      final b = await seedEpisode(
+          title: 'B', enclosure: 'https://cast.test/b.mp3');
+      await db.queueDao
+          .playLast(profileId: profileId, workId: playing.id, nowMs: 1);
+      await db.queueDao
+          .playLast(profileId: profileId, workId: later.id, nowMs: 2);
+      await controller.playWork(playing);
+      await db.queueDao.playNextAll(
+          profileId: profileId, workIds: [a.id, b.id], nowMs: 3);
+
+      player.emitCompleted();
+      await pumpEventQueue();
+
+      expect(controller.current?.id, a.id);
+    });
+
+    test('with finished episodes kept, advancing never loops back to one '
+        'already played', () async {
+      await db.profilesDao.setKeepFinishedInQueue(profileId, true);
+      final first = await seedEpisode(title: 'One');
+      final second = await seedEpisode(
+          title: 'Two', enclosure: 'https://cast.test/2.mp3');
+      await db.queueDao
+          .playLast(profileId: profileId, workId: first.id, nowMs: 1);
+      await db.queueDao
+          .playLast(profileId: profileId, workId: second.id, nowMs: 2);
+      await controller.playWork(first);
+      player.emitCompleted();
+      await pumpEventQueue();
+      expect(controller.current?.id, second.id);
+      player.log.clear();
+
+      player.emitCompleted();
+      await pumpEventQueue();
+
+      expect(controller.current?.id, second.id);
+      expect(player.log, isNot(contains('play')));
+    });
+
+    test('with finished episodes kept, the last one in Up Next just stops',
+        () async {
+      await db.profilesDao.setKeepFinishedInQueue(profileId, true);
+      final only = await seedEpisode(title: 'One');
+      await db.queueDao
+          .playLast(profileId: profileId, workId: only.id, nowMs: 1);
+      await controller.playWork(only);
+      player.log.clear();
+
+      player.emitCompleted();
+      await pumpEventQueue();
+
+      expect(player.log, isNot(contains('play')));
     });
 
     test('an empty queue after finishing just stops — no crash, nothing '

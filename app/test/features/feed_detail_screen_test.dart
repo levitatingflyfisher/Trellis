@@ -9,6 +9,10 @@ import 'package:trellis/features/feeds/feed_detail_screen.dart';
 import 'package:trellis/features/feeds/feeds_repository.dart';
 import 'package:trellis/features/feeds/feeds_screen.dart';
 
+import 'package:trellis/features/feeds/feed_settings_screen.dart';
+import 'package:trellis/features/player/player_controller.dart';
+
+import '../support/fake_player.dart';
 import '../support/scripted_fetcher.dart';
 
 /// The feed detail screen: a single feed's own episodes, newest first, plus
@@ -211,6 +215,161 @@ void main() {
 
       expect(find.text(feedBotWallReason), findsOneWidget);
       expect(find.text(feed.url), findsNothing);
+    });
+  });
+
+  group('the podcast page (ADR-0016)', () {
+    late FakeEpisodePlayer player;
+    late PlayerController controller;
+    late Feed feed;
+    late Map<String, int> ids;
+
+    // Three episodes, published A then B then C; B is already played.
+    setUp(() async {
+      player = FakeEpisodePlayer();
+      controller = PlayerController(
+          db: db, profileId: profileId, createPlayer: () => player);
+      feed = await seedFeed();
+      ids = {'Aurora season': (await db.spineDao.worksOf(profileId)).single.id};
+      for (final (title, at) in [('Bright comet', 2000), ('Clear night', 3000)]) {
+        final id = await db.spineDao.insertWork(
+            profileId: profileId,
+            kind: 'episode',
+            title: title,
+            persistence: 'ephemeron',
+            firstSeenEpochDay: 100,
+            sourceUrl: 'https://cast.test/$at.mp3');
+        await db.feedsDao.insertEpisode(
+            workId: id,
+            feedId: feed.id,
+            guid: 'g$at',
+            enclosureUrl: 'https://cast.test/$at.mp3',
+            durationMs: 45 * 60000,
+            publishedAtMs: at);
+        ids[title] = id;
+      }
+      await db.feedsDao.markPlayed(ids['Bright comet']!, 1);
+    });
+    tearDown(() => controller.dispose());
+
+    Future<void> pumpPage(WidgetTester tester, {Feed? f}) async {
+      await tester.pumpWidget(MaterialApp(
+          home: FeedDetailScreen(
+              db: db,
+              repository: FeedsRepository(
+                  db: db, fetcher: ScriptedFetcher((u, h) => textResponse(''))),
+              feed: f ?? feed,
+              playerController: controller)));
+      await tester.pumpAndSettle();
+    }
+
+    List<String> titlesInOrder(WidgetTester tester) {
+      final titles = ids.keys.toList();
+      final found = [
+        for (final t in titles)
+          (t, tester.getTopLeft(find.text(t)).dy),
+      ]..sort((a, b) => a.$2.compareTo(b.$2));
+      return [for (final f in found) f.$1];
+    }
+
+    Future<void> openMenu(WidgetTester tester, String title) async {
+      await tester.tap(find.byKey(Key('menu-${ids[title]}')));
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('rows play from here, and say their length', (tester) async {
+      await pumpPage(tester);
+      expect(find.textContaining(' · 45 min'), findsNWidgets(2));
+
+      await tester.tap(find.byKey(Key('play-${ids['Clear night']}')));
+      await tester.pumpAndSettle();
+      expect(player.loadedUrl, 'https://cast.test/3000.mp3');
+    });
+
+    testWidgets('a played episode fades on this page too', (tester) async {
+      await pumpPage(tester);
+      expect(find.byKey(Key('played-${ids['Bright comet']}')), findsOneWidget);
+      expect(find.byKey(Key('played-${ids['Clear night']}')), findsNothing);
+    });
+
+    testWidgets('newest first by default; oldest first is remembered for '
+        'this show', (tester) async {
+      await pumpPage(tester);
+      expect(titlesInOrder(tester),
+          ['Clear night', 'Bright comet', 'Aurora season']);
+
+      await tester.tap(find.byKey(const Key('sort-oldest')));
+      await tester.pumpAndSettle();
+      expect(titlesInOrder(tester),
+          ['Aurora season', 'Bright comet', 'Clear night']);
+      expect((await db.feedsDao.feedById(feed.id))!.sortOldestFirst, isTrue);
+
+      await tester.pumpWidget(const SizedBox());
+      await pumpPage(tester, f: (await db.feedsDao.feedById(feed.id))!);
+      expect(titlesInOrder(tester),
+          ['Aurora season', 'Bright comet', 'Clear night']);
+    });
+
+    testWidgets('Play from here queues this and the unplayed ones after it '
+        'in the order shown, then plays', (tester) async {
+      await db.feedsDao.setSortOldestFirst(feed.id, true);
+      await pumpPage(tester, f: (await db.feedsDao.feedById(feed.id))!);
+
+      await openMenu(tester, 'Aurora season');
+      await tester.tap(find.text('Play from here'));
+      await tester.pumpAndSettle();
+
+      final queue = await db.queueDao.queueOf(profileId);
+      expect(queue.map((r) => r.workId),
+          [ids['Aurora season'], ids['Clear night']],
+          reason: 'Bright comet is already played');
+      expect(player.loadedUrl, 'https://cast.test/aurora.mp3');
+      expect(find.byKey(Key('queued-${ids['Clear night']}')), findsOneWidget);
+    });
+
+    testWidgets('Add unplayed to Up Next appends them and says how many',
+        (tester) async {
+      await pumpPage(tester);
+      await tester.tap(find.byKey(const Key('add-unplayed')));
+      await tester.pumpAndSettle();
+
+      final queue = await db.queueDao.queueOf(profileId);
+      expect(queue.map((r) => r.workId),
+          [ids['Clear night'], ids['Aurora season']]);
+      expect(find.text('Added 2 episodes to Up Next.'), findsOneWidget);
+      expect(player.loadedUrl, isNull, reason: 'queueing never starts play');
+    });
+
+    testWidgets('Mark played and Mark unplayed from the row menu',
+        (tester) async {
+      await pumpPage(tester);
+      await openMenu(tester, 'Clear night');
+      await tester.tap(find.text('Mark played'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(Key('played-${ids['Clear night']}')), findsOneWidget);
+
+      await openMenu(tester, 'Clear night');
+      await tester.tap(find.text('Mark unplayed'));
+      await tester.pumpAndSettle();
+      expect(find.byKey(Key('played-${ids['Clear night']}')), findsNothing);
+    });
+
+    testWidgets('Podcast settings opens the show\'s settings',
+        (tester) async {
+      await pumpPage(tester);
+      await tester.tap(find.byKey(const Key('podcast-settings')));
+      await tester.pumpAndSettle();
+      expect(find.byType(FeedSettingsScreen), findsOneWidget);
+    });
+
+    testWidgets('the page survives 320dp at 2x text', (tester) async {
+      tester.view.physicalSize = const Size(320, 640);
+      tester.view.devicePixelRatio = 1.0;
+      tester.platformDispatcher.textScaleFactorTestValue = 2.0;
+      addTearDown(tester.view.reset);
+      addTearDown(tester.platformDispatcher.clearAllTestValues);
+      await pumpPage(tester);
+      expect(tester.takeException(), isNull);
     });
   });
 }

@@ -249,6 +249,12 @@ class Feeds extends Table {
   /// from the feed id (`DeviceServices.artworkFileFor`), fetched once and
   /// never re-fetched at render.
   TextColumn get imageUrl => text().nullable()();
+
+  /// The podcast page's order (ADR-0016): newest first unless the
+  /// listener chose oldest first for this show, e.g. to binge from the
+  /// start. Still chronological either way, so ADR-0003 law 1 holds.
+  BoolColumn get sortOldestFirst =>
+      boolean().withDefault(const Constant(false))();
 }
 
 /// River metadata for a feed item. The item itself IS a spine work
@@ -302,6 +308,16 @@ class Episodes extends Table {
   /// Null exactly when [dspOriginalDurationMs] is null (set together, in
   /// the same atomic promote — never one without the other).
   IntColumn get dspProcessedDurationMs => integer().nullable()();
+
+  /// When this episode was played (ADR-0016): playback reached the end
+  /// or its last 30 s, or the listener marked it played. A recorded fact
+  /// rather than a guess from position, so a row can fade with
+  /// confidence. Cleared only by "Mark unplayed".
+  IntColumn get finishedAtMs => integer().nullable()();
+
+  /// The item's own artwork URL, when the feed gives one. Only fetched
+  /// when it differs from the show's; see `FeedsRepository`.
+  TextColumn get imageUrl => text().nullable()();
 
   @override
   Set<Column> get primaryKey => {workId};
@@ -1991,6 +2007,63 @@ class QueueDao extends DatabaseAccessor<AppDatabase> with _$QueueDaoMixin {
     );
   });
 
+  /// [playNext] for a run of works, kept in the given order ("Play from
+  /// here"). One transaction and one renumber, however long the run.
+  Future<void> playNextAll({
+    required int profileId,
+    required List<int> workIds,
+    required int nowMs,
+  }) => transaction(() async {
+    final run = workIds.toSet();
+    final rest = [
+      for (final r in await queueOf(profileId))
+        if (!run.contains(r.workId)) r.workId,
+    ];
+    await _rewrite(profileId, [...run, ...rest], nowMs);
+  });
+
+  /// Appends the works not already queued, in order ("Add unplayed to Up
+  /// Next"); queued ones keep their place. Returns how many were added.
+  Future<int> playLastAll({
+    required int profileId,
+    required List<int> workIds,
+    required int nowMs,
+  }) => transaction(() async {
+    final current = [for (final r in await queueOf(profileId)) r.workId];
+    final have = current.toSet();
+    final fresh = [
+      for (final id in workIds)
+        if (have.add(id)) id,
+    ];
+    var position = current.length;
+    for (final id in fresh) {
+      await into(queueTable).insert(QueueTableCompanion.insert(
+          profileId: profileId,
+          workId: id,
+          position: position++,
+          addedAtMs: nowMs));
+    }
+    return fresh.length;
+  });
+
+  /// Replaces the queue with [order], keeping each surviving row's
+  /// addedAtMs.
+  Future<void> _rewrite(int profileId, List<int> order, int nowMs) async {
+    final added = {
+      for (final r in await queueOf(profileId)) r.workId: r.addedAtMs,
+    };
+    await (delete(queueTable)..where((q) => q.profileId.equals(profileId)))
+        .go();
+    var position = 0;
+    for (final id in order) {
+      await into(queueTable).insert(QueueTableCompanion.insert(
+          profileId: profileId,
+          workId: id,
+          position: position++,
+          addedAtMs: added[id] ?? nowMs));
+    }
+  }
+
   /// Drops [workId] from the queue (a no-op if it isn't there) and
   /// renumbers what remains contiguously.
   Future<void> remove({required int profileId, required int workId}) =>
@@ -2216,7 +2289,8 @@ class AudiobooksDao extends DatabaseAccessor<AppDatabase>
 /// A river row: the spine work plus its river metadata and feed title.
 typedef RiverEntry = ({Work work, Episode episode, String feedTitle});
 
-@DriftAccessor(tables: [Feeds, Episodes, Works, PlayerPositions])
+@DriftAccessor(
+    tables: [Feeds, Episodes, Works, PlayerPositions, Positions, Alignments])
 class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
   FeedsDao(super.db);
 
@@ -2315,6 +2389,7 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
     required String guid,
     String? enclosureUrl,
     int? durationMs,
+    String? imageUrl,
     required int publishedAtMs,
   }) => into(episodes).insert(
     EpisodesCompanion.insert(
@@ -2323,6 +2398,7 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
       guid: guid,
       enclosureUrl: Value(enclosureUrl),
       durationMs: Value(durationMs),
+      imageUrl: Value(imageUrl),
       publishedAtMs: publishedAtMs,
     ),
   );
@@ -2412,9 +2488,9 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
     return {for (final r in rows) r.read(episodes.guid)!};
   }
 
-  /// THE river query — the fleet's one ordering code path (ADR-0003 law 1):
-  /// reverse-chronological by publish time, nothing else, no other sort
-  /// exists anywhere in the feature.
+  /// THE river query (ADR-0003 law 1): reverse-chronological by publish
+  /// time, nothing else. The only other order is [episodesOfFeed]'s, one
+  /// show by date in the direction the listener picked; nothing ranks.
   Future<List<RiverEntry>> riverItems(int profileId) async {
     final q = select(episodes).join([
       innerJoin(works, works.id.equalsExp(episodes.workId)),
@@ -2435,24 +2511,124 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
     ];
   }
 
-  /// One feed's own episodes, newest first — the feed detail screen's
-  /// query (unlike [riverItems], scoped to a single feed, not a profile's
-  /// whole river).
+  /// One feed's own episodes for the podcast page, by publish date:
+  /// newest first unless [oldestFirst]. Unlike [riverItems] it is scoped
+  /// to one feed, and the direction is the listener's choice.
   Future<List<({Work work, Episode episode})>> episodesOfFeed(
-    int feedId,
-  ) async {
+    int feedId, {
+    bool oldestFirst = false,
+  }) async {
     final q =
         select(
             episodes,
           ).join([innerJoin(works, works.id.equalsExp(episodes.workId))])
           ..where(episodes.feedId.equals(feedId) &
               works.persistence.isNotValue('decayed'))
-          ..orderBy([OrderingTerm.desc(episodes.publishedAtMs)]);
+          ..orderBy([
+            oldestFirst
+                ? OrderingTerm.asc(episodes.publishedAtMs)
+                : OrderingTerm.desc(episodes.publishedAtMs),
+          ]);
     final rows = await q.get();
     return [
       for (final r in rows)
         (work: r.readTable(works), episode: r.readTable(episodes)),
     ];
+  }
+
+  /// Fills an already-stored episode's missing length and artwork from a
+  /// later listing of the feed; never overwrites, so a length the player
+  /// measured stays.
+  Future<void> fillMissingMetadata(int feedId, String guid,
+      {int? durationMs, String? imageUrl}) async {
+    final ep = await (select(episodes)
+          ..where((e) => e.feedId.equals(feedId) & e.guid.equals(guid)))
+        .getSingleOrNull();
+    if (ep == null) return;
+    final fill = EpisodesCompanion(
+      durationMs: ep.durationMs == null && durationMs != null
+          ? Value(durationMs)
+          : const Value.absent(),
+      imageUrl: ep.imageUrl == null && imageUrl != null
+          ? Value(imageUrl)
+          : const Value.absent(),
+    );
+    if (!fill.durationMs.present && !fill.imageUrl.present) return;
+    await (update(episodes)..where((e) => e.workId.equals(ep.workId)))
+        .write(fill);
+  }
+
+  Future<void> setSortOldestFirst(int feedId, bool oldestFirst) =>
+      (update(feeds)..where((f) => f.id.equals(feedId)))
+          .write(FeedsCompanion(sortOldestFirst: Value(oldestFirst)));
+
+  /// The first finish wins, so replaying an episode doesn't move when it
+  /// was played.
+  Future<void> setFinished(int workId, int nowMs) =>
+      (update(episodes)
+            ..where((e) => e.workId.equals(workId) & e.finishedAtMs.isNull()))
+          .write(EpisodesCompanion(finishedAtMs: Value(nowMs)));
+
+  /// "Mark played": the played fact and the seen dot, nothing else.
+  /// Finishing by ear promotes the work (ADR-0003 law 2); marking does
+  /// not, or clearing out a backlog would keep all of it forever.
+  Future<void> markPlayed(int workId, int nowMs) => transaction(() async {
+        await setFinished(workId, nowMs);
+        await (update(episodes)
+              ..where((e) => e.workId.equals(workId) & e.readAtMs.isNull()))
+            .write(EpisodesCompanion(readAtMs: Value(nowMs)));
+      });
+
+  /// "Mark unplayed" also forgets where it stopped, so playing it again
+  /// starts at the top instead of in its last seconds, and forgets the
+  /// day it was finished.
+  Future<void> markUnplayed({required int profileId, required int workId}) =>
+      transaction(() async {
+        await (update(episodes)..where((e) => e.workId.equals(workId)))
+            .write(const EpisodesCompanion(finishedAtMs: Value(null)));
+        // The library's progress and the finished count read this day;
+        // a kept work stays kept.
+        await (update(works)..where((w) => w.id.equals(workId)))
+            .write(const WorksCompanion(finishedEpochDay: Value(null)));
+        await (delete(playerPositions)
+              ..where((p) =>
+                  p.profileId.equals(profileId) & p.workId.equals(workId)))
+            .go();
+        await (delete(positions)
+              ..where((p) =>
+                  p.profileId.equals(profileId) & p.workId.equals(workId)))
+            .go();
+      });
+
+  /// Where each work stands for one listener, in one pass for a whole
+  /// list of rows. A transcribed work keeps its place as a sentence
+  /// (the cursor law), so that sentence is projected back to its start
+  /// time and wins over any raw position left from before the transcript.
+  Future<({Map<int, int> progressMs, Set<int> transcribed})> listeningOf(
+      int profileId) async {
+    final progress = <int, int>{
+      for (final p in await (select(playerPositions)
+            ..where((p) => p.profileId.equals(profileId)))
+          .get())
+        p.workId: p.tMs,
+    };
+    final aligned = selectOnly(alignments, distinct: true)
+      ..addColumns([alignments.workId]);
+    final transcribed = {
+      for (final r in await aligned.get()) r.read(alignments.workId)!,
+    };
+    final projected = select(positions).join([
+      innerJoin(
+          alignments,
+          alignments.workId.equalsExp(positions.workId) &
+              alignments.segmentIdx.equalsExp(positions.segmentIdx)),
+    ])
+      ..where(positions.profileId.equals(profileId));
+    for (final r in await projected.get()) {
+      progress[r.readTable(positions).workId] =
+          r.readTable(alignments).tStartMs;
+    }
+    return (progressMs: progress, transcribed: transcribed);
   }
 
   Future<void> markRead(int workId, int nowMs) =>
@@ -2766,7 +2942,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 22;
+  int get schemaVersion => 23;
   // There is no v14: it was reserved for the reader-depth campaign, which
   // landed as v18 after three sibling campaigns merged ahead of it, so the
   // guard chain skips from 13 to 15. Version gaps are harmless — an
@@ -2995,6 +3171,25 @@ class AppDatabase extends _$AppDatabase {
             // with this column already present, so adding it again there
             // would be a duplicate column.
             await m.addColumn(jobsTable, jobsTable.failureReason);
+          }
+          if (from >= 2 && from < 23) {
+            // ADR-0016: the played fact, an episode's own artwork and the
+            // podcast page's sort. Guarded on from >= 2 like every other
+            // feeds/episodes column: the from < 2 block creates both
+            // tables fresh with these columns already present.
+            await m.addColumn(episodes, episodes.finishedAtMs);
+            await m.addColumn(episodes, episodes.imageUrl);
+            await m.addColumn(feeds, feeds.sortOldestFirst);
+            // Episodes finished by ear before v23 only stamped the work;
+            // the player is the only writer of that day, so it is a safe
+            // stand-in and they fade from the first launch.
+            await customStatement('''
+              UPDATE episodes SET finished_at_ms = (
+                SELECT finished_epoch_day * 86400000 FROM works
+                WHERE works.id = episodes.work_id)
+              WHERE finished_at_ms IS NULL AND work_id IN (
+                SELECT id FROM works WHERE finished_epoch_day IS NOT NULL)
+            ''');
           }
         },
         beforeOpen: (details) async {

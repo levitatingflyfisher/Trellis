@@ -206,7 +206,33 @@ Enclosure? _findAudio(XmlElement el) {
   return null;
 }
 
-FeedItem _rssItem(XmlElement item) {
+/// `itunes:duration`: plain seconds, `mm:ss` or `hh:mm:ss`.
+int? _parseDuration(String raw) {
+  final parts = raw.trim().split(':');
+  if (parts.isEmpty || parts.length > 3) return null;
+  var seconds = 0;
+  for (final p in parts) {
+    final n = int.tryParse(p.trim());
+    if (n == null || n < 0) return null;
+    seconds = seconds * 60 + n;
+  }
+  return seconds == 0 ? null : seconds * 1000;
+}
+
+String? _itemImageUrl(XmlElement item, String feedUrl) {
+  for (final img in _allLocal(item.childElements, 'image')) {
+    final href = img.getAttribute('href');
+    if (href == null || href.trim().isEmpty) continue;
+    try {
+      return Uri.parse(feedUrl).resolve(href.trim()).toString();
+    } catch (_) {
+      return href.trim();
+    }
+  }
+  return null;
+}
+
+FeedItem _rssItem(XmlElement item, String feedUrl) {
   final linkEl = _firstLocal(item.descendantElements, 'link');
   var link = linkEl?.innerText.trim() ?? '';
   if (link.isEmpty) link = linkEl?.getAttribute('href') ?? '';
@@ -230,6 +256,8 @@ FeedItem _rssItem(XmlElement item) {
     chapters: ch.chapters,
     chaptersUrl: ch.chaptersUrl,
     contentHtml: _cleanContentHtml(encoded),
+    imageUrl: _itemImageUrl(item, feedUrl),
+    durationMs: _parseDuration(_nsText(item, 'duration')),
   );
 }
 
@@ -302,7 +330,7 @@ ParsedFeed parseRssFeed(String xml, String feedUrl) {
     final el = _toElement(capture!);
     switch (captureKind) {
       case 'item':
-        rssItems.add(_rssItem(el));
+        rssItems.add(_rssItem(el, feedUrl));
       case 'entry':
         atomItems.add(_atomEntry(el));
       default:

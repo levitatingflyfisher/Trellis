@@ -61,3 +61,18 @@ String formatClock(int ms) {
       ? '${d.inHours}:$minutes:$seconds'
       : '${d.inMinutes}:$seconds';
 }
+
+/// An episode's length as a listener would say it: `45 min`, `1 hr 5 min`.
+/// Anything under a minute reads `1 min`, never `0 min`.
+String formatLength(int ms) => _hoursMinutes((ms / 60000).round());
+
+/// What remains of an episode, rounded up so a sliver never reads as
+/// nothing: `23 min left`.
+String formatTimeLeft(int ms) => '${_hoursMinutes((ms / 60000).ceil())} left';
+
+String _hoursMinutes(int totalMinutes) {
+  final m = totalMinutes < 1 ? 1 : totalMinutes;
+  if (m < 60) return '$m min';
+  final rest = m % 60;
+  return rest == 0 ? '${m ~/ 60} hr' : '${m ~/ 60} hr $rest min';
+}

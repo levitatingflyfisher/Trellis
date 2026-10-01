@@ -1,4 +1,8 @@
+import 'dart:async';
 import 'dart:io';
+
+import 'package:dio/dio.dart' as dio;
+import 'package:domovoi/domovoi.dart' show TransferOutcome;
 
 import 'package:comms_core/comms_core.dart';
 import 'package:drift/native.dart';
@@ -7,6 +11,8 @@ import 'package:trellis/db/database.dart';
 import 'package:trellis/features/feeds/feed_ingest.dart';
 import 'package:trellis/features/feeds/feed_rules.dart';
 import 'package:trellis/features/feeds/feeds_repository.dart';
+import 'package:trellis/features/transcribe/audio_fetcher.dart';
+import 'package:trellis/services/device_services.dart';
 
 import '../support/fake_services.dart';
 import '../support/scripted_fetcher.dart';
@@ -155,6 +161,69 @@ void main() {
       // The shownotes are readable: desc became a prose segment.
       final segs = await db.spineDao.segmentsOf(work.id);
       expect(segs.single.body, 'Lights in the north.');
+    });
+
+    test('an item\'s own artwork and length are kept with its episode',
+        () async {
+      await ingestFeedItems(
+          db: db,
+          profileId: profileId,
+          feedId: feedId,
+          items: const [
+            FeedItem(
+                title: 'Aurora season',
+                link: 'https://cast.test/aurora',
+                date: 'Wed, 05 Aug 2026 12:00:00 GMT',
+                desc: '',
+                enclosure: Enclosure(url: 'https://cast.test/aurora.mp3'),
+                imageUrl: 'https://cast.test/aurora.jpg',
+                durationMs: 1800000),
+          ],
+          nowMs: nowMs);
+      final work = (await db.spineDao.worksOf(profileId)).single;
+      final episode = (await db.feedsDao.episodeOf(work.id))!;
+      expect(episode.imageUrl, 'https://cast.test/aurora.jpg');
+      expect(episode.durationMs, 1800000);
+    });
+
+    test('an episode seen before this release gains its length and artwork '
+        'the next time the feed lists it', () async {
+      const plain = FeedItem(
+          title: 'Aurora season',
+          link: 'https://cast.test/aurora',
+          date: 'Wed, 05 Aug 2026 12:00:00 GMT',
+          desc: '',
+          enclosure: Enclosure(url: 'https://cast.test/aurora.mp3'));
+      await ingestFeedItems(
+          db: db,
+          profileId: profileId,
+          feedId: feedId,
+          items: const [plain],
+          nowMs: nowMs);
+      final work = (await db.spineDao.worksOf(profileId)).single;
+      await db.feedsDao.setDuration(work.id, 1234000);
+
+      final added = await ingestFeedItems(
+          db: db,
+          profileId: profileId,
+          feedId: feedId,
+          items: const [
+            FeedItem(
+                title: 'Aurora season',
+                link: 'https://cast.test/aurora',
+                date: 'Wed, 05 Aug 2026 12:00:00 GMT',
+                desc: '',
+                enclosure: Enclosure(url: 'https://cast.test/aurora.mp3'),
+                imageUrl: 'https://cast.test/aurora.jpg',
+                durationMs: 1800000),
+          ],
+          nowMs: nowMs);
+
+      expect(added, 0);
+      final episode = (await db.feedsDao.episodeOf(work.id))!;
+      expect(episode.imageUrl, 'https://cast.test/aurora.jpg');
+      expect(episode.durationMs, 1234000,
+          reason: 'a length the player measured beats what the feed says');
     });
 
     test('a text item becomes an ephemeron article work with the link as '
@@ -1006,6 +1075,7 @@ void main() {
       final result = await repository.subscribe(
           profileId: profileId, rawUrl: 'https://cast.test/feed');
       expect(result, isA<SubscribeSuccess>());
+      await repository.artworkSettled;
       final feed = (await db.feedsDao.feedsOf(profileId)).single;
       expect(feed.imageUrl, 'https://cast.test/art.jpg');
       expect(services.artworkFileFor(feed.id).existsSync(), isTrue);
@@ -1024,7 +1094,146 @@ void main() {
           FeedsRepository(db: db, fetcher: fetcher, services: services);
       await repository.subscribe(
           profileId: profileId, rawUrl: 'https://cast.test/feed');
+      await repository.artworkSettled;
       expect((services.audioFetcher as FakeAudioFetcher).fetched, isEmpty);
+    });
+  });
+
+  group('episode artwork (ADR-0016)', () {
+    late AppDatabase db;
+    late int profileId;
+    setUp(() async {
+      db = AppDatabase.forTesting(NativeDatabase.memory());
+      profileId = await db.profilesDao.create('Ada');
+    });
+    tearDown(() => db.close());
+
+    String feedWith(List<String?> itemImages) => '''
+<rss xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd">
+<channel><title>The Night Sky Cast</title>
+  <itunes:image href="https://cast.test/show.jpg"/>
+  ${[
+          for (var i = 0; i < itemImages.length; i++)
+            '<item><title>Ep $i</title><link>https://cast.test/$i</link>'
+                '<pubDate>${(i + 1).toString().padLeft(2, '0')} Jul 2026 12:00:00 GMT</pubDate>'
+                '${itemImages[i] == null ? '' : '<itunes:image href="${itemImages[i]}"/>'}'
+                '<enclosure url="https://cast.test/$i.mp3" type="audio/mpeg"/>'
+                '</item>'
+        ].join()}
+</channel></rss>
+''';
+
+    Future<(DeviceServices, FakeAudioFetcher)> subscribe(String body,
+        {bool localMl = true}) async {
+      final dir = Directory.systemTemp.createTempSync('trellis-ep-art');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final services = testServices(dir, localMlAvailable: localMl);
+      final repository = FeedsRepository(
+          db: db,
+          fetcher: ScriptedFetcher((u, h) => textResponse(body)),
+          services: services);
+      await repository.subscribe(
+          profileId: profileId, rawUrl: 'https://cast.test/feed');
+      await repository.artworkSettled;
+      return (services, services.audioFetcher as FakeAudioFetcher);
+    }
+
+    test('an episode with its own artwork gets it on disk, once per image',
+        () async {
+      final (services, fetcher) = await subscribe(feedWith([
+        'https://cast.test/a.jpg',
+        'https://cast.test/a.jpg',
+        'https://cast.test/b.jpg',
+      ]));
+      expect(fetcher.fetched.toSet(), {
+        'https://cast.test/show.jpg',
+        'https://cast.test/a.jpg',
+        'https://cast.test/b.jpg',
+      });
+      expect(fetcher.fetched, hasLength(3), reason: 'a shared image once');
+      expect(
+          services.episodeArtworkFileFor('https://cast.test/a.jpg')
+              .existsSync(),
+          isTrue);
+    });
+
+    test('artwork that is just the show\'s own is never fetched twice',
+        () async {
+      final (_, fetcher) =
+          await subscribe(feedWith(['https://cast.test/show.jpg', null]));
+      expect(fetcher.fetched, ['https://cast.test/show.jpg']);
+    });
+
+    test('only the newest episodes\' artwork is fetched up front', () async {
+      final (_, fetcher) = await subscribe(feedWith([
+        for (var i = 0; i < 30; i++) 'https://cast.test/ep$i.jpg',
+      ]));
+      expect(fetcher.fetched.length - 1, episodeArtworkFetchLimit);
+    });
+
+    test('a refresh with nothing new still fetches artwork that is missing '
+        '(a failed fetch, or a URL filled in later)', () async {
+      final dir = Directory.systemTemp.createTempSync('trellis-ep-art-retry');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final fetcher = _ScriptedAudioFetcher()
+        ..failing.add('https://cast.test/a.jpg');
+      final services = testServices(dir, audioFetcher: fetcher);
+      var body = feedWith(['https://cast.test/a.jpg', null]);
+      final repository = FeedsRepository(
+          db: db,
+          fetcher: ScriptedFetcher((u, h) => textResponse(body)),
+          services: services);
+      await repository.subscribe(
+          profileId: profileId, rawUrl: 'https://cast.test/feed');
+      await repository.artworkSettled;
+      expect(
+          services.episodeArtworkFileFor('https://cast.test/a.jpg')
+              .existsSync(),
+          isFalse);
+
+      fetcher.failing.clear();
+      body = feedWith(['https://cast.test/a.jpg', 'https://cast.test/b.jpg']);
+      final feed = (await db.feedsDao.feedsOf(profileId)).single;
+      final outcome = await repository.refreshFeed(feed, force: true);
+      await repository.artworkSettled;
+
+      expect(outcome.newItems, 0);
+      for (final url in ['https://cast.test/a.jpg', 'https://cast.test/b.jpg']) {
+        expect(services.episodeArtworkFileFor(url).existsSync(), isTrue,
+            reason: url);
+      }
+    });
+
+    test('following a show returns before a slow image host answers',
+        () async {
+      final dir = Directory.systemTemp.createTempSync('trellis-ep-art-slow');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final gate = Completer<void>();
+      final fetcher = _ScriptedAudioFetcher()..gate = gate.future;
+      final repository = FeedsRepository(
+          db: db,
+          fetcher: ScriptedFetcher(
+              (u, h) => textResponse(feedWith(['https://cast.test/a.jpg']))),
+          services: testServices(dir, audioFetcher: fetcher));
+
+      final result = await repository
+          .subscribe(profileId: profileId, rawUrl: 'https://cast.test/feed')
+          .timeout(const Duration(seconds: 5));
+
+      expect(result, isA<SubscribeSuccess>());
+      await pumpEventQueue();
+      expect(fetcher.fetched, isNotEmpty,
+          reason: 'artwork is under way, held by the slow host');
+      gate.complete();
+      await repository.artworkSettled;
+      expect(fetcher.fetched, contains('https://cast.test/a.jpg'));
+    });
+
+    test('the web tier fetches no episode artwork', () async {
+      final (_, fetcher) = await subscribe(
+          feedWith(['https://cast.test/a.jpg']),
+          localMl: false);
+      expect(fetcher.fetched, isNot(contains('https://cast.test/a.jpg')));
     });
   });
 
@@ -1130,4 +1339,24 @@ void main() {
       expect(outcome.message, contains("couldn’t be reached"));
     });
   });
+}
+
+/// Writes the target like [FakeAudioFetcher], but can hold every fetch
+/// behind [gate] and throw for URLs in [failing].
+class _ScriptedAudioFetcher implements AudioFetcher {
+  final fetched = <String>[];
+  final failing = <String>{};
+  Future<void>? gate;
+
+  @override
+  Future<TransferOutcome> fetch(String url, File target,
+      {dio.CancelToken? cancelToken,
+      void Function(int received, int? total)? onProgress}) async {
+    fetched.add(url);
+    await gate;
+    if (failing.contains(url)) throw const SocketException('unreachable');
+    target.parent.createSync(recursive: true);
+    target.writeAsStringSync('image for $url');
+    return TransferOutcome.completed;
+  }
 }
