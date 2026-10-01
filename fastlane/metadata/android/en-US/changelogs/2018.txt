@@ -1,0 +1,1 @@
+Fixes the crash when translating. Translation now runs on phones.

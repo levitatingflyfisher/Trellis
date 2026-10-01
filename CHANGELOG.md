@@ -7,6 +7,10 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.5.7 — 2026-10-25
+
+- Fix: translating crashed the app on phones. The release build's code shrinker renamed ONNX Runtime's Java classes, which its native library looks up by name. A keep rule and a test now guard it.
+
 ## 1.5.6 — 2026-10-25
 
 ### Fixed
