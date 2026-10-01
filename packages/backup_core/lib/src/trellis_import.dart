@@ -154,7 +154,7 @@ abstract final class TrellisImporter {
         skipped: skipped,
         dropped: const [
           'Trellis kept no review log, so imported cards begin with an '
-              'empty history — future reviews build it here.',
+              'empty history; future reviews build it here.',
         ],
       ),
     );

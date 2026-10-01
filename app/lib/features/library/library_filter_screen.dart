@@ -9,6 +9,7 @@ library;
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
+import 'package:openhearth_design/openhearth_design.dart';
 
 import '../../db/database.dart' hide Alignment;
 import 'library_query.dart';
@@ -37,6 +38,12 @@ class _LibraryFilterScreenState extends State<LibraryFilterScreen> {
   late final TextEditingController _viewNameController;
   List<SavedViewRow> _savedViews = const [];
 
+  /// Views deleted with the bin but still on offer to Undo; the row is
+  /// deleted only when the offer is let go (fleet delete ruling: a
+  /// deliberate delete does not ask, and its Undo never times out).
+  final Set<int> _removing = {};
+  final OhUndoController _undo = OhUndoController();
+
   @override
   void initState() {
     super.initState();
@@ -46,6 +53,7 @@ class _LibraryFilterScreenState extends State<LibraryFilterScreen> {
 
   @override
   void dispose() {
+    _undo.dispose();
     _viewNameController.dispose();
     super.dispose();
   }
@@ -64,13 +72,29 @@ class _LibraryFilterScreenState extends State<LibraryFilterScreen> {
         name: name,
         queryJson: jsonEncode(widget.currentQuery.toJson()),
         nowMs: DateTime.now().millisecondsSinceEpoch);
-    if (!mounted) return;
-    Navigator.of(context).pop(widget.currentQuery);
+    await _leave(widget.currentQuery);
   }
 
-  Future<void> _deleteView(int id) async {
-    await widget.db.libraryDao.deleteSavedView(id);
-    await _load();
+  void _deleteView(SavedViewRow v) {
+    setState(() => _removing.add(v.id));
+    _undo.show(
+      message: 'Deleted the view “${v.name}”',
+      onUndo: () async {
+        if (mounted) setState(() => _removing.remove(v.id));
+      },
+      onCommit: () async {
+        await widget.db.libraryDao.deleteSavedView(v.id);
+        _removing.remove(v.id);
+        if (mounted) await _load();
+      },
+    );
+  }
+
+  /// Leaving lets a pending delete go first, so the Library's chips, which
+  /// reload as this screen closes, never show a view that is gone.
+  Future<void> _leave([LibraryQuery? result]) async {
+    await _undo.dismiss();
+    if (mounted) Navigator.of(context).pop(result);
   }
 
   Future<void> _moveView(SavedViewRow v, int delta) async {
@@ -82,14 +106,33 @@ class _LibraryFilterScreenState extends State<LibraryFilterScreen> {
   }
 
   void _applyView(SavedViewRow v) {
-    Navigator.of(context).pop(
+    _leave(
         LibraryQuery.fromJson(jsonDecode(v.queryJson) as Map<String, Object?>));
   }
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final views = [
+      for (final v in _savedViews)
+        if (!_removing.contains(v.id)) v
+    ];
+    return PopScope(
+      canPop: _undo.pending == null,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) _leave();
+      },
+      child: ListenableBuilder(
+        listenable: _undo,
+        builder: (context, _) => _scaffold(context, theme, views),
+      ),
+    );
+  }
+
+  Widget _scaffold(
+      BuildContext context, ThemeData theme, List<SavedViewRow> views) {
     return Scaffold(
+      bottomSheet: OhUndoBar(controller: _undo),
       appBar: AppBar(title: const Text('Saved views')),
       body: CappedBody(child: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -119,11 +162,11 @@ class _LibraryFilterScreenState extends State<LibraryFilterScreen> {
                 ),
               ],
             ),
-            if (_savedViews.isNotEmpty) ...[
+            if (views.isNotEmpty) ...[
               const SizedBox(height: 24),
               Text('Saved views', style: theme.textTheme.bodyLarge),
               const SizedBox(height: 8),
-              for (final v in _savedViews)
+              for (final v in views)
                 ListTile(
                   key: Key('saved-view-${v.name}'),
                   contentPadding: EdgeInsets.zero,
@@ -149,7 +192,7 @@ class _LibraryFilterScreenState extends State<LibraryFilterScreen> {
                         key: Key('delete-view-${v.name}'),
                         tooltip: 'Delete this view',
                         icon: const Icon(Icons.delete_outline),
-                        onPressed: () => _deleteView(v.id),
+                        onPressed: () => _deleteView(v),
                       ),
                     ],
                   ),

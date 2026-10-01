@@ -100,7 +100,7 @@ Future<FeedArchiveResult> walkFeedArchive(
         pagesFetched: pagesFetched,
         stopReason: ArchiveWalkStopReason.pageCap,
         message: 'Stopped after $pagesFetched archive '
-            '${_pageWord(pagesFetched)} — that is the safety limit. Some '
+            '${_pageWord(pagesFetched)}, the safety limit. Some '
             'older episodes may remain unfetched.',
       );
     }
@@ -115,10 +115,10 @@ Future<FeedArchiveResult> walkFeedArchive(
         pagesFetched: pagesFetched,
         stopReason: ArchiveWalkStopReason.unsafeUrl,
         message: pagesFetched == 0
-            ? "The archive link isn't a safe address to fetch — no older "
+            ? 'The archive link isn’t a safe address to fetch, so no older '
                 'episodes were fetched.'
             : 'Stopped after $pagesFetched archive '
-                '${_pageWord(pagesFetched)} — the next link was not a safe '
+                '${_pageWord(pagesFetched)}: the next link was not a safe '
                 'address to follow.',
       );
     }
@@ -148,7 +148,7 @@ Future<FeedArchiveResult> walkFeedArchive(
         message: pagesFetched == 0
             ? "The archive page couldn't be read as a feed."
             : 'Stopped after $pagesFetched archive '
-                "${_pageWord(pagesFetched)} — the next one couldn't be read "
+                '${_pageWord(pagesFetched)}: the next one couldn’t be read '
                 'as a feed.',
       );
     }

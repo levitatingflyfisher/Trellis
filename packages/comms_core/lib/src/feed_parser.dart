@@ -226,7 +226,7 @@ ParsedFeed parseRssFeed(String xml, String feedUrl) {
     d = XmlDocument.parse(xml);
   } catch (_) {
     throw const FeedParseException(
-        'Not valid XML — check the URL is an RSS or Atom feed.');
+        'Not valid XML. Check the URL is an RSS or Atom feed.');
   }
 
   final items = <FeedItem>[];

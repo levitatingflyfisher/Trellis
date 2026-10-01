@@ -313,10 +313,10 @@ abstract final class OhPrimerImporter {
         skipped: skipped,
         dropped: const [
           'On-device ML caches (word timings, translations, figure data) '
-              'stayed behind — this app can regenerate them from the source.',
+              'stayed behind; this app can regenerate them from the source.',
           'Model-download and proxy consents never travel; this device will '
               'ask fresh.',
-          'Reader settings — including the parent PIN and any API key — '
+          'Reader settings, including the parent PIN and any API key, '
               'stay on the old device.',
         ],
       ),

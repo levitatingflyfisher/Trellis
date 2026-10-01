@@ -192,7 +192,7 @@ class SkeinFetcher {
       }
       if (over) {
         await _skeinError(request.response, HttpStatus.badGateway,
-            'That page is too large to bring in — over '
+            'That page is too large to bring in: over '
             '${maxBytes ~/ (1024 * 1024)} MB.');
         return;
       }

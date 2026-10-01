@@ -383,6 +383,9 @@ class _RiverScreenState extends State<RiverScreen> {
       ..clearSnackBars()
       ..showSnackBar(SnackBar(
         content: const Text('Kept. It’s in your library now.'),
+        // A triage Undo is a convenience (nothing is deleted); the line
+        // lapses rather than trailing across screens (conformance C14).
+        persist: false,
         action: SnackBarAction(
           label: 'Undo',
           onPressed: () => _undoTriage(e.work.id, prior),
@@ -404,6 +407,9 @@ class _RiverScreenState extends State<RiverScreen> {
       ..clearSnackBars()
       ..showSnackBar(SnackBar(
         content: const Text('Marked read'),
+        // A triage Undo is a convenience (nothing is deleted); the line
+        // lapses rather than trailing across screens (conformance C14).
+        persist: false,
         action: SnackBarAction(
           label: 'Undo',
           onPressed: () => _undoTriage(e.work.id, prior),

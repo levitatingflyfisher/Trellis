@@ -237,6 +237,8 @@ class _HomeShellState extends State<HomeShell> {
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(
         content: const Text('Captured.'),
+        // View is a convenience; the line lapses (conformance C14).
+        persist: false,
         action: SnackBarAction(label: 'View', onPressed: _openCaptures),
       ));
   }

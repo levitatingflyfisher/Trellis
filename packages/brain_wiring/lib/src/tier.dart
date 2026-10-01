@@ -101,7 +101,7 @@ class UnavailableTierBrain implements Brain {
       throw ArgumentError.value(
         tier,
         'tier',
-        'has a real Brain — UnavailableTierBrain only stands in for '
+        'has a real Brain; UnavailableTierBrain only stands in for '
             'stove and localStub',
       );
     }
@@ -118,7 +118,7 @@ class UnavailableTierBrain implements Brain {
       // The BrainTier.stove identifier itself is unchanged; this is copy
       // only.
       BrainTier.stove =>
-        'Your home desktop is not connected yet — that tier is on the '
+        'Your home desktop is not connected yet; that tier is on the '
             'roadmap. Pick another Brain in Settings for now.',
       _ =>
         'No local model is installed on this device yet. Pick another '

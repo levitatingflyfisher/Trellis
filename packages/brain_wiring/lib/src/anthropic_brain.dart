@@ -71,7 +71,7 @@ class AnthropicBrain implements Brain {
       rethrow;
     } catch (error) {
       throw AskException(
-        'Could not reach Anthropic — check the connection and try again.',
+        'Could not reach Anthropic. Check the connection and try again.',
         cause: error,
       );
     }
@@ -88,13 +88,13 @@ class AnthropicBrain implements Brain {
     final cause = 'HTTP ${response.statusCode}: ${response.body}';
     final message = switch (response.statusCode) {
       401 || 403 =>
-        'Anthropic did not accept the API key — check it in Settings.',
+        'Anthropic did not accept the API key. Check it in Settings.',
       429 =>
-        'Anthropic is asking this key to slow down — wait a moment and '
+        'Anthropic is asking this key to slow down. Wait a moment and '
             'try again.',
       529 || >= 500 =>
-        'Anthropic is busy right now — try again in a little while.',
-      _ => 'Anthropic could not handle that request — try again, and if '
+        'Anthropic is busy right now. Try again in a little while.',
+      _ => 'Anthropic could not handle that request. Try again, and if '
           'it keeps happening, check for an app update.',
     };
     return AskException(message, cause: cause);
@@ -107,13 +107,13 @@ class AnthropicBrain implements Brain {
       decoded = jsonDecode(response.body);
     } on FormatException catch (error) {
       throw AskException(
-        "Anthropic's reply was not in the expected shape — try again.",
+        'Anthropic’s reply was not in the expected shape. Try again.',
         cause: error,
       );
     }
     if (decoded is! Map<String, dynamic>) {
       throw AskException(
-        "Anthropic's reply was not in the expected shape — try again.",
+        'Anthropic’s reply was not in the expected shape. Try again.',
         cause: response.body,
       );
     }
@@ -122,7 +122,7 @@ class AnthropicBrain implements Brain {
     // surface it as its own calm failure rather than an empty string.
     if (decoded['stop_reason'] == 'refusal') {
       throw AskException(
-        'Anthropic declined this request — try rephrasing it.',
+        'Anthropic declined this request. Try rephrasing it.',
         cause: response.body,
       );
     }
@@ -140,7 +140,7 @@ class AnthropicBrain implements Brain {
     }
     if (buffer.isEmpty) {
       throw AskException(
-        "Anthropic's reply came back empty — try again.",
+        'Anthropic’s reply came back empty. Try again.',
         cause: response.body,
       );
     }

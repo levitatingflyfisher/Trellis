@@ -213,4 +213,34 @@ void main() {
 
     expect(find.byKey(const Key('saved-view-Everything')), findsNothing);
   });
+
+  // A tap on the bin deleted the view outright, with no way back (rollout
+  // concern 9). The tap is deliberate, so it does not ask; it offers an
+  // Undo that stays until the person acts or leaves (fleet delete ruling).
+  testWidgets('deleting a saved view offers an Undo that brings it back',
+      (tester) async {
+    final profileId = await seedProfile();
+    await seedWork(profileId: profileId, kind: 'book', title: 'A book');
+    await db.libraryDao.createSavedView(
+        profileId: profileId, name: 'Everything', queryJson: '{}', nowMs: 0);
+    await pumpApp(tester);
+
+    await tester.tap(find.byKey(const Key('open-filter')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('open-saved-views')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('delete-view-Everything')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('saved-view-Everything')), findsNothing);
+    expect(find.text('Undo'), findsOneWidget);
+    // Still there to come back: nothing is gone until the offer lapses.
+    await tester.pump(const Duration(seconds: 30));
+    expect(find.text('Undo'), findsOneWidget, reason: 'Undo never times out');
+
+    await tester.tap(find.text('Undo'));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('saved-view-Everything')), findsOneWidget);
+    expect(await db.libraryDao.savedViewsOf(profileId), hasLength(1));
+  });
 }

@@ -36,7 +36,7 @@ class RecapFailedException implements Exception {
 
   /// Displayable, in the interface's voice.
   final String message =
-      'The model could not write a recap right now — pick up reading '
+      'The model could not write a recap right now. Pick up reading '
       'where you left off.';
 
   /// The underlying parse problem, for logs and tests.

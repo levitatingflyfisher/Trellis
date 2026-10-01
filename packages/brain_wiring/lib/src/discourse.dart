@@ -103,7 +103,7 @@ void validateDistilledDiscourse(Map<String, dynamic> courseJson) {
     if (items.length == 2 && items[0].kind == items[1].kind) {
       throw FormatException(
         "node '$nodeId': 'discourse' repeats kind "
-        "'${discourseKindWireName(items[0].kind)}' — pair a Socratic "
+        "'${discourseKindWireName(items[0].kind)}'; pair a Socratic "
         'follow-up with an explain-back prompt instead',
       );
     }

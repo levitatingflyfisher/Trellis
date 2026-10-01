@@ -72,7 +72,7 @@ abstract final class RowPayload {
         throw ArgumentError.value(
           name,
           'tables',
-          'consents never travel — they are re-asked on the target device',
+          'consents never travel; they are re-asked on the target device',
         );
       }
       if (!espalierBackupTables.contains(name)) {
@@ -121,7 +121,7 @@ abstract final class RowPayload {
     if (version > schemaVersion) {
       throw FormatException(
           'Backup schema v$version is newer than this app understands '
-          '(v$schemaVersion) — update the app, then restore');
+          '(v$schemaVersion). Update the app, then restore');
     }
 
     final payload = root['payload'];
@@ -130,8 +130,8 @@ abstract final class RowPayload {
     }
     if (payload.containsKey(_forbiddenTable)) {
       throw const FormatException(
-          'Backup contains a consents table; consents never travel — '
-          'refusing to import');
+          'Backup contains a consents table; consents never travel, '
+          'so it is not imported');
     }
 
     final tables = <String, List<Map<String, Object?>>>{};

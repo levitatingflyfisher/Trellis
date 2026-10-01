@@ -41,7 +41,13 @@ void main() => runFleetConformance(const FleetAppConfig(
         FleetCheck.c4Permissions,
         FleetCheck.c6Harness,
         FleetCheck.c7Fonts,
+        // C7-assetText: C7 over the bundled course (assets/courses/*.ohcourse,
+        // JSON), whose words C7's lib/ sweep never reads.
+        FleetCheck.c7AssetText,
         FleetCheck.c8IconButtons,
+        // C14: a SnackBar with an action states persist, or Flutter keeps it
+        // up until tapped, across screens.
+        FleetCheck.c14SnackBarPersist,
         // C10: no raw exception text on screen. It cannot see an error
         // stored first and shown later, so those sites were fixed by hand
         // too (boot notice, course/OPML/backup refusals, model and voice

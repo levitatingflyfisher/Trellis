@@ -58,6 +58,35 @@ void main() {
     expect(hits, isEmpty);
   });
 
+  // The packages' messages reach the screen too (backup import notes, Brain
+  // failures, feed-archive stops); about 39 spaced em dashes sat there
+  // (rollout concern 6). Exempt: the engines' developer errors, which the
+  // app only shows behind Details, and the OPML file format.
+  test('no spaced em dash in the packages\' copy either', () {
+    const engineOnly = ['jobs_core', 'ml_runtime', 'stardict_core',
+        'transcribe_core'];
+    final hits = <String>[];
+    for (final f in Directory('../packages')
+        .listSync(recursive: true)
+        .whereType<File>()
+        .where((f) => f.path.contains('/lib/') && f.path.endsWith('.dart'))
+        .where((f) => !engineOnly.any((p) => f.path.contains('/$p/')))
+        .where((f) => !f.path.endsWith('opml.dart'))) {
+      final lines = f.readAsLinesSync();
+      for (var i = 0; i < lines.length; i++) {
+        final t = lines[i].trimLeft();
+        if (t.startsWith('//')) continue;
+        for (final m in literal.allMatches(lines[i])) {
+          final lit = m.group(0)!;
+          if (lit.contains(' — ') || lit.endsWith(" —'") || lit.endsWith(' —"')) {
+            hits.add('${f.path}:${i + 1} $lit');
+          }
+        }
+      }
+    }
+    expect(hits, isEmpty);
+  });
+
   test('no typewriter apostrophe or quote inside on-screen copy', () {
     final apostrophe = RegExp(r"[A-Za-z]'[A-Za-z]");
     final escaped = RegExp(r"[A-Za-z}]\\'[A-Za-z]");

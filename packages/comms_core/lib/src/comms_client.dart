@@ -118,7 +118,7 @@ class CommsClient {
       r.body,
       maxBytes: maxTextBytes,
       message: 'Fetched page is too large '
-          '(over ${maxTextBytes ~/ (1024 * 1024)} MB) — refusing to load.',
+          '(over ${maxTextBytes ~/ (1024 * 1024)} MB), so it was not loaded.',
     );
     return decodeResponseBytes(bytes, r.header('content-type') ?? '');
   }
@@ -151,7 +151,7 @@ class CommsClient {
       } catch (_) {}
     }
     throw const FetchFailedException(
-        'Blocked by CORS — all proxies failed. Try pasting the article text '
+        'Blocked by CORS, and all proxies failed. Try pasting the article text '
         'instead.');
   }
 

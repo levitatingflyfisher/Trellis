@@ -58,7 +58,7 @@ class DistillFailedException implements Exception {
 
   /// Calm and displayable, in the interface's voice.
   final String message =
-      'The model could not produce a valid course from this source — '
+      'The model could not produce a valid course from this source, so '
       'nothing was saved. Try again, or try a different Brain.';
 
   /// Total Brain calls made (initial + repair rounds).

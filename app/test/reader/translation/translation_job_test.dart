@@ -465,7 +465,7 @@ class _AlwaysThrowsBrain implements Brain {
   @override
   Future<String> complete(String prompt) async {
     throw AskException(
-        'Your home desktop is not connected yet — that tier is on the '
+        'Your home desktop is not connected yet; that tier is on the '
         'roadmap. Pick another Brain in Settings for now.');
   }
 }

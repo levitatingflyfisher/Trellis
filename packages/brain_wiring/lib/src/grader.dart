@@ -41,7 +41,7 @@ class GradeSuggestionFailedException implements Exception {
 
   /// Displayable, in the interface's voice.
   final String message =
-      'The model could not write a critique for this attempt — rate it '
+      'The model could not write a critique for this attempt. Rate it '
       'yourself as usual.';
 
   /// The underlying parse problem, for logs and tests.
