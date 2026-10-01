@@ -4,7 +4,7 @@
 /// channel answers.
 library;
 
-const appVersion = '1.4.2';
+const appVersion = '1.5.0';
 
 /// Sent on every native fetch (ADR-0017). Feed hosts read the User-Agent
 /// to tell podcast apps apart and to reach a misbehaving one; Dart's
