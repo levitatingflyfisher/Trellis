@@ -520,7 +520,7 @@ class ModelRegistry {
             voiceStyleFileName: 'M1.json',
           ),
         ),
-        // T2 translation: every Marian pair, English on one end
+        // T1 translation: every Marian pair, English on one end
         // (translation_catalog.dart holds the pins and the provenance).
         ...translationCatalog(),
         // Campaign 4 Phase 3 — the StarDict door: an English-English

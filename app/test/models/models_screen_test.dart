@@ -6,7 +6,7 @@ import 'package:trellis/features/models/models_screen.dart';
 
 import '../support/fake_services.dart';
 
-/// "On this device": every registry model with its exact size and honest
+/// "Models & storage": every registry model with its exact size and honest
 /// state; download behind the ONE consent chokepoint; pause keeps the
 /// partial; delete frees the space.
 void main() {
@@ -51,7 +51,8 @@ void main() {
       expect(find.text(modelLabel(spec.id)), findsOneWidget);
       expect(find.textContaining(formatBytes(spec.sizeBytes)), findsWidgets);
     }
-    expect(find.text('On this device'), findsWidgets); // title + state line
+    expect(find.text('Models & storage'), findsOneWidget); // the title
+    expect(find.text('On this device'), findsOneWidget); // a state line
     expect(
       tester
           .widgetList(find.byType(Text))

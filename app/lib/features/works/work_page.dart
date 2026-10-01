@@ -13,6 +13,7 @@ export '../transcribe/job_cards.dart' show transcribeEstimate;
 import 'dart:async';
 import 'dart:io';
 
+import 'package:drift/drift.dart' show TableUpdate, TableUpdateQuery;
 import 'package:flutter/material.dart';
 import 'package:openhearth_design/openhearth_design.dart';
 
@@ -138,11 +139,40 @@ class _WorkPageState extends State<WorkPage> {
   bool get _isAudiobook => _work.kind == 'audiobook';
   bool get _transcribed => _facts?.transcribed ?? false;
 
+  StreamSubscription<Set<TableUpdate>>? _transcriptWrites;
+
   @override
   void initState() {
     super.initState();
     _markSeen();
     _load();
+    // Jobs finish while the page is open (1.5.6): a transcript landing or
+    // a download completing must change what the page offers without
+    // leaving and coming back.
+    _transcriptWrites = _db
+        .tableUpdates(TableUpdateQuery.onTable(_db.alignments))
+        .listen((_) {
+      if (!_transcribed) _load();
+    });
+    _actions?.downloader?.addListener(_onDownloads);
+  }
+
+  bool _onDisk(Episode? e) {
+    final url = e?.enclosureUrl;
+    final d = _actions?.downloader;
+    return e != null && url != null && d != null && d.isDownloaded(e.workId, url);
+  }
+
+  void _onDownloads() {
+    if (!mounted) return;
+    if (_onDisk(_episode) != (_facts?.downloaded ?? false)) _load();
+  }
+
+  @override
+  void dispose() {
+    _transcriptWrites?.cancel();
+    _actions?.downloader?.removeListener(_onDownloads);
+    super.dispose();
   }
 
   /// Opening a feed item is looking at it, so its New marker clears, the
@@ -167,12 +197,13 @@ class _WorkPageState extends State<WorkPage> {
     final notes = await _db.feedsDao.notesOf(id);
     final entry = (work: work, episode: episode);
     final state = await WorkListState.load(_db, profileId, entries: [entry]);
-    final actions = _actions;
     final facts = WorkRowFacts.of(
       work,
       episode,
       state,
-      downloaded: episode != null && (actions?.isDownloaded(episode) ?? false),
+      // Disk truth, not the actions' cache: a transcription fetches the
+      // audio without the downloader, so its revision never moves.
+      downloaded: _onDisk(episode),
     );
     final position = await _db.spineDao.position(
       profileId: profileId,
@@ -243,6 +274,16 @@ class _WorkPageState extends State<WorkPage> {
   String? get _showTitle => widget.showTitle ?? _feed?.title;
 
   String get _originalName => languageNameOf(_work.lang ?? _feed?.language);
+
+  /// Whisper's translate task only writes English, so an English work is
+  /// never offered it.
+  bool get _sourceIsEnglish =>
+      (_work.lang ?? _feed?.language)
+          ?.trim()
+          .toLowerCase()
+          .split(RegExp('[-_]'))
+          .first ==
+      'en';
 
   // ───── modes ─────
 
@@ -380,22 +421,13 @@ class _WorkPageState extends State<WorkPage> {
     if (!l.isOriginal && _readBlocked == null) await _read();
   }
 
-  /// Today's translate entry points: the reader's Translate sheet for
-  /// anything with text (it downloads what's missing), and
-  /// transcribe-and-translate for an episode without a transcript.
+  /// Translate opens the reader's Translate sheet, which asks the source
+  /// when nobody knows it and never lists it as a target. It needs text,
+  /// so an episode without a transcript waits for one (1.5.6: it used to
+  /// transcribe-and-translate into English, even for an English episode).
   VoidCallback? get _translate {
     if (_isAudiobook) return null;
-    if (_isAudio && !_transcribed) {
-      if (!_canTranscribe) return null;
-      return () async {
-        final e = _episode;
-        if (e == null) return;
-        await _actions!.transcribe(context, (
-          work: _work,
-          episode: e,
-        ), translate: true);
-      };
-    }
+    if (_isAudio && !_transcribed) return null;
     if (_doors.readerDoors.translation == null) return null;
     return () async {
       await _doors.read(context, _entry, openTranslatePicker: true);
@@ -460,10 +492,14 @@ class _WorkPageState extends State<WorkPage> {
   Set<String> get _shownAsButtons => {
     if (_episode?.enclosureUrl != null) ...{'play-next', 'play-last'},
     if (_showsDownload) 'download',
-    // Only an untranscribed episode's Translate… is the menu's act
-    // (transcribe and translate); elsewhere it opens the reader's picker.
-    if (_isAudio && !_transcribed) 'translate',
+    if (_showsTranscribe) 'transcribe',
+    // Not a button: Whisper's translate needs no text but can only write
+    // English, so it waits like Translate does, and never for English.
+    if ((_isAudio && !_transcribed) || _sourceIsEnglish) 'translate',
   };
+
+  bool get _showsTranscribe =>
+      _canTranscribe && !_transcribed && _episode?.archivedAtMs == null;
 
   List<PopupMenuEntry<String>> _menuItems() {
     final actions = _actions;
@@ -765,28 +801,20 @@ class _WorkPageState extends State<WorkPage> {
               key: const Key('lang-translate'),
               style: OutlinedButton.styleFrom(minimumSize: const Size(48, 48)),
               icon: const Icon(Icons.translate),
-              // Without a transcript it transcribes first; the line below
-              // says so.
               label: const Text('Translate…'),
               onPressed: translate,
             ),
           ],
         ),
-        if (translate != null && _isAudio && !_transcribed)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text(
-              'Translate transcribes first, then translates into English.',
-              style: theme.textTheme.bodySmall,
-            ),
-          ),
         if (translate == null && !_isAudiobook)
           Padding(
             padding: const EdgeInsets.only(top: 4),
             child: Text(
               _isAudio && !_transcribed
-                  ? 'Translating needs a transcript, and this device can’t '
-                        'transcribe.'
+                  ? _canTranscribe
+                        ? 'Translating needs a transcript first.'
+                        : 'Translating needs a transcript, and this device '
+                              'can’t transcribe.'
                   : 'This device can’t translate offline.',
               style: theme.textTheme.bodySmall,
             ),
@@ -821,6 +849,13 @@ class _WorkPageState extends State<WorkPage> {
           onPressed: _keep,
           icon: const Icon(Icons.bookmark_add_outlined),
           label: const Text('Keep'),
+        ),
+      if (_showsTranscribe)
+        OutlinedButton.icon(
+          key: Key('page-transcribe-$id'),
+          onPressed: _transcribe,
+          icon: const Icon(Icons.subtitles_outlined),
+          label: Text(_transcribeLabel),
         ),
       if (_showsDownload)
         OutlinedButton.icon(

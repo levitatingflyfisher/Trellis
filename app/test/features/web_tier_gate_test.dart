@@ -125,6 +125,11 @@ void main() {
     await toTab(t, 'Library');
     await t.tap(find.byKey(const Key('library-more')));
     await t.pumpAndSettle();
+    expect(
+        find.descendant(
+            of: find.byKey(const Key('open-models')),
+            matching: find.text('Models & storage')),
+        findsOneWidget);
     await t.tap(find.byKey(const Key('open-models')));
     await t.pumpAndSettle();
 

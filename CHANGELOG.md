@@ -7,6 +7,24 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.5.6 — 2026-10-25
+
+### Fixed
+- **Translate finds its models.** The Translate sheet said there was no
+  offline translator even after you had downloaded one.
+- **Translate waits for text.** An episode without a transcript no longer
+  offers to translate, and nothing offers to translate English into
+  English.
+- **The episode page keeps up.** Read works as soon as a transcript lands,
+  Transcribe shows while there is none, and Download goes away when the
+  download finishes.
+- **Tapping speed opens one list**, not a stack of them.
+
+### Changed
+- **Speed:** swipe on it as before; a tap now opens a plain list of
+  speeds (0.75× to 4×) with the current one checked.
+- **"On this device" is now "Models & storage."**
+
 ## 1.5.5 — 2026-10-25
 
 ### Added

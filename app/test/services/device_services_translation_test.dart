@@ -34,11 +34,11 @@ void main() {
     expect(await services.translatorFor(translatorSpec()), isNull);
   });
 
-  test('below the model\'s own minTier (t2), the honesty gate refuses even '
+  test('below the model\'s own minTier (t1), the honesty gate refuses even '
       'if the store claims it is present', () async {
     final services = testServices(dir,
         modelStore: FakeModelStore(downloadedIds: {'opus-mt-en-es'}),
-        tier: DeviceTier.t1);
+        tier: DeviceTier.t0);
     expect(await services.translatorFor(translatorSpec()), isNull);
   });
 

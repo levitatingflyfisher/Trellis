@@ -401,7 +401,8 @@ void main() {
         'record is docs/reference/mt-models.md)', () {
       final mt = starter.byId('opus-mt-en-es')!;
       expect(mt.task, ModelTask.translation);
-      expect(mt.minTier, DeviceTier.t2);
+      // T1 since 1.5.6: the app runs every device at T1.
+      expect(mt.minTier, DeviceTier.t1);
       expect(mt.langs, {'es'});
       expect(mt.licenses, ['CC-BY-4.0']);
       final layout = mt.marianLayout;
@@ -419,12 +420,12 @@ void main() {
         'gets nothing)', () {
       expect(
         starter
-            .pickModel(ModelTask.translation, DeviceTier.t2, langHint: 'es')
+            .pickModel(ModelTask.translation, DeviceTier.t1, langHint: 'es')
             ?.id,
         'opus-mt-en-es',
       );
       expect(
-        starter.pickModel(ModelTask.translation, DeviceTier.t1, langHint: 'es'),
+        starter.pickModel(ModelTask.translation, DeviceTier.t0, langHint: 'es'),
         isNull,
       );
       expect(

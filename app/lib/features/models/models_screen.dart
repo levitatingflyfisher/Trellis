@@ -1,4 +1,4 @@
-/// "On this device" — the model manager AND the storage story (proposal-2
+/// "Models & storage" — the model manager AND the storage story (proposal-2
 /// §9).
 ///
 /// Lists the pinned registry: what each model is, exactly how big, whether
@@ -101,7 +101,7 @@ class WebTierModelsNotice extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('On this device')),
+      appBar: AppBar(title: const Text('Models & storage')),
       body: CappedBody(child: Padding(
         key: const Key('web-tier-notice'),
         padding: const EdgeInsets.all(24),
@@ -293,7 +293,7 @@ class _ModelsScreenState extends State<ModelsScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text('On this device')),
+      appBar: AppBar(title: const Text('Models & storage')),
       body: CappedBody(child: ListView(
         children: [
           Padding(

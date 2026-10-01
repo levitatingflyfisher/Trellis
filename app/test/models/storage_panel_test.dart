@@ -9,7 +9,7 @@ import 'package:trellis/features/models/models_screen.dart';
 
 import '../support/fake_services.dart';
 
-/// The storage panel on "On this device": real on-disk bytes for models,
+/// The storage panel on "Models & storage": real on-disk bytes for models,
 /// cached episode audio, leftover decoded PCM and the database file; the
 /// clear buttons delete ONLY cache — works and segments stay (data stays,
 /// cache goes).

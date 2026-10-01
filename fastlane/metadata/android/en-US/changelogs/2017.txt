@@ -1,0 +1,1 @@
+Translate now finds the models you downloaded, and waits for a transcript. The episode page updates as soon as a transcript or download finishes. Tapping speed opens one simple list of speeds. "On this device" is now "Models & storage".

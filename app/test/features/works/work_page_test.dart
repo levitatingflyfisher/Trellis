@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/episodes/episode_actions.dart';
+import 'package:trellis/features/feeds/episode_download_coordinator.dart';
 import 'package:trellis/features/player/player_controller.dart';
 import 'package:trellis/features/reader/reader_doors.dart';
 import 'package:trellis/features/reader/reader_screen.dart';
@@ -12,6 +13,7 @@ import 'package:trellis/features/transcribe/transcribe_coordinator.dart';
 import 'package:trellis/features/works/work_open.dart';
 import 'package:trellis/features/works/work_page.dart';
 import 'package:trellis/main.dart';
+import 'package:trellis/services/device_services.dart';
 
 import '../../support/fake_player.dart';
 import '../../support/fake_services.dart';
@@ -202,12 +204,17 @@ void main() {
       dir.deleteSync(recursive: true);
     });
 
+    late DeviceServices services;
+    late EpisodeDownloadCoordinator downloader;
+
     Future<void> pumpPage(WidgetTester tester, int workId) async {
-      final services = testServices(dir);
+      services = testServices(dir);
+      downloader = EpisodeDownloadCoordinator(services: services, db: db);
       final actions = EpisodeActions(
           db: db,
           profileId: profileId,
           player: controller,
+          downloader: downloader,
           transcriber: TranscribeCoordinator(db: db, services: services),
           services: services,
           transcribeRate: () => 1 / 12);
@@ -355,7 +362,9 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.byKey(Key('share-$episode')), findsOneWidget);
       expect(find.byKey(Key('mark-played-$episode')), findsOneWidget);
-      expect(find.byKey(Key('transcribe-$episode')), findsOneWidget);
+      // Transcribe is a visible action until there is a transcript.
+      expect(find.byKey(Key('transcribe-$episode')), findsNothing);
+      expect(find.byKey(Key('page-transcribe-$episode')), findsOneWidget);
     });
 
     testWidgets('a picked translation is remembered for next time',
@@ -458,11 +467,81 @@ void main() {
       expect(find.byKey(const Key('lang-translate')), findsOneWidget);
       final values = await pageMenuValues(tester);
       expect(values, isNotEmpty);
-      for (final shown in ['play-next', 'play-last', 'download', 'translate',
-          'keep']) {
+      for (final shown in ['play-next', 'play-last', 'download', 'transcribe',
+          'translate', 'keep']) {
         expect(values, isNot(contains(shown)), reason: shown);
       }
-      expect(values, containsAll(['share', 'mark-played', 'transcribe']));
+      expect(values, containsAll(['share', 'mark-played']));
+    });
+
+    // 1.5.6: an untranscribed English episode offered translating into
+    // English. Translating needs text, and never into the source.
+    testWidgets('without a transcript Translate waits for one, and nothing '
+        'promises English', (tester) async {
+      await pumpPage(tester, episode);
+      final translate =
+          tester.widget<ButtonStyleButton>(find.byKey(const Key('lang-translate')));
+      expect(translate.onPressed, isNull);
+      expect(find.textContaining('into English'), findsNothing);
+      expect(find.text('Translating needs a transcript first.'),
+          findsOneWidget);
+      expect(await pageMenuValues(tester), isNot(contains('translate')));
+    });
+
+    testWidgets('an English episode is never offered translation into '
+        'English', (tester) async {
+      await db.spineDao.setWorkLang(episode, 'en');
+      await pumpPage(tester, episode);
+      expect(await pageMenuValues(tester), isNot(contains('translate')));
+      await transcribeEpisode();
+      await tester.pumpAndSettle();
+      expect(await pageMenuValues(tester), isNot(contains('translate')));
+    });
+
+    // 1.5.6: the page went stale after a job — Read worked only after
+    // leaving and coming back, and Download stayed after it finished.
+    testWidgets('Transcribe is a visible action until the transcript lands, '
+        'and then Read opens it without reopening the page', (tester) async {
+      await pumpPage(tester, episode);
+      expect(find.byKey(Key('page-transcribe-$episode')), findsOneWidget);
+      expect(find.text('No transcript yet: Read opens the show notes.'),
+          findsOneWidget);
+      await transcribeEpisode();
+      await tester.pumpAndSettle();
+      expect(find.byKey(Key('page-transcribe-$episode')), findsNothing);
+      expect(find.text('No transcript yet: Read opens the show notes.'),
+          findsNothing);
+      await tester.tap(find.byKey(const Key('mode-read')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('notes-screen')), findsNothing);
+    });
+
+    testWidgets('Download leaves the page when the download finishes',
+        (tester) async {
+      await pumpPage(tester, episode);
+      expect(find.byKey(Key('page-download-$episode')), findsOneWidget);
+      final file =
+          services.audioFileFor(episode, 'https://x.test/aurora.mp3');
+      file.parent.createSync(recursive: true);
+      file.writeAsBytesSync([1, 2, 3]);
+      downloader.notifyListeners();
+      await tester.pumpAndSettle();
+      expect(find.byKey(Key('page-download-$episode')), findsNothing);
+    });
+
+    testWidgets('audio a transcription fetched clears Download too',
+        (tester) async {
+      await pumpPage(tester, episode);
+      expect(find.byKey(Key('page-download-$episode')), findsOneWidget);
+      // The transcription's own fetch: the file lands, the downloader is
+      // never told, then the transcript is written.
+      final file =
+          services.audioFileFor(episode, 'https://x.test/aurora.mp3');
+      file.parent.createSync(recursive: true);
+      file.writeAsBytesSync([1, 2, 3]);
+      await transcribeEpisode();
+      await tester.pumpAndSettle();
+      expect(find.byKey(Key('page-download-$episode')), findsNothing);
     });
 
     testWidgets('a transcribed episode keeps Transcribe + translate in its ⋮',

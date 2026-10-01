@@ -41,7 +41,7 @@ class LibraryScreen extends StatefulWidget {
   final Profile profile;
   final VoidCallback onSwitchProfile;
 
-  /// Opens the "On this device" model manager; the shell wires it.
+  /// Opens the "Models & storage" model manager; the shell wires it.
   final VoidCallback? onOpenModels;
 
   /// The HTTP seam for "From the web" intake. Optional so existing call
@@ -506,7 +506,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   const PopupMenuItem(
                     key: Key('open-models'),
                     value: 'models',
-                    child: Text('On this device'),
+                    child: Text('Models & storage'),
                   ),
                 if (theme != null) ...themeMenuItems(theme),
               ],

@@ -1025,7 +1025,11 @@ List<ModelSpec> translationCatalog() => [
               ModelFile(url: url, sha256: sha256, bytes: bytes),
           ],
           licenses: [license],
-          minTier: DeviceTier.t2,
+          // T1, not T2: an int8 Marian pair is a phone-sized download, and
+          // the app has no tier probe, so it runs every device at T1. At T2
+          // the Translate sheet could never see a pair the Models screen
+          // had just downloaded (1.5.6).
+          minTier: DeviceTier.t1,
           langs: {target},
           sourceLang: source,
           marianLayout: MarianModelLayout(

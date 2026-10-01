@@ -79,7 +79,7 @@ class HomeShell extends StatefulWidget {
   /// Every long job on the device; owned above this shell (see JobCenter).
   final JobCenter jobs;
 
-  /// The device's background-check switches, shown on "On this device"
+  /// The device's background-check switches, shown on "Models & storage"
   /// where the system can run a check. Owned above this shell, like jobs.
   final FeedCheckSettings? feedCheck;
 
