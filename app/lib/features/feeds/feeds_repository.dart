@@ -79,7 +79,8 @@ enum RefreshStatus {
   /// Transport or HTTP error — failure counted, breaker at 5.
   error,
 
-  /// Fresh body that would not parse; bookkeeping untouched (donor parity).
+  /// Fresh body that would not parse; counted toward the breaker with the
+  /// parser's reason, validators untouched.
   parseFailed,
 
   /// Breaker verdict: throttle window still open, or feed marked broken.
@@ -259,10 +260,9 @@ class FeedsRepository {
       final ParsedFeed parsed;
       try {
         parsed = parseRssFeed(res.body!, feed.url);
-      } on FeedParseException {
-        // Donor parity (comms_core note): a fresh body that fails to parse
-        // skips ALL bookkeeping — an unparseable feed never trips the
-        // breaker.
+      } on FeedParseException catch (e) {
+        await _persistState(feed.id,
+            applyParseFailure(state, nowMs: nowMs, error: e.message));
         return (status: RefreshStatus.parseFailed, newItems: 0);
       }
       state = applyFetchResult(state, res,

@@ -8,6 +8,7 @@
 /// proxies failed" message instead of the size error.
 library;
 
+import 'dart:async';
 import 'dart:math';
 import 'dart:typed_data';
 
@@ -200,6 +201,9 @@ class CommsClient {
       }
       if (r.ok) {
         final body = await fetchAndDecode(r);
+        if (_isBotWall(r.statusCode, body)) {
+          return FeedFetchResult.error(r.statusCode, feedBotWallReason);
+        }
         return FeedFetchResult.fresh(
           body: body,
           etag: r.header('etag'),
@@ -217,6 +221,10 @@ class CommsClient {
       if (!_consent.proxyConsented) {
         return FeedFetchResult.error(null, e.message);
       }
+    } on TimeoutException {
+      if (!_consent.proxyConsented) {
+        return const FeedFetchResult.error(null, feedStalledReason);
+      }
     } catch (_) {}
     // Fall back to proxies — but never prompt here (background refresh);
     // only use them if the profile already consented (C5).
@@ -233,6 +241,24 @@ class CommsClient {
     }
     return const FeedFetchResult.error();
   }
+
+  /// A robot check (SiteGround's sgcaptcha, Cloudflare's challenge) answers
+  /// a feed URL with a 2xx HTML page. Parsing it would report "not valid
+  /// XML", which sends the listener hunting for a typo; naming the wall
+  /// tells them the address is right and the host is the problem. A 202 is
+  /// never a feed, so any HTML 202 counts.
+  static bool _isBotWall(int status, String body) {
+    final head = body.length > 4096 ? body.substring(0, 4096) : body;
+    if (!_htmlStartRe.hasMatch(head)) return false;
+    return status == 202 || _botWallRe.hasMatch(head);
+  }
+
+  static final _htmlStartRe =
+      RegExp(r'^\s*(<!doctype html|<html)', caseSensitive: false);
+  static final _botWallRe = RegExp(
+      r'captcha|challenge-platform|cf-chl|just a moment\.\.\.'
+      r'|attention required|verify you are human',
+      caseSensitive: false);
 
   /// Donor `discoverFeedUrl` (index.html ~6273): feed-looking URLs pass
   /// through; otherwise fetch and sniff, try `<link>` discovery, then a

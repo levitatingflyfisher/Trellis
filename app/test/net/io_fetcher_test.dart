@@ -9,8 +9,8 @@ import 'package:trellis/net/io_fetcher.dart';
 /// The dart:io [HttpFetcher] against a real loopback server — hermetic, no
 /// external network. The seam contract under test (http_fetcher.dart):
 /// redirects followed with the SSRF check re-run per hop, non-2xx returned
-/// (not thrown), the body streamed (never buffered), timeout as a
-/// whole-request deadline.
+/// (not thrown), the body streamed (never buffered), timeout as the wait
+/// for headers and the longest silence allowed mid-body.
 void main() {
   // The canonical flutter_test_config initializes the widgets binding for
   // every suite, and the binding swaps HttpClient for a 400-refusing mock
@@ -172,7 +172,7 @@ void main() {
     expect(received.toString(), 'firstrest');
   });
 
-  test('timeout is a whole-request deadline: a server that never answers',
+  test('timeout bounds the wait for headers: a server that never answers',
       () async {
     await serve((req) async {
       // Never respond; hold the socket.
@@ -194,6 +194,45 @@ void main() {
       await Completer<void>().future; // stall forever mid-body
     });
     final fetcher = IoHttpFetcher(checkRedirectTarget: permissive);
+    addTearDown(fetcher.close);
+
+    final r = await fetcher.get(base, timeout: const Duration(milliseconds: 300));
+    await expectLater(collect(r.body), throwsA(isA<TimeoutException>()));
+  });
+
+  test('a slow but steady body outlasts the timeout: only silence fails it',
+      () async {
+    // Why: a 20 MB feed on a weak connection takes far longer than any
+    // sensible timeout, yet never goes quiet. A whole-request deadline
+    // failed exactly those feeds.
+    await serve((req) async {
+      req.response.bufferOutput = false;
+      for (var i = 0; i < 8; i++) {
+        req.response.write('$i');
+        await req.response.flush();
+        await Future<void>.delayed(const Duration(milliseconds: 100));
+      }
+      await req.response.close();
+    });
+    final fetcher = IoHttpFetcher(checkRedirectTarget: permissive);
+    addTearDown(fetcher.close);
+
+    final r = await fetcher.get(base, timeout: const Duration(milliseconds: 300));
+    expect(await collect(r.body), '01234567');
+  });
+
+  test('a body that trickles forever still ends at the ceiling', () async {
+    await serve((req) async {
+      req.response.bufferOutput = false;
+      while (true) {
+        req.response.write('.');
+        await req.response.flush();
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+      }
+    });
+    final fetcher = IoHttpFetcher(
+        checkRedirectTarget: permissive,
+        maxBodyTime: const Duration(milliseconds: 400));
     addTearDown(fetcher.close);
 
     final r = await fetcher.get(base, timeout: const Duration(milliseconds: 300));

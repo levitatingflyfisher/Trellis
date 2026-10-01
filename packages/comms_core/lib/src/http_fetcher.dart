@@ -8,7 +8,9 @@
 ///   redirect-following); re-run your own SSRF check on redirect targets.
 /// - Return non-2xx statuses as a [FetchResponse]; throw only for
 ///   transport-level failures (DNS, TLS, timeout, connection reset).
-/// - Honour [timeout] as a whole-request deadline (donor `AbortSignal.timeout`).
+/// - Honour [timeout] as the wait for headers and then the longest silence
+///   allowed mid-body, not a whole-request deadline: a large feed on a slow
+///   link is slow but never silent. Cap the whole body separately, generously.
 /// - Do not buffer the body: [FetchResponse.body] must stream, so the caps
 ///   in this package can abort mid-download.
 library;

@@ -10,6 +10,7 @@ import 'package:openhearth_design/openhearth_design.dart';
 import '../../db/database.dart';
 import '../../services/picked_save.dart';
 import 'feed_detail_screen.dart';
+import 'feed_ingest.dart';
 import 'feed_settings_screen.dart';
 import 'feeds_repository.dart';
 import 'subscribe_screen.dart';
@@ -303,6 +304,21 @@ class _FeedsScreenState extends State<FeedsScreen> {
     await _load();
   }
 
+  /// The address, unless the feed is failing: then the reason, because that
+  /// is what the listener needs to see while scanning the list.
+  Widget _feedSubtitle(Feed feed) {
+    final small = Theme.of(context).textTheme.bodySmall;
+    final state = stateOfFeed(feed);
+    if (state.consecutiveFailures == 0 && !state.broken) {
+      return Text(feed.url,
+          overflow: TextOverflow.ellipsis, maxLines: 1, style: small);
+    }
+    return Text(state.lastError ?? comms.feedUnreachableReason,
+        overflow: TextOverflow.ellipsis,
+        maxLines: 2,
+        style: small?.copyWith(color: Theme.of(context).colorScheme.error));
+  }
+
   Widget _feedTile(Feed feed) {
     return ListTile(
       onTap: () => _openFeed(feed),
@@ -312,12 +328,7 @@ class _FeedsScreenState extends State<FeedsScreen> {
         overflow: TextOverflow.ellipsis,
         maxLines: 1,
       ),
-      subtitle: Text(
-        feed.url,
-        overflow: TextOverflow.ellipsis,
-        maxLines: 1,
-        style: Theme.of(context).textTheme.bodySmall,
-      ),
+      subtitle: _feedSubtitle(feed),
       trailing: PopupMenuButton<String>(
         key: Key('feed-menu-${feed.id}'),
         tooltip: 'More',

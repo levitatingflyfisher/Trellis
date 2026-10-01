@@ -107,14 +107,17 @@ FeedRefreshState applyFetchResult(FeedRefreshState s, FeedFetchResult r,
       return s.copyWith(
         consecutiveFailures: s.consecutiveFailures + 1,
         broken: true,
-        lastError: 'Feed returned 404/410',
+        lastError: feedGoneReason,
       );
     case FeedFetchStatus.error:
       final failures = s.consecutiveFailures + 1;
       return s.copyWith(
         consecutiveFailures: failures,
         broken: failures >= 5 ? true : s.broken,
-        lastError: 'Fetch failed',
+        lastError: r.message ??
+            (r.errorCode != null
+                ? feedRefusedReason(r.errorCode!)
+                : feedUnreachableReason),
       );
     case FeedFetchStatus.fresh:
       var title = s.title;

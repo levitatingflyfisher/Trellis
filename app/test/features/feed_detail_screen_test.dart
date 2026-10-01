@@ -1,3 +1,6 @@
+import 'dart:convert';
+
+import 'package:comms_core/comms_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:drift/native.dart';
@@ -22,14 +25,14 @@ void main() {
   });
   tearDown(() => db.close());
 
-  Future<Feed> seedFeed({String? nextPageUrl}) async {
+  Future<Feed> seedFeed({String? nextPageUrl, String breakerJson = '{}'}) async {
     final id = await db.feedsDao
         .insertFeed(profileId: profileId, url: 'https://cast.test/feed');
     await db.feedsDao.updateRefreshState(id,
         title: 'The Night Sky Cast',
         etag: null,
         lastModified: null,
-        breakerJson: '{}',
+        breakerJson: breakerJson,
         nextPageUrl: nextPageUrl,
         updateNextPageUrl: true);
     await db.spineDao.insertWork(
@@ -136,5 +139,78 @@ void main() {
 
     expect(find.byType(FeedDetailScreen), findsOneWidget);
     expect(find.text('Aurora season'), findsOneWidget);
+  });
+
+  group('a failing feed says why', () {
+    // Why: a feed behind a robot check or gone from its host used to fail
+    // without a word; the listener only noticed episodes had stopped.
+    final walled = jsonEncode({
+      'consecutiveFailures': 2,
+      'broken': false,
+      'lastError': feedBotWallReason,
+    });
+    const rss = '<rss><channel><title>The Night Sky Cast</title>'
+        '</channel></rss>';
+
+    testWidgets('the detail screen names the reason; a healthy feed does not',
+        (tester) async {
+      final feed = await seedFeed(breakerJson: walled);
+      await pump(tester, feed, ScriptedFetcher((u, h) => textResponse(rss)));
+      await tester.pumpAndSettle();
+      expect(find.text(feedBotWallReason), findsOneWidget);
+
+      await tester.pumpWidget(const SizedBox());
+      await db.feedsDao.updateRefreshState(feed.id,
+          title: feed.title,
+          etag: null,
+          lastModified: null,
+          breakerJson: '{}');
+      final healthy = (await db.feedsDao.feedById(feed.id))!;
+      await pump(tester, healthy, ScriptedFetcher((u, h) => textResponse(rss)));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('feed-problem')), findsNothing);
+    });
+
+    testWidgets('a feed Trellis stopped checking says so', (tester) async {
+      final feed = await seedFeed(
+          breakerJson: jsonEncode({
+        'consecutiveFailures': 1,
+        'broken': true,
+        'lastError': feedGoneReason,
+      }));
+      await pump(tester, feed, ScriptedFetcher((u, h) => textResponse(rss)));
+      await tester.pumpAndSettle();
+      expect(find.text(feedGoneReason), findsOneWidget);
+      expect(find.textContaining('stopped checking'), findsOneWidget);
+    });
+
+    testWidgets('Try again refetches, and a good answer clears the reason',
+        (tester) async {
+      final feed = await seedFeed(breakerJson: walled);
+      final fetcher = ScriptedFetcher((u, h) => textResponse(rss));
+      await pump(tester, feed, fetcher);
+      await tester.pumpAndSettle();
+
+      await tester.tap(find.text('Try again'));
+      await tester.pumpAndSettle();
+
+      expect(fetcher.calls, hasLength(1));
+      expect(find.byKey(const Key('feed-problem')), findsNothing);
+    });
+
+    testWidgets('the feeds list shows the reason in place of the address',
+        (tester) async {
+      final feed = await seedFeed(breakerJson: walled);
+      await tester.pumpWidget(MaterialApp(
+          home: FeedsScreen(
+              db: db,
+              repository: FeedsRepository(
+                  db: db, fetcher: ScriptedFetcher((u, h) => textResponse(''))),
+              profile: (await db.profilesDao.all()).single)));
+      await tester.pumpAndSettle();
+
+      expect(find.text(feedBotWallReason), findsOneWidget);
+      expect(find.text(feed.url), findsNothing);
+    });
   });
 }

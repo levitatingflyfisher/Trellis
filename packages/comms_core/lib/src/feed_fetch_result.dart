@@ -3,6 +3,21 @@
 /// viaProxy?}`).
 library;
 
+/// Why a feed failed, in words a listener can act on. They are stored as the
+/// feed's last error and shown on its row, so they name the cause, not the
+/// mechanism.
+const feedGoneReason =
+    'The feed’s server says this feed is gone. The show may have moved.';
+const feedUnreachableReason = 'Couldn’t reach the feed’s server.';
+const feedStalledReason = 'The feed’s server stopped sending.';
+const feedBotWallReason = 'The feed’s web host is asking for a robot check, '
+    'which Trellis can’t pass. Try again later, or ask the show for another '
+    'feed address.';
+
+/// The reason for an HTTP refusal that has no sentence of its own.
+String feedRefusedReason(int code) =>
+    'The feed’s server refused the request (error $code).';
+
 enum FeedFetchStatus { fresh, notModified, throttled, notFound, error }
 
 class FeedFetchResult {

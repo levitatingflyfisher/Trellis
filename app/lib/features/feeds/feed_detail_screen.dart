@@ -1,6 +1,8 @@
+import 'package:comms_core/comms_core.dart' show feedUnreachableReason;
 import 'package:flutter/material.dart';
 
 import '../../db/database.dart';
+import 'feed_ingest.dart';
 import 'feeds_repository.dart';
 import '../shared/capped_body.dart';
 
@@ -12,7 +14,8 @@ import '../shared/capped_body.dart';
 /// Deliberately narrow: tiles here show title and date only. Playing,
 /// transcribing, and opening the reader stay the River's job (ADR-0003 law
 /// 1's one ordering lives there); this screen exists for the archive
-/// affordance, not as a second river.
+/// affordance, not as a second river. A feed that is failing says why at
+/// the top, with a way to try again.
 class FeedDetailScreen extends StatefulWidget {
   final AppDatabase db;
   final FeedsRepository repository;
@@ -31,6 +34,7 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
   late Feed _feed;
   List<({Work work, Episode episode})>? _episodes;
   bool _fetching = false;
+  bool _retrying = false;
 
   @override
   void initState() {
@@ -56,6 +60,18 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
         .showSnackBar(SnackBar(content: Text(outcome.message)));
   }
 
+  Future<void> _retry() async {
+    setState(() => _retrying = true);
+    await widget.repository.refreshFeed(_feed, force: true);
+    final fresh = await widget.db.feedsDao.feedById(_feed.id);
+    if (!mounted) return;
+    setState(() {
+      if (fresh != null) _feed = fresh;
+      _retrying = false;
+    });
+    await _load();
+  }
+
   static const _months = [
     'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', //
     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec',
@@ -76,11 +92,11 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
       ),
       body: CappedBody(child: switch (episodes) {
         null => const Center(child: CircularProgressIndicator()),
-        _ => ListView.builder(
-            itemCount: episodes.length + 1,
-            itemBuilder: (_, i) =>
-                i < episodes.length ? _episodeTile(episodes[i]) : _footer(),
-          ),
+        _ => ListView(children: [
+            ?_problem(),
+            for (final e in episodes) _episodeTile(e),
+            _footer(),
+          ]),
       }),
     );
   }
@@ -90,6 +106,26 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
       leading: const Icon(Icons.podcasts),
       title: Text(e.work.title, overflow: TextOverflow.ellipsis, maxLines: 2),
       subtitle: Text(_formatDay(e.episode.publishedAtMs)),
+    );
+  }
+
+  Widget? _problem() {
+    final state = stateOfFeed(_feed);
+    if (state.consecutiveFailures == 0 && !state.broken) return null;
+    final error = Theme.of(context).colorScheme.error;
+    return ListTile(
+      key: const Key('feed-problem'),
+      leading: Icon(Icons.error_outline, color: error),
+      title: Text(state.lastError ?? feedUnreachableReason),
+      // A broken feed is skipped by every refresh, so the listener must hear
+      // that nothing will change on its own.
+      subtitle: state.broken
+          ? const Text('Trellis has stopped checking this feed.')
+          : null,
+      trailing: TextButton(
+        onPressed: _retrying ? null : _retry,
+        child: const Text('Try again'),
+      ),
     );
   }
 

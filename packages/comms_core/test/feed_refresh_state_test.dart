@@ -61,7 +61,7 @@ void main() {
           nowMs: nowMs);
       expect(next.broken, isTrue);
       expect(next.consecutiveFailures, 1);
-      expect(next.lastError, 'Feed returned 404/410');
+      expect(next.lastError, feedGoneReason);
       expect(next.lastCheckedMs, isNull,
           reason: 'donor does not stamp lastChecked on failures');
     });
@@ -97,11 +97,25 @@ void main() {
         s = applyFetchResult(s, const FeedFetchResult.error(), nowMs: nowMs);
         expect(s.consecutiveFailures, i);
         expect(s.broken, isFalse, reason: 'not yet at failure $i');
-        expect(s.lastError, 'Fetch failed');
+        expect(s.lastError, feedUnreachableReason);
       }
       s = applyFetchResult(s, const FeedFetchResult.error(), nowMs: nowMs);
       expect(s.consecutiveFailures, 5);
       expect(s.broken, isTrue);
+    });
+
+    test('error: a server refusal names its status code', () {
+      final s = applyFetchResult(
+          const FeedRefreshState(url: 'u'), const FeedFetchResult.error(403),
+          nowMs: nowMs);
+      expect(s.lastError, contains('403'));
+    });
+
+    test('error: a typed refusal keeps its own sentence', () {
+      final s = applyFetchResult(const FeedRefreshState(url: 'u'),
+          const FeedFetchResult.error(202, feedBotWallReason),
+          nowMs: nowMs);
+      expect(s.lastError, feedBotWallReason);
     });
 
     group('fresh', () {

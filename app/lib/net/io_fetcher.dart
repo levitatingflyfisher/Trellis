@@ -7,7 +7,8 @@
 ///   this layer's duty).
 /// - Non-2xx statuses come back as a [FetchResponse]; only transport-level
 ///   failures throw.
-/// - [timeout] is a whole-request deadline covering headers AND body.
+/// - [timeout] bounds the wait for headers, then the longest silence allowed
+///   while the body streams; [maxBodyTime] caps the body as a whole.
 /// - The body is never buffered: callers stream it so comms_core's
 ///   mid-stream size caps can abort a download.
 library;
@@ -18,7 +19,9 @@ import 'dart:io';
 import 'package:comms_core/comms_core.dart';
 
 class IoHttpFetcher implements HttpFetcher {
-  IoHttpFetcher({Uri Function(String rawUrl)? checkRedirectTarget})
+  IoHttpFetcher(
+      {Uri Function(String rawUrl)? checkRedirectTarget,
+      this.maxBodyTime = const Duration(minutes: 3)})
       : _checkRedirectTarget = checkRedirectTarget ?? assertSafeFetchUrl,
         _client = HttpClient() {
     _client.autoUncompress = true;
@@ -30,6 +33,11 @@ class IoHttpFetcher implements HttpFetcher {
   final Uri Function(String rawUrl) _checkRedirectTarget;
 
   final HttpClient _client;
+
+  /// The whole body's ceiling, so a server trickling a byte at a time can't
+  /// hold a refresh forever. Three minutes carries a 25 MB feed at about
+  /// 140 KB/s.
+  final Duration maxBodyTime;
 
   /// One hop budget for the whole chain (browsers use 20; feeds never
   /// legitimately need more than a handful).
@@ -73,9 +81,9 @@ class IoHttpFetcher implements HttpFetcher {
       return FetchResponse(
         statusCode: response.statusCode,
         headers: _flattenHeaders(response.headers),
-        body: deadline == null
+        body: timeout == null
             ? response
-            : _deadlineBound(response, deadline),
+            : _stallBound(response, stall: timeout, ceiling: maxBodyTime),
       );
     }
     throw const FetchFailedException('Too many redirects.');
@@ -94,43 +102,58 @@ class IoHttpFetcher implements HttpFetcher {
     return out;
   }
 
-  /// Wraps the body so the whole-request deadline keeps running while the
-  /// server dribbles (or stalls) the response.
-  static Stream<List<int>> _deadlineBound(
-      Stream<List<int>> src, DateTime deadline) {
+  /// Wraps the body so it fails when the server goes quiet for [stall], or
+  /// when the whole body takes longer than [ceiling]. A steady slow download
+  /// is fine: a 20 MB feed on a weak connection is slow but never silent,
+  /// and a whole-request deadline failed exactly those feeds.
+  static Stream<List<int>> _stallBound(Stream<List<int>> src,
+      {required Duration stall, required Duration ceiling}) {
     final controller = StreamController<List<int>>();
     late StreamSubscription<List<int>> sub;
-    Timer? timer;
+    Timer? quiet;
+    Timer? whole;
 
-    void closeWith([Object? error]) {
-      timer?.cancel();
+    void fail(String why) {
+      quiet?.cancel();
+      whole?.cancel();
       sub.cancel();
-      if (error != null) controller.addError(error);
+      controller.addError(TimeoutException(why));
       controller.close();
     }
 
+    void armQuiet() {
+      quiet?.cancel();
+      quiet = Timer(stall, () => fail('The server stopped sending'));
+    }
+
     controller.onListen = () {
-      final left = deadline.difference(DateTime.now());
-      if (left <= Duration.zero) {
-        controller.addError(
-            TimeoutException('Request deadline exceeded'));
-        controller.close();
-        return;
-      }
-      timer = Timer(left, () {
-        closeWith(TimeoutException('Request deadline exceeded'));
-      });
+      whole = Timer(ceiling, () => fail('The body took too long'));
+      armQuiet();
       sub = src.listen(
-        controller.add,
+        (chunk) {
+          armQuiet();
+          controller.add(chunk);
+        },
         onError: (Object e, StackTrace st) => controller.addError(e, st),
         onDone: () {
-          timer?.cancel();
+          quiet?.cancel();
+          whole?.cancel();
           controller.close();
         },
       );
     };
+    // A paused reader is not a silent server.
+    controller.onPause = () {
+      quiet?.cancel();
+      sub.pause();
+    };
+    controller.onResume = () {
+      sub.resume();
+      armQuiet();
+    };
     controller.onCancel = () {
-      timer?.cancel();
+      quiet?.cancel();
+      whole?.cancel();
       return sub.cancel();
     };
     return controller.stream;

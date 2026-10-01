@@ -3,6 +3,7 @@
 /// and the never-prompt background proxy rule (C5).
 library;
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:comms_core/comms_core.dart';
@@ -202,5 +203,50 @@ void main() {
         feedClient(fetcher).fetchFeedConditional('http://192.168.1.10/feed'),
         throwsA(isA<UnsafeUrlException>()));
     expect(fetcher.calls, isEmpty);
+  });
+
+  group('a robot check is named, not mistaken for a feed', () {
+    // SiteGround's wall, as The FI Show's host serves it: 202, tiny HTML,
+    // a meta refresh to /.well-known/sgcaptcha/.
+    const sgcaptcha = '<html><head><link rel="icon" href="data:;">'
+        '<meta http-equiv="refresh" content="0;/.well-known/sgcaptcha/'
+        '?r=%2Ffeed%2F"></meta></head></html>';
+
+    test('SiteGround 202 captcha page', () async {
+      final fetcher = ScriptedFetcher(
+          (url, headers) => textResponse(sgcaptcha, status: 202));
+      final res = await feedClient(fetcher)
+          .fetchFeedConditional('https://example.com/feed');
+      expect(res.status, FeedFetchStatus.error);
+      expect(res.errorCode, 202);
+      expect(res.message, feedBotWallReason);
+    });
+
+    test('a 200 challenge page (Cloudflare style)', () async {
+      final fetcher = ScriptedFetcher((url, headers) => textResponse(
+          '<!DOCTYPE html><html><head><title>Just a moment...</title>'
+          '<script src="/cdn-cgi/challenge-platform/x.js"></script>'));
+      final res = await feedClient(fetcher)
+          .fetchFeedConditional('https://example.com/feed');
+      expect(res.message, feedBotWallReason);
+    });
+
+    test('a feed that merely mentions captcha is still a feed', () async {
+      const rss = '<?xml version="1.0"?><rss><channel><title>On captcha'
+          '</title></channel></rss>';
+      final fetcher = ScriptedFetcher((url, headers) => textResponse(rss));
+      final res = await feedClient(fetcher)
+          .fetchFeedConditional('https://example.com/feed');
+      expect(res.status, FeedFetchStatus.fresh);
+    });
+  });
+
+  test('a stalled server is reported as stalled', () async {
+    final fetcher = ScriptedFetcher(
+        (url, headers) => throw TimeoutException('stalled'));
+    final res = await feedClient(fetcher)
+        .fetchFeedConditional('https://example.com/feed');
+    expect(res.status, FeedFetchStatus.error);
+    expect(res.message, feedStalledReason);
   });
 }

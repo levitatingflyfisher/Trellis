@@ -618,8 +618,10 @@ void main() {
       expect(after.breakerJson, contains('"broken":true'));
     });
 
-    test('a fresh body that fails to parse leaves ALL bookkeeping '
-        'untouched (donor parity)', () async {
+    test('a fresh body that fails to parse records why, and keeps the old '
+        'validators', () async {
+      // Why: the donor skipped all bookkeeping here, so a feed that kept
+      // serving junk looked healthy forever and its row never said why.
       final fetcher = ScriptedFetcher((url, headers) =>
           textResponse('this is not xml', headers: {'etag': '"new"'}));
       final feed = await seedFeed(etag: '"old"');
@@ -629,8 +631,10 @@ void main() {
 
       final after = (await db.feedsDao.feedsOf(profileId)).single;
       expect(after.etag, '"old"',
-          reason: 'the donor skipped bookkeeping when parse threw');
-      expect(after.breakerJson, feed.breakerJson);
+          reason: 'validators of an unparsed body must not be adopted');
+      final state = stateOfFeed(after);
+      expect(state.consecutiveFailures, 1);
+      expect(state.lastError, contains('Not valid XML'));
     });
 
     test('a fresh fetch adopts the archive link the parse found', () async {
