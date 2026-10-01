@@ -103,7 +103,7 @@ class ReaderTypography {
         'justified': justified,
       };
 
-  /// Lenient the way the house codecs are lenient (`decodeFsrsCardState`):
+  /// Lenient the way the house codecs are lenient (`decodeStudyCard`):
   /// a missing or malformed key falls back to its default rather than
   /// throwing — a corrupt blob degrades to "as if never set", never a
   /// crash on open.

@@ -3,8 +3,8 @@
 /// on-ramp Readwise-style highlight review is built on. This is NOT the
 /// course study flow: course items live in Cards/StudyDao, a table this
 /// screen never queries (see DailyReviewDao's doc comment). Soon maps to
-/// the sealed scheduler's again; Eventually maps to good — the same
-/// scheduleSm2 course sessions use, untouched.
+/// again and Eventually to good, through the profile's scheduler (FSRS or
+/// SM-2), the same one its course sessions use.
 ///
 /// The front is deliberately plain: a bare ledger word shows just the
 /// word. A capture's front is built from two independent pieces (Campaign
@@ -32,7 +32,9 @@ import '../shared/capped_body.dart';
 class _QueueItem {
   final String sourceType;
   final int sourceId;
-  final study.CardState state;
+
+  /// Null for a source never graded.
+  final study.StudyCard? card;
 
   /// The word (ledger) or the resolved sentence (capture, once one can be
   /// found) — empty for a capture with no transcript yet, in which case
@@ -50,7 +52,7 @@ class _QueueItem {
   const _QueueItem({
     required this.sourceType,
     required this.sourceId,
-    required this.state,
+    required this.card,
     required this.headline,
     this.byline,
     this.pending = false,
@@ -72,6 +74,7 @@ class _DailyReviewScreenState extends State<DailyReviewScreen> {
   late final int _today = epochDayUtcNow();
   List<_QueueItem>? _queue;
   int _reviewed = 0;
+  study.Scheduler _scheduler = study.Scheduler.fsrs;
 
   /// Fixed at load — the "M" of the "N of M" progress counter. [_queue]'s
   /// own length is "N" (it only ever shrinks), so the counter needs no
@@ -85,8 +88,12 @@ class _DailyReviewScreenState extends State<DailyReviewScreen> {
   }
 
   Future<void> _load() async {
-    final all = await widget.db.dailyReviewDao.loadAll(widget.profileId, _today);
-    final due = all.entries.where((e) => e.value.isDue(_today)).toList();
+    final all = await widget.db.dailyReviewDao.loadAll(widget.profileId);
+    final due = all.entries
+        .where((e) => e.value == null || e.value!.progress.isDue(_today))
+        .toList();
+    final schedulerName =
+        await widget.db.profilesDao.scheduler(widget.profileId);
 
     final words = {
       for (final w in await widget.db.ledgerDao.wordsOf(widget.profileId))
@@ -108,7 +115,7 @@ class _DailyReviewScreenState extends State<DailyReviewScreen> {
         items.add(_QueueItem(
             sourceType: sourceType,
             sourceId: sourceId,
-            state: entry.value,
+            card: entry.value,
             headline: words[sourceId]?.word ?? '(word removed)'));
         continue;
       }
@@ -117,7 +124,7 @@ class _DailyReviewScreenState extends State<DailyReviewScreen> {
         items.add(_QueueItem(
             sourceType: sourceType,
             sourceId: sourceId,
-            state: entry.value,
+            card: entry.value,
             headline: '',
             byline: 'A captured moment',
             pending: true));
@@ -127,13 +134,16 @@ class _DailyReviewScreenState extends State<DailyReviewScreen> {
       items.add(_QueueItem(
           sourceType: sourceType,
           sourceId: sourceId,
-          state: entry.value,
+          card: entry.value,
           headline: details.sentence ?? '',
           byline: details.byline,
           pending: details.sentence == null));
     }
     if (!mounted) return;
     setState(() {
+      _scheduler = schedulerName == study.Scheduler.classic.name
+          ? study.Scheduler.classic
+          : study.Scheduler.fsrs;
       _queue = items;
       _total = items.length;
     });
@@ -170,12 +180,25 @@ class _DailyReviewScreenState extends State<DailyReviewScreen> {
   }
 
   Future<void> _grade(_QueueItem item, study.Grade grade) async {
-    final next = study.scheduleSm2(item.state, grade, _today);
-    await widget.db.dailyReviewDao.recordGrade(
-        profileId: widget.profileId,
-        sourceType: item.sourceType,
-        sourceId: item.sourceId,
-        after: next);
+    final itemId = '${item.sourceType}:${item.sourceId}';
+    final card = item.card;
+    if (_scheduler == study.Scheduler.fsrs) {
+      final before = card?.fsrsToGradeFrom(_today) ??
+          study.FsrsCardState.initial(itemId, _today);
+      await widget.db.dailyReviewDao.recordGrade(
+          profileId: widget.profileId,
+          sourceType: item.sourceType,
+          sourceId: item.sourceId,
+          fsrs: study.scheduleFsrs(before, grade, _today));
+    } else {
+      final before = card?.classicToGradeFrom() ??
+          study.CardState.initial(itemId, const study.SrsDefaults(), _today);
+      await widget.db.dailyReviewDao.recordGrade(
+          profileId: widget.profileId,
+          sourceType: item.sourceType,
+          sourceId: item.sourceId,
+          classic: study.scheduleSm2(before, grade, _today));
+    }
     if (!mounted) return;
     setState(() {
       _queue!.removeWhere((q) =>

@@ -149,7 +149,7 @@ copies the database to the user's cloud account, outside the household's
 own encrypted `.ohbk` backup. A test reads the manifest. Fleet
 conformance still passes.
 
-### 5. FSRS by default: not flipped
+### 5. FSRS by default: not flipped (replaced, see the update below)
 
 `study_core`'s FSRS scheduler is complete and tested, but it can't be
 the default yet. Unlocking and mastery (`nodeUnlocked`, `nodeProgress`,
@@ -167,6 +167,29 @@ same-session relearning after "Again", and Daily review always uses
 SM-2. The default stays `'classic'`, and FSRS stays labelled beta. What
 would let it flip: unlock and mastery read the active scheduler's half,
 or FSRS grades also advance the classic half.
+
+**Update: flipped.** This ruling is replaced. Unlock, mastery, due counts
+and the dashboard now read one scheduler-neutral view,
+`cardProgress(StudyCard)` in study_core. It reads whichever half graded
+the card last, and each grade stamps which one that was, since two halves
+graded the same day can't be ordered by date. Switching keeps progress
+both ways, which replaces ADR-0009's lossy-switch-back law. The first grade under the other scheduler seeds its half from
+the newer one: FSRS from SM-2 as stability := interval, dated to SM-2's
+last review rather than today (dating it today gave the first FSRS Good
+zero growth), and SM-2 from FSRS as interval := the interval FSRS
+scheduled, with ease from the inverse of the ease-to-difficulty map.
+Neither mapping is published; both treat "days until the next review" as
+the quantity the two models share. The default is now `'fsrs'` with the
+default weights and 0.9 desired retention, and Classic stays one tap
+away. Mastery also needs two reviews of a card under either scheduler,
+since one first-ever Easy under FSRS already schedules past the 7-day
+threshold. The other two caveats are fixed too. After "Again", FSRS
+re-asks the card later in the same session; that re-ask is practice, not
+a review, so the due day FSRS gave the lapse stands and no revlog row is
+added. Daily review (words and captures) follows the profile's scheduler,
+storing the same two-half blob as course cards. Anki export carries no
+schedule for either scheduler: cards go out as new and Anki schedules
+them itself.
 
 ### 6. Small UI fixes
 

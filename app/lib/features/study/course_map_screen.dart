@@ -52,7 +52,7 @@ class CourseMapScreen extends StatefulWidget {
 }
 
 class _CourseMapScreenState extends State<CourseMapScreen> {
-  Map<String, study.CardState>? _cards;
+  Map<String, study.CardProgress>? _cards;
 
   @override
   void initState() {
@@ -61,7 +61,8 @@ class _CourseMapScreenState extends State<CourseMapScreen> {
   }
 
   Future<void> _reload() async {
-    final cards = await widget.db.studyDao.loadCardStates(widget.courseRow.id);
+    final stored = await widget.db.studyDao.loadCards(widget.courseRow.id);
+    final cards = stored.map((id, c) => MapEntry(id, c.progress));
     if (!mounted) return;
     setState(() => _cards = cards);
   }

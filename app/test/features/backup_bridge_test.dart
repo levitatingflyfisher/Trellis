@@ -272,7 +272,7 @@ void main() {
       expect((await db2.feedsDao.episodeOf(episodeWork.id))?.guid, 'guid-1');
       final courseRow =
           (await db2.studyDao.coursesOf(ada.id)).single;
-      final cards = await db2.studyDao.loadCardStates(courseRow.id);
+      final cards = await db2.studyDao.loadClassicHalves(courseRow.id);
       expect(cards['i1']!.dueEpochDay, 20671);
       expect((await db2.studyDao.revlogOf(courseRow.id)).single.tsMs, 999);
       expect(
@@ -312,7 +312,7 @@ void main() {
 
       final courseARow =
           courses.singleWhere((c) => c.courseId == 'course-a');
-      final aCards = await db.studyDao.loadCardStates(courseARow.id);
+      final aCards = await db.studyDao.loadClassicHalves(courseARow.id);
       final item1 = aCards['item-1']!;
       expect(item1.ease, 2.1);
       expect(item1.intervalDays, 6);
@@ -320,7 +320,7 @@ void main() {
       expect(item1.reps, 2);
       expect(item1.lapses, 1);
 
-      final bundledCards = await db.studyDao.loadCardStates(bundledRow);
+      final bundledCards = await db.studyDao.loadClassicHalves(bundledRow);
       expect(bundledCards['item-b']!.reps, 4,
           reason: 'bundled-course progress is the user\'s — it lands on the '
               'course this device already has');
@@ -333,6 +333,37 @@ void main() {
           reason: 'the engine\'s empty-revlog sentence travels through');
     });
 
+    test('donor progress lands as the newer classic half; an FSRS half '
+        'already on the card survives', () async {
+      final ada = await db.profilesDao.create('Ada');
+      final bundledRow = await db.studyDao.importCourse(
+          profileId: ada,
+          raw: ourCourseJson(id: 'bundled-1', title: 'Bundled'),
+          nowMs: 5);
+      final fsrs = study.FsrsCardState(
+          itemId: 'item-b',
+          stability: 3,
+          difficulty: 5,
+          dueEpochDay: 20003,
+          reps: 1,
+          lapses: 0,
+          lastReviewEpochDay: 20000);
+      await db.studyDao.recordGradeFsrs(
+          courseRowId: bundledRow,
+          before: study.FsrsCardState.initial('item-b', 20000),
+          after: fsrs,
+          grade: study.Grade.good,
+          tsMs: 1);
+
+      await bridge.applyTrellis(await import(), profileId: ada, nowMs: 7);
+
+      final card = (await db.studyDao.loadCards(bundledRow))['item-b']!;
+      expect(card.fsrs, fsrs);
+      expect(card.classic!.reps, 4);
+      expect(card.lastGradedBy, study.Scheduler.classic,
+          reason: 'donor progress wins');
+    });
+
     test('re-applying the same backup duplicates nothing', () async {
       final ada = await db.profilesDao.create('Ada');
       await bridge.applyTrellis(await import(), profileId: ada, nowMs: 7);
@@ -340,7 +371,7 @@ void main() {
 
       final courses = await db.studyDao.coursesOf(ada);
       expect(courses.length, 1);
-      final cards = await db.studyDao.loadCardStates(courses.single.id);
+      final cards = await db.studyDao.loadClassicHalves(courses.single.id);
       expect(cards.length, 1);
     });
   });

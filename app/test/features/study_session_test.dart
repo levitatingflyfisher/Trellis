@@ -141,6 +141,8 @@ void main() {
       'the suggestion only highlights — the learner\'s tap drives SM-2',
       (tester) async {
     final (id, course) = await import(fourTypesCourse());
+    // SM-2 specific: FSRS (the default) never relearns the same day.
+    await db.profilesDao.setScheduler(1, 'classic');
     await pumpSession(tester, id, course);
     await tester.tap(find.byKey(const Key('begin-session')));
     await tester.pumpAndSettle();
@@ -171,7 +173,7 @@ void main() {
         reason: 'the tap drives the SRS, not the suggestion');
     expect(log.single.intervalBeforeDays, 0);
     expect(log.single.intervalAfterDays, 1);
-    final card = (await db.studyDao.loadCardStates(id))['i-cloze']!;
+    final card = (await db.studyDao.loadClassicHalves(id))['i-cloze']!;
     expect(card.reps, 1);
     expect(card.intervalDays, 1);
   });
@@ -259,6 +261,8 @@ void main() {
   testWidgets('a lapse relearns in THIS session, with cleared inputs',
       (tester) async {
     final (id, course) = await import(singleClozeCourse());
+    // SM-2 specific: FSRS (the default) never relearns the same day.
+    await db.profilesDao.setScheduler(1, 'classic');
     await pumpSession(tester, id, course);
     await tester.tap(find.byKey(const Key('begin-session')));
     await tester.pumpAndSettle();
@@ -285,7 +289,7 @@ void main() {
     expect(find.text('You reviewed 2 items.'), findsOneWidget);
     final log = await db.studyDao.revlogOf(id);
     expect([for (final e in log) e.grade], ['again', 'good']);
-    final card = (await db.studyDao.loadCardStates(id))['i-a']!;
+    final card = (await db.studyDao.loadClassicHalves(id))['i-a']!;
     expect(card.lapses, 1);
     expect(card.reps, 1);
   });

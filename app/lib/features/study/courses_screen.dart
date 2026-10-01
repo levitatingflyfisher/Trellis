@@ -66,11 +66,11 @@ class _CoursesScreenState extends State<CoursesScreen> {
   /// chip entirely (quiet means quiet, ADR-0003 law 5: no permanent zero).
   int? _dailyReviewDue;
 
-  /// The profile's scheduler choice ('classic' the default, or 'fsrs') —
+  /// The profile's scheduler choice ('fsrs' the default, or 'classic') —
   /// the study crown's toggle. Loaded once per [_load]; grading itself
   /// reads it fresh from the database (study_session_screen.dart), so this
   /// field only drives the settings menu's own checkmark.
-  String _scheduler = 'classic';
+  String _scheduler = 'fsrs';
 
   @override
   void initState() {
@@ -107,13 +107,11 @@ class _CoursesScreenState extends State<CoursesScreen> {
     await _load(); // the due count moved
   }
 
-  /// The study crown's toggle (ADR-0009). Switching TO FSRS is the
-  /// direction with a real, easy-to-miss consequence (the lossy-switch-
-  /// back law), so it asks first, in one honest sentence naming what
-  /// actually changes — never just "are you sure?". Switching BACK to
-  /// Classic is an instant resume: there is nothing new to warn about in
-  /// that direction, so it flips with no dialog, matching the reader's own
-  /// settings-escape idiom (ADR-0006's `_toggleVoicePreference`).
+  /// The study crown's toggle (ADR-0009). Switching to FSRS explains, once,
+  /// what FSRS is and that progress carries over; the screen is where the
+  /// jargon gets its one-line explanation. Switching to Classic flips with
+  /// no dialog, matching the reader's settings-escape idiom (ADR-0006's
+  /// `_toggleVoicePreference`).
   Future<void> _toggleScheduler() async {
     final next = _scheduler == 'fsrs' ? 'classic' : 'fsrs';
     if (next == 'fsrs') {
@@ -124,9 +122,8 @@ class _CoursesScreenState extends State<CoursesScreen> {
           content: const Text(
               'Classic is SM-2, the long-standing spaced-repetition schedule. '
               'FSRS learns each card’s own difficulty and memory curve to '
-              'schedule reviews more precisely than Classic’s fixed steps; '
-              'switching back to Classic later resumes right where Classic '
-              'left off, but FSRS’s own progress won’t carry over.'),
+              'schedule reviews more precisely than Classic’s fixed steps. '
+              'Your progress carries over when you switch, either way.'),
           actions: [
             TextButton(
                 onPressed: () => Navigator.pop(dialog, false),
@@ -266,7 +263,9 @@ class _CoursesScreenState extends State<CoursesScreen> {
                   key: const Key('scheduler-toggle'),
                   value: 'scheduler',
                   checked: _scheduler == 'fsrs',
-                  child: const Text('Newer scheduling: FSRS (beta)'),
+                  child: const Text(
+                      'FSRS scheduling: learns each card’s memory curve. '
+                      'Off uses Classic (SM-2) fixed steps.'),
                 ),
               ],
             ),

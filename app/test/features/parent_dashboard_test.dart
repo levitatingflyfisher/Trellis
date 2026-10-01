@@ -69,7 +69,7 @@ void main() {
         ease: 2.5,
         intervalDays: intervalDays,
         dueEpochDay: 100 + intervalDays,
-        reps: 1,
+        reps: 2,
         lapses: 0,
       );
 

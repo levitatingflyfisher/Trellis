@@ -4,14 +4,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/study/courses_screen.dart';
 
-/// The study crown's toggle: a calm per-profile setting, default "Classic
-/// (SM-2)", opt-in "FSRS" — following the reader's existing settings-escape
+/// The study crown's toggle: a calm per-profile setting, default "FSRS",
+/// "Classic (SM-2)" one tap away — following the reader's existing settings-escape
 /// idiom (a PopupMenuButton + CheckedPopupMenuItem, ADR-0006's pattern) so
 /// this doesn't invent a second settings surface convention. Switching TO
-/// FSRS shows one honest sentence about the lossy-switch-back law before
-/// it takes effect; switching back to Classic is an instant, unsurprising
-/// resume (no dialog — there is nothing new to warn about in that
-/// direction, ADR-0009).
+/// FSRS explains it and says progress carries over before it takes effect;
+/// switching to Classic is instant (no dialog, ADR-0009).
 void main() {
   late AppDatabase db;
   setUp(() => db = AppDatabase.forTesting(NativeDatabase.memory()));
@@ -28,9 +26,10 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('defaults to unchecked (Classic) for a fresh profile',
+  testWidgets('defaults to checked (FSRS) for a fresh profile',
       (tester) async {
     final profile = await seedProfile();
+    expect(await db.profilesDao.scheduler(profile.id), 'fsrs');
     await pumpCourses(tester, profile);
 
     await tester.tap(find.byKey(const Key('study-settings')));
@@ -38,13 +37,15 @@ void main() {
 
     final item = tester.widget<CheckedPopupMenuItem<String>>(
         find.byKey(const Key('scheduler-toggle')));
-    expect(item.checked, isFalse);
+    expect(item.checked, isTrue);
+    expect(find.textContaining('beta'), findsNothing);
   });
 
   testWidgets(
-      'switching to FSRS shows one explanatory sentence naming the '
-      'lossy-switch-back law before it takes effect', (tester) async {
+      'switching to FSRS explains it, and says progress carries over, '
+      'before it takes effect', (tester) async {
     final profile = await seedProfile();
+    await db.profilesDao.setScheduler(profile.id, 'classic');
     await pumpCourses(tester, profile);
 
     await tester.tap(find.byKey(const Key('study-settings')));
@@ -53,9 +54,8 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(find.textContaining('FSRS'), findsWidgets);
-    expect(find.textContaining('won’t carry over'), findsOneWidget,
-        reason: 'the honest sentence must name the actual consequence, not '
-            'just say "are you sure?"');
+    expect(find.textContaining('progress carries over'), findsOneWidget,
+        reason: 'switching keeps progress both ways, and the dialog says so');
     // Not yet applied — the dialog is a confirmation, not a fait accompli.
     expect(await db.profilesDao.scheduler(profile.id), 'classic');
   });
@@ -63,6 +63,7 @@ void main() {
   testWidgets('confirming the dialog actually flips the setting',
       (tester) async {
     final profile = await seedProfile();
+    await db.profilesDao.setScheduler(profile.id, 'classic');
     await pumpCourses(tester, profile);
 
     await tester.tap(find.byKey(const Key('study-settings')));
@@ -83,6 +84,7 @@ void main() {
 
   testWidgets('declining the dialog leaves Classic in place', (tester) async {
     final profile = await seedProfile();
+    await db.profilesDao.setScheduler(profile.id, 'classic');
     await pumpCourses(tester, profile);
 
     await tester.tap(find.byKey(const Key('study-settings')));

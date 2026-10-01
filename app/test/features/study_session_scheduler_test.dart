@@ -9,15 +9,10 @@ import 'package:trellis/db/database.dart';
 import 'package:trellis/features/intake/paste_intake.dart' show epochDayUtcNow;
 import 'package:trellis/features/study/study_session_screen.dart';
 
-/// The study crown, closing the reachability gap a review caught: FSRS-5
-/// (21 tests, packages/study_core/test/fsrs_scheduler_test.dart) is real
-/// but until this file, nothing a user could do ever invoked it —
-/// study_session_screen.dart graded through scheduleSm2 unconditionally,
-/// regardless of the profile's scheduler setting. This file proves the
-/// dispatch: Classic (the default) grades byte-for-byte as it always has;
-/// FSRS grades through scheduleFsrs, seeded lazily from classic history on
-/// first touch, and a round trip back to Classic lands on classic state
-/// that was never mutated while FSRS was active.
+/// The session grades through the profile's scheduler: Classic through
+/// scheduleSm2, FSRS through scheduleFsrs. A switch in either direction
+/// seeds the new scheduler from the card's newer half at its first grade,
+/// so progress carries over both ways.
 void main() {
   late AppDatabase db;
   setUp(() => db = AppDatabase.forTesting(NativeDatabase.memory()));
@@ -86,16 +81,16 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  group('the default profile (Classic) is untouched', () {
+  group('a profile set to Classic grades through scheduleSm2', () {
     testWidgets(
-        'grades through scheduleSm2 exactly as before — the FSRS half of '
-        'the stateJson blob is never written for a Classic profile',
+        'the FSRS half of the stateJson blob is never written',
         (tester) async {
-      final (_, id, course) = await import(singleClozeCourse());
+      final (profileId, id, course) = await import(singleClozeCourse());
+      await db.profilesDao.setScheduler(profileId, 'classic');
       await openSession(tester, id, course);
       await gradeAs(tester, 'Good');
 
-      final card = (await db.studyDao.loadCardStates(id))['i-a']!;
+      final card = (await db.studyDao.loadClassicHalves(id))['i-a']!;
       final expected = study.scheduleSm2(
           study.CardState.initial('i-a', course.srsDefaults, epochDayUtcNow()),
           study.Grade.good,
@@ -122,8 +117,7 @@ void main() {
       await openSession(tester, id, course);
       await gradeAs(tester, 'Good');
 
-      final fsrs =
-          (await db.studyDao.loadFsrsCardStates(id, epochDayUtcNow()))['i-a']!;
+      final fsrs = (await db.studyDao.loadCards(id))['i-a']!.fsrs!;
       final expectedFirst = study.scheduleFsrs(
           study.FsrsCardState.initial('i-a', epochDayUtcNow()),
           study.Grade.good,
@@ -138,10 +132,9 @@ void main() {
           reason: 'a card graded ONLY under FSRS never gains classic keys');
     });
 
-    testWidgets('a lapse ("Again") is not re-queued in-session — FSRS '
-        'schedules at least one day out even for a lapse (day-granularity, '
-        'no same-day relearning steps; see fsrs_scheduler.dart), unlike '
-        'SM-2\'s immediate same-day relearn', (tester) async {
+    testWidgets('"Again" re-asks the card later in the same session, and '
+        'the re-ask does not reschedule it: the stored due stays what FSRS '
+        'computed for the lapse', (tester) async {
       final (profileId, id, course) = await import(singleClozeCourse());
       await db.profilesDao.setScheduler(profileId, 'fsrs');
       await openSession(tester, id, course);
@@ -151,25 +144,37 @@ void main() {
       await tester.tap(find.text('Again'));
       await tester.pumpAndSettle();
 
-      // A same-day relearn would land back on the item step. Instead the
-      // session should already be done — nothing left due today.
+      final afterLapse = (await db.studyDao.loadCards(id))['i-a']!.fsrs!;
+      expect(afterLapse.dueEpochDay, greaterThan(epochDayUtcNow()));
+
+      expect(find.text('Session complete'), findsNothing);
+      final blank = find.byKey(const Key('blank-i-a-c1'));
+      expect(blank, findsOneWidget, reason: 'the card is asked again');
+      expect(tester.widget<TextField>(blank).controller!.text, isEmpty,
+          reason: 'with the failed attempt cleared');
+      await gradeAs(tester, 'Good');
+
       expect(find.text('Session complete'), findsOneWidget);
+      final card = (await db.studyDao.loadCards(id))['i-a']!.fsrs!;
+      expect(card, afterLapse);
+      expect(await db.studyDao.revlogOf(id), hasLength(1),
+          reason: 'practice inside the session is not a scheduled review');
     });
   });
 
-  group('lazy seeding: real classic history seeds the first FSRS grade',
-      () {
+  group('switching keeps progress', () {
     testWidgets('a card with classic progress, switched to FSRS: the first '
         'FSRS grade is computed FROM the seeded classic state, not a bare '
         'fresh card', (tester) async {
       final (profileId, id, course) = await import(singleClozeCourse());
+      await db.profilesDao.setScheduler(profileId, 'classic');
       await openSession(tester, id, course);
-      await gradeAs(tester, 'Good'); // real classic history: reps 1, interval 1
+      await gradeAs(tester, 'Again'); // due again today under SM-2
 
-      final classicAfterFirst = (await db.studyDao.loadCardStates(id))['i-a']!;
+      final classicAfterFirst =
+          (await db.studyDao.loadCards(id))['i-a']!.classic!;
       await db.profilesDao.setScheduler(profileId, 'fsrs');
 
-      // Reopen the session (a fresh due queue) and grade again, now on FSRS.
       await openSession(tester, id, course, openKey: const Key('reopen'));
       await gradeAs(tester, 'Good');
 
@@ -177,59 +182,41 @@ void main() {
           study.seedFsrsFromClassic(classicAfterFirst, epochDayUtcNow());
       final expectedAfter =
           study.scheduleFsrs(seededBefore, study.Grade.good, epochDayUtcNow());
-      final fsrsAfter =
-          (await db.studyDao.loadFsrsCardStates(id, epochDayUtcNow()))['i-a']!;
-      expect(fsrsAfter.stability, closeTo(expectedAfter.stability, 1e-9),
-          reason: 'the seed carried real classic progress in, not a fresh '
-              'S0/D0 as if the card had never been studied');
+      final card = (await db.studyDao.loadCards(id))['i-a']!;
+      expect(card.fsrs!.stability, closeTo(expectedAfter.stability, 1e-9));
+      expect(card.fsrs!.lapses, 1,
+          reason: 'the classic lapse came along with the seed');
+      expect(card.lastGradedBy, study.Scheduler.fsrs);
     });
-  });
 
-  group('switching back to Classic lands on intact, unmutated classic state',
-      () {
-    testWidgets(
-        'a classic -> FSRS -> classic round trip resumes classic grading '
-        'exactly where it was frozen, never touched by the FSRS excursion',
-        (tester) async {
+    testWidgets('switching back to Classic resumes from the newer FSRS '
+        'progress, not the classic state frozen before FSRS', (tester) async {
       final (profileId, id, course) = await import(singleClozeCourse());
+      final today = epochDayUtcNow();
+      // An FSRS review a week ago, due again today.
+      await db.into(db.cards).insert(CardsCompanion.insert(
+          courseId: id,
+          itemId: 'i-a',
+          stateJson: mergeCardStateJson(null,
+              fsrs: study.FsrsCardState(
+                  itemId: 'i-a',
+                  stability: 7,
+                  difficulty: 5,
+                  dueEpochDay: today,
+                  reps: 3,
+                  lapses: 0,
+                  lastReviewEpochDay: today - 7))));
+      await db.profilesDao.setScheduler(profileId, 'classic');
+
       await openSession(tester, id, course);
       await gradeAs(tester, 'Good');
-      final classicAfterFirst = (await db.studyDao.loadCardStates(id))['i-a']!;
 
-      // FSRS excursion: switch, grade (item is due again immediately after
-      // its first classic grade puts it at interval 1 -- not due tomorrow
-      // yet, so seed the queue by grading whatever FSRS makes due; the
-      // classic row must not move regardless of what happens here).
-      await db.profilesDao.setScheduler(profileId, 'fsrs');
-      final before = await db.studyDao.fsrsStateToGradeFrom(
-          courseRowId: id,
-          itemId: 'i-a',
-          classicBefore: classicAfterFirst,
-          todayEpochDay: epochDayUtcNow());
-      final after =
-          study.scheduleFsrs(before, study.Grade.easy, epochDayUtcNow());
-      await db.studyDao.recordGradeFsrs(
-          courseRowId: id,
-          before: before,
-          after: after,
-          grade: study.Grade.easy,
-          tsMs: 2);
-
-      final classicDuringFsrs = (await db.studyDao.loadCardStates(id))['i-a']!;
-      expect(classicDuringFsrs.ease, classicAfterFirst.ease,
-          reason: 'the classic half must not move while FSRS is active');
-      expect(classicDuringFsrs.intervalDays, classicAfterFirst.intervalDays);
-      expect(classicDuringFsrs.dueEpochDay, classicAfterFirst.dueEpochDay);
-
-      // Switch back — classic resumes from exactly what it was frozen at.
-      await db.profilesDao.setScheduler(profileId, 'classic');
-      final classicAfterSwitchBack =
-          (await db.studyDao.loadCardStates(id))['i-a']!;
-      expect(classicAfterSwitchBack.ease, classicAfterFirst.ease);
-      expect(classicAfterSwitchBack.intervalDays,
-          classicAfterFirst.intervalDays);
-      expect(classicAfterSwitchBack.dueEpochDay, classicAfterFirst.dueEpochDay);
-      expect(classicAfterSwitchBack.reps, classicAfterFirst.reps);
+      final card = (await db.studyDao.loadCards(id))['i-a']!;
+      expect(card.lastGradedBy, study.Scheduler.classic);
+      expect(card.classic!.intervalDays, greaterThan(7),
+          reason: 'SM-2 grew the 7-day interval FSRS had reached');
+      expect(card.fsrs!.stability, 7,
+          reason: 'the FSRS half stays as it was');
     });
   });
 }

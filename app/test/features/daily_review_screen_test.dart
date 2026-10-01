@@ -46,6 +46,7 @@ void main() {
     final profileId = await db.profilesDao.create('Ada');
     final wordId =
         await db.ledgerDao.add(profileId: profileId, word: 'saudade', nowMs: 1);
+    await db.profilesDao.setScheduler(profileId, 'classic');
 
     await tester.pumpWidget(MaterialApp(
         home: DailyReviewScreen(db: db, profileId: profileId)));
@@ -67,6 +68,7 @@ void main() {
     final profileId = await db.profilesDao.create('Ada');
     final wordId =
         await db.ledgerDao.add(profileId: profileId, word: 'saudade', nowMs: 1);
+    await db.profilesDao.setScheduler(profileId, 'classic');
 
     await tester.pumpWidget(MaterialApp(
         home: DailyReviewScreen(db: db, profileId: profileId)));
@@ -83,6 +85,25 @@ void main() {
         .getSingle();
     expect(row.stateJson, contains('"reps":1'));
     // Graduated: gone from the visible queue immediately (due later, not today).
+    expect(find.text('saudade'), findsNothing);
+  });
+
+  testWidgets('on the default (FSRS) profile, Eventually grades through '
+      'FSRS', (tester) async {
+    final profileId = await db.profilesDao.create('Ada');
+    final wordId =
+        await db.ledgerDao.add(profileId: profileId, word: 'saudade', nowMs: 1);
+
+    await tester.pumpWidget(MaterialApp(
+        home: DailyReviewScreen(db: db, profileId: profileId)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('review-eventually')));
+    await tester.pumpAndSettle();
+
+    final card = await db.dailyReviewDao.cardOf(
+        profileId: profileId, sourceType: 'ledger', sourceId: wordId);
+    expect(card!.classic, isNull);
+    expect(card.fsrs!.reps, 1);
     expect(find.text('saudade'), findsNothing);
   });
 

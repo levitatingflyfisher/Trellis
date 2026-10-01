@@ -452,6 +452,8 @@ class DbBridge {
 
   /// Donor progress wins over whatever state the card had here: a restore
   /// that quietly keeps the older of two schedules would be a silent loss.
+  /// It lands as the newer classic half; an FSRS half already here stays,
+  /// so the card keeps its FSRS difficulty if the learner grades it there.
   Future<void> _upsertCardState(
       {required int courseRowId, required study.CardState state}) async {
     final existing = await (db.select(db.cards)
@@ -460,12 +462,14 @@ class DbBridge {
         .getSingleOrNull();
     if (existing != null) {
       await (db.update(db.cards)..where((c) => c.id.equals(existing.id)))
-          .write(CardsCompanion(stateJson: Value(encodeCardState(state))));
+          .write(CardsCompanion(
+              stateJson: Value(
+                  mergeCardStateJson(existing.stateJson, classic: state))));
     } else {
       await db.into(db.cards).insert(CardsCompanion.insert(
           courseId: courseRowId,
           itemId: state.itemId,
-          stateJson: encodeCardState(state)));
+          stateJson: mergeCardStateJson(null, classic: state)));
     }
   }
 }

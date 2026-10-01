@@ -68,7 +68,7 @@ void main() {
           ease: 2.5,
           intervalDays: intervalDays,
           dueEpochDay: 100 + intervalDays,
-          reps: 1,
+          reps: 2,
           lapses: 0);
 
   group('schema migration v5 → v6', () {
@@ -263,7 +263,7 @@ void main() {
       expect(await db.spineDao.worksOf(grace), hasLength(2));
       expect(await db.feedsDao.feedsOf(grace), hasLength(1));
       final graceCourse = (await db.studyDao.coursesOf(grace)).single;
-      expect(await db.studyDao.loadCardStates(graceCourse.id), hasLength(1));
+      expect(await db.studyDao.loadClassicHalves(graceCourse.id), hasLength(1));
       expect(await db.studyDao.revlogOf(graceCourse.id), hasLength(1));
       expect((await db.ledgerDao.wordsOf(grace)).single.word, 'word2');
       expect(

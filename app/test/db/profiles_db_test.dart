@@ -49,21 +49,22 @@ void main() {
   });
 
   group('scheduler (study crown: Classic | FSRS, per profile)', () {
-    test('a fresh profile defaults to classic', () async {
+    test('a fresh profile defaults to fsrs', () async {
       final profileId = await db.profilesDao.create('Ada');
-      expect(await db.profilesDao.scheduler(profileId), 'classic');
+      expect(await db.profilesDao.scheduler(profileId), 'fsrs');
     });
 
-    test('setting it to fsrs persists, scoped to this profile only', () async {
+    test('setting it to classic persists, scoped to this profile only',
+        () async {
       final ada = await db.profilesDao.create('Ada');
       final bea = await db.profilesDao.create('Bea');
 
-      await db.profilesDao.setScheduler(ada, 'fsrs');
+      await db.profilesDao.setScheduler(ada, 'classic');
 
-      expect(await db.profilesDao.scheduler(ada), 'fsrs');
+      expect(await db.profilesDao.scheduler(ada), 'classic');
       expect(
         await db.profilesDao.scheduler(bea),
-        'classic',
+        'fsrs',
         reason: 'the scheduler choice is per-profile, never global',
       );
     });
@@ -206,7 +207,7 @@ void main() {
       final profiles = await migrated.profilesDao.all();
       expect(profiles.single.name, 'Ada');
       // …and the new column reads its default rather than throwing.
-      expect(await migrated.profilesDao.scheduler(adaId), 'classic');
+      expect(await migrated.profilesDao.scheduler(adaId), 'fsrs');
     });
   });
 }

@@ -1,8 +1,10 @@
+import 'package:study_core/src/card_progress.dart';
 import 'package:study_core/src/models.dart';
 
-/// Per-node study state derived from card states. A brand-new item (no card
-/// yet) counts as due; an item is "mastered" once its interval reaches a
-/// threshold (durable enough to count as learned).
+/// Per-node study state derived from card progress ([cardProgress]'s
+/// scheduler-neutral view, so FSRS-graded cards count too). A brand-new item
+/// (no card yet) counts as due; an item is "mastered" once its interval
+/// reaches a threshold (durable enough to count as learned).
 class NodeProgress {
   const NodeProgress({
     required this.total,
@@ -17,9 +19,19 @@ class NodeProgress {
   bool get hasDue => due > 0;
 }
 
+/// Reviews a card needs before it can count as mastered. One first-ever
+/// Easy under FSRS already schedules past a week; a gate that opens on a
+/// single tap measures confidence, not retention.
+const int kMasteryMinReviews = 2;
+
+/// Mastered: reviewed at least [kMasteryMinReviews] times and now spaced at
+/// least [masteryIntervalDays] apart. Every mastery count goes through here.
+bool isMastered(CardProgress p, {int masteryIntervalDays = 7}) =>
+    p.reps >= kMasteryMinReviews && p.intervalDays >= masteryIntervalDays;
+
 NodeProgress nodeProgress(
   KnowledgeNode node,
-  Map<String, CardState> cards,
+  Map<String, CardProgress> cards,
   int todayEpochDay, {
   int masteryIntervalDays = 7,
 }) {
@@ -32,7 +44,7 @@ NodeProgress nodeProgress(
       continue;
     }
     if (c.isDue(todayEpochDay)) due++;
-    if (c.intervalDays >= masteryIntervalDays) mastered++;
+    if (isMastered(c, masteryIntervalDays: masteryIntervalDays)) mastered++;
   }
   return NodeProgress(total: node.items.length, due: due, mastered: mastered);
 }
@@ -41,7 +53,7 @@ NodeProgress nodeProgress(
 bool nodeUnlocked(
   KnowledgeNode node,
   Course course,
-  Map<String, CardState> cards,
+  Map<String, CardProgress> cards,
   int todayEpochDay,
 ) {
   for (final pid in node.prereqs) {

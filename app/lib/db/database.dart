@@ -26,11 +26,11 @@ class Profiles extends Table {
   BoolColumn get preferSystemVoice =>
       boolean().withDefault(const Constant(false))();
 
-  /// The study crown's per-profile scheduler choice: 'classic' (SM-2, the
-  /// default) or 'fsrs' (beta, opt-in). A string, not a bool, so a third
-  /// option never needs a schema change — same escape-hatch shape as
+  /// The study crown's per-profile scheduler choice: 'fsrs' (the default)
+  /// or 'classic' (SM-2). A string, not a bool, so a third option never
+  /// needs a schema change — same escape-hatch shape as
   /// [preferSystemVoice].
-  TextColumn get scheduler => text().withDefault(const Constant('classic'))();
+  TextColumn get scheduler => text().withDefault(const Constant('fsrs'))();
 
   /// The Up Next queue's finish law (P4 mercy #3): finishing an episode
   /// removes it from the queue by default (false); true keeps it in place
@@ -404,8 +404,9 @@ class Captures extends Table {
 /// foreign key to any one table, because a review item can come from either
 /// [WordLedger] ('ledger') or [Captures] ('capture') — this table is
 /// deliberately the only thing that knows both exist. [stateJson] carries
-/// the SAME shape [encodeCardState]/[decodeCardState] already read/write
-/// for course cards (ease/intervalDays/dueEpochDay/reps/lapses); a row is
+/// the SAME two-half blob course cards use ([mergeCardStateJson] /
+/// [decodeStudyCard]), so daily review follows the profile's scheduler; a
+/// row is
 /// created lazily on first grade, exactly like [Cards] — an ungraded
 /// source has no row and is treated as a brand-new, immediately-due card.
 @DataClassName('DailyReviewCardRow')
@@ -659,24 +660,18 @@ study.CardState decodeCardState(String itemId, String stateJson) {
   );
 }
 
-/// The study crown: FSRS's additive half of the same [Cards.stateJson] blob,
-/// under an `fsrs`-prefixed key family so it can never collide with the
-/// classic keys above. Missing or corrupt FSRS keys decode as
-/// [study.FsrsCardState.initial] — "corrupt/missing -> treated as new" is
-/// the law the spec asks for, and unlike [decodeCardState] this never
-/// throws, so callers don't need a separate skip-path for it.
-study.FsrsCardState decodeFsrsCardState(
-  String itemId,
-  String stateJson,
-  int todayEpochDay,
-) {
+/// The blob key naming which scheduler wrote last. Two halves graded on the
+/// same day can't be ordered by date, and the newer one is the learner's
+/// real progress (see [study.StudyCard]).
+const _lastGradedByKey = 'lastGradedBy';
+
+/// The FSRS half of a [Cards.stateJson] blob, under `fsrs`-prefixed keys so
+/// it never collides with the classic keys above; null when absent or
+/// corrupt, so a bad half reads as "not graded under FSRS" and the other
+/// half, or a fresh start, takes over.
+study.FsrsCardState? _decodeFsrsHalf(String itemId, Map<String, dynamic> m) {
+  if (m['fsrsStability'] == null || m['fsrsDifficulty'] == null) return null;
   try {
-    final m = json.decode(stateJson);
-    if (m is! Map<String, dynamic> ||
-        m['fsrsStability'] == null ||
-        m['fsrsDifficulty'] == null) {
-      return study.FsrsCardState.initial(itemId, todayEpochDay);
-    }
     return study.FsrsCardState(
       itemId: itemId,
       stability: (m['fsrsStability'] as num).toDouble(),
@@ -687,8 +682,40 @@ study.FsrsCardState decodeFsrsCardState(
       lastReviewEpochDay: m['fsrsLastReviewEpochDay'] as int?,
     );
   } catch (_) {
-    return study.FsrsCardState.initial(itemId, todayEpochDay);
+    return null;
   }
+}
+
+/// Both halves of a stored card plus which was graded last; null when
+/// neither half decodes, so a caller skips that one row, not the course.
+study.StudyCard? decodeStudyCard(String itemId, String stateJson) {
+  final Map<String, dynamic> m;
+  try {
+    final decoded = json.decode(stateJson);
+    if (decoded is! Map<String, dynamic>) return null;
+    m = decoded;
+  } catch (_) {
+    return null;
+  }
+  study.CardState? classic;
+  try {
+    classic = decodeCardState(itemId, stateJson);
+  } catch (_) {
+    classic = null;
+  }
+  final fsrs = _decodeFsrsHalf(itemId, m);
+  if (classic == null && fsrs == null) return null;
+  final stamp = switch (m[_lastGradedByKey]) {
+    'fsrs' => study.Scheduler.fsrs,
+    'classic' => study.Scheduler.classic,
+    _ => null,
+  };
+  return study.StudyCard(
+    itemId: itemId,
+    classic: classic,
+    fsrs: fsrs,
+    lastGradedBy: stamp,
+  );
 }
 
 Map<String, dynamic> _fsrsBlobKeys(study.FsrsCardState f) => {
@@ -710,10 +737,10 @@ Map<String, dynamic> _classicBlobKeys(study.CardState s) => {
 };
 
 /// Merges a [classic] and/or [fsrs] update into [existingStateJson]'s blob,
-/// leaving whichever half is not supplied exactly as it was. This is the
-/// mechanism behind the lossy-switch-back law (ADR-0009): grading under one
-/// scheduler must never move, recompute, or erase the other's stored
-/// progress — it must simply not be there yet, or be there untouched. A
+/// leaving whichever half is not supplied exactly as it was and stamping
+/// which scheduler wrote last. The untouched half stays as it was so a
+/// switch back can tell it is stale and reseed it from the newer one
+/// ([study.StudyCard]) rather than resume from frozen progress. A
 /// corrupt existing blob is treated as empty rather than thrown (a single
 /// bad row must not block the review that would have fixed it).
 String mergeCardStateJson(
@@ -731,8 +758,14 @@ String mergeCardStateJson(
       // failing the review that would otherwise repair it.
     }
   }
-  if (classic != null) merged.addAll(_classicBlobKeys(classic));
-  if (fsrs != null) merged.addAll(_fsrsBlobKeys(fsrs));
+  if (classic != null) {
+    merged.addAll(_classicBlobKeys(classic));
+    merged[_lastGradedByKey] = study.Scheduler.classic.name;
+  }
+  if (fsrs != null) {
+    merged.addAll(_fsrsBlobKeys(fsrs));
+    merged[_lastGradedByKey] = study.Scheduler.fsrs.name;
+  }
   return json.encode(merged);
 }
 
@@ -787,96 +820,35 @@ class StudyDao extends DatabaseAccessor<AppDatabase> with _$StudyDaoMixin {
             ..orderBy([(c) => OrderingTerm.asc(c.id)]))
           .get();
 
-  /// itemId → SRS state for one course row (the donor CardRepository.load).
-  /// A row whose blob fails to decode is skipped individually — the store's
-  /// law (see backup_core's TrellisImporter precedent) — rather than
-  /// throwing for the whole course.
-  Future<Map<String, study.CardState>> loadCardStates(int courseRowId) async {
+  /// itemId → every stored card of one course row, both scheduler halves.
+  /// Progress, unlock and due counts read these through
+  /// [study.StudyCard.progress], never one half directly: a card graded
+  /// only under FSRS has no classic half at all. A row whose blob fails to
+  /// decode is skipped individually (the store's law, see backup_core's
+  /// TrellisImporter precedent) rather than throwing for the whole course.
+  Future<Map<String, study.StudyCard>> loadCards(int courseRowId) async {
     final rows = await (select(
       cards,
     )..where((c) => c.courseId.equals(courseRowId))).get();
-    final out = <String, study.CardState>{};
+    final out = <String, study.StudyCard>{};
     for (final r in rows) {
-      try {
-        out[r.itemId] = decodeCardState(r.itemId, r.stateJson);
-      } catch (_) {
-        // Malformed entry: skip it, not the course.
-      }
+      final card = decodeStudyCard(r.itemId, r.stateJson);
+      if (card != null) out[r.itemId] = card;
     }
     return out;
   }
 
-  /// itemId → FSRS state for one course row, at [todayEpochDay] (needed only
-  /// to seed [study.FsrsCardState.initial] for a card FSRS has never touched
-  /// — see [decodeFsrsCardState]). Never throws or skips: missing/corrupt
-  /// FSRS data always degrades to "new", per the additive-JSON law.
-  Future<Map<String, study.FsrsCardState>> loadFsrsCardStates(
+  /// The stored classic halves alone, for inspecting storage. Not a
+  /// progress reader: it misses every card graded only under FSRS, and a
+  /// classic half may be stale (use [loadCards]).
+  Future<Map<String, study.CardState>> loadClassicHalves(
     int courseRowId,
-    int todayEpochDay,
   ) async {
-    final rows = await (select(
-      cards,
-    )..where((c) => c.courseId.equals(courseRowId))).get();
+    final all = await loadCards(courseRowId);
     return {
-      for (final r in rows)
-        r.itemId: decodeFsrsCardState(r.itemId, r.stateJson, todayEpochDay),
+      for (final e in all.entries)
+        if (e.value.classic != null) e.key: e.value.classic!,
     };
-  }
-
-  /// The FSRS state to grade FROM for [itemId]: the card's existing FSRS
-  /// half if one is already stored, or a lazy seed from [classicBefore] via
-  /// [study.seedFsrsFromClassic] if FSRS has never touched this card yet.
-  ///
-  /// Seeding happens HERE, lazily, at the moment a card is about to be
-  /// graded under FSRS for the first time — not in bulk when a profile
-  /// flips its scheduler setting. This mirrors the lazy-creation law
-  /// [Cards] rows already follow (created on first grade, not on course
-  /// import): a profile can own courses with hundreds of never-reviewed
-  /// items, and switch-time seeding would write FSRS state for every one
-  /// of them whether or not FSRS ever grades them. [classicBefore] should
-  /// be whatever classic state the card currently has (or
-  /// `CardState.initial(...)` for an item never graded under either
-  /// scheduler) — seeding from a genuinely-fresh classic state is safe:
-  /// `scheduleFsrs`'s first-review branch (`reps == 0`) computes S0/D0
-  /// from the grade alone and never reads the seed's stability/difficulty,
-  /// so a fresh item still starts FSRS fresh.
-  Future<study.FsrsCardState> fsrsStateToGradeFrom({
-    required int courseRowId,
-    required String itemId,
-    required study.CardState classicBefore,
-    required int todayEpochDay,
-  }) async {
-    final row =
-        await (select(cards)..where(
-              (c) => c.courseId.equals(courseRowId) & c.itemId.equals(itemId),
-            ))
-            .getSingleOrNull();
-    if (row != null) {
-      try {
-        final decoded = json.decode(row.stateJson);
-        if (decoded is Map<String, dynamic> &&
-            decoded['fsrsStability'] != null &&
-            decoded['fsrsDifficulty'] != null) {
-          // A real, decodable FSRS row already exists — trust it. Decoded
-          // by hand (not via decodeFsrsCardState) so a corrupt value here
-          // falls through to seeding below instead of that function's own
-          // "corrupt -> initial()" default, which would discard real
-          // classic history this function can recover from instead.
-          return study.FsrsCardState(
-            itemId: itemId,
-            stability: (decoded['fsrsStability'] as num).toDouble(),
-            difficulty: (decoded['fsrsDifficulty'] as num).toDouble(),
-            dueEpochDay: decoded['fsrsDueEpochDay'] as int,
-            reps: decoded['fsrsReps'] as int? ?? 0,
-            lapses: decoded['fsrsLapses'] as int? ?? 0,
-            lastReviewEpochDay: decoded['fsrsLastReviewEpochDay'] as int?,
-          );
-        }
-      } catch (_) {
-        // Corrupt blob: fall through to seeding.
-      }
-    }
-    return study.seedFsrsFromClassic(classicBefore, todayEpochDay);
   }
 
   /// One graded review, atomically: upsert the card's state to [after] and
@@ -928,8 +900,7 @@ class StudyDao extends DatabaseAccessor<AppDatabase> with _$StudyDaoMixin {
 
   /// The FSRS twin of [recordGrade]: same atomic upsert-then-append shape,
   /// but writes only the `fsrs`-prefixed half of the blob (via
-  /// [mergeCardStateJson]), leaving any classic half exactly as it was —
-  /// the lossy-switch-back law depends on this.
+  /// [mergeCardStateJson]), leaving any classic half as it was.
   Future<void> recordGradeFsrs({
     required int courseRowId,
     required study.FsrsCardState before,
@@ -1224,13 +1195,13 @@ class ProfilesDao extends DatabaseAccessor<AppDatabase>
         ProfilesCompanion(preferSystemVoice: Value(value)),
       );
 
-  /// 'classic' (the honest default — see [Profiles.scheduler]) for a
-  /// profile no row exists for yet.
+  /// 'fsrs' (the default — see [Profiles.scheduler]) for a profile no row
+  /// exists for yet.
   Future<String> scheduler(int profileId) async {
     final row = await (select(
       profiles,
     )..where((p) => p.id.equals(profileId))).getSingleOrNull();
-    return row?.scheduler ?? 'classic';
+    return row?.scheduler ?? 'fsrs';
   }
 
   Future<void> setScheduler(int profileId, String value) =>
@@ -1856,14 +1827,13 @@ class DailyReviewDao extends DatabaseAccessor<AppDatabase>
 
   String _itemId(String sourceType, int sourceId) => '$sourceType:$sourceId';
 
-  /// One source's current state, or a brand-new (immediately due) one if
-  /// it has never been graded — the same lazy-creation law [Cards] rows
-  /// follow.
-  Future<study.CardState> stateOf({
+  /// One source's stored card, or null if it has never been graded (a
+  /// brand-new, immediately due card: the same lazy-creation law [Cards]
+  /// rows follow).
+  Future<study.StudyCard?> cardOf({
     required int profileId,
     required String sourceType,
     required int sourceId,
-    required int todayEpochDay,
   }) async {
     final row =
         await (select(dailyReviewCards)..where(
@@ -1873,22 +1843,21 @@ class DailyReviewDao extends DatabaseAccessor<AppDatabase>
                   c.sourceId.equals(sourceId),
             ))
             .getSingleOrNull();
-    final itemId = _itemId(sourceType, sourceId);
     return row == null
-        ? study.CardState.initial(
-            itemId,
-            const study.SrsDefaults(),
-            todayEpochDay,
-          )
-        : decodeCardState(itemId, row.stateJson);
+        ? null
+        : decodeStudyCard(_itemId(sourceType, sourceId), row.stateJson);
   }
 
+  /// Stores one grade under whichever scheduler made it, leaving the other
+  /// half as it was (see [mergeCardStateJson]), exactly as course cards do.
   Future<void> recordGrade({
     required int profileId,
     required String sourceType,
     required int sourceId,
-    required study.CardState after,
+    study.CardState? classic,
+    study.FsrsCardState? fsrs,
   }) {
+    assert((classic == null) != (fsrs == null), 'one grade, one scheduler');
     return transaction(() async {
       final existing =
           await (select(dailyReviewCards)..where(
@@ -1898,7 +1867,11 @@ class DailyReviewDao extends DatabaseAccessor<AppDatabase>
                     c.sourceId.equals(sourceId),
               ))
               .getSingleOrNull();
-      final stateJson = encodeCardState(after);
+      final stateJson = mergeCardStateJson(
+        existing?.stateJson,
+        classic: classic,
+        fsrs: fsrs,
+      );
       if (existing != null) {
         await (update(dailyReviewCards)..where((c) => c.id.equals(existing.id)))
             .write(DailyReviewCardsCompanion(stateJson: Value(stateJson)));
@@ -1915,15 +1888,12 @@ class DailyReviewDao extends DatabaseAccessor<AppDatabase>
     });
   }
 
-  /// itemId ("type:id") -> state, for every ledger word and capture this
-  /// profile owns — course items never enter this map; it is never built
-  /// from [Cards]. A malformed row is skipped individually (the store's
-  /// law, matching [StudyDao.loadCardStates]'s hardening) rather than
-  /// failing the whole queue.
-  Future<Map<String, study.CardState>> loadAll(
-    int profileId,
-    int todayEpochDay,
-  ) async {
+  /// itemId ("type:id") -> stored card, or null for a source never graded,
+  /// for every ledger word and capture this profile owns. Course items
+  /// never enter this map; it is never built from [Cards]. A malformed row
+  /// is skipped individually (the store's law, matching
+  /// [StudyDao.loadCards]' hardening) rather than failing the whole queue.
+  Future<Map<String, study.StudyCard?>> loadAll(int profileId) async {
     final words = await (select(
       wordLedger,
     )..where((w) => w.profileId.equals(profileId))).get();
@@ -1935,21 +1905,16 @@ class DailyReviewDao extends DatabaseAccessor<AppDatabase>
       for (final r in existing) _itemId(r.sourceType, r.sourceId): r,
     };
 
-    final out = <String, study.CardState>{};
+    final out = <String, study.StudyCard?>{};
     void addSource(String sourceType, int sourceId) {
       final itemId = _itemId(sourceType, sourceId);
       final row = byKey[itemId];
-      try {
-        out[itemId] = row == null
-            ? study.CardState.initial(
-                itemId,
-                const study.SrsDefaults(),
-                todayEpochDay,
-              )
-            : decodeCardState(itemId, row.stateJson);
-      } catch (_) {
-        // Malformed entry: skip it, not the queue.
+      if (row == null) {
+        out[itemId] = null;
+        return;
       }
+      final card = decodeStudyCard(itemId, row.stateJson);
+      if (card != null) out[itemId] = card;
     }
 
     for (final w in words) {
@@ -1964,8 +1929,10 @@ class DailyReviewDao extends DatabaseAccessor<AppDatabase>
   /// How many extracts/vocab are due right now — the home surface's quiet
   /// chip, separate from any course's due count.
   Future<int> dueCount(int profileId, int todayEpochDay) async {
-    final all = await loadAll(profileId, todayEpochDay);
-    return all.values.where((s) => s.isDue(todayEpochDay)).length;
+    final all = await loadAll(profileId);
+    return all.values
+        .where((c) => c == null || c.progress.isDue(todayEpochDay))
+        .length;
   }
 
   // Reuses CapturesDao's own join rather than duplicating it; DailyReviewDao
@@ -2999,9 +2966,14 @@ class HouseholdDao extends DatabaseAccessor<AppDatabase>
     var cardsMastered = 0;
     CourseMastery? currentCourse;
     for (final c in courseRows) {
-      final states = await db.studyDao.loadCardStates(c.id);
+      final states = await db.studyDao.loadCards(c.id);
       final mastered = states.values
-          .where((s) => s.intervalDays >= masteryIntervalDays)
+          .where(
+            (s) => study.isMastered(
+              s.progress,
+              masteryIntervalDays: masteryIntervalDays,
+            ),
+          )
           .length;
       cardsMastered += mastered;
       if (identical(c, latest)) {

@@ -1,4 +1,5 @@
 import 'package:test/test.dart';
+import 'package:study_core/src/card_progress.dart';
 import 'package:study_core/src/models.dart';
 import 'package:study_core/src/progress.dart';
 import 'package:study_core/src/sm2_scheduler.dart';
@@ -51,7 +52,8 @@ void main() {
           .map((it) => cards[it.id]!.dueEpochDay)
           .reduce((a, b) => a > b ? a : b);
 
-      final unlocked = nodeUnlocked(nodeB, _course, cards, day);
+      final unlocked = nodeUnlocked(nodeB, _course,
+          cards.map((k, v) => MapEntry(k, CardProgress.fromClassic(v))), day);
       if (unlocked) everUnlocked = true;
       expect(
         !everUnlocked || unlocked,

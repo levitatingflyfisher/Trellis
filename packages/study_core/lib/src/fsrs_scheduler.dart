@@ -1,11 +1,11 @@
-// FSRS-5 spaced-repetition scheduler (pure function) — additive, opt-in.
+// FSRS-5 spaced-repetition scheduler (pure function), the default.
 //
 // This file does not modify models.dart or sm2_scheduler.dart. The sealed
 // SM-2 scheduler and its CardState are untouched; FsrsCardState is a
 // standalone type living beside it, sharing only the [Grade] enum. A
-// profile opts into FSRS per Card; grading calls scheduleFsrs instead of
-// scheduleSm2 for that card, using the same "state + grade + today ->
-// new state" boundary shape.
+// profile on FSRS (the default) grades through scheduleFsrs instead of
+// scheduleSm2, using the same "state + grade + today -> new state"
+// boundary shape.
 //
 // ## Source
 //
@@ -318,9 +318,8 @@ FsrsCardState scheduleFsrs(FsrsCardState state, Grade grade, int todayEpochDay,
 /// at all — it replays each card's full review log through the FSRS update
 /// formulas, "assuming that when you did those old reviews, you remembered
 /// 90% of the material" wherever elapsed-time data is missing. Replaying a
-/// review log is out of scope for an additive, opt-in per-profile setting
-/// (it would require folding over `revlog`, which this campaign does not
-/// touch), so this uses two explicit heuristics instead of inventing a
+/// review log is out of scope here (it would require folding over
+/// `revlog`), so this uses two explicit heuristics instead of inventing a
 /// citation that does not exist:
 ///
 /// * stability := max(intervalDays, a small floor). This needs no external
@@ -333,8 +332,8 @@ FsrsCardState scheduleFsrs(FsrsCardState state, Grade grade, int todayEpochDay,
 ///   5.28 anchor is FSRS-5's own D0(good) for a fresh card under the
 ///   default weights (kept in sync with [fsrsInitialDifficulty]), so a
 ///   deck at SM-2's default ease seeds a "typical first-good-review"
-///   difficulty. This mapping is OUR heuristic — not a published one — and
-///   is declared as such in the per-profile setting's copy (see ADR-0009).
+///   difficulty. This mapping is OUR heuristic, not a published one (see
+///   ADR-0017 item 5).
 FsrsCardState seedFsrsFromClassic(CardState classic, int todayEpochDay) {
   const double newCardStabilityFloor = 0.5;
   final double stability = classic.intervalDays > 0
@@ -345,19 +344,36 @@ FsrsCardState seedFsrsFromClassic(CardState classic, int todayEpochDay) {
     stability: stability,
     difficulty: _difficultyFromEase(classic.ease),
     dueEpochDay: classic.dueEpochDay,
-    reps: classic.reps,
+    // SM-2 resets reps to 0 on a lapse, but a lapsed card has history:
+    // reps 0 would send scheduleFsrs down its first-review branch and throw
+    // away the difficulty seeded from ease.
+    reps: classic.reps == 0 && classic.lapses > 0 ? 1 : classic.reps,
     lapses: classic.lapses,
-    lastReviewEpochDay: todayEpochDay,
+    // The day SM-2 last reviewed it, not today: FSRS grows stability by how
+    // much has been forgotten since then, and a seed claiming "reviewed
+    // today" gives the first FSRS Good after a switch zero growth.
+    lastReviewEpochDay:
+        math.min(classic.dueEpochDay - classic.intervalDays, todayEpochDay),
   );
 }
 
+const double _minEase = 1.3; // SM-2's ease floor -> hardest.
+const double _easeAtMidDifficulty = 2.5; // SM-2's default ease.
+const double _maxDifficulty = 10.0;
+
+double _easeDifficultySlope() =>
+    (fsrsInitialDifficulty(Grade.good) - _maxDifficulty) /
+    (_easeAtMidDifficulty - _minEase);
+
 double _difficultyFromEase(double ease) {
-  const double minEase = 1.3; // SM-2's ease floor -> hardest.
-  const double easeAtMidDifficulty = 2.5; // SM-2's default ease.
-  const double maxDifficulty = 10.0;
-  final double midDifficulty = fsrsInitialDifficulty(Grade.good);
-  final double slope =
-      (midDifficulty - maxDifficulty) / (easeAtMidDifficulty - minEase);
-  final double d = maxDifficulty + slope * (ease - minEase);
-  return d.clamp(1.0, maxDifficulty);
+  final double d = _maxDifficulty + _easeDifficultySlope() * (ease - _minEase);
+  return d.clamp(1.0, _maxDifficulty);
+}
+
+/// The inverse of the ease -> difficulty map above, for seeding SM-2 from
+/// FSRS, floored at SM-2's own minimum ease.
+double easeFromFsrsDifficulty(double difficulty) {
+  final double ease =
+      _minEase + (difficulty - _maxDifficulty) / _easeDifficultySlope();
+  return ease < _minEase ? _minEase : ease;
 }

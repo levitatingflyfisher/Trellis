@@ -21,6 +21,14 @@ void main() {
 
   Future<int> seedProfile() => db.profilesDao.create('Ada');
 
+  /// The classic state a Classic profile would grade [wordId] from.
+  Future<CardState> classicOf(int profileId, int wordId, int today) async {
+    final card = await db.dailyReviewDao.cardOf(
+        profileId: profileId, sourceType: 'ledger', sourceId: wordId);
+    return card?.classicToGradeFrom() ??
+        CardState.initial('ledger:$wordId', const SrsDefaults(), today);
+  }
+
   String courseJson() => json.encode({
         'schemaVersion': '1.0',
         'id': 'c1',
@@ -51,23 +59,15 @@ void main() {
           .add(profileId: profileId, word: 'saudade', nowMs: 1);
       const today = 20000;
 
-      final before = await db.dailyReviewDao.stateOf(
-          profileId: profileId,
-          sourceType: 'ledger',
-          sourceId: wordId,
-          todayEpochDay: today);
+      final before = await classicOf(profileId, wordId, today);
       final after = scheduleSm2(before, Grade.again, today);
       await db.dailyReviewDao.recordGrade(
           profileId: profileId,
           sourceType: 'ledger',
           sourceId: wordId,
-          after: after);
+          classic: after);
 
-      final stored = await db.dailyReviewDao.stateOf(
-          profileId: profileId,
-          sourceType: 'ledger',
-          sourceId: wordId,
-          todayEpochDay: today);
+      final stored = await classicOf(profileId, wordId, today);
       expect(stored.intervalDays, 0);
       expect(stored.dueEpochDay, today,
           reason: 'Soon = again = due again today, the sealed scheduler\'s '
@@ -81,24 +81,41 @@ void main() {
           .add(profileId: profileId, word: 'saudade', nowMs: 1);
       const today = 20000;
 
-      final before = await db.dailyReviewDao.stateOf(
-          profileId: profileId,
-          sourceType: 'ledger',
-          sourceId: wordId,
-          todayEpochDay: today);
+      final before = await classicOf(profileId, wordId, today);
       final after = scheduleSm2(before, Grade.good, today);
       await db.dailyReviewDao.recordGrade(
           profileId: profileId,
           sourceType: 'ledger',
           sourceId: wordId,
-          after: after);
+          classic: after);
 
-      final stored = await db.dailyReviewDao.stateOf(
+      final stored = await classicOf(profileId, wordId, today);
+      expect(stored.dueEpochDay, greaterThan(today));
+    });
+  });
+
+  group('daily review follows the profile\'s scheduler', () {
+    test('an FSRS grade lands as the FSRS half and drives the due count; '
+        'a later classic grade seeds from it', () async {
+      final profileId = await seedProfile();
+      final wordId = await db.ledgerDao
+          .add(profileId: profileId, word: 'saudade', nowMs: 1);
+      const today = 20000;
+      final fsrs = scheduleFsrs(
+          FsrsCardState.initial('ledger:$wordId', today), Grade.good, today);
+      await db.dailyReviewDao.recordGrade(
           profileId: profileId,
           sourceType: 'ledger',
           sourceId: wordId,
-          todayEpochDay: today);
-      expect(stored.dueEpochDay, greaterThan(today));
+          fsrs: fsrs);
+
+      final card = (await db.dailyReviewDao.loadAll(profileId))[
+          'ledger:$wordId']!;
+      expect(card.classic, isNull);
+      expect(card.fsrs, fsrs);
+      expect(await db.dailyReviewDao.dueCount(profileId, today), 0);
+      expect(await db.dailyReviewDao.dueCount(profileId, fsrs.dueEpochDay), 1);
+      expect(card.classicToGradeFrom().intervalDays, fsrs.dueEpochDay - today);
     });
   });
 
@@ -130,10 +147,11 @@ void main() {
           grade: Grade.good,
           tsMs: 1);
 
-      final all = await db.dailyReviewDao.loadAll(profileId, today);
+      final all = await db.dailyReviewDao.loadAll(profileId);
       final due = {
         for (final e in all.entries)
-          if (e.value.isDue(today)) e.key: e.value
+          if (e.value == null || e.value!.progress.isDue(today))
+            e.key: e.value
       };
 
       expect(due.keys, containsAll(['ledger:$wordId', 'capture:$captureId']));
@@ -149,19 +167,15 @@ void main() {
       final wordId = await db.ledgerDao
           .add(profileId: profileId, word: 'saudade', nowMs: 1);
 
-      final before = await db.dailyReviewDao.stateOf(
-          profileId: profileId,
-          sourceType: 'ledger',
-          sourceId: wordId,
-          todayEpochDay: today);
+      final before = await classicOf(profileId, wordId, today);
       await db.dailyReviewDao.recordGrade(
           profileId: profileId,
           sourceType: 'ledger',
           sourceId: wordId,
-          after: scheduleSm2(before, Grade.good, today));
+          classic: scheduleSm2(before, Grade.good, today));
 
-      final all = await db.dailyReviewDao.loadAll(profileId, today);
-      expect(all['ledger:$wordId']!.isDue(today), isFalse);
+      final all = await db.dailyReviewDao.loadAll(profileId);
+      expect(all['ledger:$wordId']!.progress.isDue(today), isFalse);
     });
 
     test('due count is per-profile', () async {
@@ -190,7 +204,7 @@ void main() {
       final goodWordId =
           await db.ledgerDao.add(profileId: profileId, word: 'hygge', nowMs: 2);
 
-      final all = await db.dailyReviewDao.loadAll(profileId, 20000);
+      final all = await db.dailyReviewDao.loadAll(profileId);
       expect(all.containsKey('ledger:$wordId'), isFalse);
       expect(all.containsKey('ledger:$goodWordId'), isTrue);
     });
