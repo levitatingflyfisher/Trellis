@@ -1,0 +1,172 @@
+{
+  "schemaVersion": "1.0",
+  "id": "kalman-filters",
+  "title": "The Kalman Filter Family",
+  "subtitle": "From linear-Gaussian estimation to multiple-model tracking",
+  "subject": "Estimation & Control",
+  "level": "undergrad-to-frontier",
+  "description": "Zero-to-hero on recursive state estimation: why the Kalman filter is the optimal linear-Gaussian estimator, the two different ways (EKF, UKF) to keep using it when the world goes nonlinear, and how IMM handles a system that switches behaviors. After this you can re-derive each from first principles and tell the story of why each exists.",
+  "provenance": {
+    "kind": "researched",
+    "generatedBy": "gigabrain-author",
+    "created": "2026-06-22",
+    "sources": [
+      { "title": "Kalman, R.E. (1960) — A New Approach to Linear Filtering and Prediction Problems", "note": "the original linear KF" },
+      { "title": "Welch & Bishop — An Introduction to the Kalman Filter", "url": "https://www.cs.unc.edu/~welch/kalman/", "note": "canonical tutorial" },
+      { "title": "Julier & Uhlmann (1997) — A New Extension of the Kalman Filter to Nonlinear Systems", "note": "the unscented transform / UKF" },
+      { "title": "Blom & Bar-Shalom (1988) — The Interacting Multiple Model algorithm for systems with Markovian switching coefficients", "note": "IMM" }
+    ]
+  },
+  "srsDefaults": { "algorithm": "sm2", "initialEase": 2.5, "firstIntervalDays": 1 },
+  "nodes": [
+    {
+      "id": "state-space-and-bayes",
+      "title": "State-space models and the predict-update heartbeat",
+      "summary": "A hidden state you can't see, noisy measurements you can, and a recursive belief you update each step.",
+      "prereqs": [],
+      "diagramMermaid": "flowchart LR; Pr[Predict: push belief forward] --> Up[Update: correct with measurement]; Up --> Pr; Z((measurement z)) --> Up",
+      "intake": "Before any Kalman filter, two ideas. First, a state-space model: a system has a hidden state vector x — say position and velocity — that evolves over time, x_k = f(x_{k-1}) + noise, and measurements z that are a noisy function of the state, z_k = h(x_k) + noise. You never see x directly; you only ever see z, and you must infer x. Second, recursive Bayesian estimation: instead of one best guess, carry a belief about x as a probability distribution, and revise it whenever a measurement arrives. The rhythm is always the same two beats: take your prior, PREDICT it forward through the dynamics (which makes you less certain), then UPDATE by folding in the new measurement (which makes you more certain) to get a posterior — and that posterior is the prior for the next step. Every filter in this course is this predict-update heartbeat; they differ only in how they represent and push around the belief. The plain Kalman filter is what you get when the belief is Gaussian and the model is linear.",
+      "items": [
+        { "id": "ss-1", "type": "cloze", "rung": 1,
+          "text": "In a state-space model you never observe the hidden {{c1::state}} directly — you only see noisy {{c2::measurements}} and must infer the {{c1::state}} from them.",
+          "answers": { "c1": "state", "c2": "measurements" } },
+        { "id": "ss-2", "type": "cloze", "rung": 1,
+          "text": "Every filter shares a two-beat rhythm: {{c1::predict}} pushes the belief forward (less certain), then {{c2::update}} folds in the measurement (more certain).",
+          "answers": { "c1": "predict", "c2": "update" } },
+        { "id": "ss-3", "type": "qa", "rung": 3,
+          "prompt": "Why carry the estimate as a probability distribution instead of a single best-guess value?",
+          "answer": "Because the spread (covariance) encodes how much to trust the estimate, and that uncertainty is exactly what lets the update optimally weigh a new measurement against the prior — a point estimate throws that information away.",
+          "acceptable": ["uncertainty", "covariance", "trust", "weigh"],
+          "rubric": "Must connect carrying a distribution to tracking uncertainty and using it to weight the update." },
+        { "id": "ss-4", "type": "qa", "rung": 2,
+          "prompt": "What does the predict step do to your uncertainty, and what does the update step do to it?",
+          "answer": "Predict increases uncertainty (the dynamics + process noise spread the belief out); update decreases it (the measurement sharpens the belief).",
+          "acceptable": ["predict", "increase", "update", "decrease"],
+          "rubric": "Predict grows uncertainty; update shrinks it." }
+      ]
+    },
+    {
+      "id": "kf-core",
+      "title": "The linear Kalman filter",
+      "summary": "When the model is linear and noise Gaussian, the belief stays Gaussian — track just a mean and a covariance, and the update is provably optimal.",
+      "prereqs": ["state-space-and-bayes"],
+      "diagramMermaid": "flowchart LR; subgraph Predict; A[x-hat, P] --> B[push through F, add Q]; end; subgraph Update; B --> K[Kalman gain K]; Z((z)) --> K; K --> C[blend toward z]; end",
+      "intake": "The Kalman filter is the recursive Bayesian filter for one special, beautiful case: the model is LINEAR and all noise is GAUSSIAN. Under those two assumptions the belief stays Gaussian forever, so the entire belief is just a mean (your estimate, x-hat) and a covariance (your uncertainty, P) — no histograms, no particles. Predict: push the mean through the linear dynamics F and grow P by the process noise Q. Update: when measurement z arrives, form the innovation (the surprise) = z minus your predicted measurement, then compute the Kalman gain K — the optimal blend between trusting your prediction and trusting the measurement, set entirely by their relative uncertainties — and nudge the estimate toward z by K times the innovation. In the linear-Gaussian world this is OPTIMAL: no estimator achieves lower mean-squared error. That optimality is why everyone reaches for it — and why the rest of this course is a sequence of clever tricks for keeping this machinery when reality breaks the 'linear' or the 'Gaussian'.",
+      "items": [
+        { "id": "kf-1", "type": "cloze", "rung": 1,
+          "text": "Under linear-Gaussian assumptions the belief stays {{c1::Gaussian}}, so the KF only needs to track a {{c2::mean}} and a {{c3::covariance}}.",
+          "answers": { "c1": "Gaussian", "c2": "mean", "c3": "covariance" } },
+        { "id": "kf-2", "type": "cloze", "rung": 2,
+          "text": "The {{c1::Kalman gain}} decides how much to trust the new measurement versus the prediction, based on their relative {{c2::uncertainty}}.",
+          "answers": { "c1": "Kalman gain", "c2": "uncertainty" } },
+        { "id": "kf-3", "type": "qa", "rung": 2,
+          "prompt": "Under exactly which two conditions is the Kalman filter optimal (minimum mean-squared error)?",
+          "answer": "Linear dynamics and measurement models, and Gaussian noise.",
+          "acceptable": ["linear", "gaussian"],
+          "rubric": "Both: linearity of the model AND Gaussian noise." },
+        { "id": "kf-4", "type": "qa", "rung": 3,
+          "prompt": "Explain what the Kalman gain does and why it depends on the uncertainties.",
+          "answer": "It is the weight applied to the innovation (measurement surprise). When the prediction is uncertain (large P) relative to the measurement noise (R), the gain is high — lean on the measurement; when the measurement is noisy relative to a confident prediction, the gain is low — lean on the model. It is the optimal uncertainty-weighted blend of the two.",
+          "acceptable": ["innovation", "high", "low", "uncertainty", "blend"],
+          "rubric": "Gain = uncertainty-weighted blend; high when prediction uncertain / measurement trustworthy, low otherwise." },
+        { "id": "kf-5", "type": "discrimination", "rung": 2,
+          "prompt": "Exactly one is FALSE:",
+          "choices": [
+            "The KF must store the full posterior as a histogram of probabilities",
+            "Predict increases uncertainty; update decreases it",
+            "The KF is optimal only under linear-Gaussian assumptions",
+            "The innovation is the difference between the measurement and its prediction"
+          ],
+          "correctIndex": 0,
+          "explanation": "A Gaussian belief is fully captured by a mean + covariance — no histogram or particle set is needed." }
+      ]
+    },
+    {
+      "id": "ekf",
+      "title": "Extended Kalman Filter — linearize the nonlinearity",
+      "summary": "Keep the exact KF machinery, but replace the nonlinear functions with their first-order Taylor (Jacobian) approximation at the current estimate.",
+      "prereqs": ["kf-core"],
+      "intake": "Reality is rarely linear: a radar measures range and bearing (nonlinear in x,y); a robot turns (nonlinear dynamics). The Extended Kalman Filter keeps the exact Kalman machinery but LINEARIZES the nonlinear functions at each step — it takes the first-order Taylor expansion of f and h around the current estimate, using their Jacobians (matrices of partial derivatives) wherever the plain KF used the constant matrices F and H. It is cheap and works astonishingly often — a version of it flew the Apollo guidance computer. But the linearization is only valid NEAR the estimate: when the nonlinearity is strong or the uncertainty is wide, the first-order approximation biases the estimate, the reported covariance stops reflecting reality, and the filter can DIVERGE. It also presumes you can get derivatives — you need differentiable models and the algebra (or autodiff) to compute Jacobians.",
+      "items": [
+        { "id": "ekf-1", "type": "cloze", "rung": 1,
+          "text": "The EKF copes with nonlinearity by {{c1::linearizing}} the model each step using its {{c2::Jacobians}} (a first-order {{c3::Taylor}} expansion).",
+          "answers": { "c1": "linearizing", "c2": "Jacobians", "c3": "Taylor" } },
+        { "id": "ekf-2", "type": "qa", "rung": 2,
+          "prompt": "Name the two main practical costs/limitations of the EKF's linearization.",
+          "answer": "(1) It needs differentiable models and their Jacobians; (2) the first-order approximation breaks down under strong nonlinearity or wide uncertainty, biasing the estimate and risking divergence.",
+          "acceptable": ["jacobian", "diverge", "nonlinear", "differentiable"],
+          "rubric": "Needs Jacobians/differentiable models AND can bias/diverge under strong nonlinearity." },
+        { "id": "ekf-3", "type": "qa", "rung": 3,
+          "prompt": "Why can the EKF navigate Apollo successfully yet diverge on a strongly nonlinear problem?",
+          "answer": "Linearization is a local, first-order approximation valid only near the current estimate. With mild dynamics and small uncertainty the local linear model is accurate; with strong nonlinearity or wide covariance the Taylor truncation error grows, the reported covariance no longer matches reality, and errors compound into divergence.",
+          "acceptable": ["local", "first-order", "near", "truncation", "diverge"],
+          "rubric": "Must hinge on linearization being a LOCAL approximation that fails when nonlinearity/uncertainty is large." }
+      ]
+    },
+    {
+      "id": "ukf",
+      "title": "Unscented Kalman Filter — propagate the distribution, not the function",
+      "summary": "Skip derivatives: push a few deterministic sigma points through the true nonlinearity and rebuild the mean and covariance.",
+      "prereqs": ["kf-core"],
+      "intake": "The Unscented Kalman Filter attacks the same nonlinear problem as the EKF but makes a different bet: it is easier to approximate a probability distribution than to approximate an arbitrary nonlinear function. Instead of linearizing, the UKF chooses a small set of carefully placed SIGMA POINTS — deterministic samples that exactly capture the mean and covariance of the current belief — pushes each one through the TRUE nonlinear function, and then recomputes the mean and covariance from the transformed points. That is the unscented transform. No derivatives and no Jacobians (so it even handles non-differentiable models), and it captures the true mean/covariance to higher order than the EKF's first-order linearization — usually more accurate under strong nonlinearity, at comparable cost (about 2n+1 sigma points for an n-dimensional state). The price is a few tuning knobs (the spread parameters alpha, beta, kappa).",
+      "items": [
+        { "id": "ukf-1", "type": "cloze", "rung": 1,
+          "text": "The UKF avoids derivatives by pushing deterministic {{c1::sigma points}} through the {{c2::true}} nonlinear function and rebuilding the mean/covariance — the {{c3::unscented}} transform.",
+          "answers": { "c1": "sigma points", "c2": "true", "c3": "unscented" } },
+        { "id": "ukf-2", "type": "qa", "rung": 2,
+          "prompt": "State the UKF's core mechanism and one advantage over the EKF besides accuracy.",
+          "answer": "It places sigma points capturing the belief's mean/covariance, propagates them through the true nonlinearity, and reconstructs the mean/covariance (unscented transform). Advantage: it is derivative-free, so it needs no Jacobians and works even on non-differentiable models.",
+          "acceptable": ["sigma", "unscented", "derivative-free", "no jacobian"],
+          "rubric": "Sigma points through the true function + derivative-free / no Jacobians." },
+        { "id": "ukf-3", "type": "qa", "rung": 3,
+          "prompt": "Articulate the single key insight that makes the UKF often beat the EKF.",
+          "answer": "It is easier to approximate a distribution with a few well-placed points than to approximate an arbitrary nonlinear function with a straight line. By propagating the true function over sigma points, the UKF captures the mean and covariance to higher order than the EKF's first-order Taylor linearization, so it stays accurate exactly where linearization breaks.",
+          "acceptable": ["distribution", "points", "higher order", "linearization"],
+          "rubric": "The insight: approximating the distribution (sigma points) beats approximating the function (linearization)." },
+        { "id": "ukf-4", "type": "discrimination", "rung": 2,
+          "prompt": "Which statement about the UKF is FALSE?",
+          "choices": [
+            "It requires computing Jacobians",
+            "It propagates sigma points through the true nonlinear function",
+            "It is derivative-free",
+            "It typically beats the EKF under strong nonlinearity"
+          ],
+          "correctIndex": 0,
+          "explanation": "Being derivative-free — no Jacobians — is the entire point of the UKF." }
+      ]
+    },
+    {
+      "id": "imm",
+      "title": "Interacting Multiple Model — when the system switches behaviors",
+      "summary": "Run a bank of filters, one per motion model, and let a Markov chain mix and reweight them so the estimate follows whichever model currently fits.",
+      "prereqs": ["kf-core"],
+      "diagramMermaid": "flowchart TB; M[Mix estimates by Markov transition probs] --> F[Run each model's filter one step]; F --> U[Reweight model probabilities by likelihood]; U --> O[Output probability-weighted blend]; O --> M",
+      "intake": "EKF and UKF fix nonlinearity, but they assume you know WHICH model the system is following. Real targets switch behaviors — an aircraft cruises straight, then yanks into a turn; a 'constant velocity' model and a 'coordinated turn' model are each wrong half the time. The Interacting Multiple Model filter runs a whole BANK of filters in parallel, one per candidate motion model (each member can itself be a KF, EKF, or UKF), and treats WHICH model is active as a hidden discrete state that evolves by a Markov chain. Each cycle it: (1) MIXES the filters' previous estimates according to the model-transition probabilities, so each filter starts from a blend reflecting possible switches; (2) runs each filter one predict/update step; (3) reweights each model's PROBABILITY by how well it predicted the measurement (its likelihood); and (4) outputs the probability-weighted blend of the bank. The payoff: it tracks smoothly while the target cruises (the steady model dominates) and reacts within a step or two when it maneuvers (the matching model's probability spikes and the output follows). IMM is orthogonal to the EKF/UKF axis — those handle nonlinearity WITHIN a model; IMM handles SWITCHING BETWEEN models.",
+      "items": [
+        { "id": "imm-1", "type": "cloze", "rung": 1,
+          "text": "IMM treats which motion model is active as a hidden discrete state evolving by a {{c1::Markov}} chain, running a {{c2::bank}} of filters in parallel.",
+          "answers": { "c1": "Markov", "c2": "bank" } },
+        { "id": "imm-2", "type": "qa", "rung": 2,
+          "prompt": "What problem does IMM solve that EKF/UKF do not, and how (one sentence on the mechanism)?",
+          "answer": "It handles a system that switches between modes/models (e.g. a maneuvering target) by running a bank of per-model filters and mixing/weighting their estimates by model probability via a Markov transition matrix.",
+          "acceptable": ["switch", "bank", "markov", "model probability"],
+          "rubric": "Mode/model switching + bank of filters mixed by Markov/model-probabilities." },
+        { "id": "imm-3", "type": "qa", "rung": 4,
+          "prompt": "From scratch, walk through one full IMM cycle end-to-end, and explain why it both tracks smoothly during cruise and reacts quickly to a maneuver.",
+          "answer": "Mix: blend the bank's previous estimates using the Markov model-transition probabilities, so each filter starts from a mixture reflecting possible mode switches. Filter: run each model's filter one predict/update step. Reweight: raise each model's probability in proportion to how well it predicted the measurement (its likelihood). Combine: output the probability-weighted average over the bank. It cruises smoothly because the steady model dominates and is stable; it reacts fast because the moment a maneuver makes the turn model fit better, that model's likelihood and probability spike within a step or two and the output follows.",
+          "acceptable": ["mix", "filter", "likelihood", "reweight", "combine", "weighted"],
+          "rubric": "Names the four sub-steps (mix / filter / reweight by likelihood / combine) AND ties cruise-stability and fast reaction to where the probability mass sits." },
+        { "id": "imm-4", "type": "discrimination", "rung": 3,
+          "prompt": "IMM is best described as solving:",
+          "choices": [
+            "nonlinearity within a single motion model",
+            "switching between multiple motion models",
+            "reducing raw measurement noise",
+            "linearizing the measurement function"
+          ],
+          "correctIndex": 1,
+          "explanation": "IMM is the multiple-model / regime-switching tool; nonlinearity within one model is the EKF/UKF's job." }
+      ]
+    }
+  ]
+}
