@@ -10,13 +10,12 @@
 /// Layout: `<baseDir>/<modelId>/<filename>` with `.part` growing alongside.
 /// The app roots [baseDir] at `appSupport/models/`; tests inject a temp dir.
 ///
-/// A TTS voice (ADR-0006, [VoiceArchiveLayout]) is different: the pinned
-/// file is a `.tar.bz2`, and the usable artifact is what's INSIDE it.
-/// "Completeness" for one of these becomes the extracted directory's own
-/// promotion law — extract to a scratch dir, then atomically rename it
-/// into place — mirroring the plain-file law one level up (verify, THEN
-/// promote). The tarball itself is deleted once extraction succeeds; there
-/// is no reason to keep both the compressed and the extracted copy.
+/// A StarDict dictionary ([DictionaryArchiveLayout]) is different: the
+/// pinned file is a `.tar.gz`, and the usable artifact is what's INSIDE
+/// it. "Completeness" for one becomes the extracted directory's own
+/// promotion law: extract to a scratch dir, then atomically rename it
+/// into place, the plain-file law one level up (verify, THEN promote).
+/// The tarball is deleted once extraction succeeds.
 library;
 
 import 'dart:async';
@@ -40,10 +39,11 @@ class ModelIntegrityException implements Exception {
   String toString() => 'ModelIntegrityException: $message';
 }
 
-/// A voice archive that downloaded and hashed correctly but could not be
-/// unpacked — a corrupt file, or an upstream release layout that no
-/// longer matches the pinned [VoiceArchiveLayout]. Never a silent partial
-/// install: on this failure nothing is left at [ModelStore.voiceDirOf].
+/// A dictionary archive that downloaded and hashed correctly but could
+/// not be unpacked: a corrupt file, or an upstream release layout that no
+/// longer matches the pinned [DictionaryArchiveLayout]. Never a silent
+/// partial install: on this failure nothing is left at
+/// [ModelStore.dictionaryDirOf].
 class ModelExtractionException implements Exception {
   final String message;
   ModelExtractionException(this.message);
@@ -105,21 +105,15 @@ abstract class ModelStore {
   Future<void> delete(ModelSpec spec);
 
   /// Where [file] of [spec] lives once installed (engines load from here).
-  /// For an archive [spec] this is the downloaded tarball's OWN path,
-  /// which stops existing once extraction succeeds — engines load a
-  /// voice's files from [voiceDirOf] instead.
+  /// For a dictionary [spec] this is the downloaded tarball's OWN path,
+  /// which stops existing once extraction succeeds; the dictionary is
+  /// read from [dictionaryDirOf] instead.
   String pathOf(ModelSpec spec, ModelFile file);
-
-  /// Where a voice's EXTRACTED files live (meaningful only when
-  /// `spec.archiveLayout != null`): `<dir>/<archiveLayout.modelFileName>`,
-  /// `.../<tokensFileName>`, `.../<dataDirName>/`.
-  String voiceDirOf(ModelSpec spec);
 
   /// Where a dictionary's EXTRACTED files live (meaningful only when
   /// `spec.dictionaryArchiveLayout != null`, Campaign 4 Phase 3):
   /// `<dir>/<layout.ifoFileName>`, `.../<idxFileName>`,
-  /// `.../<dictFileName>` — a separate directory from [voiceDirOf] since
-  /// the two archive shapes never mix in one spec.
+  /// `.../<dictFileName>`.
   String dictionaryDirOf(ModelSpec spec);
 
   /// Starts (or resumes) the download. Throws [StateError] before anything
@@ -174,9 +168,6 @@ class DiskModelStore implements ModelStore {
   }
 
   @override
-  String voiceDirOf(ModelSpec spec) => '${baseDir.path}/${spec.id}/voice';
-
-  @override
   String dictionaryDirOf(ModelSpec spec) =>
       '${baseDir.path}/${spec.id}/dictionary';
 
@@ -184,12 +175,6 @@ class DiskModelStore implements ModelStore {
   Future<bool> isDownloaded(ModelSpec spec) async {
     if (spec.dictionaryArchiveLayout != null) {
       return Directory(dictionaryDirOf(spec)).existsSync();
-    }
-    if (spec.archiveLayout != null) {
-      // Completeness IS the extracted directory's existence — the rename
-      // that creates it is atomic, so there is no partially-extracted
-      // state to distinguish from "not yet".
-      return Directory(voiceDirOf(spec)).existsSync();
     }
     for (final f in spec.files) {
       final file = File(pathOf(spec, f));
@@ -201,53 +186,9 @@ class DiskModelStore implements ModelStore {
     return true;
   }
 
-  /// Unpacks the downloaded tarball (already hash-verified by the caller)
-  /// into [voiceDirOf], atomically, and deletes the tarball. [spec.files]
-  /// is always a single archive file for a voice — sherpa-onnx ships one
-  /// tarball per voice.
-  Future<void> _extract(ModelSpec spec, VoiceArchiveLayout layout) async {
-    final tarballFile = File(pathOf(spec, spec.files.single));
-    final Archive archive;
-    try {
-      final compressed = await tarballFile.readAsBytes();
-      final tarBytes = BZip2Decoder().decodeBytes(compressed);
-      archive = TarDecoder().decodeBytes(tarBytes);
-    } catch (e) {
-      debugPrint('model "${spec.id}": archive unreadable: $e');
-      throw ModelExtractionException(
-          "The downloaded file couldn’t be unpacked. Try downloading it "
-          'again.');
-    }
-
-    final stagingDir = Directory(
-        '${baseDir.path}/${spec.id}/.extracting-${_nowMs()}');
-    await extractArchiveToDisk(archive, stagingDir.path);
-
-    final unwrapped = Directory('${stagingDir.path}/${layout.topLevelDir}');
-    if (!unwrapped.existsSync()) {
-      await stagingDir.delete(recursive: true);
-      throw ModelExtractionException(
-          'model “${spec.id}”: the extracted archive did not contain the '
-          'expected “${layout.topLevelDir}” directory; the upstream '
-          'release layout may have changed');
-    }
-
-    final finalDir = Directory(voiceDirOf(spec));
-    if (finalDir.existsSync()) await finalDir.delete(recursive: true);
-    await finalDir.parent.create(recursive: true);
-    // Atomic on the same filesystem — the promotion law, one level up
-    // from a plain file's hash-then-rename.
-    await unwrapped.rename(finalDir.path);
-    if (stagingDir.existsSync()) await stagingDir.delete(recursive: true);
-    await tarballFile.delete();
-  }
-
-  /// The dictionary-archive path (Campaign 4 Phase 3), additive alongside
-  /// [_extract] rather than a generalization of it: the pinned file is a
-  /// `.tar.gz` (GZipDecoder), where a voice's is `.tar.bz2` (BZip2Decoder)
-  /// — a genuinely different codec, not a naming difference — but every
-  /// other step (stage, verify the wrapper dir, atomic rename, delete the
-  /// tarball) mirrors [_extract]'s own promotion law exactly.
+  /// Unpacks the downloaded `.tar.gz` (already hash-verified by the
+  /// caller) into [dictionaryDirOf], atomically, and deletes the tarball
+  /// (Campaign 4 Phase 3): stage, check the wrapper dir, rename, delete.
   Future<void> _extractDictionary(
       ModelSpec spec, DictionaryArchiveLayout layout) async {
     final tarballFile = File(pathOf(spec, spec.files.single));
@@ -297,7 +238,7 @@ class DiskModelStore implements ModelStore {
   @override
   Future<int> missingBytes(ModelSpec spec) async {
     if (await isDownloaded(spec)) return 0;
-    if (spec.archiveLayout != null || spec.dictionaryArchiveLayout != null) {
+    if (spec.dictionaryArchiveLayout != null) {
       return spec.sizeBytes - await partialBytes(spec);
     }
     var sum = 0;
@@ -394,10 +335,6 @@ class DiskModelStore implements ModelStore {
           }
           if (f.shared) await _noteUse(spec, f);
           doneBytes += f.bytes;
-        }
-        final layout = spec.archiveLayout;
-        if (layout != null) {
-          await _extract(spec, layout);
         }
         final dictLayout = spec.dictionaryArchiveLayout;
         if (dictLayout != null) {

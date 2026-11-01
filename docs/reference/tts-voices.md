@@ -8,7 +8,16 @@ choice can be checked rather than trusted.
 ## Trellis's own voices (ADR-0022, 1.6.14)
 
 One voice per language, downloaded inside the app (owner, board-0203,
-board-0211). Every file is pinned by sha256 and byte length. Trellis's
+board-0211).
+
+Training data, found after 1.6.14 shipped (see ADR-0022's correction):
+- Kyutai does not state Pocket TTS's release training data. The CALM
+  paper its card cites (arXiv 2509.06926, appendix D) lists AMI,
+  Earnings-22, GigaSpeech, SPGISpeech, TED-LIUM, VoxPopuli, LibriHeavy
+  and Emilia, several of which are non-commercial or share-alike.
+- Kokoro v1.1-zh's Chinese data was granted by LongMaoData with no named
+  licence, plus synthetic English made with closed TTS services
+  (hexgrad/Kokoro-82M-v1.1-zh card). Every file is pinned by sha256 and byte length. Trellis's
 own files are on the permanent release `models-voices-1`, with a
 NOTICE that carries the credits below and the licence texts.
 

@@ -68,37 +68,6 @@ void main() {
     });
   });
 
-  group('VoiceArchiveLayout (TTS voices, ADR-0006)', () {
-    test(
-        'archiveLayout is null by default — every existing spec shape '
-        'keeps compiling unchanged', () {
-      expect(spec('plain', ModelTask.asr, DeviceTier.t1).archiveLayout, isNull);
-    });
-
-    test(
-        'a TTS voice spec carries its archive layout — the "data, not '
-        'code" surface for adding a voice', () {
-      const layout = VoiceArchiveLayout(
-        topLevelDir: 'vits-piper-en_US-example-medium',
-        modelFileName: 'en_US-example-medium.onnx',
-        tokensFileName: 'tokens.txt',
-        dataDirName: 'espeak-ng-data',
-      );
-      final voice = ModelSpec(
-        id: 'piper-example',
-        task: ModelTask.tts,
-        files: [
-          ModelFile.unverified(
-              url: 'https://example.test/voice.tar.bz2', bytes: 1000),
-        ],
-        licenses: const ['CC-BY-4.0', 'GPL-3.0'],
-        minTier: DeviceTier.t1,
-        archiveLayout: layout,
-      );
-      expect(voice.archiveLayout, same(layout));
-    });
-  });
-
   group('ModelSpec', () {
     test('sizeBytes is the sum of its files — derived, never a second copy',
         () {

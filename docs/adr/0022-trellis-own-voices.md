@@ -18,6 +18,21 @@ A clean licence here means the code, the weights and the training data
 are MIT, Apache-2.0, BSD, CC-BY or CC0, and nothing at run time needs
 espeak-ng (GPL-3).
 
+Correction (13 November, after 1.6.14 shipped): the training data of
+both engines was not checked before the release, and neither meets that
+bar as written.
+- **Pocket TTS.** Kyutai does not state the training data of its
+  released models. The paper its model card cites (arXiv 2509.06926,
+  appendix D) trained its TTS models on AMI, Earnings-22 (CC-BY-SA),
+  GigaSpeech and SPGISpeech (non-commercial or research terms),
+  TED-LIUM, VoxPopuli, LibriHeavy and Emilia (CC-BY-NC).
+- **Kokoro v1.1-zh.** Its Chinese data was "freely and permissively
+  granted" by LongMaoData, a dataset company, with no licence named.
+  Synthetic English made with closed TTS services is also mixed in.
+- The weights themselves are CC-BY-4.0 and Apache-2.0, and every voice
+  clip is CC0 or CC-BY-4.0. Whether the shipped voices stay is the
+  owner's call (board, 13 November).
+
 ## Decision
 
 ### One rule for every voice

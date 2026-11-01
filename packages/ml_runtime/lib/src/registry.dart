@@ -82,26 +82,6 @@ class ModelFile {
       'ModelFile($url, $bytes bytes, ${isPinned ? 'pinned' : 'UNPINNED'})';
 }
 
-/// Where a downloaded archive's usable files live once extracted — the
-/// "data, not code" surface for adding a TTS voice (ADR-0006): a new
-/// [ModelSpec] with a new [VoiceArchiveLayout] is a complete voice; no
-/// engine code changes. Every sherpa-onnx release tarball unpacks to
-/// exactly one top-level directory, which extraction strips so the
-/// voice's own directory is flat.
-class VoiceArchiveLayout {
-  final String topLevelDir;
-  final String modelFileName;
-  final String tokensFileName;
-  final String dataDirName;
-
-  const VoiceArchiveLayout({
-    required this.topLevelDir,
-    required this.modelFileName,
-    required this.tokensFileName,
-    required this.dataDirName,
-  });
-}
-
 /// Which downloaded filename plays which role for a Pocket TTS voice
 /// (board-0211): Trellis's own export of Kyutai's weights, one language
 /// each, with Kyutai's ready voice state; the Mimi decoder is one file
@@ -187,10 +167,8 @@ class MarianModelLayout {
 
 /// Which extracted filename plays which role for a StarDict dictionary
 /// archive (Campaign 4 Phase 3) — the "data, not code" surface for adding
-/// a dictionary, one level over from [VoiceArchiveLayout]: the pinned
-/// file is a `.tar.gz` (not `.tar.bz2` — a separate extraction path from
-/// the voice one, since the two archive formats differ), and the usable
-/// artifact is the `.ifo`/`.idx`/`.dict.dz` trio inside it.
+/// a dictionary: the pinned file is a `.tar.gz`, and the usable artifact
+/// is the `.ifo`/`.idx`/`.dict.dz` trio inside it.
 class DictionaryArchiveLayout {
   final String topLevelDir;
   final String ifoFileName;
@@ -240,13 +218,6 @@ class ModelSpec {
   /// them; only [pickTranslationPair] looks at this field.
   final String? sourceLang;
 
-  /// Non-null for a downloaded file that is an ARCHIVE needing extraction
-  /// before use (a TTS voice bundle, currently the only case) — the
-  /// model store's completeness law changes from "exact pinned byte
-  /// length" to "the extracted directory exists" (an atomic rename, so
-  /// existence IS completeness).
-  final VoiceArchiveLayout? archiveLayout;
-
   /// Non-null for a Kokoro voice (board-0211).
   final KokoroVoiceLayout? kokoroLayout;
 
@@ -258,11 +229,9 @@ class ModelSpec {
   final MarianModelLayout? marianLayout;
 
   /// Non-null for a StarDict dictionary archive (Campaign 4 Phase 3) —
-  /// see [DictionaryArchiveLayout]. A different extraction path from
-  /// [archiveLayout] (that one is a `.tar.bz2` voice bundle; this is a
-  /// `.tar.gz` dictionary set), so the two stay separate fields rather
-  /// than one generalized "any archive" shape — the model store's own
-  /// extraction code branches on which of these is set.
+  /// see [DictionaryArchiveLayout]. The model store's completeness law
+  /// for it is "the extracted directory exists" (an atomic rename, so
+  /// existence IS completeness), not the pinned byte length.
   final DictionaryArchiveLayout? dictionaryArchiveLayout;
 
   /// Set only for a model Trellis converted itself (ADR-0014's amendment
@@ -279,7 +248,6 @@ class ModelSpec {
     required this.minTier,
     Set<String>? langs,
     this.sourceLang,
-    this.archiveLayout,
     this.kokoroLayout,
     this.pocketLayout,
     this.marianLayout,

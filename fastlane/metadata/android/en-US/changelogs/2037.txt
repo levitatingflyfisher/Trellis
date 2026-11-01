@@ -1,0 +1,1 @@
+Tidier inside: Trellis drops old voice-download code it no longer uses, and the notes say what the voices were trained on, as far as is known.

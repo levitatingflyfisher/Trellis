@@ -7,9 +7,14 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.6.15 — 2026-11-13
+
+- **What the voices learned from, as far as is known.** The voice records (ADR-0022 and the voices reference) now say it plainly: Kyutai does not name the training data of its released Pocket TTS models, and the paper it cites trained on sets that include non-commercial and share-alike ones; Kokoro’s Chinese data was granted by a dataset company with no licence named. The code, the weights and every voice clip are clean. Nothing about the voices changes in this release.
+- **Old voice-download code is gone.** The path that unpacked the Piper-era voice archives had nothing left to unpack; the dictionary download path stays.
+
 ## 1.6.14 — 2026-11-13
 
-- **Trellis’s own voices, in eight languages.** German, English, Spanish, French, Italian, Dutch and Portuguese speak with Pocket TTS by Kyutai; Chinese speaks with Kokoro. Each is one download in Settings › Models › Voices, and works whatever voices the phone has. About 108 MB a language, plus 41 MB once for a part the first seven share; Chinese is about 175 MB. Each voice names its speaker and licence, and every one is labelled machine-made.
+- **Trellis’s own voices, in eight languages.** German, English, Spanish, French, Italian, Dutch and Portuguese speak with Pocket TTS by Kyutai; Chinese speaks with Kokoro. Each is one download in Settings › Models & storage › Voices, and works whatever voices the phone has. About 108 MB a language, plus 41 MB once for a part the first seven share; Chinese is about 175 MB. Each voice names its speaker and licence, and every one is labelled machine-made.
 - **The Supertonic voice is gone.** Its four languages now have voices of their own, and a phone that had downloaded it gets the space back when Trellis starts.
 - **How clearly the voice speaks, with the new voices.** Pocket TTS keeps its words at their own pace, so Clear, Slow and clear and Very slow make the episode slower with longer pauses after each sentence. Chinese and the phone’s voice speak slower too.
 

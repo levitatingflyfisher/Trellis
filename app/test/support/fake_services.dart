@@ -71,8 +71,6 @@ class FakeModelStore implements ModelStore {
   String pathOf(ModelSpec spec, ModelFile file) =>
       '/fake/models/${spec.id}/${Uri.parse(file.url).pathSegments.last}';
 
-  @override
-  String voiceDirOf(ModelSpec spec) => '/fake/models/${spec.id}/voice';
 
   @override
   String dictionaryDirOf(ModelSpec spec) =>
