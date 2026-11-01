@@ -6,6 +6,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 
 import '../../db/database.dart';
+import 'docx_intake.dart';
 import 'epub_intake.dart';
 import 'pdf_intake.dart';
 import 'pdf_reader.dart';
@@ -14,6 +15,7 @@ import 'text_intake.dart';
 /// The file endings the picker offers. PDF only where PDFium can run.
 const importableExtensions = [
   'epub',
+  'docx',
   if (pdfReadingAvailable) 'pdf',
   'md',
   'markdown',
@@ -22,8 +24,8 @@ const importableExtensions = [
 
 /// The same, as the words under "Import a file".
 const importableKindsWords = pdfReadingAvailable
-    ? 'EPUB, PDF, Markdown or text'
-    : 'EPUB, Markdown or text';
+    ? 'EPUB, Word, PDF, Markdown or text'
+    : 'EPUB, Word, Markdown or text';
 
 String _endingOf(String name) {
   final dot = name.lastIndexOf('.');
@@ -32,7 +34,8 @@ String _endingOf(String name) {
 
 /// Imports the file at [path] as what its [name] says it is, and returns
 /// the new work's id. Throws [FormatException] when it can't be read as
-/// that; a [PdfUnreadableException], [EpubTooLargeException] or
+/// that; a [PdfUnreadableException], [EpubTooLargeException],
+/// [DocxTooLargeException] or
 /// [TextTooLargeException] carries
 /// words fit to show as they are. [readPdf] stands in for PDFium in
 /// tests.
@@ -54,6 +57,10 @@ Future<int> importDocumentFile(
   }
   if (isTextFileName(name)) {
     return importTextFile(db: db, profileId: profileId, path: path, name: name);
+  }
+  if (isDocxName(name)) {
+    return importDocxFile(
+        db: db, profileId: profileId, path: path, sourceName: name);
   }
   return importEpubFile(
       db: db, profileId: profileId, path: path, sourceName: name);
@@ -81,6 +88,10 @@ Future<int?> pickAndImportDocument(
   if (isTextFileName(file.name)) {
     return importTextBytes(
         db: db, profileId: profileId, bytes: file.bytes!, name: file.name);
+  }
+  if (isDocxName(file.name)) {
+    return importDocxBytes(
+        db: db, profileId: profileId, bytes: file.bytes!, sourceName: file.name);
   }
   return importEpubBytes(
       db: db, profileId: profileId, bytes: file.bytes!, sourceName: file.name);

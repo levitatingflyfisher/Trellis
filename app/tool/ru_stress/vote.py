@@ -9,12 +9,17 @@ Each sighting is (source, form with U+0301). The form is brought to modern
 spelling (orthography.modernize) and kept only if Hunspell knows it. Words
 are keyed lower case with ё written е, as Hunspell spells them.
 
-- agree: two or more sightings, every one on the same vowel.
-- single: one sighting; kept apart, never trained on.
+- agree: two or more dictionaries, every sighting on the same vowel.
+- single: one dictionary only, however often it says so (repeats in one
+  book are not independent: an italic example or an archaic mark
+  recurs); kept apart, never trained on.
 - disputed: sightings on different vowels; no vowel is named. More scans
   may settle it; what stays disputed passes through unmarked.
 
-Usage: vote.py HUNSPELL_FORMS SOURCE=forms.tsv... > votes.tsv
+A book in [dispute_only] (measured precision under 85%) can make a word
+disputed but never counts toward agree, and alone names nothing.
+
+Usage: vote.py HUNSPELL_FORMS SOURCE=forms.tsv... [--dispute-only dal] > votes.tsv
 """
 
 import sys
@@ -45,7 +50,7 @@ def _vowel_index(form):
     return idx, n
 
 
-def vote(sightings, known):
+def vote(sightings, known, dispute_only=frozenset()):
     counts = defaultdict(lambda: defaultdict(lambda: defaultdict(int)))
     for source, form in sightings:
         modern = modernize(form, known)
@@ -60,12 +65,15 @@ def vote(sightings, known):
     out = {}
     for key, by_source in counts.items():
         plain = {s: dict(c) for s, c in by_source.items()}
+        trusted = {s: c for s, c in plain.items() if s not in dispute_only}
+        if not trusted:
+            continue
         vowels = {v for c in plain.values() for v in c}
-        total = sum(n for c in plain.values() for n in c.values())
         if len(vowels) > 1:
             out[key] = Verdict(key, None, "disputed", plain)
         else:
-            out[key] = Verdict(key, vowels.pop(), "agree" if total >= 2 else "single", plain)
+            out[key] = Verdict(key, vowels.pop(),
+                               "agree" if len(trusted) >= 2 else "single", plain)
     return out
 
 
@@ -76,11 +84,16 @@ def load_known(path):
 def main(argv):
     known = load_known(argv[0])
     sightings = []
+    only = set()
+    if "--dispute-only" in argv:
+        i = argv.index("--dispute-only")
+        only = set(argv[i + 1].split(","))
+        argv = argv[:i] + argv[i + 2:]
     for arg in argv[1:]:
         source, path = arg.split("=", 1)
         for line in open(path, encoding="utf-8"):
             sightings.append((source, line.split("\t", 1)[0]))
-    for v in sorted(vote(sightings, known).values(), key=lambda v: v.word):
+    for v in sorted(vote(sightings, known, only).values(), key=lambda v: v.word):
         counts = " ".join(f"{s}:" + ",".join(f"{i}x{n}" for i, n in sorted(c.items()))
                           for s, c in sorted(v.counts.items()))
         print(f"{v.word}\t{'' if v.vowel is None else v.vowel}\t{v.status}\t{counts}")

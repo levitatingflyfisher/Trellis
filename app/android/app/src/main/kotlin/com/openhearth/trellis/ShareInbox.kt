@@ -35,6 +35,8 @@ object ShareInbox {
     /// copied at all.
     private const val MAX_MEDIA_BYTES = 200L * 1024 * 1024
     private const val MAX_TEXT_BYTES = 8L * 1024 * 1024
+    private const val DOCX =
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
 
     /// A provider that sends nothing for this long has stalled; a slow but
     /// moving one (a big file from cloud storage) is left to finish.
@@ -155,6 +157,7 @@ object ShareInbox {
         val ext = name.substringAfterLast('.', "").lowercase()
         return when {
             m == "application/epub+zip" || ext == "epub" -> MAX_MEDIA_BYTES
+            m == DOCX || ext == "docx" -> MAX_MEDIA_BYTES
             m == "application/pdf" || ext == "pdf" -> MAX_MEDIA_BYTES
             m.startsWith("audio/") ||
                 ext in setOf("mp3", "m4a", "m4b", "ogg", "opus", "flac") -> MAX_MEDIA_BYTES

@@ -1,0 +1,1 @@
+Trellis opens Word documents (.docx). Paste or share a web book's contents page and Trellis offers to add the whole book, chapter by chapter.

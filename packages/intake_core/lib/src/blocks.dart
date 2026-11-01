@@ -46,6 +46,18 @@ final class TextBlock extends IntakeBlock {
   String toString() => 'TextBlock($text)';
 }
 
+/// A heading with its level, 1 the highest. Only the Word reader emits
+/// these; the EPUB reader takes its chapter titles from the book's
+/// structure instead.
+final class HeadingBlock extends IntakeBlock {
+  final String text;
+  final int level;
+  const HeadingBlock(this.text, {this.level = 1});
+
+  @override
+  String toString() => 'HeadingBlock($level, $text)';
+}
+
 /// An image reference (donor `{type:"segment",kind:"figure",content:{src,alt}}`).
 ///
 /// [src] is resolved relative to the OPF root directory; it is the key into

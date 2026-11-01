@@ -30,22 +30,25 @@ Future<bool> confirmDownload(
     builder: (context) => AlertDialog(
       key: const Key('consent-dialog'),
       title: Text(title),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          for (final item in items)
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8),
-              child: Text('• ${item.label}'),
+      // Scrolls: a web book names every chapter's address (1.6.19).
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final item in items)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: Text('• ${item.label}'),
+              ),
+            const SizedBox(height: 8),
+            Text(
+              'This uses the internet. On a metered connection it may '
+              'use paid data.',
+              style: Theme.of(context).textTheme.bodySmall,
             ),
-          const SizedBox(height: 8),
-          Text(
-            'This uses the internet. On a metered connection it may '
-            'use paid data.',
-            style: Theme.of(context).textTheme.bodySmall,
-          ),
-        ],
+          ],
+        ),
       ),
       actions: [
         TextButton(

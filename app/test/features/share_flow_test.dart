@@ -103,6 +103,30 @@ void main() {
     expect(fetcher.calls, isEmpty, reason: 'nothing fetched before a choice');
   });
 
+  testWidgets('a web book’s contents page asks: add the book or save the '
+      'page; the book opens on Open a link’s card', (tester) async {
+    fetcher = ScriptedFetcher((url, _) => textResponse(
+        '<html><head><title>Legal Systems</title></head><body>'
+        '<p><a href="Introduction.docx">Introduction</a></p>'
+        '<p><a href="Iceland.docx">Saga-Period Iceland</a></p>'
+        '<p><a href="Somali.docx">Somali Law</a></p></body></html>',
+        headers: {'content-type': 'text/html; charset=utf-8'}));
+    await boot(tester);
+    shares.arrive(
+        const SharedPayload(text: 'http://books.example/legal/Contents.htm'));
+    await tester.pumpAndSettle();
+    expect(find.text('Add the book (3 chapters)'), findsOneWidget);
+    expect(find.byKey(const Key('share-save-contents')), findsOneWidget);
+    expect(fetcher.calls, hasLength(1), reason: 'only the contents page');
+
+    await tester.tap(find.byKey(const Key('share-add-book')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('A book of 3 chapters: Introduction'),
+        findsOneWidget);
+    expect(fetcher.calls, hasLength(1),
+        reason: 'no chapter before its own consent');
+  });
+
   testWidgets('sharing the same text again opens the first instead of '
       'adding a copy', (tester) async {
     shares.waiting.add(const SharedPayload(text: 'Twice told'));

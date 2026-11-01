@@ -16,9 +16,12 @@ def test_two_sightings_on_one_vowel_agree():
     assert got == {"корова": Verdict("корова", 1, "agree", {"pavl": {1: 1}, "akad": {1: 1}})}
 
 
-def test_one_dictionary_seen_twice_agrees_too():
+def test_one_dictionary_seen_twice_is_still_one_source():
+    # Repeats in one book are not independent: the same italic example or
+    # archaic mark recurs (14 Nov: до́стает, пробы́ from the Academy alone).
     got = vote([("pavl", f"доро{A}га"), ("pavl", f"доро{A}га")], KNOWN)
-    assert got["дорога"].status == "agree"
+    assert got["дорога"].status == "single"
+    assert got["дорога"].vowel == 1
 
 
 def test_a_single_sighting_is_kept_apart():
@@ -51,3 +54,18 @@ def test_words_are_keyed_as_hunspell_spells_them():
     # Lower case, ё written е, so ёлка and елка are one word.
     got = vote([("pavl", f"ё{A}лка"), ("akad", f"Е{A}лка")], {"елка"})
     assert got["елка"].vowel == 0 and got["елка"].status == "agree"
+
+
+def test_a_dispute_only_book_can_block_but_never_confirm():
+    # A book whose measured precision is under 85% (Dal: 65%, check set 3)
+    # may say a word is disputed, never that it agrees.
+    only = {"dal"}
+    got = vote([("pavl", f"доро{A}га"), ("dal", f"доро{A}га")], KNOWN,
+               dispute_only=only)
+    assert got["дорога"].status == "single"
+    got = vote([("pavl", f"доро{A}га"), ("dal", f"до{A}рога")], KNOWN,
+               dispute_only=only)
+    assert got["дорога"].status == "disputed"
+    got = vote([("dal", f"доро{A}га"), ("dal", f"доро{A}га")], KNOWN,
+               dispute_only=only)
+    assert "дорога" not in got, "a dispute-only book alone names nothing"

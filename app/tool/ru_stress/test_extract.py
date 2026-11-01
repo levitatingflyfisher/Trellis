@@ -66,3 +66,12 @@ def test_only_words_as_dense_as_the_measured_ones_are_kept():
     bold = dict(w("Коро́ва", 100, 100, stress=3, conf=0.9), word="Корова", density=0.55)
     plain = dict(w("будет", 400, 100, stress=1, conf=0.9), density=0.30)
     assert [g.form for g in stressed_words([bold, plain], min_density=0.5)] == [f"Коро{A}ва"]
+
+
+def test_an_ending_printed_alone_is_not_a_word():
+    # Dictionaries print endings ("-у́ша", "-а́да"); stripped of the hyphen
+    # they pose as short real words (ада, аду) and false disputes follow.
+    assert clean("-уша,", 1) is None  # the mark on у
+    assert clean("уша,", 0) == f"у{A}ша"  # the same word without a hyphen
+    page = [w("-ада", 100, 100, stress=1, conf=0.9)]
+    assert stressed_words(page) == []

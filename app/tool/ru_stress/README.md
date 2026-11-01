@@ -20,6 +20,7 @@ Tools:
   Ambiguous words get candidates, and a modern word list picks one.
 - `extract.py`: every marked word from the accent finder's page output,
   with words split at a line end joined and OCR junk dropped.
+- `upright.py`: keeps upright words only; italic examples carry no marks.
 - `vote.py`: modern spelling, Hunspell's word list, and a vote across
   dictionaries: `agree` (two or more sightings on one vowel), `single`,
   or `disputed` (no vowel named).
@@ -27,4 +28,4 @@ Tools:
   `rule`, `ai-checked`); the training export refuses any `ai-checked`
   row.
 
-Tests: `uv run --with pytest pytest app/tool/ru_stress`
+Tests: `uv run --with pytest --with numpy pytest app/tool/ru_stress`

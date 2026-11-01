@@ -7,6 +7,12 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.6.19 — 2026-11-17
+
+- **Trellis opens Word documents (.docx files).** In the Library, tap Add, then Import a file, and pick the document. You can also share it to Trellis from another app, or pick Trellis from the **Open with** menu of a file manager or a chat app. It arrives as a book: its headings become chapters, and its lists, links and tables come too. Footnotes show as small raised numbers in the text, and the notes themselves are gathered at the end of each chapter under “Notes”. When Trellis reads the book aloud, it skips the raised numbers. An old .doc file can’t be opened; Trellis says how to save it as .docx.
+- **Books from the web, chapter by chapter.** Some books on the web are one page that lists the chapters, each a link of its own. Copy that page’s web address, then in the Library tap Add, then Open a link, and paste it. Or share the page to Trellis from your browser. Trellis offers “Add the book”. Before it downloads anything, it lists every chapter’s address and asks whether to go ahead. Then it brings in the chapters one at a time and keeps them together as one book in your Library. If any chapter can’t be downloaded, Trellis names it and adds none of the book, so you never get a book with a chapter missing. A link straight to a Word document opens that document.
+- **Known limit.** Pictures in a Word document are left out.
+
 ## 1.6.18 — 2026-11-14
 
 - **A big player.** Tap the player bar and it opens full screen, with a long bar you can drag to any point in the episode, the time played and the time left, and a large Play between the skip back 15 seconds and skip ahead 30 seconds buttons. Speed, the sleep timer, the Queue and the episode’s page are there too. Swipe down, or tap the arrow at the top, to go back to the small bar.

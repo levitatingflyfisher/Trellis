@@ -22,14 +22,23 @@ import 'dart:io';
 
 import 'package:comms_core/comms_core.dart';
 import 'package:crypto/crypto.dart';
+import 'package:flutter/foundation.dart' show compute;
 import 'package:intake_core/intake_core.dart'
-    show extractArticle, naturalCompareAudiobookNames, parseMarkdown;
+    show
+        BookContents,
+        extractArticle,
+        findBookContents,
+        naturalCompareAudiobookNames,
+        parseDocx,
+        parseMarkdown;
 
 import '../../db/database.dart';
 import '../models/format.dart';
 import 'article_fetch.dart';
 import 'audiobook_import.dart';
 import 'audiobook_picker_gateway.dart' show audiobookExtensions;
+import 'book_fetch.dart' show maxBookChapters;
+import 'docx_intake.dart';
 import 'epub_intake.dart';
 import 'paste_intake.dart' show storePastedText;
 import 'text_intake.dart';
@@ -207,6 +216,21 @@ final class ShareOffersFeed extends ShareOutcome {
   });
 }
 
+/// A web book's contents page (1.6.19): the person chooses between
+/// bringing in the whole book and saving the page.
+final class ShareOffersBook extends ShareOutcome {
+  final BookContents book;
+
+  /// The link row this share saved, filled with the page on "Save this
+  /// page", dropped once the book is in.
+  final int linkWorkId;
+
+  /// The page as already fetched, so "Save this page" needn't fetch again.
+  final String html;
+  const ShareOffersBook(
+      {required this.book, required this.linkWorkId, required this.html});
+}
+
 /// Nothing (more) could be saved; [message] says why, as a sentence.
 /// [workId] is set when a link row stands anyway.
 final class ShareRefused extends ShareOutcome {
@@ -251,13 +275,14 @@ const maxSharedTextBytes = 8 * 1024 * 1024;
 /// A double tap on Share, or a bot that sends twice, is one share.
 const _sameTextWindow = Duration(minutes: 1);
 
-enum _FileKind { epub, pdf, audio, text, html, other }
+enum _FileKind { epub, docx, pdf, audio, text, html, other }
 
 _FileKind _kindOf(SharedFile f) {
   final mime = (f.mimeType ?? '').toLowerCase();
   final dot = f.name.lastIndexOf('.');
   final ext = dot < 0 ? '' : f.name.substring(dot + 1).toLowerCase();
   if (mime == 'application/epub+zip' || ext == 'epub') return _FileKind.epub;
+  if (isDocxName(f.name, mimeType: f.mimeType)) return _FileKind.docx;
   if (mime == 'application/pdf' || ext == 'pdf') return _FileKind.pdf;
   if (mime.startsWith('audio/') || audiobookExtensions.contains(ext)) {
     return _FileKind.audio;
@@ -386,14 +411,17 @@ class ShareIntake {
     final url = saved.pageToFetch;
     if (url == null || !_reading.add(saved.workId)) return null;
     try {
-      final page = await fetchPage(fetcher: fetcher, url: url);
+      final got = await fetchBytes(fetcher: fetcher, url: url);
       final String html;
-      switch (page) {
-        case PageRefused(message: final message):
+      switch (got) {
+        case BytesRefused(message: final message):
           return ShareRefused('$message Its link is kept.',
               workId: saved.workId);
-        case PageFetched(html: final h):
-          html = h;
+        case BytesFetched(:final bytes, :final contentType):
+          if (isDocxName(url.path, mimeType: contentType.split(';').first.trim())) {
+            return await _fillDocument(saved.workId, url, bytes);
+          }
+          html = decodeResponseBytes(bytes, contentType);
       }
       if (saved.askAboutFeeds) {
         final article = extractArticle(html, baseUrl: url.toString());
@@ -415,6 +443,11 @@ class ShareIntake {
               html: html,
               sourceApp: sourceApp,
               linkWorkId: saved.workId);
+        }
+        final book = findBookContents(html, url);
+        if (book != null && book.chapters.length <= maxBookChapters) {
+          return ShareOffersBook(
+              book: book, linkWorkId: saved.workId, html: html);
         }
       }
       return await _fill(saved.workId, url, html);
@@ -457,6 +490,46 @@ class ShareIntake {
     } catch (e) {
       return const ShareRefused('That page couldn’t be saved.');
     }
+  }
+
+  /// "Save this page" from the book sheet: the link row filled from the
+  /// contents page already in hand.
+  Future<ShareOutcome> saveContentsPage(ShareOffersBook offer) async {
+    try {
+      return await _fill(
+          offer.linkWorkId, offer.book.contentsUrl, offer.html);
+    } catch (e) {
+      return const ShareRefused('That page couldn’t be saved.');
+    }
+  }
+
+  /// The book was brought in instead: the bare link to its contents page
+  /// goes, as a followed feed's does.
+  Future<void> dropContentsLink(ShareOffersBook offer) async {
+    final id = offer.linkWorkId;
+    if (await db.feedsDao.sharedLinkOnlyUrl(id) == null) return;
+    await db.spineDao.deleteWorks([id]);
+  }
+
+  /// A shared link to a Word document (1.6.19): its row becomes the
+  /// document, read as a book.
+  Future<ShareOutcome> _fillDocument(int workId, Uri url, List<int> bytes) async {
+    final name = Uri.decodeComponent(
+        url.pathSegments.isEmpty ? url.host : url.pathSegments.last);
+    final DocxRows rows;
+    try {
+      rows = await compute(_readDocx, (bytes: bytes, name: name));
+    } on FormatException catch (e) {
+      return ShareRefused('${e.message} Its link is kept.', workId: workId);
+    }
+    if (rows.rows.isEmpty) {
+      return ShareRefused(
+          'There was nothing in that document to read. Its link is kept.',
+          workId: workId);
+    }
+    await db.spineDao.replaceBody(workId,
+        kind: 'book', title: rows.title, rows: rows.rows, links: rows.links);
+    return ShareUpgraded(workId);
   }
 
   /// The feed was followed instead: the bare link this share saved a
@@ -619,6 +692,14 @@ class ShareIntake {
                       path: f.path,
                       sourceName: f.name,
                     );
+              saved.add(ShareSaved(id, inLatest: false));
+            case _FileKind.docx:
+              final id = await importDocxFile(
+                db: db,
+                profileId: profileId,
+                path: f.path,
+                sourceName: f.name,
+              );
               saved.add(ShareSaved(id, inLatest: false));
             case _FileKind.pdf:
               // Where there is no PDF engine (the web) this is a constant,
@@ -835,3 +916,6 @@ String? siteNameIn(String html) {
   if (named != null && named.isNotEmpty) return _unescape(named);
   return _feedTitleIn(html);
 }
+
+DocxRows _readDocx(({List<int> bytes, String name}) m) =>
+    docxRows(parseDocx(m.bytes, sourceName: m.name));

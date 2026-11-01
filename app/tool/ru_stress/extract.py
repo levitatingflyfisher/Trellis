@@ -16,7 +16,7 @@ Usage: extract.py RESULTS.jsonl [--min-confidence 0.6] [--min-density D] > forms
 --min-density keeps only words as inked as the bold entry words the finder
 was measured on (check sets: 0.50 for Pavlovsky, 0.39 for the Academy).
 Running text carries no printed marks, so a claim there is noise.
-Output columns: form (with U+0301), page, x0, y0, confidence.
+Output columns: form (with U+0301), page, x0, y0, confidence, x1, y1.
 """
 
 import json
@@ -38,12 +38,21 @@ class Stressed:
     x0: int
     y0: int
     confidence: float
+    x1: int = 0
+    y1: int = 0
 
 
 def clean(raw, stress_char):
     """The word with U+0301 after its marked letter, or None when the word
     is not plain Cyrillic or the mark is not on a vowel."""
     chars = [LOOK_ALIKE.get(c, c) for c in raw]
+    # An ending printed alone ("-у́ша") is not a word: without its hyphen
+    # it would pose as a short real one.
+    lead = 0
+    while lead < len(chars) and chars[lead] in "«(\"[„“":
+        lead += 1
+    if lead < len(chars) and chars[lead] in "-–—":
+        return None
     start, end = 0, len(chars)
     while start < end and chars[start] in EDGE_PUNCT:
         start += 1
@@ -85,7 +94,9 @@ def stressed_words(words, min_confidence=0.0, min_density=0.0):
             continue
         form = clean(raw, stress)
         if form:
-            out.append(Stressed(form, a["page"], a["bbox"][0], a["bbox"][1], conf))
+            b = a["bbox"]
+            # A word joined across a line end keeps its first part's box.
+            out.append(Stressed(form, a["page"], b[0], b[1], conf, b[2], b[3]))
     return out
 
 
@@ -100,7 +111,7 @@ def main(argv):
         pages.setdefault(rec["page"], []).append(rec)
     for words in pages.values():
         for s in stressed_words(words, minc, mind):
-            print(f"{s.form}\t{s.page}\t{s.x0}\t{s.y0}\t{s.confidence}")
+            print(f"{s.form}\t{s.page}\t{s.x0}\t{s.y0}\t{s.confidence}\t{s.x1}\t{s.y1}")
 
 
 if __name__ == "__main__":

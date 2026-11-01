@@ -82,43 +82,75 @@ Future<PageFetchOutcome> fetchPage({
   required Uri url,
   Duration timeout = const Duration(seconds: 30),
 }) async {
+  final got = await fetchBytes(fetcher: fetcher, url: url, timeout: timeout);
+  return switch (got) {
+    BytesFetched(:final bytes, :final contentType) =>
+      PageFetched(decodeResponseBytes(bytes, contentType)),
+    BytesRefused(:final message) => PageRefused(message),
+  };
+}
+
+/// What one fetch of raw bytes came to.
+sealed class BytesOutcome {
+  const BytesOutcome();
+}
+
+final class BytesFetched extends BytesOutcome {
+  final Uint8List bytes;
+
+  /// The answer's Content-Type, or empty.
+  final String contentType;
+  const BytesFetched(this.bytes, this.contentType);
+}
+
+final class BytesRefused extends BytesOutcome {
+  final String message;
+  const BytesRefused(this.message);
+}
+
+/// One already-consented GET of [url], its body capped at
+/// [maxTextFetchBytes]: a page or a document, before anything reads it.
+/// Every failure is a sentence. Never throws.
+Future<BytesOutcome> fetchBytes({
+  required HttpFetcher fetcher,
+  required Uri url,
+  Duration timeout = const Duration(seconds: 30),
+}) async {
   final FetchResponse response;
   try {
     response = await fetcher.get(url,
         headers: const {'accept': 'text/html, application/xhtml+xml, */*'},
         timeout: timeout);
   } on TimeoutException {
-    return const PageRefused(
+    return const BytesRefused(
         'The site took too long to answer. Try again later.');
   } on CommsException catch (e) {
     // Donor-verbatim user-facing messages (redirect refusals, hop SSRF).
-    return PageRefused(e.message);
+    return BytesRefused(e.message);
   } catch (_) {
-    return const PageRefused("That address couldn’t be reached.");
+    return const BytesRefused("That address couldn’t be reached.");
   }
 
   if (response.statusCode < 200 || response.statusCode >= 300) {
-    return PageRefused(
+    return BytesRefused(
         'The site answered with an error (${response.statusCode}).');
   }
 
-  final Uint8List bytes;
   try {
-    bytes = await collectCapped(response.body,
-        maxBytes: maxTextFetchBytes,
-        message: 'That page is too large to bring in.');
+    return BytesFetched(
+        await collectCapped(response.body,
+            maxBytes: maxTextFetchBytes,
+            message: 'That page is too large to bring in.'),
+        response.headers['content-type'] ?? '');
   } on SizeCapException catch (e) {
-    return PageRefused(e.message);
+    return BytesRefused(e.message);
   } on TimeoutException {
-    return const PageRefused(
+    return const BytesRefused(
         'The site took too long to answer. Try again later.');
   } catch (_) {
-    return const PageRefused(
+    return const BytesRefused(
         'The page stopped arriving before it finished.');
   }
-
-  return PageFetched(
-      decodeResponseBytes(bytes, response.headers['content-type'] ?? ''));
 }
 
 /// The extracting half of [fetchArticle], for a page already in hand (a

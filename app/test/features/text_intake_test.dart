@@ -111,7 +111,7 @@ make all
 
   test('the picker offers them, and says so', () {
     expect(importableExtensions,
-        ['epub', 'pdf', 'md', 'markdown', 'txt']);
-    expect(importableKindsWords, 'EPUB, PDF, Markdown or text');
+        ['epub', 'docx', 'pdf', 'md', 'markdown', 'txt']);
+    expect(importableKindsWords, 'EPUB, Word, PDF, Markdown or text');
   });
 }

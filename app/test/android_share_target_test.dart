@@ -53,6 +53,7 @@ void main() {
       'text/x-markdown',
       'text/html',
       'application/epub+zip',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'application/pdf',
       'audio/*',
     });
@@ -67,6 +68,7 @@ void main() {
       'text/x-markdown',
       'text/html',
       'application/epub+zip',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
       'application/pdf',
       'audio/*',
     });
@@ -85,8 +87,8 @@ void main() {
   // Owner, 1.6.x: "tried to open a markdown file in Trellis and could
   // not". A file manager or a chat app offers "Open with" through VIEW,
   // not through the share sheet.
-  test('Open with: Trellis is offered for Markdown and text files, by '
-      'content address only', () {
+  test('Open with: Trellis is offered for Markdown, text and (1.6.19) Word '
+      'files, by content address only', () {
     final view = filters
         .where((f) => f.contains('android.intent.action.VIEW'))
         .toList();
@@ -94,7 +96,12 @@ void main() {
     final f = view.single;
     expect(f, contains('android.intent.category.DEFAULT'));
     expect(f, contains('android:scheme="content"'));
-    for (final mime in ['text/markdown', 'text/x-markdown', 'text/plain']) {
+    for (final mime in [
+      'text/markdown',
+      'text/x-markdown',
+      'text/plain',
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    ]) {
       expect(f, contains('android:mimeType="$mime"'), reason: mime);
     }
     expect(f, isNot(contains('*/*')));

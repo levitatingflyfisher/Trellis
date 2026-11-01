@@ -31,6 +31,9 @@ List<SegmentRow> flattenEpub(EpubDoc doc) {
                 IntakeSegmentKind.math => 'code',
               },
               content);
+        case HeadingBlock(:final text):
+          // The EPUB reader emits none; its chapters carry the titles.
+          add('heading', text);
         case FigureBlock(:final src, :final alt):
           add('figure', alt.isNotEmpty ? alt : src);
       }

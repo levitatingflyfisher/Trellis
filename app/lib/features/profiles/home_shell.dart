@@ -23,6 +23,7 @@ import '../intake/audiobook_import.dart';
 import '../intake/audiobook_import_screen.dart';
 import '../intake/audiobook_picker_gateway.dart';
 import '../intake/share_intake.dart';
+import '../intake/url_intake.dart';
 import '../intake/share_queue.dart';
 import '../jobs/job_center.dart';
 import '../jobs/jobs_screen.dart';
@@ -362,6 +363,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         setState(() => _latestChanges++);
       case ShareOffersFeed():
         unawaited(_offerFeed(outcome));
+      case ShareOffersBook():
+        unawaited(_offerBook(outcome));
       case ShareRefused(message: final message, workId: final workId):
         if (workId != null) setState(() => _latestChanges++);
         _toast(message, action: workId == null ? null : _openAction(workId));
@@ -515,6 +518,36 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       case 'save':
         final saved = await _shareIntake.savePage(offer);
         _onShare(saved, sourceApp: offer.sourceApp);
+    }
+  }
+
+  /// A web book's contents page: bring in the whole book, or keep the
+  /// page. The book comes in through Open a link's own card, which asks
+  /// once more, naming every chapter's address.
+  Future<void> _offerBook(ShareOffersBook offer) async {
+    final choice = await showModalBottomSheet<String>(
+      context: context,
+      showDragHandle: true,
+      builder: (context) => _BookSheet(offer: offer),
+    );
+    if (!mounted) return;
+    switch (choice) {
+      case 'book':
+        final workId = await _pushPage<int>(UrlIntakeScreen(
+            db: widget.db,
+            profileId: widget.profile.id,
+            fetcher: widget.fetcher,
+            lane: widget.services.webFetchLane,
+            book: offer.book));
+        if (workId == null || !mounted) return;
+        await _shareIntake.dropContentsLink(offer);
+        if (!mounted) return;
+        _goToTab(_libraryTab);
+        setState(() => _latestChanges++);
+        _toast('Added “${offer.book.title}” to your Library',
+            action: _openAction(workId));
+      case 'save':
+        _onShare(await _shareIntake.saveContentsPage(offer));
     }
   }
 
@@ -1248,6 +1281,56 @@ class _SetupReminder extends StatelessWidget {
                   child: const Text('Set up'),
                 ),
               ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// The choice a shared contents page earns: bring in its book, or keep
+/// the page itself. Dismissing keeps the bare link, as it was.
+class _BookSheet extends StatelessWidget {
+  final ShareOffersBook offer;
+  const _BookSheet({required this.offer});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final n = offer.book.chapters.length;
+    return SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(offer.book.contentsUrl.host, style: theme.textTheme.bodySmall),
+            const SizedBox(height: 4),
+            Text('This is the contents page of a book of $n chapters: '
+                '“${offer.book.title}”.',
+                style: theme.textTheme.bodyMedium),
+            const SizedBox(height: 20),
+            FilledButton.icon(
+              key: const Key('share-add-book'),
+              onPressed: () => Navigator.pop(context, 'book'),
+              icon: const Icon(Icons.menu_book),
+              label: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 12),
+                child: Text('Add the book ($n chapters)',
+                    textAlign: TextAlign.center),
+              ),
+            ),
+            const SizedBox(height: 12),
+            OutlinedButton.icon(
+              key: const Key('share-save-contents'),
+              onPressed: () => Navigator.pop(context, 'save'),
+              icon: const Icon(Icons.bookmark_add_outlined),
+              label: const Padding(
+                padding: EdgeInsets.symmetric(vertical: 12),
+                child: Text('Save this page'),
+              ),
             ),
           ],
         ),
