@@ -7,6 +7,10 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.6.20 — 2026-11-20
+
+- **Trellis’s own Russian voice, as a preview.** Russian can now be read aloud by a voice made on your phone, with no internet: go to Settings, then Models, open Voices, and download the Russian voice (about 97 MB). Then open a Russian text and tap Read aloud; in the voices sheet it is the **Downloaded voice (preview)**. It is a preview because Russian marks no stress in writing, and the voice’s stress table puts it on the wrong syllable in about 1 word in 20. A fixed table, wrong on 1 word in 50 or fewer, follows in a few days and replaces it. Until then the phone’s own Russian voice is still there to pick in the same sheet.
+
 ## 1.6.19 — 2026-11-17
 
 - **Trellis opens Word documents (.docx files).** In the Library, tap Add, then Import a file, and pick the document. You can also share it to Trellis from another app, or pick Trellis from the **Open with** menu of a file manager or a chat app. It arrives as a book: its headings become chapters, and its lists, links and tables come too. Footnotes show as small raised numbers in the text, and the notes themselves are gathered at the end of each chapter under “Notes”. When Trellis reads the book aloud, it skips the raised numbers. An old .doc file can’t be opened; Trellis says how to save it as .docx.

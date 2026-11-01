@@ -357,6 +357,7 @@ List<ModelSpec> voiceCatalog() => [
           },
         ),
       ),
+      piperRuDenis(),
     ];
 
 /// The revision of rhasspy/piper-voices the Russian voice is pinned at
@@ -367,8 +368,12 @@ const _denis =
 
 /// Russian: Piper's ru_RU denis (medium), weights MIT, recordings CC0,
 /// as Piper publishes them. Its text front end is Trellis's own
-/// (`packages/russian_g2p`), with no espeak-ng.
-// Held out of voiceCatalog() and every list until it passes ADR-0022's speech-recognition gate with the Russian stress table pinned here.
+/// (`packages/russian_g2p`), with no espeak-ng. The stress table
+/// (app/tool/ru_stress/build_table.py) takes its words from Hunspell
+/// ru_RU (Lebedev, BSD-style; the file says it is modified) and its
+/// stress from public-domain printed books, the rest guessed by a model
+/// trained on those marks only. A preview at the owner's word (20 Nov):
+/// about 1 word in 20 is stressed wrong until the table reaches 1 in 50.
 ModelSpec piperRuDenis() => ModelSpec(
       id: 'piper-ru-denis',
       task: ModelTask.tts,
@@ -385,12 +390,20 @@ ModelSpec piperRuDenis() => ModelSpec(
               'e4fb4ab60262d1ab802c8c39301976c4135e545bc834a33c6eedc1f764df3bd6',
           bytes: 5464,
         ),
+        ModelFile(
+          url: '${_release}ru-stress-1.tsv',
+          sha256:
+              'a374858f3532f9eaf76cd5a06b81e9b6072d006f3140d5c5a0ba9244d994812c',
+          bytes: 34124744,
+        ),
       ],
-      licenses: const ['MIT', 'CC0-1.0'],
+      licenses: const ['MIT', 'CC0-1.0', 'BSD-style'],
       minTier: DeviceTier.t1,
       langs: const {'ru'},
       piperLayout: const PiperVoiceLayout(
         modelFileName: 'ru_RU-denis-medium.onnx',
         configFileName: 'ru_RU-denis-medium.onnx.json',
+        stressTableFileName: 'ru-stress-1.tsv',
       ),
+      preview: true,
     );

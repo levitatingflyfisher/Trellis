@@ -133,9 +133,9 @@ void main() {
           contains('zh'));
     });
 
-    test('the held-back Russian voice builds a Piper engine for Russian, '
-        'and still no run reaches it: the starter catalog does not '
-        'name it', () async {
+    test('the Russian voice (a preview, owner 20 Nov) builds a Piper '
+        'engine, and a Russian run reaches it once it is downloaded',
+        () async {
       final services = testServices(dir,
           modelStore: FakeModelStore(
               downloadedIds: {'pocket-en', 'piper-ru-denis'}),
@@ -143,8 +143,9 @@ void main() {
       final ru = await services.speechEngineFor(piperRuDenis());
       expect(ru, isNotNull);
       expect(ru!.speaks, {'ru'});
-      expect(await services.downloadedVoiceLangs(), {'en'});
-      expect(await services.resolveSpeechEngine(lang: 'ru'), isNull);
+      expect(await services.downloadedVoiceLangs(), {'en', 'ru'});
+      expect((await services.resolveSpeechEngine(lang: 'ru'))?.speaks,
+          contains('ru'));
     });
 
     test('nothing downloaded: no languages', () async {

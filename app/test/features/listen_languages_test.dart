@@ -31,7 +31,7 @@ void main() {
   test('Trellis’s own voices can save German, English, Spanish, French, '
       'Italian, Dutch, Portuguese and Chinese', () {
     expect(savableListenLanguages(testServices(dir)),
-        ['de', 'en', 'es', 'fr', 'it', 'nl', 'pt', 'zh']);
+        ['de', 'en', 'es', 'fr', 'it', 'nl', 'pt', 'ru', 'zh']);
   });
 
   test('with the phone’s own voices, every language the phone speaks can '
@@ -44,20 +44,21 @@ void main() {
 
   test('an English episode: every other language the voices speak, each '
       'by its own pair', () {
-    expect(offered('en'), ['de', 'es', 'fr', 'it', 'nl', 'pt', 'zh']);
-    expect(offered('en-US'), ['de', 'es', 'fr', 'it', 'nl', 'pt', 'zh']);
+    expect(offered('en'), ['de', 'es', 'fr', 'it', 'nl', 'pt', 'ru', 'zh']);
+    expect(offered('en-US'), ['de', 'es', 'fr', 'it', 'nl', 'pt', 'ru', 'zh']);
   });
 
   test('a Spanish episode: into English directly, into the others by way '
       'of English, and never into Spanish', () {
-    expect(offered('es'), ['de', 'en', 'fr', 'it', 'nl', 'pt', 'zh']);
+    expect(offered('es'), ['de', 'en', 'fr', 'it', 'nl', 'pt', 'ru', 'zh']);
   });
 
   test('an episode in a language no voice speaks is still offered every '
       'language a translator reaches from it', () {
-    const all = ['de', 'en', 'es', 'fr', 'it', 'nl', 'pt', 'zh'];
+    const all = ['de', 'en', 'es', 'fr', 'it', 'nl', 'pt', 'ru', 'zh'];
     expect(offered('ja'), all);
-    expect(offered('ru'), all);
+    // Russian has its own voice since 1.6.20; it is never offered itself.
+    expect(offered('ru'), [for (final l in all) if (l != 'ru') l]);
   });
 
   test('an episode in a language no translator reads is offered nothing',
@@ -68,14 +69,14 @@ void main() {
   test('the show’s language stands in when the episode has none of its '
       'own', () {
     expect(offered(null, feedLang: 'fr-FR'),
-        ['de', 'en', 'es', 'it', 'nl', 'pt', 'zh']);
+        ['de', 'en', 'es', 'it', 'nl', 'pt', 'ru', 'zh']);
     expect(offered('es', feedLang: 'fr'),
-        ['de', 'en', 'fr', 'it', 'nl', 'pt', 'zh']);
+        ['de', 'en', 'fr', 'it', 'nl', 'pt', 'ru', 'zh']);
   });
 
   test('a language nobody knows is taken for English, as the chain takes '
       'it', () {
-    const fromEnglish = ['de', 'es', 'fr', 'it', 'nl', 'pt', 'zh'];
+    const fromEnglish = ['de', 'es', 'fr', 'it', 'nl', 'pt', 'ru', 'zh'];
     expect(offered(null), fromEnglish);
     expect(offered('und', feedLang: ''), fromEnglish);
     expect(listenSourceLanguage(workLang: null, feedLang: null), 'en');
@@ -187,21 +188,23 @@ void main() {
     test('a phone voice for a language no translator knows at all is never '
         'offered', () {
       expect(offeredWith(['cy', 'bo'], 'en'),
-          ['de', 'es', 'fr', 'it', 'nl', 'pt', 'zh']);
+          ['de', 'es', 'fr', 'it', 'nl', 'pt', 'ru', 'zh']);
     });
 
     test('a language with a translator and no voice is left out, and the '
         'note names it and says where to add a voice', () {
-      final services = testServices(dir, phoneVoices: phoneVoicesFor(['ja']));
+      // Japanese has a translator and no voice of Trellis's own (Russian
+      // was the example until its own voice shipped, 1.6.20).
+      final services = testServices(dir, phoneVoices: phoneVoicesFor(['hi']));
       final sorted = listenLanguagesOf(services, workLang: 'en', feedLang: null);
-      expect(sorted.offered, isNot(contains('ru')));
-      expect(sorted.noVoice, contains('ru'));
+      expect(sorted.offered, isNot(contains('ja')));
+      expect(sorted.noVoice, contains('ja'));
       final note =
           listenMissingNoteFor(services, workLang: 'en', feedLang: null)!;
-      expect(note, contains('Russian'));
+      expect(note, contains('Japanese'));
       expect(note, contains('no voice on this phone'));
       expect(note, contains('Text-to-speech output'));
-      expect(note, isNot(contains('Japanese')));
+      expect(note, isNot(contains('Hindi')));
     });
 
     test('a language the phone speaks and no translator writes from the '
@@ -220,20 +223,20 @@ void main() {
 
     test('the voices are those last heard from the phone, and a voice '
         'installed since shows up when they are asked again', () async {
-      final saver = FakePhoneSpeechSaver(['ru']);
+      final saver = FakePhoneSpeechSaver(['hi']);
       final cache = PhoneVoiceCache(saver);
       final services = testServices(dir, phoneVoices: cache);
       List<String> offered() =>
           listenLanguagesFor(services, workLang: 'en', feedLang: null);
-      const own = ['de', 'es', 'fr', 'it', 'nl', 'pt', 'zh'];
+      const own = ['de', 'es', 'fr', 'it', 'nl', 'pt', 'ru', 'zh'];
       expect(offered(), own, reason: 'not asked yet');
       var heard = 0;
       cache.addListener(() => heard++);
       await cache.refresh();
-      expect(offered(), [...own, 'ru']..sort());
-      saver.langs = {'ru', 'ja'};
+      expect(offered(), [...own, 'hi']..sort());
+      saver.langs = {'hi', 'ja'};
       await cache.refresh();
-      expect(offered(), [...own, 'ja', 'ru']..sort());
+      expect(offered(), [...own, 'hi', 'ja']..sort());
       await cache.refresh();
       expect(heard, 2, reason: 'only a real change is told');
     });
@@ -242,4 +245,4 @@ void main() {
 
 /// The languages Trellis's own voices speak (ADR-0022): the registry's
 /// `voiceLangs`, written out so a change to it shows here.
-const ownVoiceLangsForTest = {'de', 'en', 'es', 'fr', 'it', 'nl', 'pt', 'zh'};
+const ownVoiceLangsForTest = {'de', 'en', 'es', 'fr', 'it', 'nl', 'pt', 'ru', 'zh'};

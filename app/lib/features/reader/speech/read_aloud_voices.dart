@@ -18,6 +18,7 @@ library;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
+import 'package:ml_runtime/ml_runtime.dart' show voiceCatalog;
 
 import '../../../services/device_services.dart' show SystemVoice;
 import '../reader_prefs.dart';
@@ -102,6 +103,13 @@ class ReadAloudVoiceOption {
   const ReadAloudVoiceOption(this.id, this.label, [this.detail]);
 }
 
+/// Languages whose downloaded voice is a preview ([ModelSpec.preview]),
+/// read from the catalog so the sheet can never disagree with it.
+final Set<String> _previewLangs = {
+  for (final s in voiceCatalog())
+    if (s.preview) ...?s.langs,
+};
+
 /// The voices that can read [lang], in the order the sheet lists them.
 /// Empty when none can. The phone's are numbered in a steady order (by
 /// locale, on the phone before needing the internet, then by name), so
@@ -119,8 +127,13 @@ List<ReadAloudVoiceOption> readAloudVoiceOptions(String lang,
     });
   return [
     if (neuralLangs.contains(lang))
-      const ReadAloudVoiceOption(readAloudNeuralVoice, 'Downloaded voice',
-          'Smoother, made on this phone'),
+      _previewLangs.contains(lang)
+          ? const ReadAloudVoiceOption(
+              readAloudNeuralVoice,
+              'Downloaded voice (preview)',
+              'Made on this phone. Some words are stressed wrong for now')
+          : const ReadAloudVoiceOption(readAloudNeuralVoice,
+              'Downloaded voice', 'Smoother, made on this phone'),
     if (phone == null || phone.isNotEmpty)
       const ReadAloudVoiceOption(readAloudDefaultVoice, 'Default voice'),
     for (var i = 0; i < (phone?.length ?? 0); i++)

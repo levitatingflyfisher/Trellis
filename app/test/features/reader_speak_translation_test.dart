@@ -596,6 +596,21 @@ void main() {
       ('system:ru-ua-x-a-local', 'Voice 4', 'Russian (Ukraine)'),
     ]);
   });
+
+  test('a preview voice says so in the sheet: the Russian downloaded voice '
+      'warns of its stress (owner, 20 Nov); the others do not', () {
+    final ru = readAloudVoiceOptions('ru',
+        neuralLangs: const {'ru'}, installed: const []);
+    expect((ru.first.id, ru.first.label, ru.first.detail), (
+      readAloudNeuralVoice,
+      'Downloaded voice (preview)',
+      'Made on this phone. Some words are stressed wrong for now',
+    ));
+    final de = readAloudVoiceOptions('de',
+        neuralLangs: const {'de'}, installed: const []);
+    expect((de.first.label, de.first.detail),
+        ('Downloaded voice', 'Smoother, made on this phone'));
+  });
 }
 
 /// A model whose every sentence waits for [next].

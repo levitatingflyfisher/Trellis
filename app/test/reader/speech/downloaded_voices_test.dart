@@ -115,7 +115,7 @@ void main() {
     expect(downloadedVoiceName(starter.byId('pocket-es')!), 'Pocket TTS');
     expect(downloadedVoiceName(starter.byId('kokoro-zh-zf001')!), 'Kokoro');
     for (final s in starter.specs.where((s) => s.task == ModelTask.tts)) {
-      expect(downloadedVoiceName(s), isIn(['Pocket TTS', 'Kokoro']),
+      expect(downloadedVoiceName(s), isIn(['Pocket TTS', 'Kokoro', 'Piper']),
           reason: s.id);
     }
     expect(downloadedVoiceName(piperRuDenis()), 'Piper');

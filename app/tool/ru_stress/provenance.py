@@ -5,9 +5,11 @@ pairs")."""
 
 from dataclasses import dataclass
 
-#: The scans agree on it; a rule that is always true; an AI read the scan.
-KINDS = ("scan-agree", "rule", "ai-checked")
-TRAINABLE = ("scan-agree", "rule")
+#: The scans agree on it; one book prints it (17 Nov: a printed mark, not
+#: an AI's answer, so trainable); a rule that is always true; an AI read
+#: the scan.
+KINDS = ("scan-agree", "scan-single", "rule", "ai-checked")
+TRAINABLE = ("scan-agree", "scan-single", "rule")
 
 
 class NotTrainable(Exception):

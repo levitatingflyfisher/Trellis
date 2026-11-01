@@ -451,38 +451,51 @@ void main() {
           starter.specs.where((s) => s.licenses.contains('OpenRAIL-M')),
           isEmpty);
       expect(starter.voiceLangs(DeviceTier.t1),
-          {'de', 'en', 'es', 'fr', 'it', 'nl', 'pt', 'zh'});
+          {'de', 'en', 'es', 'fr', 'it', 'nl', 'pt', 'ru', 'zh'});
     });
 
-    test('the Russian voice (Piper ru_RU denis) is pinned but held back: '
-        'not in the starter catalog, so no list shows it', () {
+    test('the Russian voice (Piper ru_RU denis) ships as a preview: in the '
+        'starter catalog, and the only voice marked preview (owner, 20 Nov)',
+        () {
       final starter = ModelRegistry.starter();
-      expect(starter.voiceFor('ru', DeviceTier.t3), isNull);
-      expect(starter.voiceLangs(DeviceTier.t3), isNot(contains('ru')));
-      expect(starter.specs.where((s) => s.piperLayout != null), isEmpty);
-      expect(voiceCatalog().where((s) => s.piperLayout != null), isEmpty);
-      expect(starter.byId(piperRuDenis().id), isNull);
+      expect(starter.voiceFor('ru', DeviceTier.t1)?.id, 'piper-ru-denis');
+      expect([for (final s in voiceCatalog()) if (s.preview) s.id],
+          ['piper-ru-denis']);
+      expect([for (final s in starter.specs) if (s.preview) s.id],
+          ['piper-ru-denis']);
     });
 
-    test('the held-back Russian voice: denis medium at a pinned revision, '
-        'MIT weights and CC0 recordings, every file hashed', () {
+    test('the Russian voice: denis medium at a pinned revision, MIT '
+        'weights and CC0 recordings, its stress table from the voices '
+        'release, every file hashed', () {
       final ru = piperRuDenis();
       expect(ru.id, 'piper-ru-denis');
       expect(ru.task, ModelTask.tts);
       expect(ru.langs, {'ru'});
-      expect(ru.licenses, ['MIT', 'CC0-1.0']);
+      expect(ru.licenses, ['MIT', 'CC0-1.0', 'BSD-style']);
+      expect(ru.preview, isTrue);
       const base = 'https://huggingface.co/rhasspy/piper-voices/resolve/'
           '6b9cfaacb4fb2e02a9621227e3c1a48bec9710c3/ru/ru_RU/denis/medium/';
       final layout = ru.piperLayout!;
       expect(layout.modelFileName, 'ru_RU-denis-medium.onnx');
       expect(layout.configFileName, 'ru_RU-denis-medium.onnx.json');
-      expect(layout.stressTableFileName, isNull,
-          reason: 'the stress table is pinned when it ships');
+      expect(layout.stressTableFileName, 'ru-stress-1.tsv');
       final byName = {
         for (final f in ru.files) Uri.parse(f.url).pathSegments.last: f
       };
-      expect(byName.keys,
-          {layout.modelFileName, layout.configFileName});
+      expect(byName.keys, {
+        layout.modelFileName,
+        layout.configFileName,
+        layout.stressTableFileName,
+      });
+      final stress = byName[layout.stressTableFileName]!;
+      expect(
+          stress.url,
+          'https://github.com/levitatingflyfisher/Trellis/releases/download/'
+          'models-voices-1/ru-stress-1.tsv');
+      expect(stress.sha256,
+          'a374858f3532f9eaf76cd5a06b81e9b6072d006f3140d5c5a0ba9244d994812c');
+      expect(stress.bytes, 34124744);
       final model = byName[layout.modelFileName]!;
       expect(model.url, '$base${layout.modelFileName}');
       expect(model.sha256,

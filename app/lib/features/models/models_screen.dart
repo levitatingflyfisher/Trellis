@@ -68,12 +68,15 @@ final Map<String, String> _voiceLabels = {
             'Pocket TTS, ${p.voiceCredit}, offline',
         (_, final k?) => '${languageDisplayName(langs.single)} voice: '
             'Kokoro, ${k.voiceFileName.replaceAll('.bin', '')}, offline',
+        _ when s.piperLayout != null && s.preview =>
+          '${languageDisplayName(langs.single)} voice (preview): Piper, '
+              'denis, offline. Some words are stressed wrong for now',
         _ => '${languageDisplayName(langs.single)} voice, offline',
       },
 };
 
 bool _isOwnVoice(ModelSpec s) =>
-    s.pocketLayout != null || s.kokoroLayout != null;
+    s.pocketLayout != null || s.kokoroLayout != null || s.piperLayout != null;
 
 String modelLabel(String id) =>
     kModelLabels[id] ?? _translationLabels[id] ?? _voiceLabels[id] ?? id;
@@ -86,6 +89,10 @@ const String voicesCredit =
     'Chinese: Kokoro-82M v1.1-zh by hexgrad, under Apache-2.0 '
     '(https://huggingface.co/hexgrad/Kokoro-82M-v1.1-zh), reading text '
     'with jieba and pypinyin (MIT) and misaki (Apache-2.0).\n'
+    'Russian (preview): Piper ru_RU denis, weights under MIT and '
+    'recordings under CC0 (https://huggingface.co/rhasspy/piper-voices). '
+    'Its stress table is modified from Hunspell ru_RU by Alexander Lebedev '
+    '(BSD-style licence), with stress from public-domain printed books.\n'
     'The files are kept at https://github.com/levitatingflyfisher/Trellis/'
     'releases/tag/models-voices-1, which is never deleted. Every voice is '
     'made by a machine, and Trellis says so wherever it is heard.';

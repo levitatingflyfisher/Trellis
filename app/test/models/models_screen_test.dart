@@ -49,7 +49,8 @@ void main() {
       for (final s in registry.specs)
         if (s.task != ModelTask.translation &&
             s.kokoroLayout == null &&
-            s.pocketLayout == null)
+            s.pocketLayout == null &&
+            s.piperLayout == null)
           s,
     ];
     for (final spec in listed) {
@@ -169,6 +170,24 @@ void main() {
     final zh = find.text('Chinese voice: Kokoro, zf_001, offline');
     await tester.scrollUntilVisible(zh, 200);
     expect(zh, findsOneWidget);
+  });
+
+  testWidgets('the Russian voice is listed with Trellis’s voices as a '
+      'preview, and its credit names Piper, denis and the Hunspell word '
+      'list it was modified from (owner, 20 Nov)', (tester) async {
+    expect(modelLabel('piper-ru-denis'),
+        'Russian voice (preview): Piper, denis, offline. Some words are '
+        'stressed wrong for now');
+    expect(voicesCredit, contains('Piper ru_RU denis'));
+    expect(voicesCredit, contains('Hunspell ru_RU by Alexander Lebedev'));
+    await pump(tester, store: FakeModelStore());
+    await tester.scrollUntilVisible(
+        find.byKey(const Key('models-voices')), 200);
+    await tester.tap(find.byKey(const Key('models-voices')));
+    await tester.pumpAndSettle();
+    final ru = find.byKey(const Key('model-download-piper-ru-denis'));
+    await tester.scrollUntilVisible(ru, 200);
+    expect(ru, findsOneWidget);
   });
 
   testWidgets('translation pairs fold into one section that names each '

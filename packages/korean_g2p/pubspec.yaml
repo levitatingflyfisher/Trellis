@@ -1,0 +1,11 @@
+name: korean_g2p
+description: >
+  Korean text to the phonemes the tiny Korean voice takes. Written from
+  the standard pronunciation rules (표준 발음법); no other tool's data.
+  Pure Dart.
+version: 0.1.0
+publish_to: none
+environment:
+  sdk: ^3.5.0
+dev_dependencies:
+  test: ^1.25.0

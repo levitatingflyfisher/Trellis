@@ -1,0 +1,1 @@
+Trellis's own Russian voice, as a preview: download it in Models, then pick it in the voices sheet. About 1 word in 20 is stressed wrong; a fixed version follows in a few days.

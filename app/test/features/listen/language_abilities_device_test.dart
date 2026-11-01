@@ -51,7 +51,9 @@ void main() {
     expect(all['ru']!.transcribe, Ability.download);
     expect(all['ru']!.translate, Ability.download);
     expect(all['es']!.speak, Ability.download);
-    expect(all['ru']!.speak, Ability.notYet, reason: 'no phone voice');
+    expect(all['ru']!.speak, Ability.download,
+        reason: 'Trellis’s own Russian voice (1.6.20)');
+    expect(all['ja']!.speak, Ability.notYet, reason: 'no phone voice');
   });
 
   test('a small language: whisper hears Welsh; no translator or voice',

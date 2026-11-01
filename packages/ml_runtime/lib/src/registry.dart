@@ -240,7 +240,7 @@ class ModelSpec {
   /// Non-null for a Pocket TTS voice (board-0211).
   final PocketVoiceLayout? pocketLayout;
 
-  /// Non-null for a Piper voice (the Russian one, held back for now).
+  /// Non-null for a Piper voice (the Russian one).
   final PiperVoiceLayout? piperLayout;
 
   /// Non-null for a Marian translation pair (ADR-0008) — see
@@ -259,6 +259,11 @@ class ModelSpec {
   /// line. Null for a model taken as its maker published it.
   final String? convertedFrom;
 
+  /// A voice shipped before it passes its gate, at the owner's word: the
+  /// screens that list it say "preview" beside it (the Russian voice, 20
+  /// Nov, while its stress table is closed to 1 word in 50).
+  final bool preview;
+
   ModelSpec({
     required this.id,
     required this.task,
@@ -273,6 +278,7 @@ class ModelSpec {
     this.marianLayout,
     this.dictionaryArchiveLayout,
     this.convertedFrom,
+    this.preview = false,
   })  : files = List.unmodifiable(files),
         licenses = List.unmodifiable(licenses),
         langs = langs == null ? null : Set.unmodifiable(langs) {

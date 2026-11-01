@@ -25,7 +25,14 @@ Tools:
   dictionaries: `agree` (two or more sightings on one vowel), `single`,
   or `disputed` (no vowel named).
 - `provenance.py`: each entry says where it came from (`scan-agree`,
-  `rule`, `ai-checked`); the training export refuses any `ai-checked`
-  row.
+  `scan-single`, `rule`, `ai-checked`); the training export refuses any
+  `ai-checked` row.
+- `classify.py`: the tiny stress model for words the table lacks. It
+  scores each vowel from the letters around it and its place in the word,
+  learns only from printed marks, and saves a plain table of weights
+  (about 3 MB) the app can read.
+- `guess.py`: an earlier guesser by word endings alone, kept as the
+  baseline; on held-out pages it is right on 50–64% of the words the
+  table lacks, against about 70% for `classify.py`.
 
-Tests: `uv run --with pytest --with numpy pytest app/tool/ru_stress`
+Tests: `uv run --with pytest --with numpy --with scikit-learn pytest app/tool/ru_stress`
