@@ -271,3 +271,17 @@ String preCursorText(
       if (s.idx < currentSegmentIdx && s.body.trim().isNotEmpty) s.body
   ].join('\n\n');
 }
+
+final _linkStart = RegExp(r'^https?://', caseSensitive: false);
+final _linkTail = RegExp(r'[.,;:!?)\]”’\x22\x27]+$');
+
+/// The web address a word of the text stands for, or null when the word
+/// is not a link. [original] is the token as written (the tokenizer
+/// keeps the full address behind the shortened word it shows); the
+/// punctuation that ends a sentence is not part of the address.
+String? linkOfToken(String original) {
+  if (!_linkStart.hasMatch(original)) return null;
+  final href = original.replaceFirst(_linkTail, '');
+  final uri = Uri.tryParse(href);
+  return uri == null || uri.host.isEmpty ? null : href;
+}

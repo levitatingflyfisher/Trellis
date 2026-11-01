@@ -394,7 +394,7 @@ void main() {
         ('heading', 'Tide notes'),
         ('prose', 'Bring a coat.'),
         ('prose', '• rope'),
-        ('prose', '• charts (https://example.org/c)'),
+        ('prose', '• charts https://example.org/c'),
       ]);
       expect(discarded, ['/cache/tides.md']);
     });

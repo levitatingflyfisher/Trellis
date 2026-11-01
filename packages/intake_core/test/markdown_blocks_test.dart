@@ -69,7 +69,7 @@ It came in overnight.
     test('a link keeps its words and its address', () {
       expect(blocks('See the [tide tables](https://example.org/tides "Tides") '
           'first.'), [
-        ('prose', 'See the tide tables (https://example.org/tides) first.'),
+        ('prose', 'See the tide tables https://example.org/tides first.'),
       ]);
     });
 
@@ -83,7 +83,7 @@ It came in overnight.
     test('a reference link is looked up, and its definition is not text',
         () {
       expect(blocks('Read [the guide][g] today.\n\n[g]: https://example.org/g "Guide"'), [
-        ('prose', 'Read the guide (https://example.org/g) today.'),
+        ('prose', 'Read the guide https://example.org/g today.'),
       ]);
     });
 

@@ -55,7 +55,7 @@ make all
     expect(work.persistence, 'work');
     expect(segments, [
       ('heading', 'The Harbour'),
-      ('prose', 'It was very quiet. See the tables (https://example.org/tides).'),
+      ('prose', 'It was very quiet. See the tables https://example.org/tides.'),
       ('prose', '• a coat'),
       ('prose', '• a hat'),
       ('code', 'make all'),

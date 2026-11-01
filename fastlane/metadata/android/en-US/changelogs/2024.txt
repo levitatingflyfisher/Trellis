@@ -1,0 +1,1 @@
+Links in the reader can be opened: a link looks like a link, and a tap asks where it goes, then opens it in your browser. A long link address in a Markdown file no longer shows as "…".

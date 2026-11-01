@@ -7,6 +7,11 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.6.2 — 2026-11-10
+
+- **Links in the reader can be opened.** A web address in a text looks like a link, and a tap on it asks where it goes, as show notes do, then opens it in your browser. It works for any text: a Markdown file, a paste, a PDF, a transcript.
+- Fix: in 1.6.1 a long link address from a Markdown file showed as “…”. The address now follows the link’s words and is shown shortened. A Markdown file imported with 1.6.1 keeps the old form until it is imported again.
+
 ## 1.6.1 — 2026-11-10
 
 - **Markdown and text files open in Trellis.** “Import a file” in the Library takes .md, .markdown and .txt. A Markdown file’s headings become its chapters; a link keeps its words and its address; each list item is its own line; each table row reads as one sentence; bold, italics and the other marks are gone. A .txt file is read as plain text.

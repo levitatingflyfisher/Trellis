@@ -8,8 +8,11 @@
 ///  * headings (hash or underlined) become headings, so they are the
 ///    work's chapters;
 ///  * a link keeps its words and its address: `[tides](https://x)` reads
-///    "tides (https://x)", and the reader and read aloud already know
-///    what to do with a bare address;
+///    "tides https://x". The address stands as a word of its own, not in
+///    brackets, because that is the form the reader knows: it shows a
+///    long address shortened, opens it on a tap, and read aloud skips
+///    it. In brackets the reader took it for one over-long word and
+///    showed "…";
 ///  * each list item is a line of its own with a plain mark, and each
 ///    table row one sentence of "Column: value" pairs, so both read well
 ///    by eye and by ear;
@@ -313,7 +316,7 @@ String _inline(String text, Map<String, String> refs) {
 
   String linked(String words, String url) {
     final w = words.trim();
-    return w.isEmpty || w == url ? hold(url) : '$w (${hold(url)})';
+    return w.isEmpty || w == url ? hold(url) : '$w ${hold(url)}';
   }
 
   var t = text

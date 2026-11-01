@@ -29,6 +29,8 @@ import 'dictionary_sheet.dart';
 import 'ledger_screen.dart';
 import 'line_paced_view.dart';
 import 'reader_code_face.dart';
+import '../works/device_hooks.dart' show openExternalLink;
+import '../works/link_confirm.dart';
 import 'reader_logic.dart';
 import 'reader_prefs.dart';
 import 'reader_typography_settings_screen.dart';
@@ -202,6 +204,10 @@ class ReaderScreen extends StatefulWidget {
   /// episode's Read and from the player.
   final bool openOnPage;
 
+  /// Opens a link met in the text, once the reader agreed (1.6.2). The
+  /// browser by default; tests stand in for it.
+  final Future<void> Function(Uri uri) openLink;
+
   /// The media session read aloud takes while it reads (1.6.0, user: "it
   /// stops when the screen goes dark, I would like it treated just like
   /// media/podcast playing"): the session brings the playback service,
@@ -232,6 +238,7 @@ class ReaderScreen extends StatefulWidget {
       this.layerLang,
       this.openTranslatePicker = false,
       this.openOnPage = false,
+      this.openLink = openExternalLink,
       this.session = const NoPlaybackSession()});
 
   @override
@@ -2139,6 +2146,13 @@ class _ReaderScreenState extends State<ReaderScreen>
   void _seekToWord(int globalIdx) {
     final doc = _doc;
     if (doc == null || doc.words.isEmpty) return;
+    // A link's word opens the link (1.6.2), after the same question show
+    // notes ask. It does not also move the reading place.
+    final link = linkOfToken(doc.originals[globalIdx]);
+    if (link != null) {
+      unawaited(confirmAndOpenLink(context, link, widget.openLink));
+      return;
+    }
     _timer?.cancel();
     unawaited(_stopSpeak());
     // On Page a tapped word is seek + follow (1.5.5, 1.5.8): while this
@@ -3821,7 +3835,13 @@ class _ReaderScreenState extends State<ReaderScreen>
     final lit = _litSentence;
     final inLit = lit != null && w >= lit.$1 && w < lit.$2;
     final scheme = theme.colorScheme;
-    final style = current ? base?.copyWith(color: scheme.onTertiary) : base;
+    // A link looks like one: it can be tapped.
+    final linked = linkOfToken(doc.originals[w]) != null;
+    final plain = linked
+        ? base?.copyWith(
+            color: scheme.primary, decoration: TextDecoration.underline)
+        : base;
+    final style = current ? base?.copyWith(color: scheme.onTertiary) : plain;
     final Widget child = w == 0
         ? DropCap(
             word: doc.words[w],
