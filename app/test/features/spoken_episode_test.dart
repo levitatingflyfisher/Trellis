@@ -215,9 +215,10 @@ void main() {
           (seg: 3, text: 'Adiós.'),
         ],
         String lang = 'es',
+        String fileName = 'render.wav',
         bool kept = false}) async {
       final services = testServices(dir);
-      final wav = File('${dir.path}/render.wav');
+      final wav = File('${dir.path}/$fileName');
       final render =
           await renderSpoken(sentences: sentences, synth: synth, wav: wav);
       return storeSpokenEpisode(
@@ -356,6 +357,25 @@ void main() {
           (await db.spineDao.worksOf(profileId))
               .where((w) => w.title.endsWith('(Spanish)')),
           hasLength(1));
+    });
+
+    test('making it again as another file type leaves no old file behind',
+        () async {
+      final id = await store(fileName: 'first.ogg');
+      final services = testServices(dir);
+      final oldFile = services.audioFileFor(
+          id, (await db.feedsDao.episodeOf(id))!.enclosureUrl!);
+      expect(oldFile.path, endsWith('.ogg'));
+      expect(oldFile.existsSync(), isTrue);
+
+      final again = await store(fileName: 'second.m4a');
+
+      expect(again, id);
+      final newFile = services.audioFileFor(
+          id, (await db.feedsDao.episodeOf(id))!.enclosureUrl!);
+      expect(newFile.path, endsWith('.m4a'));
+      expect(newFile.existsSync(), isTrue);
+      expect(oldFile.existsSync(), isFalse);
     });
   });
 }

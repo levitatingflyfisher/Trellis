@@ -142,7 +142,7 @@ void main() {
       'titles whole', (tester) async {
     await pumpAt(tester, const Size(320, 640), 3.0);
     for (final tab in [
-      'Subscriptions',
+      'Subs',
       'Latest',
       'Queue',
       'Courses',

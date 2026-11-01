@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
@@ -59,7 +60,7 @@ void main() {
   // The owner's order (12 Nov): "Subscriptions, Latest, Queue, Library,
   // Courses, and then settings".
   const tabs = [
-    'Subscriptions',
+    'Subs',
     'Latest',
     'Queue',
     'Library',
@@ -92,7 +93,7 @@ void main() {
     expect(find.byKey(const Key('manage-feeds')), findsNothing);
     await toTab(tester, 'Library');
     expect(find.byKey(const Key('library-subscriptions')), findsNothing);
-    await toTab(tester, 'Subscriptions');
+    await toTab(tester, 'Subs');
     expect(
       find.descendant(
         of: find.byType(AppBar),
@@ -135,17 +136,19 @@ void main() {
   });
 
   // Six items share the width: at 360 dp each has 60, and at 320 dp 53.
-  // "Subscriptions" needs about 104 at the bar's 1.3x cap and 80 at 1.0,
-  // so it can't be whole at the bar's own size on any phone this narrow.
-  // It is drawn smaller, just enough to fit on one line, never cut and
-  // never an icon alone; every label that fits keeps the bar's size.
-  for (final (width, scale, fullSize) in [
-    (360.0, 1.3, ['Latest', 'Queue', 'Library']),
-    (320.0, 1.3, ['Latest', 'Queue']),
-    (412.0, 1.0, ['Latest', 'Queue', 'Library', 'Courses', 'Settings']),
+  // The owner (board-0169, 12 Nov): the first label is "Subs", and every
+  // label is full size. All six are drawn at one size: the phone's own
+  // text size where the widest fits its share, else the largest size at
+  // which all six fit. None is drawn smaller than the others.
+  for (final (width, scale, phoneSize) in [
+    (360.0, 1.0, true),
+    (412.0, 1.0, true),
+    (320.0, 1.0, true),
+    (360.0, 1.3, false),
+    (320.0, 1.3, false),
   ]) {
     testWidgets('at ${width.toInt()} dp and text $scale every label shows '
-        'whole on one line; $fullSize keep the bar’s size', (tester) async {
+        'whole on one line at the bar’s own size', (tester) async {
       tester.view.physicalSize = Size(width, 700);
       tester.view.devicePixelRatio = 1.0;
       tester.platformDispatcher.textScaleFactorTestValue = scale;
@@ -155,6 +158,7 @@ void main() {
 
       for (final tab in tabs) {
         await toTab(tester, tab);
+        final sizes = <double>[];
         for (final label in tabs) {
           final paragraph = tester.renderObject<RenderParagraph>(
             find
@@ -177,13 +181,18 @@ void main() {
             reason: '$label on $tab',
           );
           expect(paragraph.maxLines ?? 1, 1, reason: '$label on $tab');
-          if (fullSize.contains(label)) {
-            expect(
-              paragraph.textScaler.scale(10),
-              closeTo(10 * scale, 0.01),
-              reason: '$label is drawn at the bar’s own size',
-            );
+          sizes.add(paragraph.textScaler.scale(10) / 10);
+          if (phoneSize) {
+            expect(sizes.last, closeTo(scale, 0.01),
+                reason: '$label is drawn at the phone’s own size');
           }
+        }
+        expect(sizes.reduce(math.max) - sizes.reduce(math.min),
+            lessThan(0.001),
+            reason: 'every label at one size on $tab');
+        if (!phoneSize) {
+          expect(sizes.first, greaterThan(1.0),
+              reason: 'large text still draws the bar larger');
         }
       }
       expect(

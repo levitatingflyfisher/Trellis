@@ -179,7 +179,7 @@ void main() {
     await tester.pump();
     expect(find.byKey(const Key('mini-player')), findsOneWidget);
 
-    await toTab(tester, 'Subscriptions'); // feeds screen, long feed title row
+    await toTab(tester, 'Subs'); // feeds screen, long feed title row
 
     await tester.tap(find.text('Follow'));
     await tester.pumpAndSettle(); // subscribe screen

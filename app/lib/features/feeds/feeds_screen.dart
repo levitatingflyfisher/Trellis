@@ -19,6 +19,7 @@ import '../works/work_open.dart';
 import '../works/work_row.dart';
 import '../reader/reader_doors.dart';
 import '../search/search_screen.dart';
+import '../search/search_store.dart';
 import 'background/feed_check_section.dart';
 import 'background/feed_check_settings.dart';
 import 'episode_download_coordinator.dart';
@@ -583,8 +584,8 @@ class _FeedsScreenState extends State<FeedsScreen> {
     );
   }
 
-  bool _matches(String name) =>
-      _query.isEmpty || name.toLowerCase().contains(_query.toLowerCase());
+  /// The same rule as every other search box: each word a word start.
+  bool _matches(String name) => SearchStore.wordsMatch(_query, name);
 
   /// One chip per shelf, named as the shelf is, with its count: the
   /// newsletter shelf sits below every podcast, and 118 podcasts is a

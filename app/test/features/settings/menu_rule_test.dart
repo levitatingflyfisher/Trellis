@@ -132,7 +132,7 @@ void main() {
       'show’s page and History have no ⋮, and a long press still selects',
       (tester) async {
     await pumpApp(tester);
-    await toTab(tester, 'Subscriptions');
+    await toTab(tester, 'Subs');
     final subscriptions = await menu(tester, topMenu());
     expect(subscriptions, ['Import OPML', 'Export OPML']);
 

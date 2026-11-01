@@ -7,6 +7,12 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.6.12 — 2026-11-12
+
+- **“Subs” on the bottom bar**, and all six labels drawn at one full size. The Subscriptions screen keeps its full title.
+- **Find a subscription** matches the start of any word, in any order, like every other search box.
+- **A spoken episode made again** as a different kind of audio clears the old audio file, so it no longer takes space.
+
 ## 1.6.11 — 2026-11-12
 
 - **A calmer episode page.** One big Play (in the language you are learning when that episode is made), with Read, Queue and Download beside it. “This episode in other languages” is the one place to switch language for listening and reading. Everything else is in the ⋮, and nothing is shown greyed out.

@@ -1154,7 +1154,7 @@ void main() {
           .map((d) => d.label)
           .toList();
       expect(labels, [
-        'Subscriptions',
+        'Subs',
         'Latest',
         'Queue',
         'Library',

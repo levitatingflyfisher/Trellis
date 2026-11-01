@@ -86,7 +86,7 @@ void main() {
     await seedProfile();
     await pumpApp(tester);
 
-    await toTab(tester, 'Subscriptions');
+    await toTab(tester, 'Subs');
     expect(find.byType(FeedsScreen), findsOneWidget);
     await tester.tap(find.text('Follow a feed'));
     await tester.pumpAndSettle();
@@ -105,7 +105,7 @@ void main() {
     await seedProfile();
     await pumpApp(tester);
 
-    await toTab(tester, 'Subscriptions');
+    await toTab(tester, 'Subs');
     await tester.tap(find.text('Follow a feed'));
     await tester.pumpAndSettle();
     expect(find.byType(SubscribeScreen), findsOneWidget);
@@ -115,11 +115,11 @@ void main() {
     await toTab(tester, 'Library');
     expect(appBarTitle('Library'), findsOneWidget);
     await back(tester);
-    await toTab(tester, 'Subscriptions');
+    await toTab(tester, 'Subs');
     expect(find.byType(SubscribeScreen), findsOneWidget,
         reason: 'Subscriptions kept its page across the trip');
 
-    await toTab(tester, 'Subscriptions');
+    await toTab(tester, 'Subs');
     expect(find.byType(SubscribeScreen), findsNothing);
     expect(appBarTitle('Subscriptions'), findsOneWidget);
   });

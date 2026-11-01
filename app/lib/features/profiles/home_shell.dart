@@ -1039,71 +1039,56 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           else
             _miniPlayerBar(),
           // Six plain labels, always (owner: plain labels, never icons
-          // alone). The bar draws its labels at up to 1.3x; the bar's
-          // labels set no letter spacing, and settings_tab_test.dart
+          // alone), all at one size (board-0169); settings_tab_test.dart
           // holds every label whole on one line at 360 and 320 dp.
           Theme(
             data: _barTheme(Theme.of(context)),
+            child: OneSizeBarLabels(
+            labels: _barLabels,
             child: NavigationBar(
             selectedIndex: _tab,
             onDestinationSelected: _selectTab,
             destinations: [
-              // The industry's word for the shows you follow.
-              WholeBarLabel(
-                label: 'Subscriptions',
-                child: NavigationDestination(
-                  icon: const Icon(Icons.rss_feed_outlined),
-                  selectedIcon: const Icon(Icons.rss_feed),
-                  label: 'Subscriptions',
-                ),
+              // The shows you follow: "Subs" on the bar (owner,
+              // board-0169); its screen is titled Subscriptions.
+              NavigationDestination(
+                icon: const Icon(Icons.rss_feed_outlined),
+                selectedIcon: const Icon(Icons.rss_feed),
+                label: 'Subs',
               ),
               // "Latest", the industry's word, not the coined "River"
               // (operator naming ruling): every item from every followed
               // feed, newest first, kept for good (ADR-0019); keeping one
               // puts it in the Library.
-              WholeBarLabel(
+              NavigationDestination(
+                icon: const Icon(Icons.dynamic_feed_outlined),
+                selectedIcon: const Icon(Icons.dynamic_feed),
                 label: 'Latest',
-                child: NavigationDestination(
-                  icon: const Icon(Icons.dynamic_feed_outlined),
-                  selectedIcon: const Icon(Icons.dynamic_feed),
-                  label: 'Latest',
-                ),
               ),
               // "Queue", not the coined "Up Next": what plays after this,
               // in the order the listener chose.
-              WholeBarLabel(
+              NavigationDestination(
+                icon: const Icon(Icons.queue_music_outlined),
+                selectedIcon: const Icon(Icons.queue_music),
                 label: 'Queue',
-                child: NavigationDestination(
-                  icon: const Icon(Icons.queue_music_outlined),
-                  selectedIcon: const Icon(Icons.queue_music),
-                  label: 'Queue',
-                ),
               ),
-              WholeBarLabel(
+              NavigationDestination(
+                icon: const Icon(Icons.local_library_outlined),
+                selectedIcon: const Icon(Icons.local_library),
                 label: 'Library',
-                child: NavigationDestination(
-                  icon: const Icon(Icons.local_library_outlined),
-                  selectedIcon: const Icon(Icons.local_library),
-                  label: 'Library',
-                ),
               ),
-              WholeBarLabel(
+              NavigationDestination(
+                icon: const Icon(Icons.school_outlined),
+                selectedIcon: const Icon(Icons.school),
                 label: 'Courses',
-                child: NavigationDestination(
-                  icon: const Icon(Icons.school_outlined),
-                  selectedIcon: const Icon(Icons.school),
-                  label: 'Courses',
-                ),
               ),
-              WholeBarLabel(
+              NavigationDestination(
+                icon: const Icon(Icons.settings_outlined),
+                selectedIcon: const Icon(Icons.settings),
                 label: 'Settings',
-                child: NavigationDestination(
-                  icon: const Icon(Icons.settings_outlined),
-                  selectedIcon: const Icon(Icons.settings),
-                  label: 'Settings',
-                ),
               ),
             ],
+          ),
           ),
           ),
         ],
@@ -1112,8 +1097,13 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   }
 }
 
-/// The bottom bar's theme: its labels without letter spacing, so as many
-/// as can fit whole at their full size do (see [WholeBarLabel]).
+/// The bottom bar's labels, in the owner's order (12 Nov).
+const _barLabels = [
+  'Subs', 'Latest', 'Queue', 'Library', 'Courses', 'Settings',
+];
+
+/// The bottom bar's theme: its labels without letter spacing, so they fit
+/// whole at the largest size they can (see [OneSizeBarLabels]).
 ThemeData _barTheme(ThemeData theme) => theme.copyWith(
     textTheme: theme.textTheme.copyWith(
         labelMedium: theme.textTheme.labelMedium?.copyWith(letterSpacing: 0)));

@@ -178,6 +178,17 @@ class SearchStore {
     ];
   }
 
+  /// Whether [text] answers [query] the way the index does: every word of
+  /// the query starts some word of the text, in any order, case aside. The
+  /// boxes that filter a list already in memory ask this, so they agree
+  /// with the ones that ask the index. An empty query matches all.
+  static bool wordsMatch(String query, String text) {
+    String norm(String s) => s.toLowerCase().replaceAll('’', "'");
+    final have = [for (final m in _word.allMatches(norm(text))) m.group(0)!];
+    return [for (final m in _word.allMatches(norm(query))) m.group(0)!]
+        .every((w) => have.any((h) => h.startsWith(w)));
+  }
+
   /// [matchQuery] with every word held to the title and show columns.
   static String? _titleQuery(String input) {
     final phrases = _phrases(input);

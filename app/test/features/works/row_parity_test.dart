@@ -212,7 +212,7 @@ void main() {
     await pumpApp(tester);
     await read('Latest', books: false);
 
-    await toTab(tester, 'Subscriptions');
+    await toTab(tester, 'Subs');
     await read('Books shelf', feed: false);
     await tester.tap(find.text('Night Sky'));
     await tester.pumpAndSettle();

@@ -502,7 +502,7 @@ void main() {
     testWidgets('Subscriptions finds its own shows, and hands the words on '
         'to search everything', (tester) async {
       await pumpApp(tester);
-      await toTab(tester, 'Subscriptions');
+      await toTab(tester, 'Subs');
       await tester.enterText(find.byKey(const Key('feeds-find')), 'comet');
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('feeds-search-all')));

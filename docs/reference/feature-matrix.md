@@ -851,14 +851,14 @@ Paths are under `app/test/` unless they say otherwise.
   worded More menu; the reader names its current mode as a word.
 - ✅ shipped: **Settings on the bottom bar, and one rule for ⋮**
   (board-0131/0132; owner: the three dots hid different things on
-  different screens). The bottom bar is always Subscriptions, Latest,
-  Queue, Library, Courses, Settings, in the owner's order (12 Nov), and
-  the app opens on Latest. Every label is a plain word, whole on one
-  line; six share the width, so a label that can't fit at the bar's own
-  size is drawn smaller, just enough to fit. "Subscriptions" needs about
-  104 dp at the bar's 1.3x text cap and 80 at 1.0, against 60 a slot on a
-  360 dp phone: there it is drawn at 0.74x, and at 0.85x on a 412 dp
-  phone at normal text. Settings gathers every app-wide setting and door:
+  different screens). The bottom bar is always Subs, Latest, Queue,
+  Library, Courses, Settings, in the owner's order (12 Nov; "Subs" by
+  board-0169, its screen still titled Subscriptions), and the app opens
+  on Latest. Every label is a plain word, whole on one line, and all six
+  are drawn at one size: the phone's own text size, unless the widest
+  ("Settings") would not fit its sixth of the width, and then the
+  largest size at which all six fit (1.21x on a 360 dp phone with text
+  at 1.3x, 1.08x at 320 dp). None is drawn smaller than the others. Settings gathers every app-wide setting and door:
   Theme; Reading (Reading style, Read aloud voices for every language the
   reader meets, Use the system voice, Read citations aloud); Listening
   (Wi-Fi and data, Trim silence & even out volume by default, Headphone

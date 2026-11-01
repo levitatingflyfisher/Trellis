@@ -193,6 +193,21 @@ void main() {
       expect(find.text('Podcast 000'), findsOneWidget);
     });
 
+    testWidgets(
+        'finds a name the way every other search box does: each word a '
+        'word start, in any order', (tester) async {
+      await seed();
+      await pump(tester);
+      await tester.enterText(find.byKey(const Key('feeds-find')), 'ledg hedge');
+      await tester.pump();
+      expect(find.text('Hedgerow Ledger'), findsOneWidget);
+      expect(find.text('Podcast 000'), findsNothing);
+      // Inside a word is not a word start.
+      await tester.enterText(find.byKey(const Key('feeds-find')), 'edgerow');
+      await tester.pump();
+      expect(find.text('Hedgerow Ledger'), findsNothing);
+    });
+
     testWidgets('no match says so, and offers to search everything',
         (tester) async {
       await seed();

@@ -311,6 +311,10 @@ Future<int> storeSpokenEpisode({
   ];
 
   final existing = await spokenEpisodeOf(db, original.id, lang);
+  // The file the earlier make left, to be cleared once the new one is in.
+  final oldUrl = existing == null
+      ? null
+      : (await db.feedsDao.episodeOf(existing))?.enclosureUrl;
   final workId = await db.transaction(() async {
     final int id;
     if (existing != null) {
@@ -388,6 +392,12 @@ Future<int> storeSpokenEpisode({
   } on FileSystemException {
     audio.copySync(dest.path);
     audio.deleteSync();
+  }
+  // A remake of another type (.ogg then .m4a) names a new file; the old
+  // one would stay on disk for nothing.
+  if (oldUrl != null && oldUrl != url) {
+    final old = audioFileFor(workId, oldUrl);
+    if (old.path != dest.path && old.existsSync()) old.deleteSync();
   }
   return workId;
 }
