@@ -4,10 +4,11 @@
 ///
 /// Read aloud makes its sound a sentence at a time and throws it away.
 /// This makes the whole spoken translation once, into one file, with the
-/// time of every sentence, and stores it as an episode of its own beside
-/// the original. Being an ordinary episode is the point: the player, the
-/// queue, downloads, storage and the page that lights the words as they
-/// are heard all work on it with no code of their own.
+/// time of every sentence, and stores it as a version of the episode
+/// (1.6.18, owner: "it should live together"): its own work, so the
+/// player, the queue and the page that lights the words as they are heard
+/// work on it as on any, but with no show of its own; it is found through
+/// its episode.
 library;
 
 import 'dart:convert';
@@ -27,7 +28,6 @@ import '../reader/translation/brain_translator.dart'
 import '../reader/translation/language_names.dart';
 import '../transcribe/transcript_writer.dart' show encodeWordTimingBlob;
 import 'listen_clearness.dart';
-import 'spoken_guid.dart';
 import 'spoken_voice.dart';
 
 export 'spoken_guid.dart';
@@ -221,43 +221,34 @@ List<List<Object>> estimateWordTimings(String text, int startMs, int endMs) {
 }
 
 
-/// The spoken translation of [originalId] into [lang], when one has been
-/// made; null otherwise.
-Future<int?> spokenEpisodeOf(AppDatabase db, int originalId, String lang) async {
-  final row = await (db.select(db.episodes)
-        ..where((e) => e.guid.equals(spokenGuid(originalId, lang)))
-        ..limit(1))
-      .getSingleOrNull();
-  return row?.workId;
-}
+/// The spoken translation of [originalId] into [lang] (its version's
+/// work id), when one has been made; null otherwise.
+Future<int?> spokenEpisodeOf(AppDatabase db, int originalId, String lang) async =>
+    (await db.versionsDao.versionIn(originalId, lang))?.workId;
 
-/// How clearly the made episode [spokenId] was spoken; Natural for one
-/// made before that was stored.
+/// How clearly the version [spokenId] was spoken; Natural for one made
+/// before that was stored.
 Future<ListenClearness> spokenClearnessOf(AppDatabase db, int spokenId) async =>
-    ListenClearness.parse((await db.feedsDao.episodeOf(spokenId))?.clearness);
+    ListenClearness.parse((await db.versionsDao.versionOf(spokenId))?.clearness);
 
 /// Every spoken translation into [lang] that has been made, as its
-/// original's work id to its own: what a whole list asks at once, in one
-/// query rather than one a row.
-Future<Map<int, int>> spokenEpisodesIn(AppDatabase db, String lang) async {
-  final rows = await (db.select(db.episodes)
-        ..where((e) => e.guid.like('spoken:%:$lang')))
-      .get();
-  return {
-    for (final r in rows) ?int.tryParse(r.guid.split(':')[1]): r.workId,
-  };
-}
+/// original's work id to its version's: what a whole list asks at once.
+Future<Map<int, int>> spokenEpisodesIn(AppDatabase db, String lang) =>
+    db.versionsDao.versionsIn(lang);
 
-/// [kept]: the person asked for it (a tap), not make ahead.
+/// [kept]: the person asked for it (a tap), not make ahead; the episode
+/// it lives with is then kept too.
 ///
-/// Stores [render] as an episode of [original]'s show: its text is the
+/// Stores [render] as a version of [original] (1.6.18, owner: "it should
+/// live together"): a work of kind `version` with no show of its own. Its
+/// text is the
 /// translation, a segment for each of the original's, with the times the
 /// page lights by; its audio is [audio], moved to where the player looks
-/// for a download. Returns the episode's work id. One made before for
+/// for a download. Returns the version's work id. One made before for
 /// the same original and language is replaced in place.
 ///
 /// The address it carries can never be fetched (`.invalid` never
-/// resolves): the file on the device is the episode.
+/// resolves): the file on the device is the version's audio.
 Future<int> storeSpokenEpisode({
   required AppDatabase db,
   required Work original,
@@ -314,7 +305,7 @@ Future<int> storeSpokenEpisode({
   // The file the earlier make left, to be cleared once the new one is in.
   final oldUrl = existing == null
       ? null
-      : (await db.feedsDao.episodeOf(existing))?.enclosureUrl;
+      : (await db.spineDao.workById(existing))?.sourceUrl;
   final workId = await db.transaction(() async {
     final int id;
     if (existing != null) {
@@ -324,36 +315,31 @@ Future<int> storeSpokenEpisode({
           .go();
       await (db.delete(db.segments)..where((s) => s.workId.equals(id))).go();
       await (db.delete(db.workNotes)..where((n) => n.workId.equals(id))).go();
-      await (db.update(db.episodes)..where((e) => e.workId.equals(id)))
-          .write(EpisodesCompanion(
-              enclosureUrl: Value(url),
-              voiceKind: Value(voiceKind.name),
-              clearness: Value(clearness.name)));
       await (db.update(db.works)..where((w) => w.id.equals(id)))
           .write(WorksCompanion(sourceUrl: Value(url)));
     } else {
       id = await db.spineDao.insertWork(
           profileId: original.profileId,
-          kind: 'episode',
+          kind: 'version',
           title: '${original.title} ($language)',
-          // Asked for, it is kept: in the Library whether or not its
-          // original was (lead's ruling, 12 Nov: the Library is what you
-          // keep, made episodes among it). Made ahead by a show's switch,
-          // it arrives like any episode, and make ahead may take its
-          // room back.
-          persistence: kept ? 'work' : original.persistence,
+          persistence: original.persistence,
           firstSeenEpochDay: epochDayUtcNow(),
           sourceUrl: url,
           lang: lang);
-      await db.feedsDao.insertEpisode(
-          workId: id,
-          feedId: episode.feedId,
-          guid: spokenGuid(original.id, lang),
-          enclosureUrl: url,
-          voiceKind: voiceKind.name,
-          clearness: clearness.name,
-          // Just after the original, so the two sit together in the show.
-          publishedAtMs: episode.publishedAtMs + 1);
+    }
+    await db.versionsDao.put(
+        workId: id,
+        originalId: original.id,
+        lang: lang,
+        voice: voice,
+        voiceKind: voiceKind.name,
+        clearness: clearness.name);
+    // Asked for, it is kept (lead's ruling, 12 Nov: making one is as
+    // deliberate as Keep), and it lives with its episode, so the episode
+    // is kept. Made ahead by a show's switch, nothing is kept.
+    if (kept && original.persistence != 'work') {
+      await (db.update(db.works)..where((w) => w.id.equals(original.id)))
+          .write(const WorksCompanion(persistence: Value('work')));
     }
     await db.spineDao.insertSegments(id, [
       for (final (i, seg) in segs.indexed)

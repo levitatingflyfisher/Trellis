@@ -30,22 +30,27 @@ Future<bool> clonedVoiceShareAllowed(AppDatabase db) async =>
 /// it, which says the voice is machine made.
 typedef SpokenShare = ({File? audio, String title, String text});
 
-/// The share for [work] when it is a made episode; null for any other.
+/// The share for [work] when it is a made language (a version, or a made
+/// episode whose original is gone); null for any other.
 Future<SpokenShare?> spokenShareOf(
   AppDatabase db,
   Work work,
-  Episode episode, {
+  Episode? episode, {
   required File Function(int workId, String url)? audioFileFor,
 }) async {
-  final guid = episode.guid;
-  if (!guid.startsWith('spoken:')) return null;
+  final version = await db.versionsDao.versionOf(work.id);
+  final guid = episode?.guid;
+  if (version == null && (guid == null || !guid.startsWith('spoken:'))) {
+    return null;
+  }
   // Null was stored before the kind was: every voice then was a machine
   // voice.
+  final storedKind = version?.voiceKind ?? episode?.voiceKind;
   final kind = VoiceKind.values
-          .where((k) => k.name == episode.voiceKind)
+          .where((k) => k.name == storedKind)
           .firstOrNull ??
       VoiceKind.machine;
-  final originalId = int.tryParse(guid.split(':')[1]);
+  final originalId = version?.originalId ?? int.tryParse(guid!.split(':')[1]);
   final original =
       originalId == null ? null : await db.feedsDao.episodeOf(originalId);
   final originalLink = original?.enclosureUrl;
@@ -55,7 +60,7 @@ Future<SpokenShare?> spokenShareOf(
     if (originalLink != null) 'The original: $originalLink',
   ].join('\n');
 
-  final url = episode.enclosureUrl;
+  final url = episode?.enclosureUrl ?? work.sourceUrl;
   final file = url == null ? null : audioFileFor?.call(work.id, url);
   final mayGo =
       kind != VoiceKind.cloned || await clonedVoiceShareAllowed(db);

@@ -118,6 +118,7 @@ void main() {
       expect(downloadedVoiceName(s), isIn(['Pocket TTS', 'Kokoro']),
           reason: s.id);
     }
+    expect(downloadedVoiceName(piperRuDenis()), 'Piper');
   });
 }
 

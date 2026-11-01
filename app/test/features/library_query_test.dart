@@ -45,7 +45,7 @@ void main() {
 
   group('type — mapped from the real work kinds, "course" deliberately '
       'absent (courses are never spine works)', () {
-    test('book/article/note/audiobook/episode/made each map correctly', () {
+    test('book/article/note/audiobook/episode each map correctly', () {
       expect(
           matchesLibraryQuery((work: work(kind: 'book'), episode: null, feedTitle: null),
               const LibraryQuery(types: {LibraryItemType.book})),
@@ -73,17 +73,15 @@ void main() {
           publishedAtMs: 1001,
           readAtMs: null,
           archivedAtMs: null);
-      expect(
-          matchesLibraryQuery(
-              (work: work(kind: 'episode'), episode: made, feedTitle: 'F'),
-              const LibraryQuery(types: {LibraryItemType.made})),
-          isTrue);
+      // 1.6.18: a made language lives with its episode, so it is no kind
+      // of its own. One whose episode is gone (made before 1.6.18) is an
+      // episode; a version is never in the Library at all.
       expect(
           matchesLibraryQuery(
               (work: work(kind: 'episode'), episode: made, feedTitle: 'F'),
               const LibraryQuery(types: {LibraryItemType.episode})),
-          isFalse,
-          reason: 'a made episode is its own kind');
+          isTrue);
+      expect(libraryKindOf(work(kind: 'version'), null), isNull);
       expect(
           matchesLibraryQuery((work: work(kind: 'note'), episode: null, feedTitle: null),
               const LibraryQuery(types: {LibraryItemType.note})),

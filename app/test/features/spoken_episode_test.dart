@@ -232,33 +232,35 @@ void main() {
           audioFileFor: services.audioFileFor);
     }
 
-    test('it is an episode of the same show, named for its language, with '
-        'its audio where the player looks for a download', () async {
+    // 1.6.18, owner: "it should live together".
+    test('it is a version of its episode, in no show of its own, with its '
+        'audio where the player looks for a download', () async {
       final id = await store();
 
       final work = (await db.spineDao.workById(id))!;
-      expect(work.kind, 'episode');
-      expect(work.title, 'Harbour episode (Spanish)');
+      expect(work.kind, 'version');
       expect(work.lang, 'es');
-      final episode = (await db.feedsDao.episodeOf(id))!;
-      expect(episode.feedId, feedId);
-      expect(episode.guid, spokenGuid(original.id, 'es'));
-      final file =
-          testServices(dir).audioFileFor(id, episode.enclosureUrl!);
+      final version = (await db.versionsDao.versionOf(id))!;
+      expect((version.originalId, version.lang, version.voice),
+          (original.id, 'es', 'Pocket TTS'));
+      expect(version.voiceKind, 'machine');
+      expect(await db.feedsDao.episodeOf(id), isNull,
+          reason: 'no Episode row, so no show or list holds it apart');
+      final file = testServices(dir).audioFileFor(id, work.sourceUrl!);
       expect(file.existsSync(), isTrue);
       expect(file.path, endsWith('.wav'));
       expect(await spokenEpisodeOf(db, original.id, 'es'), id);
       expect(await spokenEpisodeOf(db, original.id, 'ru'), isNull);
     });
 
-    // Lead's ruling (12 Nov): the Library is what you keep, made episodes
-    // among them; making one is as deliberate as Keep.
-    test('a made episode asked for is kept, so it is in the Library, though '
-        'its original was only passing through Latest', () async {
-      final id = await store(kept: true);
-      expect((await db.spineDao.workById(id))!.persistence, 'work');
+    // Making one is as deliberate as Keep (lead's ruling, 12 Nov). Since
+    // 1.6.18 the version lives with its episode, so the episode is kept.
+    test('a version asked for keeps its episode, which the Library shows '
+        'once, though it was only passing through Latest', () async {
+      await store(kept: true);
+      expect((await db.spineDao.workById(original.id))!.persistence, 'work');
       final library = await db.libraryDao.libraryQueryEntriesOf(profileId);
-      expect([for (final e in library) e.work.id], [id]);
+      expect([for (final e in library) e.work.id], [original.id]);
     });
 
     test('its text is the translation, a paragraph for each of the '
@@ -353,10 +355,7 @@ void main() {
       final second = await store();
 
       expect(second, first);
-      expect(
-          (await db.spineDao.worksOf(profileId))
-              .where((w) => w.title.endsWith('(Spanish)')),
-          hasLength(1));
+      expect(await db.versionsDao.versionsOf(original.id), hasLength(1));
     });
 
     test('making it again as another file type leaves no old file behind',
@@ -364,7 +363,7 @@ void main() {
       final id = await store(fileName: 'first.ogg');
       final services = testServices(dir);
       final oldFile = services.audioFileFor(
-          id, (await db.feedsDao.episodeOf(id))!.enclosureUrl!);
+          id, (await db.spineDao.workById(id))!.sourceUrl!);
       expect(oldFile.path, endsWith('.ogg'));
       expect(oldFile.existsSync(), isTrue);
 
@@ -372,7 +371,7 @@ void main() {
 
       expect(again, id);
       final newFile = services.audioFileFor(
-          id, (await db.feedsDao.episodeOf(id))!.enclosureUrl!);
+          id, (await db.spineDao.workById(id))!.sourceUrl!);
       expect(newFile.path, endsWith('.m4a'));
       expect(newFile.existsSync(), isTrue);
       expect(oldFile.existsSync(), isFalse);

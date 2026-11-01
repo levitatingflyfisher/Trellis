@@ -9,6 +9,7 @@ import 'package:trellis/features/episodes/episode_actions.dart';
 import 'package:trellis/features/feeds/episode_download_coordinator.dart';
 import 'package:trellis/features/models/models_screen.dart';
 import 'package:trellis/features/storage/storage_by_item_screen.dart';
+import 'package:trellis/features/storage/work_storage.dart';
 import 'package:trellis/services/device_services.dart';
 
 import '../support/fake_services.dart';
@@ -208,6 +209,65 @@ void main() {
     await pump(tester);
     expect(find.text('Aurora season'), findsOneWidget);
     expect(find.text('Bo\'s diary'), findsNothing);
+  });
+
+  // 1.6.18: a made language lives with its episode, and so does its audio.
+  group('made audio', () {
+    late int es;
+    const esUrl = 'https://spoken.trellis.invalid/1-es.ogg';
+
+    setUp(() async {
+      es = await db.spineDao.insertWork(
+          profileId: profile,
+          kind: 'version',
+          title: 'Aurora season (Spanish)',
+          persistence: 'work',
+          firstSeenEpochDay: 1,
+          sourceUrl: esUrl,
+          lang: 'es');
+      await db.versionsDao.put(workId: es, originalId: episode, lang: 'es');
+      await db.spineDao.insertSegments(
+          es, const [(idx: 0, kind: 'prose', text: 'Luces arriba.')]);
+      services.audioFileFor(es, esUrl)
+        ..parent.createSync(recursive: true)
+        ..writeAsBytesSync(List.filled(1500, 1));
+    });
+
+    StoredPart? madeIn(List<WorkStorage> all, String lang) => all
+        .expand((w) => w.parts)
+        .where((p) => p.kind == StoredKind.madeAudio && p.lang == lang)
+        .firstOrNull;
+
+    test('is a part of its episode, named for its language, in both views',
+        () async {
+      final all = await loadWorkStorage(db, services: services);
+      expect(all.map((w) => w.workId), isNot(contains(es)),
+          reason: 'a version is never a row of its own');
+      final row = all.singleWhere((w) => w.workId == episode);
+      final part = madeIn([row], 'es')!;
+      expect(part.bytes, 1500);
+      expect(part.label, 'Spanish audio');
+      expect(part.deleteLabel, 'Delete Spanish audio');
+      expect(part.inDatabase, isFalse);
+
+      final one = await loadWorkStorage(db,
+          services: services, onlyWorkId: episode);
+      expect(madeIn(one, 'es')?.bytes, 1500,
+          reason: 'the episode page lists it too');
+    });
+
+    test('deleting it removes the file and keeps the version, so the one '
+        'tap can make the audio again', () async {
+      final row = (await loadWorkStorage(db, services: services))
+          .singleWhere((w) => w.workId == episode);
+      final said = await deletePart(row, madeIn([row], 'es')!,
+          db: db, services: services, actions: actions);
+      expect(said, 'Deleted the Spanish audio.');
+      expect(services.audioFileFor(es, esUrl).existsSync(), isFalse);
+      expect(await db.versionsDao.versionOf(es), isNotNull);
+      expect(madeIn(await loadWorkStorage(db, services: services), 'es'),
+          isNull);
+    });
   });
 
   group('kept pages', () {

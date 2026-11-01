@@ -358,3 +358,39 @@ List<ModelSpec> voiceCatalog() => [
         ),
       ),
     ];
+
+/// The revision of rhasspy/piper-voices the Russian voice is pinned at
+/// (hashes computed from a download on 2026-11-14).
+const _piperRevision = '6b9cfaacb4fb2e02a9621227e3c1a48bec9710c3';
+const _denis =
+    'https://huggingface.co/rhasspy/piper-voices/resolve/$_piperRevision/ru/ru_RU/denis/medium/';
+
+/// Russian: Piper's ru_RU denis (medium), weights MIT, recordings CC0,
+/// as Piper publishes them. Its text front end is Trellis's own
+/// (`packages/russian_g2p`), with no espeak-ng.
+// Held out of voiceCatalog() and every list until it passes ADR-0022's speech-recognition gate with the Russian stress table pinned here.
+ModelSpec piperRuDenis() => ModelSpec(
+      id: 'piper-ru-denis',
+      task: ModelTask.tts,
+      files: [
+        ModelFile(
+          url: '${_denis}ru_RU-denis-medium.onnx',
+          sha256:
+              '879bc365cb14d1380e3f5ed6044162ccf54c99f6161871569b7f830aec3ce841',
+          bytes: 63221984,
+        ),
+        ModelFile(
+          url: '${_denis}ru_RU-denis-medium.onnx.json',
+          sha256:
+              'e4fb4ab60262d1ab802c8c39301976c4135e545bc834a33c6eedc1f764df3bd6',
+          bytes: 5464,
+        ),
+      ],
+      licenses: const ['MIT', 'CC0-1.0'],
+      minTier: DeviceTier.t1,
+      langs: const {'ru'},
+      piperLayout: const PiperVoiceLayout(
+        modelFileName: 'ru_RU-denis-medium.onnx',
+        configFileName: 'ru_RU-denis-medium.onnx.json',
+      ),
+    );

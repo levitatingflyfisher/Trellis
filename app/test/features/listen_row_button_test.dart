@@ -191,10 +191,7 @@ void main() {
   Finder button(_Ep e) => find.byKey(Key('listen-${e.work.id}'));
 
   Future<int?> spokenOf(_Ep e, [String lang = 'es']) async =>
-      (await (db.select(db.episodes)
-                ..where((r) => r.guid.equals('spoken:${e.work.id}:$lang')))
-              .getSingleOrNull())
-          ?.workId;
+      (await db.versionsDao.versionIn(e.work.id, lang))?.workId;
 
   group('make it', () {
     testWidgets('no learning language yet: the button is a translate glyph, '
@@ -544,7 +541,7 @@ void main() {
 
         expect(controller.current?.id, made,
             reason: 'made again in place, and played when done');
-        expect((await db.feedsDao.episodeOf(made))!.clearness, 'slow');
+        expect((await db.versionsDao.versionOf(made))!.clearness, 'slow');
         expect(transcribed, 1, reason: 'only the voice runs again');
       });
     });
@@ -568,7 +565,7 @@ void main() {
         await until(tester, () => controller.current != null);
 
         expect(controller.current?.id, made);
-        expect((await db.feedsDao.episodeOf(made))!.clearness, 'natural');
+        expect((await db.versionsDao.versionOf(made))!.clearness, 'natural');
         expect(j.offerFor(e.work, e.episode)!.busy, isFalse);
       });
     });
@@ -580,7 +577,7 @@ void main() {
         final e = await episode('Harbour');
         final c = chain();
         final made = (await c.start(e.work, 'es'))!;
-        final url = (await db.feedsDao.episodeOf(made))!.enclosureUrl!;
+        final url = (await db.spineDao.workById(made))!.sourceUrl!;
         testServices(dir).audioFileFor(made, url).deleteSync();
         final j = jobs(over: c);
         await j.ready;

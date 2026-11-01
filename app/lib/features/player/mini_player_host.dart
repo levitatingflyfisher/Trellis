@@ -7,6 +7,7 @@ library;
 
 import 'package:flutter/material.dart';
 
+import 'now_playing_screen.dart' show NowPlayingScreen;
 import 'player_controller.dart';
 
 /// Tracks the page routes on the app's Navigator, so the host knows when
@@ -16,6 +17,11 @@ class MiniPlayerRoutes extends NavigatorObserver with ChangeNotifier {
   final List<Route<dynamic>> _pages = [];
 
   bool get pageOverRoot => _pages.length > 1;
+
+  /// The big player is the top page: it has its own controls, so the bar
+  /// would only repeat them under it.
+  bool get nowPlayingOnTop =>
+      _pages.isNotEmpty && _pages.last.settings.name == NowPlayingScreen.routeName;
 
   void _changed() => WidgetsBinding.instance
       .addPostFrameCallback((_) => notifyListeners());
@@ -120,6 +126,7 @@ class MiniPlayerHostState extends State<MiniPlayerHost> {
         final show = bar != null &&
             controller?.current != null &&
             widget.routes.pageOverRoot &&
+            !widget.routes.nowPlayingOnTop &&
             // The keyboard covers the bar anyway, and the page above
             // would shrink twice.
             MediaQuery.viewInsetsOf(context).bottom == 0;

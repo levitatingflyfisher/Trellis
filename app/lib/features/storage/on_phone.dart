@@ -9,6 +9,8 @@
 /// be fetched again.
 library;
 
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:openhearth_design/openhearth_design.dart';
 
@@ -17,6 +19,7 @@ import '../../services/device_services.dart';
 import '../episodes/episode_actions.dart';
 import '../listen/listen.dart' show isSpokenGuid;
 import '../models/format.dart';
+import '../reader/translation/language_names.dart';
 import 'work_storage.dart';
 
 /// One episode whose audio is on this phone, and what it takes there:
@@ -29,8 +32,16 @@ typedef OnPhoneEntry = ({RiverEntry entry, int bytes});
 Future<List<OnPhoneEntry>> loadOnPhone(AppDatabase db,
     {required DeviceServices services, required int profileId}) async {
   final audio = audioOnDisk(services);
-  final out = <OnPhoneEntry>[];
+  // A version's audio counts under its episode (1.6.18: they live
+  // together); an episode whose only audio is a version's is listed too.
+  final byEpisode = <int, int>{};
   for (final MapEntry(key: id, value: bytes) in audio.entries) {
+    final v = await db.versionsDao.versionOf(id);
+    final at = v?.originalId ?? id;
+    byEpisode[at] = (byEpisode[at] ?? 0) + bytes;
+  }
+  final out = <OnPhoneEntry>[];
+  for (final MapEntry(key: id, value: bytes) in byEpisode.entries) {
     final entry = await db.feedsDao.riverEntryOf(id);
     if (entry == null || entry.work.profileId != profileId) continue;
     if (entry.episode.enclosureUrl == null) continue;
@@ -56,9 +67,34 @@ String onPhoneTotalLine(List<OnPhoneEntry> entries) {
       '${formatBytes(bytes)} in all.';
 }
 
-/// Whether [e] is a made episode, whose audio comes back by the tap that
-/// made it rather than by a download.
+/// Whether [e] is a made episode whose original is gone (made before
+/// 1.6.18), whose audio comes back by the tap that made it rather than by
+/// a download.
 bool isMadeEpisode(Episode e) => isSpokenGuid(e.guid);
+
+/// The languages whose made audio is on the phone for [workIds]: what
+/// Remove audio takes with them.
+Future<List<String>> madeAudioLangsOf(AppDatabase db, DeviceServices services,
+    Iterable<int> workIds) async {
+  final langs = <String>{};
+  for (final (lang, _) in await _madeAudioOf(db, services, workIds)) {
+    langs.add(lang);
+  }
+  return langs.toList();
+}
+
+Future<List<(String, File)>> _madeAudioOf(AppDatabase db,
+    DeviceServices services, Iterable<int> workIds) async {
+  final out = <(String, File)>[];
+  for (final id in workIds) {
+    for (final v in await db.versionsDao.versionsOf(id)) {
+      final url = (await db.spineDao.workById(v.workId))?.sourceUrl;
+      final f = url == null ? null : services.audioFileFor(v.workId, url);
+      if (f != null && f.existsSync()) out.add((v.lang, f));
+    }
+  }
+  return out;
+}
 
 /// Asks once, plain about what goes, what stays and how it comes back.
 /// Audio is not kept in Recently deleted, so the space comes back at once
@@ -68,7 +104,7 @@ bool isMadeEpisode(Episode e) => isSpokenGuid(e.guid);
 /// or processing): their space is not promised, and they are named.
 Future<bool> confirmRemoveAudio(
     BuildContext context, List<OnPhoneEntry> chosen,
-    {int kept = 0}) {
+    {int kept = 0, List<String> madeLangs = const []}) {
   final n = chosen.length;
   final bytes = chosen.fold(0, (a, e) => a + e.bytes);
   final made = chosen.where((e) => isMadeEpisode(e.entry.episode)).length;
@@ -92,6 +128,9 @@ Future<bool> confirmRemoveAudio(
     if (made > 0)
       'A made episode is made again by the same Listen tap on its '
           'original.',
+    if (madeLangs.isNotEmpty)
+      '${n == 1 ? 'Its' : 'Their'} ${_names(madeLangs)} audio goes too; the '
+          'same Listen tap makes it again.',
   ].join(' ');
   return showOhConfirm(
     context,
@@ -117,6 +156,19 @@ Future<String> removeOnPhoneAudio(
   final r = await actions.removeDownloads([
     for (final e in chosen) (work: e.entry.work, episode: e.entry.episode),
   ]);
+  // Their made languages' audio goes with them; the versions' text stays.
+  // One playing keeps its audio, the rule every Remove download follows.
+  final busy = await actions.busyWorkIds();
+  for (final e in chosen) {
+    final id = e.entry.work.id;
+    if (busy.contains(id)) continue;
+    for (final v in await db.versionsDao.versionsOf(id)) {
+      if (busy.contains(v.workId)) continue;
+      final url = (await db.spineDao.workById(v.workId))?.sourceUrl;
+      final f = url == null ? null : services.audioFileFor(v.workId, url);
+      if (f != null && f.existsSync()) f.deleteSync();
+    }
+  }
   if (r.kept == 0) {
     // A file fetched under an older address has another name than the
     // one removeDownloads looks for; nothing is using it.
@@ -143,4 +195,10 @@ Future<String> removeOnPhoneAudio(
           'audio.',
     if (removed == 0 && r.kept == 0) 'Nothing needed removing.',
   ].join(' ');
+}
+
+String _names(List<String> langs) {
+  final names = [for (final l in langs) languageDisplayName(l)];
+  if (names.length == 1) return names.single;
+  return '${names.sublist(0, names.length - 1).join(', ')} and ${names.last}';
 }

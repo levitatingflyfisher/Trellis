@@ -129,6 +129,22 @@ class KokoroVoiceLayout {
   });
 }
 
+/// Which downloaded filename plays which role for a Piper voice: the
+/// ONNX model, its `.onnx.json` (phoneme ids, sample rate, inference
+/// numbers), and the stress table its Russian front end reads. The table
+/// is null until it ships; without it, unmarked words carry no stress.
+class PiperVoiceLayout {
+  final String modelFileName;
+  final String configFileName;
+  final String? stressTableFileName;
+
+  const PiperVoiceLayout({
+    required this.modelFileName,
+    required this.configFileName,
+    this.stressTableFileName,
+  });
+}
+
 /// Which downloaded filename plays which role for a Marian (opus-mt)
 /// translation model (ADR-0008 "Babel") — the same "data, not code"
 /// rule the voice layouts follow: a new [ModelSpec] with a new
@@ -224,6 +240,9 @@ class ModelSpec {
   /// Non-null for a Pocket TTS voice (board-0211).
   final PocketVoiceLayout? pocketLayout;
 
+  /// Non-null for a Piper voice (the Russian one, held back for now).
+  final PiperVoiceLayout? piperLayout;
+
   /// Non-null for a Marian translation pair (ADR-0008) — see
   /// [MarianModelLayout].
   final MarianModelLayout? marianLayout;
@@ -250,6 +269,7 @@ class ModelSpec {
     this.sourceLang,
     this.kokoroLayout,
     this.pocketLayout,
+    this.piperLayout,
     this.marianLayout,
     this.dictionaryArchiveLayout,
     this.convertedFrom,

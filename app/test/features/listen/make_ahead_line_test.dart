@@ -165,14 +165,13 @@ void main() {
     return j;
   }
 
-  Future<int?> spokenId(_Ep e) async => (await (db.select(db.episodes)
-            ..where((r) => r.guid.equals('spoken:${e.work.id}:fr')))
-          .getSingleOrNull())
-      ?.workId;
+  Future<int?> spokenId(_Ep e) async =>
+      (await db.versionsDao.versionIn(e.work.id, 'fr'))?.workId;
 
+  /// A version (1.6.18) has no episode row: played is its work's day.
   Future<void> markPlayed(int workId) =>
-      (db.update(db.episodes)..where((e) => e.workId.equals(workId)))
-          .write(const EpisodesCompanion(finishedAtMs: Value(123)));
+      (db.update(db.works)..where((w) => w.id.equals(workId)))
+          .write(const WorksCompanion(finishedEpochDay: Value(1)));
 
   test('LAW: a new episode of a show nobody switched on is never made',
       () async {
@@ -420,7 +419,7 @@ void main() {
   group('the room limit', () {
     Future<void> big(_Ep e) async {
       final id = await spokenId(e);
-      final url = (await db.feedsDao.episodeOf(id!))!.enclosureUrl!;
+      final url = (await db.spineDao.workById(id!))!.sourceUrl!;
       final f = fileOf(id, url).openSync(mode: FileMode.append);
       f.truncateSync(600000000);
       f.closeSync();
@@ -428,7 +427,7 @@ void main() {
 
     Future<bool> onDisk(_Ep e) async {
       final id = await spokenId(e);
-      final url = (await db.feedsDao.episodeOf(id!))!.enclosureUrl!;
+      final url = (await db.spineDao.workById(id!))!.sourceUrl!;
       return fileOf(id, url).existsSync();
     }
 
@@ -488,12 +487,13 @@ void main() {
       await j.makeAheadPass();
       await until(() => !made(j, a));
       expect(await onDisk(tapped), isTrue);
-      // Asked for, so kept (the Library holds it); made ahead, it passes
-      // through Latest like anything that arrives.
-      expect((await db.spineDao.workById((await spokenId(tapped))!))!
-          .persistence, 'work');
-      expect((await db.spineDao.workById((await spokenId(b))!))!
-          .persistence, 'ephemeron');
+      // Asked for, so its episode is kept (the Library holds it, with its
+      // languages: 1.6.18); made ahead, it passes through Latest like
+      // anything that arrives.
+      expect((await db.spineDao.workById(tapped.work.id))!.persistence,
+          'work');
+      expect((await db.spineDao.workById(b.work.id))!.persistence,
+          'ephemeron');
     });
   });
 

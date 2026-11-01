@@ -453,6 +453,37 @@ class Episodes extends Table {
   Set<Column> get primaryKey => {workId};
 }
 
+/// A made language of an episode (1.6.18, owner: "it should live
+/// together"): the spoken translation is its own work, of kind `version`
+/// (its text, sentence times, place and captures hang off that work as
+/// off any), named here with its original and language. It has no
+/// Episode row, so no show, Latest or Subs list can hold it apart from
+/// its original. One per original and language.
+@DataClassName('VersionRow')
+class Versions extends Table {
+  IntColumn get workId => integer().references(Works, #id)();
+  IntColumn get originalId => integer().references(Works, #id)();
+  TextColumn get lang => text()();
+
+  /// The voice's name as the person saw it ("Kokoro"); null for one made
+  /// before 1.6.18, whose notes say it.
+  TextColumn get voice => text().nullable()();
+
+  /// 'machine' or 'cloned' ([Episodes.voiceKind] before 1.6.18).
+  TextColumn get voiceKind => text().nullable()();
+
+  /// How clearly it was spoken; null reads as Natural.
+  TextColumn get clearness => text().nullable()();
+
+  @override
+  Set<Column> get primaryKey => {workId};
+
+  @override
+  List<Set<Column>> get uniqueKeys => [
+        {originalId, lang}
+      ];
+}
+
 /// The queue (P4 mercy #3): a position-ordered, per-profile list
 /// of works waiting to play next. Named `QueueTable`/`queue` rather than
 /// `Queue` for the same reason [JobsTable] isn't `Jobs` — `Queue` collides
@@ -2074,10 +2105,22 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
   /// thousands at once, and a per-work loop was a few dozen statements
   /// each.
   Future<void> deleteWorks(Iterable<int> workIds) {
-    final ids = workIds.toSet().toList();
-    if (ids.isEmpty) return Future.value();
+    final asked = workIds.toSet().toList();
+    if (asked.isEmpty) return Future.value();
     return transaction(() async {
-      for (final c in chunksForSql(ids)) {
+      // A version is part of its original: it goes with it.
+      final ids = {...asked};
+      for (final c in chunksForSql(asked)) {
+        ids.addAll(await (selectOnly(db.versions)
+              ..addColumns([db.versions.workId])
+              ..where(db.versions.originalId.isIn(c)))
+            .map((r) => r.read(db.versions.workId)!)
+            .get());
+      }
+      for (final c in chunksForSql(ids.toList())) {
+        await (delete(db.versions)
+              ..where((v) => v.workId.isIn(c) | v.originalId.isIn(c)))
+            .go();
         // The queue (P4 mercy #3) references works by id under
         // `PRAGMA foreign_keys = ON` — without this line, deleting a
         // queued ephemeron or unfollowing its feed throws a foreign-key
@@ -2952,15 +2995,21 @@ class QueueDao extends DatabaseAccessor<AppDatabase> with _$QueueDaoMixin {
 
   /// Queues [workId] right after whatever's currently playing. Already
   /// queued moves it to the head instead of duplicating.
+  ///
+  /// [playingWorkId]: the episode playing now. Since Play puts what plays
+  /// at the head (owner, 14 Nov 2026), a Play next while it plays goes
+  /// just after it, so the queue reads in the order it will be heard.
   Future<void> playNext({
     required int profileId,
     required int workId,
     required int nowMs,
+    int? playingWorkId,
   }) => _insertAt(
     profileId: profileId,
     workId: workId,
     nowMs: nowMs,
     atHead: true,
+    playingWorkId: playingWorkId,
   );
 
   /// Appends [workId] to the tail. Already queued moves it to the tail
@@ -2981,14 +3030,24 @@ class QueueDao extends DatabaseAccessor<AppDatabase> with _$QueueDaoMixin {
     required int workId,
     required int nowMs,
     required bool atHead,
+    int? playingWorkId,
   }) => transaction(() async {
     await (delete(queueTable)..where(
           (q) => q.profileId.equals(profileId) & q.workId.equals(workId),
         ))
         .go();
     final rest = await queueOf(profileId);
+    // Behind the episode playing at the head, when there is one.
+    final at = !atHead
+        ? rest.length
+        : (rest.isNotEmpty &&
+                playingWorkId != null &&
+                rest.first.workId == playingWorkId &&
+                playingWorkId != workId)
+            ? 1
+            : 0;
     if (atHead) {
-      for (final r in rest) {
+      for (final r in rest.skip(at)) {
         await (update(queueTable)..where((q) => q.id.equals(r.id))).write(
           QueueTableCompanion(position: Value(r.position + 1)),
         );
@@ -2998,7 +3057,7 @@ class QueueDao extends DatabaseAccessor<AppDatabase> with _$QueueDaoMixin {
       QueueTableCompanion.insert(
         profileId: profileId,
         workId: workId,
-        position: atHead ? 0 : rest.length,
+        position: at,
         addedAtMs: nowMs,
       ),
     );
@@ -3136,8 +3195,10 @@ class LibraryDao extends DatabaseAccessor<AppDatabase> with _$LibraryDaoMixin {
       leftOuterJoin(episodes, episodes.workId.equalsExp(works.id)),
       leftOuterJoin(feeds, feeds.id.equalsExp(episodes.feedId)),
     ])
+      // A version lives with its episode (1.6.18): never a row of its own.
       ..where(works.profileId.equals(profileId) &
-          works.persistence.isNotValue('ephemeron'));
+          works.persistence.isNotValue('ephemeron') &
+          works.kind.isNotValue('version'));
     final rows = await q.get();
     return [
       for (final r in rows)
@@ -4390,21 +4451,71 @@ class HouseholdDao extends DatabaseAccessor<AppDatabase>
   }
 }
 
+/// The made languages of episodes ([Versions]).
+@DriftAccessor(tables: [Versions])
+class VersionsDao extends DatabaseAccessor<AppDatabase>
+    with _$VersionsDaoMixin {
+  VersionsDao(super.db);
+
+  /// Names [workId] as [originalId] in [lang]; a second put for the same
+  /// work replaces the first.
+  Future<void> put({
+    required int workId,
+    required int originalId,
+    required String lang,
+    String? voice,
+    String? voiceKind,
+    String? clearness,
+  }) =>
+      into(versions).insertOnConflictUpdate(VersionsCompanion.insert(
+        workId: Value(workId),
+        originalId: originalId,
+        lang: lang,
+        voice: Value(voice),
+        voiceKind: Value(voiceKind),
+        clearness: Value(clearness),
+      ));
+
+  /// [workId]'s version row, when it is a version.
+  Future<VersionRow?> versionOf(int workId) =>
+      (select(versions)..where((v) => v.workId.equals(workId)))
+          .getSingleOrNull();
+
+  /// [originalId] in [lang], when it has been made.
+  Future<VersionRow?> versionIn(int originalId, String lang) =>
+      (select(versions)
+            ..where((v) => v.originalId.equals(originalId) & v.lang.equals(lang)))
+          .getSingleOrNull();
+
+  /// Every made language of [originalId].
+  Future<List<VersionRow>> versionsOf(int originalId) =>
+      (select(versions)..where((v) => v.originalId.equals(originalId))).get();
+
+  /// Every version in [lang], as original id to version work id: what a
+  /// whole list asks at once.
+  Future<Map<int, int>> versionsIn(String lang) async => {
+        for (final v
+            in await (select(versions)..where((v) => v.lang.equals(lang))).get())
+          v.originalId: v.workId,
+      };
+}
+
 @DriftDatabase(
     tables: [Profiles, Works, Segments, Layers, Alignments, Positions, Feeds,
         Episodes, PlayerPositions, Courses, Cards, Revlog, JobsTable,
         WordLedger, HouseholdPin, Captures, DailyReviewCards, QueueTable,
         TranslationSentences, SavedViews, Audiobooks, AudiobookFiles,
-        ReadingDays, DeviceSettings, WorkNotes, CardImages, SegmentLinks],
+        ReadingDays, DeviceSettings, WorkNotes, CardImages, SegmentLinks,
+        Versions],
     daos: [ProfilesDao, SpineDao, FeedsDao, StudyDao, JobsDao, LedgerDao,
         HouseholdDao, CapturesDao, DailyReviewDao, QueueDao, LibraryDao,
-        AudiobooksDao, DeviceSettingsDao])
+        AudiobooksDao, DeviceSettingsDao, VersionsDao])
 class AppDatabase extends _$AppDatabase {
   AppDatabase(super.e);
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 36;
+  int get schemaVersion => 37;
   // There is no v14: it was reserved for the reader-depth campaign, which
   // landed as v18 after three sibling campaigns merged ahead of it, so the
   // guard chain skips from 13 to 15. Version gaps are harmless — an
@@ -4454,6 +4565,12 @@ class AppDatabase extends _$AppDatabase {
           await installIndexes(this);
         },
         onUpgrade: (m, from, to) async {
+          if (from < 37) {
+            // v37, one episode in every language: made first, like v36's
+            // links, because every work removal (v26's fold among the hops
+            // below) now clears versions too.
+            await m.createTable(versions);
+          }
           if (from < 36) {
             // v36, frozen references: the links of a saved text. First,
             // not in order: an older hop (v26's fold) removes works, and
@@ -4840,6 +4957,45 @@ class AppDatabase extends _$AppDatabase {
             // episodes column (the from < 2 block creates the table).
             await transaction(() async {
               await m.addColumn(episodes, episodes.clearness);
+            });
+          }
+          if (from >= 2 && from < 37) {
+            // A made episode (guid spoken:<original>:<lang>) becomes a
+            // version of its original. Its work keeps its id, address and
+            // file, so its queue entries, places and captures stay put.
+            // One whose original is gone stays an episode: it still plays.
+            await transaction(() async {
+              await customStatement('''
+                INSERT OR IGNORE INTO versions
+                  (work_id, original_id, lang, voice_kind, clearness)
+                SELECT e.work_id,
+                  CAST(substr(e.guid, 8, instr(substr(e.guid, 8), ':') - 1)
+                    AS INTEGER),
+                  substr(substr(e.guid, 8), instr(substr(e.guid, 8), ':') + 1),
+                  e.voice_kind, e.clearness
+                FROM episodes e
+                WHERE e.guid LIKE 'spoken:%:%'
+                  AND EXISTS (SELECT 1 FROM works o WHERE o.id =
+                    CAST(substr(e.guid, 8, instr(substr(e.guid, 8), ':') - 1)
+                      AS INTEGER) AND o.id != e.work_id)
+              ''');
+              // A kept made episode was in the Library; its episode is
+              // now what the Library shows, so it is kept.
+              await customStatement('''
+                UPDATE works SET persistence = 'work'
+                WHERE persistence != 'work' AND id IN (
+                  SELECT v.original_id FROM versions v
+                  JOIN works m ON m.id = v.work_id
+                  WHERE m.persistence = 'work')
+              ''');
+              await customStatement('''
+                UPDATE works SET kind = 'version'
+                WHERE id IN (SELECT work_id FROM versions)
+              ''');
+              await customStatement('''
+                DELETE FROM episodes
+                WHERE work_id IN (SELECT work_id FROM versions)
+              ''');
             });
           }
         },

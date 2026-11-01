@@ -133,6 +133,20 @@ void main() {
           contains('zh'));
     });
 
+    test('the held-back Russian voice builds a Piper engine for Russian, '
+        'and still no run reaches it: the starter catalog does not '
+        'name it', () async {
+      final services = testServices(dir,
+          modelStore: FakeModelStore(
+              downloadedIds: {'pocket-en', 'piper-ru-denis'}),
+          tier: DeviceTier.t1);
+      final ru = await services.speechEngineFor(piperRuDenis());
+      expect(ru, isNotNull);
+      expect(ru!.speaks, {'ru'});
+      expect(await services.downloadedVoiceLangs(), {'en'});
+      expect(await services.resolveSpeechEngine(lang: 'ru'), isNull);
+    });
+
     test('nothing downloaded: no languages', () async {
       final services =
           testServices(dir, modelStore: FakeModelStore(), tier: DeviceTier.t2);

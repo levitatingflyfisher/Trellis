@@ -28,6 +28,8 @@ import '../features/reader/speech/speech_engine.dart';
 import '../features/reader/speech/downloaded_voices.dart';
 import '../features/reader/speech/kokoro/kokoro_engine.dart';
 import '../features/reader/speech/kokoro/kokoro_model.dart';
+import '../features/reader/speech/piper/piper_engine.dart';
+import '../features/reader/speech/piper/piper_model.dart';
 import '../features/reader/speech/pocket/pocket_engine.dart';
 import '../features/reader/speech/pocket/pocket_model.dart';
 import '../features/reader/speech/pocket/pocket_text.dart';
@@ -473,7 +475,8 @@ class DeviceServices {
   /// that could have one, names what's missing (ADR-0006).
   ///
   /// The engine is constructed but NOT resident yet —
-  /// [PocketSpeechEngine] and [KokoroSpeechEngine] open their ONNX Runtime
+  /// [PocketSpeechEngine], [KokoroSpeechEngine] and [PiperSpeechEngine]
+  /// open their ONNX Runtime
   /// sessions lazily on first `synthesize()` — so this call is cheap even when nothing ends
   /// up being spoken.
   Future<SynthesisSpeechEngine?> speechEngineFor(ModelSpec voiceSpec) async {
@@ -491,6 +494,19 @@ class DeviceServices {
         voicePath: _pathForNamedFile(voiceSpec, kokoro.voiceFileName),
         openModel: () => openKokoroModel(modelPath),
         loadFrontEnd: () => loadKokoroFrontEnd(frontEnd),
+      );
+    }
+    final piper = voiceSpec.piperLayout;
+    if (piper != null) {
+      final modelPath = _pathForNamedFile(voiceSpec, piper.modelFileName);
+      final configPath = _pathForNamedFile(voiceSpec, piper.configFileName);
+      final stressName = piper.stressTableFileName;
+      final stressPath =
+          stressName == null ? null : _pathForNamedFile(voiceSpec, stressName);
+      return PiperSpeechEngine(
+        openModel: () => openPiperModel(modelPath),
+        loadFrontEnd: () =>
+            loadPiperFrontEnd(configPath: configPath, stressPath: stressPath),
       );
     }
     final pocket = voiceSpec.pocketLayout;

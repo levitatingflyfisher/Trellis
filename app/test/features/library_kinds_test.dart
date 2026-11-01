@@ -66,7 +66,9 @@ void main() {
     await work('note', 'A pasted text');
     await work('audiobook', 'An audiobook');
     final kept = await episode('A kept episode');
-    await episode('A kept episode (Spanish)', guid: 'spoken:$kept:es');
+    // 1.6.18: a made language is a version of its episode, never a row.
+    final es = await work('version', 'A kept episode (Spanish)');
+    await db.versionsDao.put(workId: es, originalId: kept, lang: 'es');
     await pumpApp(tester);
     await toTab(tester, 'Library');
 
@@ -75,8 +77,7 @@ void main() {
           (w) => w is ChoiceChip && '${w.key}'.contains('library-kind-'))))
         (c.label as Text).data,
     ];
-    expect(chips,
-        ['All', 'Books', 'Texts', 'Audiobooks', 'Episodes', 'Made episodes']);
+    expect(chips, ['All', 'Books', 'Texts', 'Audiobooks', 'Episodes']);
 
     Future<void> chip(String kind) async {
       await tester.tap(find.byKey(Key('library-kind-$kind')));
@@ -91,18 +92,14 @@ void main() {
     expect(find.text('A pasted text'), findsOneWidget);
     expect(find.text('An audiobook'), findsNothing);
 
-    await chip('made');
-    expect(find.text('A kept episode (Spanish)'), findsOneWidget);
-    expect(find.text('A kept episode'), findsNothing);
-
     await chip('episode');
     expect(find.text('A kept episode'), findsOneWidget);
     expect(find.text('A kept episode (Spanish)'), findsNothing);
 
     await chip('all');
-    // Newest first: the made episode and the kept one lead the list.
-    expect(find.text('A kept episode (Spanish)'), findsOneWidget);
     expect(find.text('A kept episode'), findsOneWidget);
+    expect(find.text('A kept episode (Spanish)'), findsNothing,
+        reason: 'its Spanish lives on its page, not as a row');
   });
 
   testWidgets('at 320 dp and large text every chip is on screen',
@@ -117,11 +114,13 @@ void main() {
     await work('article', 'An article');
     await work('audiobook', 'An audiobook');
     final kept = await episode('A kept episode');
-    await episode('A kept episode (Spanish)', guid: 'spoken:$kept:es');
+    // 1.6.18: a made language is a version of its episode, never a row.
+    final es = await work('version', 'A kept episode (Spanish)');
+    await db.versionsDao.put(workId: es, originalId: kept, lang: 'es');
     await pumpApp(tester);
     await toTab(tester, 'Library');
     for (final kind in ['all', 'book', 'article', 'note', 'audiobook',
-        'episode', 'made']) {
+        'episode']) {
       final r = tester.getRect(find.byKey(Key('library-kind-$kind')));
       expect(r.right, lessThanOrEqualTo(320), reason: kind);
     }

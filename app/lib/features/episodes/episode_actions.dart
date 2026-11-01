@@ -205,8 +205,11 @@ class EpisodeActions {
       (player?.canDownloadFirst ?? false) &&
       !isDownloaded(e);
 
-  Future<void> playNext(int workId) => db.queueDao
-      .playNext(profileId: profileId, workId: workId, nowMs: _nowMs());
+  Future<void> playNext(int workId) => db.queueDao.playNext(
+      profileId: profileId,
+      workId: workId,
+      nowMs: _nowMs(),
+      playingWorkId: player?.current?.id);
 
   Future<void> playLast(int workId) => db.queueDao
       .playLast(profileId: profileId, workId: workId, nowMs: _nowMs());
@@ -523,21 +526,22 @@ class EpisodeActions {
     final item = SearchItem(e.work, episode, showTitle);
     final send = shareFile;
     final device = services;
-    if (episode != null) {
-      final made = await spokenShareOf(db, e.work, episode,
-          audioFileFor: device?.audioFileFor);
-      if (made != null) {
-        if (made.audio case final audio?
-            when send != null && device != null) {
-          if (await _sendFile(audio, made.title, made.text, send, device)) {
-            return;
-          }
+    final made = episode == null && e.work.kind != 'version'
+        ? null
+        : await spokenShareOf(db, e.work, episode,
+            audioFileFor: device?.audioFileFor);
+    if (made != null) {
+      if (made.audio case final audio? when send != null && device != null) {
+        if (await _sendFile(audio, made.title, made.text, send, device)) {
+          return;
         }
-        if (!context.mounted) return;
-        await shareWords(context, made.text,
-            subject: made.title, share: shareText);
-        return;
       }
+      if (!context.mounted) return;
+      await shareWords(context, made.text,
+          subject: made.title, share: shareText);
+      return;
+    }
+    if (episode != null) {
       final url = episode.enclosureUrl;
       final audio = url == null || device == null
           ? null

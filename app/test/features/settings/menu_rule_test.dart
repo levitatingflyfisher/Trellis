@@ -198,7 +198,6 @@ void main() {
       'Capture this moment',
       'Captures',
       'Queue',
-      'Forward 30 seconds',
       'Sleep timer',
     ]);
   });

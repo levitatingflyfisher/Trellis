@@ -454,6 +454,50 @@ void main() {
           {'de', 'en', 'es', 'fr', 'it', 'nl', 'pt', 'zh'});
     });
 
+    test('the Russian voice (Piper ru_RU denis) is pinned but held back: '
+        'not in the starter catalog, so no list shows it', () {
+      final starter = ModelRegistry.starter();
+      expect(starter.voiceFor('ru', DeviceTier.t3), isNull);
+      expect(starter.voiceLangs(DeviceTier.t3), isNot(contains('ru')));
+      expect(starter.specs.where((s) => s.piperLayout != null), isEmpty);
+      expect(voiceCatalog().where((s) => s.piperLayout != null), isEmpty);
+      expect(starter.byId(piperRuDenis().id), isNull);
+    });
+
+    test('the held-back Russian voice: denis medium at a pinned revision, '
+        'MIT weights and CC0 recordings, every file hashed', () {
+      final ru = piperRuDenis();
+      expect(ru.id, 'piper-ru-denis');
+      expect(ru.task, ModelTask.tts);
+      expect(ru.langs, {'ru'});
+      expect(ru.licenses, ['MIT', 'CC0-1.0']);
+      const base = 'https://huggingface.co/rhasspy/piper-voices/resolve/'
+          '6b9cfaacb4fb2e02a9621227e3c1a48bec9710c3/ru/ru_RU/denis/medium/';
+      final layout = ru.piperLayout!;
+      expect(layout.modelFileName, 'ru_RU-denis-medium.onnx');
+      expect(layout.configFileName, 'ru_RU-denis-medium.onnx.json');
+      expect(layout.stressTableFileName, isNull,
+          reason: 'the stress table is pinned when it ships');
+      final byName = {
+        for (final f in ru.files) Uri.parse(f.url).pathSegments.last: f
+      };
+      expect(byName.keys,
+          {layout.modelFileName, layout.configFileName});
+      final model = byName[layout.modelFileName]!;
+      expect(model.url, '$base${layout.modelFileName}');
+      expect(model.sha256,
+          '879bc365cb14d1380e3f5ed6044162ccf54c99f6161871569b7f830aec3ce841');
+      expect(model.bytes, 63221984);
+      final config = byName[layout.configFileName]!;
+      expect(config.url, '$base${layout.configFileName}');
+      expect(config.sha256,
+          'e4fb4ab60262d1ab802c8c39301976c4135e545bc834a33c6eedc1f764df3bd6');
+      expect(config.bytes, 5464);
+      for (final f in ru.files) {
+        expect(f.isPinned, isTrue, reason: f.url);
+      }
+    });
+
     test('one voice per language: no two voices claim the same language '
         '(owner, 13 Nov)', () {
       final starter = ModelRegistry.starter();

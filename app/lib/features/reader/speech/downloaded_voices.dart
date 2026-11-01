@@ -86,5 +86,6 @@ class DownloadedVoices implements SynthesisSpeechEngine {
 String downloadedVoiceName(ModelSpec spec) {
   if (spec.kokoroLayout != null) return 'Kokoro';
   if (spec.pocketLayout != null) return 'Pocket TTS';
+  if (spec.piperLayout != null) return 'Piper';
   return spec.id;
 }

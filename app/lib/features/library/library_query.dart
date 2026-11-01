@@ -11,15 +11,14 @@
 library;
 
 import '../../db/database.dart' hide Alignment;
-import '../listen/spoken_guid.dart';
 
 /// The kinds the Library holds, in the order its chips show them
 /// (owner, 12 Nov: "what is library if 'latest' has all, text, and
 /// audio?"). Lead's ruling: the Library is what you keep, so its chips are
 /// the kinds of thing kept. A pasted or imported text is stored as a
-/// `note`, and shown as a Text. A made episode is an episode of its show
-/// with a spoken guid, told apart from one kept as it came.
-enum LibraryItemType { book, article, note, audiobook, episode, made }
+/// `note`, and shown as a Text. A made language is a version of its
+/// episode (1.6.18) and is never listed apart from it.
+enum LibraryItemType { book, article, note, audiobook, episode }
 
 /// The chip's word for [t].
 String libraryKindLabel(LibraryItemType t) => switch (t) {
@@ -28,7 +27,6 @@ String libraryKindLabel(LibraryItemType t) => switch (t) {
       LibraryItemType.note => 'Texts',
       LibraryItemType.audiobook => 'Audiobooks',
       LibraryItemType.episode => 'Episodes',
-      LibraryItemType.made => 'Made episodes',
     };
 
 /// The kind [entry] is, as the Library's chips sort it; null for a kind
@@ -43,7 +41,6 @@ LibraryItemType? libraryKindOf(Work work, Episode? episode) =>
       'episode' when episode == null => LibraryItemType.episode,
       // A feed's text post is an article too.
       'episode' when episode!.enclosureUrl == null => LibraryItemType.article,
-      'episode' when isSpokenGuid(episode!.guid) => LibraryItemType.made,
       'episode' => LibraryItemType.episode,
       _ => null,
     };

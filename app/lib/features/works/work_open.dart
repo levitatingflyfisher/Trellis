@@ -58,9 +58,12 @@ class WorkDoors {
     WorkEntry e, {
     String? showTitle,
   }) async {
+    final page = await pageEntryFor(db, e);
+    if (!context.mounted) return null;
     return Navigator.of(context).push(
       MaterialPageRoute<Future<bool>>(
-        builder: (_) => WorkPage(doors: this, entry: e, showTitle: showTitle),
+        builder: (_) =>
+            WorkPage(doors: this, entry: page, showTitle: showTitle),
       ),
     );
   }
@@ -137,4 +140,19 @@ class WorkDoors {
       await p.playWork(work, downloadFirst: downloadFirst);
     }
   }
+}
+
+/// The page [e] opens on. A version has none of its own (1.6.18, owner:
+/// "it should live together"): its episode's page, set to its language.
+Future<WorkEntry> pageEntryFor(AppDatabase db, WorkEntry e) async {
+  if (e.work.kind != 'version') return e;
+  final v = await db.versionsDao.versionOf(e.work.id);
+  if (v == null) return e;
+  final original = await db.spineDao.workById(v.originalId);
+  if (original == null) return e;
+  await db.spineDao.setReadLang(original.id, v.lang);
+  return (
+    work: (await db.spineDao.workById(original.id))!,
+    episode: await db.feedsDao.episodeOf(original.id),
+  );
 }

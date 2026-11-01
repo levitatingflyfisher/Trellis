@@ -171,7 +171,7 @@ class ListenChain extends ChangeNotifier {
   Future<int?> madeEpisodeOf(int workId, String lang) async {
     final id = await spokenEpisodeOf(db, workId, lang);
     if (id == null) return null;
-    final url = (await db.feedsDao.episodeOf(id))?.enclosureUrl;
+    final url = (await db.spineDao.workById(id))?.sourceUrl;
     return url != null && audioFileFor(id, url).existsSync() ? id : null;
   }
 
@@ -181,7 +181,7 @@ class ListenChain extends ChangeNotifier {
     final out = <int, int>{};
     for (final MapEntry(key: original, value: id)
         in (await spokenEpisodesIn(db, lang)).entries) {
-      final url = (await db.feedsDao.episodeOf(id))?.enclosureUrl;
+      final url = (await db.spineDao.workById(id))?.sourceUrl;
       if (url != null && audioFileFor(id, url).existsSync()) out[original] = id;
     }
     return out;

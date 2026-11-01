@@ -278,16 +278,23 @@ void main() {
     for (final k in [
       'player-back15',
       'player-toggle',
+      'player-fwd30',
       'player-speed',
       'player-close'
     ]) {
       expect(find.byKey(Key(k)), findsOneWidget, reason: k);
     }
-    // Back 15 sits just left of play/pause, where the thumb already is.
+    // Back 15 sits just left of play/pause, where the thumb already is,
+    // and Forward 30 just right of it (owner, 14 Nov 2026: "Unhide the
+    // forward 30 seconds button").
     expect(
         tester.getCenter(find.byKey(const Key('player-back15'))).dx,
         lessThan(tester.getCenter(find.byKey(const Key('player-toggle'))).dx));
-    const rare = ['open-captures', 'open-queue', 'player-capture', 'player-fwd30'];
+    expect(
+        tester.getCenter(find.byKey(const Key('player-fwd30'))).dx,
+        greaterThan(
+            tester.getCenter(find.byKey(const Key('player-toggle'))).dx));
+    const rare = ['open-captures', 'open-queue', 'player-capture'];
     for (final k in rare) {
       expect(find.byKey(Key(k)), findsNothing, reason: '$k is in the menu');
     }
@@ -298,6 +305,8 @@ void main() {
     }
     expect(find.byKey(const Key('player-back15')), findsOneWidget,
         reason: 'Back 15 is on the bar, not repeated in the menu');
+    expect(find.byKey(const Key('player-fwd30')), findsOneWidget,
+        reason: 'Forward 30 is on the bar, not repeated in the menu');
   });
 
   testWidgets('Back 15 on the bar skips back', (tester) async {

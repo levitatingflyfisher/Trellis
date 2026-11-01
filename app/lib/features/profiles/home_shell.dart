@@ -37,6 +37,7 @@ import '../player/episode_player.dart';
 import '../player/headset_keys.dart';
 import '../player/headset_keys_sheet.dart';
 import '../player/mini_player_bar.dart';
+import '../player/now_playing_screen.dart';
 import '../player/mini_player_host.dart';
 import 'bar_label_fit.dart';
 import '../player/play_fetch.dart';
@@ -617,6 +618,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   Widget _miniPlayerBar() => MiniPlayerBar(
         controller: _player,
         onOpenWork: _openPlayingWork,
+        onOpenNowPlaying: _openNowPlaying,
         onOpenShow: _openPlayingShow,
         onOpenSyncedText: _openSyncedText,
         onCapture: _capture,
@@ -636,6 +638,23 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
       builder: (_) => HeadsetKeysSheet(store: HeadsetKeysStore(widget.db)),
     ));
   }
+
+  /// A tap on the bar: the big player (owner, 14 Nov 2026), whose doors
+  /// are the bar's own.
+  void _openNowPlaying() => unawaited(openNowPlaying(
+        context,
+        controller: _player,
+        onOpenWork: _openPlayingWork,
+        onOpenShow: _openPlayingShow,
+        onOpenSyncedText: _openSyncedText,
+        onCapture: _capture,
+        onOpenCaptures: _openCaptures,
+        onOpenQueue: _openQueue,
+        onOpenChapters: _openChapters,
+        audioFileFor: widget.services.localMlAvailable
+            ? widget.services.audioFileFor
+            : null,
+      ));
 
   /// The bar's title and art: the playing episode's page, inside the tab
   /// in view, so the bottom bar stays (1.5.9, user: tapping the bar

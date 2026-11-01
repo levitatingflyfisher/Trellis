@@ -18,7 +18,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # of the product and file versions while build-number is used as the build suffix.
 # Build number >2003: the fusion supersedes the original Trellis
 # (versionCode 2003 era) and must install over it as an upgrade.
-version: 1.6.17+2039
+version: 1.6.18+2040
 
 environment:
   sdk: ^3.10.7
@@ -53,6 +53,8 @@ dependencies:
     path: ../packages/stardict_core
   mandarin_g2p:
     path: ../packages/mandarin_g2p
+  russian_g2p:
+    path: ../packages/russian_g2p
   # The fleet's one download engine (ResumableTransfer) — proposal-2 §9.
   domovoi:
     path: ../../DomovoiDiscernment

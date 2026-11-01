@@ -345,8 +345,11 @@ class _RiverScreenState extends State<RiverScreen>
       return;
     }
     if (!context.mounted) return;
+    final madeLangs = await madeAudioLangsOf(
+        widget.db, services, [for (final e in free) e.entry.work.id]);
+    if (!context.mounted) return;
     if (!await confirmRemoveAudio(context, free,
-        kept: entries.length - free.length)) {
+        kept: entries.length - free.length, madeLangs: madeLangs)) {
       return;
     }
     final message = await removeOnPhoneAudio(entries,

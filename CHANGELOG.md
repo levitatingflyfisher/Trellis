@@ -7,6 +7,14 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.6.18 — 2026-11-14
+
+- **A big player.** Tap the player bar and it opens full screen, with a long bar you can drag to any point in the episode, the time played and the time left, and a large Play between the skip back 15 seconds and skip ahead 30 seconds buttons. Speed, the sleep timer, the Queue and the episode’s page are there too. Swipe down, or tap the arrow at the top, to go back to the small bar.
+- **Skip ahead 30 seconds is on the small bar again**, just right of Play.
+- **Translated episodes are part of their episode.** When Trellis has made an episode in the language you are learning (say Spanish), you no longer get a second episode in your lists. The Spanish audio sits with the original: on its page, and in the big player, where you can switch between the original and Spanish and carry on from the same paragraph. In Storage it shows as “Spanish audio” under the episode, and you can delete it on its own; the episode’s Listen in Spanish button makes it again. Spanish episodes you made before this update are joined to their originals, with their audio, Queue place, listening place and captures kept.
+- **Play puts an episode at the top of the Queue**, or moves it there, so the Queue always starts with what you are hearing. When that episode ends, it leaves the Queue and the next one starts. Play next, used while an episode plays, puts the new one second, right after it.
+- **Known limit.** Search still lists a translated episode as its own result. Opening it opens the original episode, set to that language.
+
 ## 1.6.17 — 2026-11-14
 
 - **Storage counts kept pages.** Settings › Models & storage › Storage by item shows the pages a text keeps under that text: how many, about how big, and one delete. The text and its links stay, and keeping a page again gets it as it is that day. A page two texts link to counts once, under the older one.

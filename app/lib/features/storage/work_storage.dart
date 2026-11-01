@@ -21,7 +21,7 @@ import 'recently_deleted.dart';
 
 /// [keptPages]: the copies of linked pages a text keeps (frozen
 /// references), counted under that text.
-enum StoredKind { audio, decoded, transcript, translation, keptPages }
+enum StoredKind { audio, madeAudio, decoded, transcript, translation, keptPages }
 
 class StoredPart {
   final StoredKind kind;
@@ -36,13 +36,22 @@ class StoredPart {
   /// Whether another text links to one of [keptIds] too.
   final bool shared;
 
+  /// The version a [StoredKind.madeAudio] part is the audio of (1.6.18: a
+  /// made language lives with its episode); null otherwise.
+  final int? versionId;
+
   const StoredPart(this.kind, this.bytes,
-      {this.lang, this.keptIds = const [], this.shared = false});
+      {this.lang,
+      this.keptIds = const [],
+      this.shared = false,
+      this.versionId});
 
   /// Text in the database is measured, but the file only shrinks once
   /// SQLite reuses the pages, so its size is "about".
   bool get inDatabase =>
-      kind != StoredKind.audio && kind != StoredKind.decoded;
+      kind != StoredKind.audio &&
+      kind != StoredKind.madeAudio &&
+      kind != StoredKind.decoded;
 
   /// Whether Recently deleted can keep it: a kept page is not kept there.
   bool get restorable =>
@@ -53,6 +62,7 @@ class StoredPart {
 
   String get label => switch (kind) {
         StoredKind.audio => 'Downloaded audio',
+        StoredKind.madeAudio => '${_langName(lang!)} audio',
         StoredKind.decoded => 'Decoded audio',
         StoredKind.transcript => 'Transcript',
         StoredKind.translation => '${_langName(lang!)} translation',
@@ -68,6 +78,7 @@ class StoredPart {
   /// The ⋮ item and the delete button: names the act.
   String get deleteLabel => switch (kind) {
         StoredKind.audio => 'Remove download',
+        StoredKind.madeAudio => 'Delete ${_langName(lang!)} audio',
         StoredKind.decoded => 'Delete decoded audio',
         StoredKind.transcript => 'Delete transcript',
         StoredKind.translation => 'Delete ${_langName(lang!)} translation',
@@ -78,6 +89,7 @@ class StoredPart {
   /// `kept-pages`.
   String get keyName => switch (kind) {
         StoredKind.translation => 'translation-$lang',
+        StoredKind.madeAudio => 'made-audio-$lang',
         StoredKind.keptPages => 'kept-pages',
         _ => kind.name,
       };
@@ -89,6 +101,7 @@ class StoredPart {
       other.lang == lang &&
       other.bytes == bytes &&
       other.shared == shared &&
+      other.versionId == versionId &&
       _sameIds(other.keptIds, keptIds);
 
   static bool _sameIds(List<int> a, List<int> b) {
@@ -101,7 +114,7 @@ class StoredPart {
 
   @override
   int get hashCode =>
-      Object.hash(kind, lang, bytes, shared, Object.hashAll(keptIds));
+      Object.hash(kind, lang, bytes, shared, versionId, Object.hashAll(keptIds));
 }
 
 String _langName(String code) =>
@@ -178,6 +191,22 @@ Future<List<WorkStorage>> loadWorkStorage(
         StoredPart(StoredKind.keptPages, r.bytes,
             keptIds: r.copyIds, shared: r.shared));
   }
+  // A version is never a row of its own (1.6.18): its audio is a part of
+  // its episode, and its own small text goes with that episode.
+  final versions = onlyWorkId == null
+      ? await db.select(db.versions).get()
+      : await db.versionsDao.versionsOf(onlyWorkId);
+  for (final v in versions) {
+    parts.remove(v.workId);
+    if (services == null) continue;
+    final url = (await db.spineDao.workById(v.workId))?.sourceUrl;
+    final file = url == null ? null : services.audioFileFor(v.workId, url);
+    if (file != null && file.existsSync()) {
+      (parts[v.originalId] ??= []).add(StoredPart(
+          StoredKind.madeAudio, file.lengthSync(),
+          lang: v.lang, versionId: v.workId));
+    }
+  }
 
   final ids = parts.keys.toList();
   final works = <int, Work>{};
@@ -236,6 +265,11 @@ Future<bool> confirmDeletePart(
         'Remove download?',
         'Frees ${formatBytes(p.bytes)}. The episode stays, and you can '
             'download it again.'
+      ),
+    StoredKind.madeAudio => (
+        'Delete the ${_langName(p.lang!)} audio?',
+        'Frees ${formatBytes(p.bytes)}. The episode and its ${_langName(p.lang!)} '
+            'text stay, and the episode can make the audio again.'
       ),
     StoredKind.decoded => (
         'Delete decoded audio?',
@@ -307,6 +341,14 @@ Future<String> deletePart(
         _deleteNamed(services.audioFileFor(0, '').parent, id);
       }
       return 'Removed the download.';
+    case StoredKind.madeAudio:
+      final vid = p.versionId!;
+      final url = (await db.spineDao.workById(vid))?.sourceUrl;
+      if (services != null && url != null) {
+        final f = services.audioFileFor(vid, url);
+        if (f.existsSync()) f.deleteSync();
+      }
+      return 'Deleted the ${_langName(p.lang!)} audio.';
     case StoredKind.decoded:
       if (await isTranscribing(db, id)) {
         return 'Kept: a transcription is using it.';

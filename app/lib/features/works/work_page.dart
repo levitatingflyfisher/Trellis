@@ -418,7 +418,7 @@ class _WorkPageState extends State<WorkPage> {
     final name = languageNameOf(lang);
     if (v.withAudio(lang) case final made?) {
       return ReaderNote(
-        'This is the $name text. The $name audio is its own episode.',
+        'This is the $name text, with its $name audio.',
         action: 'Play the $name audio',
         onAction: (_) async {
           final work = await _db.spineDao.workById(made.workId);
@@ -445,15 +445,15 @@ class _WorkPageState extends State<WorkPage> {
 
   bool get _isOriginal => _versions?.original.id == _work.id;
 
-  /// Goes to another language's episode, playing it first when asked: the
-  /// page opens on what is being heard.
+  /// Switches this episode to another of its languages (1.6.18: a
+  /// version lives on its episode's page), playing it first when asked.
   Future<void> _openVersion(int workId, {required bool play}) async {
     final work = await _db.spineDao.workById(workId);
-    final episode = await _db.feedsDao.episodeOf(workId);
-    if (work == null || !mounted) return;
+    final version = await _db.versionsDao.versionOf(workId);
+    if (work == null || version == null || !mounted) return;
     if (play) await _doors.play(work);
-    if (!mounted) return;
-    await _doors.open(context, (work: work, episode: episode));
+    await _db.spineDao.setReadLang(version.originalId, version.lang);
+    _languageChosenHere = true;
     if (mounted) await _load();
   }
 
@@ -598,6 +598,7 @@ class _WorkPageState extends State<WorkPage> {
         StoredKind.audio => 'remove-download',
         StoredKind.transcript => 'delete-transcript',
         StoredKind.translation => 'delete-translation-${p.lang}',
+        StoredKind.madeAudio => 'delete-made-audio-${p.lang}',
         StoredKind.decoded => 'delete-decoded',
         StoredKind.keptPages => 'delete-kept-pages',
       };

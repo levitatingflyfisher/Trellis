@@ -242,8 +242,10 @@ class MakeAhead {
       final id = e.spokenId;
       if (id == null) continue;
       final spoken = await db.spineDao.workById(id);
+      // A version (1.6.18) has no episode row: its own address and
+      // finished day are its work's.
       final episode = await db.feedsDao.episodeOf(id);
-      final url = episode?.enclosureUrl;
+      final url = episode?.enclosureUrl ?? spoken?.sourceUrl;
       final file = url == null ? null : audioFileFor(id, url);
       if (spoken == null || file == null || !file.existsSync()) {
         _book.entries.remove(e);
@@ -256,7 +258,8 @@ class MakeAhead {
         continue;
       }
       final originalEpisode = await db.feedsDao.episodeOf(e.workId);
-      final played = episode!.finishedAtMs != null ||
+      final played = episode?.finishedAtMs != null ||
+          spoken.finishedEpochDay != null ||
           originalEpisode?.finishedAtMs != null;
       facts.add(_Facts(
           e,
@@ -285,8 +288,8 @@ class MakeAhead {
         ),
     ], _limitBytes);
     for (final id in remove) {
-      final episode = await db.feedsDao.episodeOf(id);
-      final url = episode?.enclosureUrl;
+      final url = (await db.feedsDao.episodeOf(id))?.enclosureUrl ??
+          (await db.spineDao.workById(id))?.sourceUrl;
       if (url != null) {
         final file = audioFileFor(id, url);
         if (file.existsSync()) file.deleteSync();

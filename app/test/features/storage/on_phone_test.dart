@@ -75,11 +75,16 @@ void main() {
     comet = await episode('Comet watch',
         at: 2000, url: 'https://a.test/comet.mp3', lang: 'en');
     article = await episode('Star chart', at: 1000);
-    made = await episode('Aurora season (Spanish)',
-        at: 3001,
-        url: 'https://spoken.trellis.invalid/$aurora-es.ogg',
-        guid: 'spoken:$aurora:es',
+    // 1.6.18: a made language is a version of its episode, not a row.
+    made = await db.spineDao.insertWork(
+        profileId: profileId,
+        kind: 'version',
+        title: 'Aurora season (Spanish)',
+        persistence: 'ephemeron',
+        firstSeenEpochDay: 100,
+        sourceUrl: 'https://spoken.trellis.invalid/$aurora-es.ogg',
         lang: 'es');
+    await db.versionsDao.put(workId: made, originalId: aurora, lang: 'es');
     auroraAudio = onDisk(aurora, 'https://a.test/aurora.mp3', 3000);
     madeAudio =
         onDisk(made, 'https://spoken.trellis.invalid/$aurora-es.ogg', 2000);
@@ -113,8 +118,8 @@ void main() {
       tester.widget<Text>(find.byKey(const Key('on-phone-total'))).data!;
 
   testWidgets('the chip sits beside All, Text and Audio, and shows only '
-      'episodes whose audio is on the phone, made ones too, each with its '
-      'size and the total at the top', (tester) async {
+      'episodes whose audio is on the phone, each with its size (its made '
+      'languages’ audio in it) and the total at the top', (tester) async {
     await seed();
     await pumpApp(tester);
 
@@ -128,18 +133,14 @@ void main() {
     await onPhone(tester);
 
     expect(find.byKey(Key('latest-row-$aurora')), findsOneWidget);
-    expect(find.byKey(Key('latest-row-$made')), findsOneWidget);
+    expect(find.byKey(Key('latest-row-$made')), findsNothing,
+        reason: 'a version lives with its episode');
     expect(find.byKey(Key('latest-row-$comet')), findsNothing);
     expect(find.byKey(Key('latest-row-$article')), findsNothing);
     expect(
         tester.widget<Text>(find.byKey(Key('on-phone-size-$aurora'))).data,
-        '4.0 kB on this phone');
-    expect(tester.widget<Text>(find.byKey(Key('on-phone-size-$made'))).data,
-        '2.0 kB on this phone');
-    expect(total(tester), '2 episodes, 6.0 kB in all.');
-    // Biggest first: the view is for freeing space.
-    expect(tester.getRect(find.byKey(Key('latest-row-$aurora'))).top,
-        lessThan(tester.getRect(find.byKey(Key('latest-row-$made'))).top));
+        '6.0 kB on this phone');
+    expect(total(tester), '1 episode, 6.0 kB in all.');
 
     // All brings the whole list back.
     await tester.tap(find.byKey(const Key('chip-all')));
@@ -185,20 +186,28 @@ void main() {
     expect(
         find.descendant(
             of: dialog,
-            matching: find.textContaining('Frees 4.0 kB now. The episode '
+            matching: find.textContaining('Frees 6.0 kB now. The episode '
                 'stays, with its transcript, your place and your study '
                 'cards.')),
+        findsOneWidget);
+    expect(
+        find.descendant(
+            of: dialog,
+            matching: find.textContaining('Its Spanish audio goes too; the '
+                'same Listen tap makes it again.')),
         findsOneWidget);
     await tester.tap(find.text('Remove audio'));
     await tester.pumpAndSettle();
 
     expect(auroraAudio.existsSync(), isFalse);
     expect(auroraDecoded.existsSync(), isFalse);
-    expect(madeAudio.existsSync(), isTrue);
+    expect(madeAudio.existsSync(), isFalse);
     expect(await db.spineDao.workById(aurora), isNotNull);
+    expect(await db.versionsDao.versionOf(made), isNotNull,
+        reason: 'its text stays; only the audio goes');
     expect(await db.spineDao.segmentCount(aurora), 1);
     expect(find.byKey(Key('latest-row-$aurora')), findsNothing);
-    expect(total(tester), '1 episode, 2.0 kB in all.');
+    expect(total(tester), 'No episode audio is on this phone.');
   });
 
   // Seen on the emulator: an episode whose transcription was paused kept
@@ -225,9 +234,10 @@ void main() {
   });
 
   testWidgets('several at once through the app’s own selection; a made '
-      'episode is said to come back by the tap that made it',
+      'language is said to come back by the tap that made it',
       (tester) async {
     await seed();
+    onDisk(comet, 'https://a.test/comet.mp3', 500);
     await pumpApp(tester);
     await onPhone(tester);
 
@@ -244,8 +254,8 @@ void main() {
     expect(
         find.descendant(
             of: dialog,
-            matching: find.textContaining('A made episode is made again by '
-                'the same Listen tap on its original.')),
+            matching: find.textContaining('Their Spanish audio goes too; the '
+                'same Listen tap makes it again.')),
         findsOneWidget);
     await tester.tap(
         find.descendant(of: dialog, matching: find.text('Remove audio')));

@@ -356,6 +356,8 @@ void main() {
 
   // 1.5.9, user: tapping the bar should open the episode, and the show
   // should be easy to reach. Both open inside the tab, under its bar.
+  // 1.6.18: a tap on the bar opens the big player, whose doors close it
+  // and open the episode or the show inside the tab.
   testWidgets('the bar opens its episode and its show inside the tab',
       (tester) async {
     final profileId = await seedProfile();
@@ -379,13 +381,17 @@ void main() {
 
     await tester.tap(find.byKey(const Key('player-open-work')));
     await tester.pumpAndSettle();
+    expect(find.byKey(const Key('now-playing')), findsOneWidget);
+    await tester.tap(find.byKey(const Key('now-playing-open-work')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('now-playing')), findsNothing);
     expect(find.byType(WorkPage), findsOneWidget);
     expect(find.byType(NavigationBar), findsOneWidget,
         reason: 'opened in the tab, so the bottom bar stays');
 
-    await tester.tap(find.byKey(const Key('player-menu')));
+    await tester.tap(find.byKey(const Key('player-open-work')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Go to show'));
+    await tester.tap(find.byKey(const Key('now-playing-show')));
     await tester.pumpAndSettle();
     expect(find.byType(FeedDetailScreen), findsOneWidget);
     expect(find.byType(NavigationBar), findsOneWidget);

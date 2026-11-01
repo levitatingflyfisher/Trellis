@@ -13,10 +13,11 @@ import '../works/work_row.dart' show thumbCacheWidth;
 
 /// The persistent playback bar, one slim row (1.5.9, user: "the bar is
 /// too thick"): the show's art and the title, which open the episode, then
-/// Back 15, play/pause, the swipe speed control (0.5–4×) and X. A 3 px
+/// Back 15, play/pause, Forward 30 (1.6.18, owner: "Unhide the forward 30
+/// seconds button"), the swipe speed control (0.5–4×) and X. A 3 px
 /// line along the top edge shows how far in; dragging sideways along the
 /// title row scrubs it. Everything rarer (the show, Page, captures,
-/// chapters, the Queue, Forward 30, the sleep timer) is in the ⋮ menu.
+/// chapters, the Queue, the sleep timer) is in the ⋮ menu.
 /// Compact enough for 320dp at 2× text scale; the fleet's sweep pins that.
 class MiniPlayerBar extends StatefulWidget {
   final PlayerController controller;
@@ -47,6 +48,11 @@ class MiniPlayerBar extends StatefulWidget {
   /// Shows the Queue; the shell switches to its tab.
   final VoidCallback? onOpenQueue;
 
+  /// Opens the big player (owner, 14 Nov 2026: the bar is "too tiny a
+  /// target" to drag). A tap on the bar opens it when wired; without it
+  /// the tap opens the episode, as before.
+  final VoidCallback? onOpenNowPlaying;
+
   /// Opens the chapters drawer (Campaign 7, ADR-0013); the shell wires it.
   /// Offered only when the current work IS an audiobook, the same
   /// promise-never-dangled law [onOpenSyncedText] follows.
@@ -56,6 +62,7 @@ class MiniPlayerBar extends StatefulWidget {
       {super.key,
       required this.controller,
       this.onOpenWork,
+      this.onOpenNowPlaying,
       this.onOpenShow,
       this.onOpenSyncedText,
       this.onCapture,
@@ -118,6 +125,10 @@ class _MiniPlayerBarState extends State<MiniPlayerBar> {
 
   void _scrubCancel() => setState(() => _scrub = null);
 
+  /// A tap on the bar: the big player when the shell wires it, else the
+  /// episode.
+  VoidCallback? get _onTapBar => widget.onOpenNowPlaying ?? widget.onOpenWork;
+
   /// How far in, 0–1. Paused after a restart there is no live player yet,
   /// so it comes from the saved position and the duration learned on the
   /// last play; an unknown duration reads as the start (the caption
@@ -163,7 +174,7 @@ class _MiniPlayerBarState extends State<MiniPlayerBar> {
             key: const Key('player-open-work-bar'),
             behavior: HitTestBehavior.opaque,
             excludeFromSemantics: true,
-            onTap: widget.onOpenWork,
+            onTap: _onTapBar,
             child: SafeArea(
               top: false,
               child: Stack(
@@ -195,6 +206,13 @@ class _MiniPlayerBarState extends State<MiniPlayerBar> {
                               ? Icons.pause
                               : Icons.play_arrow),
                           onPressed: controller.toggle,
+                        ),
+                        IconButton(
+                          key: const Key('player-fwd30'),
+                          tooltip: 'Forward 30 seconds',
+                          icon: const Icon(Icons.forward_30),
+                          onPressed: () =>
+                              controller.seekBy(const Duration(seconds: 30)),
                         ),
                         SpeedControl(
                           key: const Key('player-speed'),
@@ -262,7 +280,7 @@ class _MiniPlayerBarState extends State<MiniPlayerBar> {
           child: InkWell(
             key: const Key('player-open-work'),
             borderRadius: BorderRadius.circular(8),
-            onTap: widget.onOpenWork,
+            onTap: _onTapBar,
             child: ConstrainedBox(
               constraints: const BoxConstraints(minHeight: 48),
               child: LayoutBuilder(
@@ -421,8 +439,6 @@ class _MiniPlayerBarState extends State<MiniPlayerBar> {
       if (onOpenQueue != null)
         item(_BarAction.queue, 'open-queue', Icons.queue_music_outlined,
             'Queue'),
-      item(_BarAction.fwd30, 'player-fwd30', Icons.forward_30,
-          'Forward 30 seconds'),
       item(
           _BarAction.sleep,
           'open-sleep-timer',
@@ -467,8 +483,6 @@ class _MiniPlayerBarState extends State<MiniPlayerBar> {
         onOpenChapters?.call();
       case _BarAction.queue:
         onOpenQueue?.call();
-      case _BarAction.fwd30:
-        await controller.seekBy(const Duration(seconds: 30));
       case _BarAction.sleep:
         if (!menuContext.mounted) return;
         await showModalBottomSheet<void>(
@@ -486,7 +500,6 @@ enum _BarAction {
   captures,
   chapters,
   queue,
-  fwd30,
   sleep,
 }
 

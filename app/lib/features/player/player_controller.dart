@@ -393,7 +393,7 @@ class PlayerController extends ChangeNotifier {
   /// feed, or the web tier, where no artwork source is wired). Looked up
   /// once per show per load, not on every rebuild of the bar.
   File? get currentArtwork {
-    final feed = _currentFeed;
+    final feed = _shownFeed ?? _currentFeed;
     if (feed == null) return null;
     if (_artworkFeedId != feed.id) {
       _artworkFeedId = feed.id;
@@ -405,6 +405,18 @@ class PlayerController extends ChangeNotifier {
 
   int? _artworkFeedId;
   File? _artwork;
+
+  /// The show whose art and name show while [current] plays: its own, or
+  /// for a version its episode's ([currentFeed] stays null for that).
+  Feed? _shownFeed;
+
+  /// The show of the episode [work] is a version of; null otherwise.
+  Future<Feed?> _versionShowOf(Work work) async {
+    if (work.kind != 'version') return null;
+    final v = await db.versionsDao.versionOf(work.id);
+    final e = v == null ? null : await db.feedsDao.episodeOf(v.originalId);
+    return e == null ? null : db.feedsDao.feedById(e.feedId);
+  }
 
   bool get playing => _player?.playing ?? false;
   Duration get position => _player?.position ?? Duration.zero;
@@ -628,6 +640,12 @@ class PlayerController extends ChangeNotifier {
       // another Play pressed during it has already won.
       if (intent != _playIntent) return;
       _passedOver.clear();
+      // What a tap plays goes to the head of the queue, or moves there,
+      // so the queue matches what is heard (owner, 14 Nov 2026); it
+      // leaves when finished and the next starts.
+      await db.queueDao
+          .playNext(profileId: profileId, workId: work.id, nowMs: _nowMs);
+      _queueRevision++;
     }
 
     final gen = ++_loadGen;
@@ -667,18 +685,23 @@ class PlayerController extends ChangeNotifier {
     final feed = episode == null
         ? null
         : await db.feedsDao.feedById(episode.feedId);
+    // A version (1.6.18) has no show of its own: it shows its episode's
+    // art and name, though not that show's speed or intro skip, which are
+    // for the show's own audio.
+    final shownFeed = feed ?? await _versionShowOf(work);
     // Cancelled meanwhile: what stop cleared stays cleared.
     if (gen != _loadGen) return;
     _alignments = alignments;
     _currentFeed = feed;
+    _shownFeed = shownFeed;
     // Campaign 9 Phase 2e (ADR-0015 Decision 3): the lock-screen/tray tag
     // for whichever loader runs below — built once, from the SAME feed
     // row just resolved, so the album name and the per-podcast settings
     // above it never disagree about which feed this episode belongs to.
     final artFile =
-        episode == null ? null : _artworkFileFor?.call(episode.feedId);
+        shownFeed == null ? null : _artworkFileFor?.call(shownFeed.id);
     final trackInfo =
-        lockScreenTagFor(work, album: _currentFeed?.title, artworkFile: artFile);
+        lockScreenTagFor(work, album: shownFeed?.title, artworkFile: artFile);
     // The local file IS the episode once one exists on disk; stream
     // otherwise. `existsSync` on purpose (never `exists`): a real-IO await
     // here would never resolve under a widget test's fake-async zone (the
@@ -846,6 +869,7 @@ class PlayerController extends ChangeNotifier {
     _current = work;
     _currentAudiobookFiles = files;
     _currentFeed = null;
+    _shownFeed = null;
     _pausedAtMs = null;
     _finishHandled = false;
     _playedStamped = false;
@@ -1193,6 +1217,7 @@ class PlayerController extends ChangeNotifier {
     _subs.clear();
     _current = null;
     _currentFeed = null;
+    _shownFeed = null;
     _alignments = const [];
     _pausedAtMs = null;
     _currentAudiobookFiles = null;

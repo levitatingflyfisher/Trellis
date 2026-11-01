@@ -25,9 +25,10 @@ import '../../support/fake_services.dart';
 /// how the episodes are related/have a sister episodes section or
 /// something that it auto jumps to?"
 ///
-/// Both the original's page and each made episode's page list the
-/// episode in every language it has, each saying whether its audio is on
-/// the phone. A language with audio goes to that episode and plays it. A
+/// The episode's page lists it in every language it has, each saying
+/// whether its audio is on the phone; since 1.6.18 a made language is a
+/// version with no page of its own, and opening one opens this page in
+/// its language. A language with audio becomes what Play plays. A
 /// translation read with no audio says so at the top of the reader, with
 /// the one tap that makes it.
 void main() {
@@ -85,24 +86,20 @@ void main() {
           sourceText: 'Hello there.',
           body: body);
 
-  /// A made episode in [lang], as the one tap stores it, with its audio
+  /// A made language in [lang], stored as the one tap stores it since
+  /// 1.6.18 (a version, no episode row), with its audio
   /// on the phone unless [audio] is false.
   Future<int> madeIn(String lang, {bool audio = true}) async {
     final url = 'https://spoken.trellis.invalid/$original-$lang.ogg';
     final id = await db.spineDao.insertWork(
         profileId: profileId,
-        kind: 'episode',
+        kind: 'version',
         title: 'Aurora season ($lang)',
         persistence: 'ephemeron',
         firstSeenEpochDay: 100,
         sourceUrl: url,
         lang: lang);
-    await db.feedsDao.insertEpisode(
-        workId: id,
-        feedId: feedId,
-        guid: 'spoken:$original:$lang',
-        enclosureUrl: url,
-        publishedAtMs: 5001);
+    await db.versionsDao.put(workId: id, originalId: original, lang: lang);
     await db.spineDao.insertSegments(
         id, const [(idx: 0, kind: 'prose', text: 'Hola.')]);
     await db.spineDao.insertAlignments(
@@ -204,26 +201,30 @@ void main() {
         'Aurora season');
   });
 
-  testWidgets('a made episode’s page lists the original and its sisters, '
-      'and the original is one tap away', (tester) async {
+  // 1.6.18, owner: "it should live together". A made language has no
+  // page of its own: opening it opens its episode's page, in its language.
+  testWidgets('opening a made language opens its episode’s page, in that '
+      'language; the original is one tap away', (tester) async {
     final spanish = await madeIn('es');
     await madeIn('fr', audio: false);
     await pumpPage(tester, spanish, null);
 
-    expect(find.text('This episode in other languages'), findsOneWidget);
+    expect(
+        tester.widget<Text>(find.byKey(const Key('work-page-title'))).data,
+        'Aurora season');
+    expect(said(tester, const Key('mode-listen')), 'Play in Spanish');
     expect(said(tester, const Key('lang-original')),
-        'English / The original');
+        'English / This episode, the original');
     expect(said(tester, const Key('lang-es')),
-        'Spanish / This episode, its audio is on this phone');
+        'Spanish / Audio on this phone');
     expect(said(tester, const Key('lang-fr')),
         'French / Text only, its audio was removed');
 
     await tester.tap(find.byKey(const Key('lang-original')));
     await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('mode-listen')));
+    await tester.pumpAndSettle();
     expect(controller.current?.id, original);
-    expect(
-        tester.widget<Text>(find.byKey(const Key('work-page-title'))).data,
-        'Aurora season');
   });
 
   testWidgets('reading a translation with no audio says so at the top of '
@@ -266,7 +267,7 @@ void main() {
   });
 
   testWidgets('the learning language made: the page opens on it, and Read '
-      'says the audio is its own episode, and plays it', (tester) async {
+      'says its audio is here, and plays it', (tester) async {
     await db.deviceSettingsDao.write(learningLanguageKey, 'es');
     await translation(original, 'es', 'Hola.');
     final spanish = await madeIn('es');
@@ -282,7 +283,7 @@ void main() {
     expect(find.byType(ReaderScreen), findsOneWidget);
     expect(
         tester.widget<Text>(find.byKey(const Key('reader-note-text'))).data,
-        'This is the Spanish text. The Spanish audio is its own episode.');
+        'This is the Spanish text, with its Spanish audio.');
     await tester.tap(find.byKey(const Key('reader-note-action')));
     await tester.pumpAndSettle();
     expect(controller.current?.id, spanish);

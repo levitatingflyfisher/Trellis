@@ -303,8 +303,9 @@ separately for that reason. Statuses follow the same convention as above.
   screen at 320 dp and large text; at the end of a sideways row it sat
   off the edge of a narrow phone, where the owner never found it. It
   shows only the
-  episodes whose audio is on the phone, made episodes in any language
-  included, biggest first, each with its size; the total is at the top.
+  episodes whose audio is on the phone, biggest first, each with its size
+  (its made languages' audio counted in it, 1.6.18); the total is at the
+  top.
   Each row has a button to remove that episode's audio, and the app's
   own selection (long-press) removes several at
   once, with Remove audio first in the bar. One plain confirm says how
@@ -312,8 +313,8 @@ separately for that reason. Statuses follow the same convention as above.
   transcript, your place and your study cards, and the decoded copy left
   by transcribing goes with it. Audio is not kept in Recently deleted, so
   the space comes back at once and the confirm says so. A downloaded
-  episode can be downloaded again; a made episode is made again by the
-  same Listen tap on its original. An episode playing, transcribing or
+  episode can be downloaded again; its made languages' audio goes with
+  it and is made again by the same Listen tap. An episode playing, transcribing or
   being processed keeps its audio. In Models & storage the Episode audio
   row has See episodes, which opens this view, and Clear all as the
   second choice. The filter leaves books and texts out: their text is
@@ -322,9 +323,16 @@ separately for that reason. Statuses follow the same convention as above.
   chip is on Latest only. Audio left by an episode that no longer exists
   is not listed; Storage by item and Clear all still reach it
   (`features/storage/on_phone_test.dart`). Not on the web.
-- **This episode in other languages** (board-0130). An episode's page
-  lists the episode in every language it has, on the original's page and
-  on each made episode's page alike: the original first, then each other
+- **This episode in other languages** (board-0130; one episode since
+  1.6.18, owner: "it should live together"). A made language is a
+  version of its episode (kind `version`, the Versions table, no Episode
+  row), so no list holds it apart: not Latest, Subs, a show or the
+  Library. Opening one opens its episode's page in its language. The
+  big player (tap the bar) has a chip a language and switches at the
+  same paragraph. The upgrade from 1.6.17 turned each made episode into
+  a version, keeping its id, file, queue entries, places and captures
+  (`db/versions_db_test.dart`, on a database made by 1.6.17's own code).
+  An episode's page lists the episode in every language it has: the original first, then each other
   language, one row each, saying whether that language's audio is on the
   phone ("Audio on this phone", "Text only, no audio yet", "Text only,
   its audio was removed"). It replaces the Language section on an
@@ -332,13 +340,13 @@ separately for that reason. Statuses follow the same convention as above.
   language switch for listening and reading on the original's page: a
   row chooses its language, Play then plays that language's made audio
   when it is on the phone and Read reads its text; the learning language
-  not yet made is the row that makes it. On a made episode's page the
-  others are their own episodes, and a row goes to one. Reading
+  not yet made is the row that makes it. A row switches the page to
+  its language. Reading
   a translation says at the top of the reader whether that language has
   audio: "This is the Spanish text. There is no Spanish audio yet." with
   Make the Spanish audio (the one tap, in that language, where this
-  episode can be made in it), or "The Spanish audio is its own episode."
-  with Play the Spanish audio (`features/works/episode_versions_test.dart`,
+  episode can be made in it), or "This is the Spanish text, with its
+  Spanish audio." with Play the Spanish audio (`features/works/episode_versions_test.dart`,
   `work_page_four_choices_test.dart`). Books and articles keep their
   Language section.
 - ✅ shipped: **The episode's page, one main action** (board-0161, owner

@@ -1,16 +1,14 @@
 /// An episode and its made versions (board-0130, owner: "maybe make it
 /// clear how the episodes are related/have a sister episodes section or
 /// something that it auto jumps to?"). A made episode is an episode of
-/// its own, found by its guid (`spoken:<original id>:<language>`), so
-/// both the original's page and each made one's can list the others.
+/// its own work, a version of the original (1.6.18: the Versions table),
+/// so the original's page lists every language it has.
 library;
 
 import 'dart:io';
 
-import 'package:drift/drift.dart';
 
 import '../../db/database.dart';
-import '../listen/listen.dart' show parseSpokenGuid;
 
 /// One made version: its language, its episode, and whether its audio
 /// is on this phone.
@@ -37,36 +35,34 @@ class EpisodeVersions {
   }
 }
 
-/// [episode]'s original and every made version of it. Null when the
-/// original of a made episode is gone. [audioFileFor] finds a made
-/// episode's audio; without it (the web) none is on the phone.
+/// [work]'s original and every made version of it, from the Versions
+/// table (1.6.18). [work] may be the original (with its [episode]) or a
+/// version, which has no episode of its own. Null when [work] is neither,
+/// or a version's original is gone. [audioFileFor] finds a version's
+/// audio; without it (the web) none is on the phone.
 Future<EpisodeVersions?> loadEpisodeVersions(
   AppDatabase db, {
   required Work work,
-  required Episode episode,
+  Episode? episode,
   File Function(int workId, String url)? audioFileFor,
 }) async {
   var original = work;
   var originalEpisode = episode;
-  if (parseSpokenGuid(episode.guid) case (:final originalId, lang: _)) {
-    final w = await db.spineDao.workById(originalId);
-    final e = await db.feedsDao.episodeOf(originalId);
+  if (await db.versionsDao.versionOf(work.id) case final v?) {
+    final w = await db.spineDao.workById(v.originalId);
+    final e = await db.feedsDao.episodeOf(v.originalId);
     if (w == null || e == null) return null;
     original = w;
     originalEpisode = e;
   }
-  final rows = await (db.select(db.episodes)
-        ..where((e) => e.guid.like('spoken:${original.id}:%')))
-      .get();
+  if (originalEpisode == null) return null;
   final made = <String, MadeVersion>{};
-  for (final r in rows) {
-    final parsed = parseSpokenGuid(r.guid);
-    if (parsed == null || parsed.originalId != original.id) continue;
-    final url = r.enclosureUrl;
+  for (final v in await db.versionsDao.versionsOf(original.id)) {
+    final url = (await db.spineDao.workById(v.workId))?.sourceUrl;
     final audio = url != null &&
         audioFileFor != null &&
-        audioFileFor(r.workId, url).existsSync();
-    made[parsed.lang] = (lang: parsed.lang, workId: r.workId, audio: audio);
+        audioFileFor(v.workId, url).existsSync();
+    made[v.lang] = (lang: v.lang, workId: v.workId, audio: audio);
   }
   return EpisodeVersions(
       original: original, originalEpisode: originalEpisode, made: made);

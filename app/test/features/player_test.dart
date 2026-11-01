@@ -1981,12 +1981,12 @@ void main() {
       await tester.pump();
       expect(player.playing, isFalse);
 
-      // Back 15 is on the bar itself (1.5.9 fix round); Forward 30 is in ⋮.
+      // Back 15 and Forward 30 are both on the bar (1.6.18, owner:
+      // "Unhide the forward 30 seconds button").
       await tester.tap(find.byKey(const Key('player-back15')));
       await tester.pumpAndSettle();
       expect(player.log, contains('seek:${(5 * 60 - 15) * 1000}'));
 
-      await openBarMenu(tester);
       await tester.tap(find.byKey(const Key('player-fwd30')));
       await tester.pumpAndSettle();
       expect(player.log, contains('seek:${(5 * 60 - 15 + 30) * 1000}'));

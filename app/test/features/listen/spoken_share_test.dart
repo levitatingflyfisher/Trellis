@@ -135,9 +135,9 @@ void main() {
     expect(sent.mimeType, 'audio/wav');
     expect(sent.subject, 'Harbour episode (Spanish)');
     expect(sent.text, contains('machine-made voice'));
-    final ep = (await db.feedsDao.episodeOf(id))!;
+    final w = (await db.spineDao.workById(id))!;
     expect(sent.bytes,
-        services.audioFileFor(id, ep.enclosureUrl!).readAsBytesSync());
+        services.audioFileFor(id, w.sourceUrl!).readAsBytesSync());
     expect(sent.text, isNot(contains('.invalid')));
   });
 
@@ -148,7 +148,7 @@ void main() {
     late int id;
     await tester.runAsync(() async =>
         id = await made(await original(), kind: VoiceKind.cloned));
-    expect((await db.feedsDao.episodeOf(id))!.voiceKind, 'cloned',
+    expect((await db.versionsDao.versionOf(id))!.voiceKind, 'cloned',
         reason: 'the kind is stored, not read back out of words');
 
     await tapShare(tester, id);
@@ -167,8 +167,8 @@ void main() {
       'original’s address, never its own unreachable one', (tester) async {
     late int id;
     await tester.runAsync(() async => id = await made(await original()));
-    final ep = (await db.feedsDao.episodeOf(id))!;
-    services.audioFileFor(id, ep.enclosureUrl!).deleteSync();
+    final w = (await db.spineDao.workById(id))!;
+    services.audioFileFor(id, w.sourceUrl!).deleteSync();
 
     await tapShare(tester, id);
     expect(files, isEmpty);

@@ -186,8 +186,8 @@ void main() {
   test('its audio was deleted since: the same tap makes it again, in '
       'place, from the translation that is still there', () async {
     final first = await chain().start(work, 'es');
-    final episode = (await db.feedsDao.episodeOf(first!))!;
-    final file = testServices(dir).audioFileFor(first, episode.enclosureUrl!);
+    final made = (await db.spineDao.workById(first!))!;
+    final file = testServices(dir).audioFileFor(first, made.sourceUrl!);
     file.deleteSync();
     ran.clear();
 
@@ -206,7 +206,7 @@ void main() {
     final id = await chain().start(work, 'es');
 
     expect(paces, List.filled(3, ListenClearness.slow.pace));
-    final ep = (await db.feedsDao.episodeOf(id!))!;
+    final ep = (await db.versionsDao.versionOf(id!))!;
     expect(ep.clearness, 'slow');
     // A tenth of a second of sound a character: 'Hola.' 500 ms, then the
     // slow step's 800 ms pause, '¿Cómo estás?' 1200 ms, then its 1200 ms
@@ -224,7 +224,7 @@ void main() {
   test('made at another step: the tap makes it again in place at the step '
       'chosen now; at the same step nothing runs again', () async {
     final first = await chain().start(work, 'es');
-    expect((await db.feedsDao.episodeOf(first!))!.clearness, 'natural');
+    expect((await db.versionsDao.versionOf(first!))!.clearness, 'natural');
     ran.clear();
 
     await writeListenClearness(db, ListenClearness.verySlow);
@@ -232,7 +232,7 @@ void main() {
 
     expect(again, first, reason: 'replaced in place, not a second copy');
     expect(ran, ['say Hola.', 'say ¿Cómo estás?', 'say Adiós.']);
-    expect((await db.feedsDao.episodeOf(first))!.clearness, 'verySlow');
+    expect((await db.versionsDao.versionOf(first))!.clearness, 'verySlow');
 
     ran.clear();
     expect(await chain().start(work, 'es'), first);
@@ -242,8 +242,8 @@ void main() {
   test('an episode made before the step was stored counts as Natural',
       () async {
     final first = await chain().start(work, 'es');
-    await (db.update(db.episodes)..where((e) => e.workId.equals(first!)))
-        .write(const EpisodesCompanion(clearness: Value(null)));
+    await (db.update(db.versions)..where((v) => v.workId.equals(first!)))
+        .write(const VersionsCompanion(clearness: Value(null)));
     ran.clear();
 
     expect(await chain().start(work, 'es'), first);
@@ -477,9 +477,10 @@ void main() {
       'machine-made label, and the episode stores its voice kind', () async {
     final id = await chain().start(work, 'es');
 
-    final ep = (await db.feedsDao.episodeOf(id!))!;
+    final ep = (await db.versionsDao.versionOf(id!))!;
     expect(ep.voiceKind, 'machine');
-    final file = testServices(dir).audioFileFor(id, ep.enclosureUrl!);
+    final file = testServices(dir)
+        .audioFileFor(id, (await db.spineDao.workById(id))!.sourceUrl!);
     final text = String.fromCharCodes(file.readAsBytesSync());
     expect(text, contains('INAM'));
     expect(text, contains('Harbour episode (Spanish)'));
@@ -501,7 +502,7 @@ void main() {
           return null;
         }).start(work, 'es');
 
-    expect((await db.feedsDao.episodeOf(id!))!.voiceKind, 'cloned');
+    expect((await db.versionsDao.versionOf(id!))!.voiceKind, 'cloned');
     expect(tags.single, contains('real person’s voice'));
   });
 
