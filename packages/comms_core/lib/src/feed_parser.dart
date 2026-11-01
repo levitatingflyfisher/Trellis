@@ -282,6 +282,7 @@ FeedItem _rssItem(XmlElement item, String feedUrl) {
     notesHtml: _longestBody([encoded, description, summary]),
     imageUrl: _itemImageUrl(item, feedUrl),
     durationMs: _parseDuration(_nsText(item, 'duration')),
+    guid: _firstLocal(item.childElements, 'guid')?.innerText.trim() ?? '',
   );
 }
 
@@ -321,6 +322,7 @@ FeedItem _atomEntry(XmlElement entry) {
     chaptersUrl: ch.chaptersUrl,
     contentHtml: _cleanContentHtml(content),
     notesHtml: _longestBody([content, summary]),
+    guid: _firstLocal(entry.childElements, 'id')?.innerText.trim() ?? '',
   );
 }
 

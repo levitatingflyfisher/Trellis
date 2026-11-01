@@ -329,6 +329,16 @@ class FeedsRepository {
         droppable: false);
     _fetchArtworkLater((dropped) => _fetchEpisodeArtwork(feedId,
         showImageUrl: parsed.imageUrl, dropped: dropped));
+    // A paged feed's older episodes come along on their own, as
+    // AntennaPod loads every page: Fetch older at the foot of a long list
+    // was easy to miss. Queued behind the artwork, so it never holds up
+    // the answer, and let go with it.
+    if (parsed.nextPageUrl != null) {
+      _fetchArtworkLater((dropped) async {
+        final feed = await db.feedsDao.feedById(feedId);
+        if (feed != null && !dropped()) await fetchOlderEpisodes(feed);
+      });
+    }
     return SubscribeSuccess(
         feedId: feedId, title: state.title, newItems: added);
   }
@@ -634,8 +644,9 @@ class FeedsRepository {
   Future<void> _artwork = Future.value();
 
   /// Completes once artwork started by the last subscribe or refresh has
-  /// landed or failed. Nothing waits on it but tests: following a show
-  /// shouldn't hang on a slow image host.
+  /// landed or failed, and a new subscription's archive walk with it.
+  /// Nothing waits on it but tests: following a show shouldn't hang on a
+  /// slow image host.
   Future<void> get artworkSettled => _artwork;
 
   int _artworkGeneration = 0;

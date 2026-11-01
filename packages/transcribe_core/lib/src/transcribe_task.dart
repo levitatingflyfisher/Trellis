@@ -274,42 +274,78 @@ class TranscribeEpisodeTask implements ChunkedTask {
       throw StateError('buildResult with $_unitsDone of $totalUnits units '
           'committed — the transcript is not finished');
     }
-    final merged = mergeOverlap(_chunks);
-    final (resultLang, kind) = switch (task) {
-      WhisperTask.translate => ('en', LayerKind.mt),
-      WhisperTask.transcribe => (
-          // Not the lock: a detection steers decoding only. As the label
-          // it would become the work's language and outrank the feed's on
-          // every later run, wrong or not.
-          lang ?? detectLang?.call(merged) ?? 'und',
-          LayerKind.transcript
-        ),
-    };
-
-    final timed = segmentize(merged,
-        minChars: minSegmentChars, maxChars: maxSegmentChars);
-    return TranscriptionResult(
-      lang: resultLang,
-      layerKind: kind,
-      segments: [
-        for (var i = 0; i < timed.length; i++)
-          Segment(idx: i, kind: SegmentKind.prose, text: timed[i].text)
-      ],
-      alignments: [
-        for (var i = 0; i < timed.length; i++)
-          Alignment(
-              segmentIdx: i,
-              tStartMs: timed[i].tStartMs,
-              tEndMs: timed[i].tEndMs)
-      ],
-      layers: [
-        for (var i = 0; i < timed.length; i++)
-          Layer(
-              segmentIdx: i, lang: resultLang, kind: kind, text: timed[i].text)
-      ],
-      mergedChunks: merged,
-    );
+    return _assemble(_chunks,
+        task: task,
+        // Not the lock: a detection steers decoding only. As the label it
+        // would become the work's language and outrank the feed's on
+        // every later run, wrong or not.
+        lang: lang ??
+            (task == WhisperTask.transcribe
+                ? detectLang?.call(mergeOverlap(_chunks))
+                : null),
+        minSegmentChars: minSegmentChars,
+        maxSegmentChars: maxSegmentChars);
   }
+}
+
+/// The transcript as far as [checkpoint] (a [TranscribeEpisodeTask]
+/// checkpoint) has got: the same merge and segmentize as
+/// [TranscribeEpisodeTask.buildResult], over the windows committed so far.
+/// A pure function of the committed checkpoint, so what a reader sees
+/// after a kill is exactly the last committed window's transcript, and a
+/// resumed run rebuilds it rather than adding to it: no word twice.
+///
+/// The last window's tail may still change when the next window hears
+/// the same words; callers replace the whole transcript each time.
+/// [lang] labels a transcribe run (`'und'` when null); a translate run is
+/// always English.
+TranscriptionResult transcriptSoFar(String checkpoint,
+    {WhisperTask task = WhisperTask.transcribe,
+    String? lang,
+    int minSegmentChars = 8,
+    int maxSegmentChars = 240}) {
+  final decoded = jsonDecode(checkpoint) as Map<String, dynamic>;
+  return _assemble([
+    for (final c in decoded['chunks'] as List)
+      _decodeChunk(c as Map<String, dynamic>)
+  ],
+      task: task,
+      lang: lang,
+      minSegmentChars: minSegmentChars,
+      maxSegmentChars: maxSegmentChars);
+}
+
+TranscriptionResult _assemble(List<TranscriptChunk> chunks,
+    {required WhisperTask task,
+    required String? lang,
+    required int minSegmentChars,
+    required int maxSegmentChars}) {
+  final merged = mergeOverlap(chunks);
+  final (resultLang, kind) = switch (task) {
+    WhisperTask.translate => ('en', LayerKind.mt),
+    WhisperTask.transcribe => (lang ?? 'und', LayerKind.transcript),
+  };
+
+  final timed =
+      segmentize(merged, minChars: minSegmentChars, maxChars: maxSegmentChars);
+  return TranscriptionResult(
+    lang: resultLang,
+    layerKind: kind,
+    segments: [
+      for (var i = 0; i < timed.length; i++)
+        Segment(idx: i, kind: SegmentKind.prose, text: timed[i].text)
+    ],
+    alignments: [
+      for (var i = 0; i < timed.length; i++)
+        Alignment(
+            segmentIdx: i, tStartMs: timed[i].tStartMs, tEndMs: timed[i].tEndMs)
+    ],
+    layers: [
+      for (var i = 0; i < timed.length; i++)
+        Layer(segmentIdx: i, lang: resultLang, kind: kind, text: timed[i].text)
+    ],
+    mergedChunks: merged,
+  );
 }
 
 TranscriptChunk _shift(TranscriptChunk c, int byMs) => TranscriptChunk(

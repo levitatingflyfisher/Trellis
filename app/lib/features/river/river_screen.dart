@@ -12,7 +12,7 @@ import '../works/work_row.dart';
 import '../episodes/episode_selection.dart';
 import '../feeds/background/feed_check_settings.dart';
 import '../feeds/episode_download_coordinator.dart';
-import '../jobs/jobs_screen.dart' show downloadFraction, downloadStatus;
+import '../jobs/jobs_screen.dart' show downloadStatus;
 import '../feeds/feeds_repository.dart';
 import '../feeds/feed_detail_screen.dart';
 import '../feeds/feeds_screen.dart';
@@ -829,6 +829,7 @@ class _RiverScreenState extends State<RiverScreen>
     final isAudio = e.episode.enclosureUrl != null;
     final entry = (work: e.work, episode: e.episode);
     final row = WorkRow(
+      downloads: _actions.downloader,
       work: e.work,
       episode: e.episode,
       facts: WorkRowFacts.of(e.work, e.episode, _rowState,

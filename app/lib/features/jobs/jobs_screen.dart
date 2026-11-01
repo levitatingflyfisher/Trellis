@@ -102,12 +102,6 @@ String downloadStatus(EpisodeDownloadState s) {
   return s.receivedBytes == null ? 'Starting download…' : 'Downloading: $bytes';
 }
 
-double? downloadFraction(EpisodeDownloadState s) {
-  final total = s.totalBytes;
-  if (total == null || total == 0) return s.downloading ? null : 0;
-  return ((s.receivedBytes ?? 0) / total).clamp(0, 1).toDouble();
-}
-
 class DownloadJobCard extends StatelessWidget {
   final EpisodeDownloadCoordinator coordinator;
   final int workId;

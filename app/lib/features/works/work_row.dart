@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
 import '../../db/database.dart' hide Alignment;
+import '../feeds/episode_download_coordinator.dart';
 import '../models/format.dart';
 import '../player/player_controller.dart';
 
@@ -341,6 +342,10 @@ class WorkRow extends StatelessWidget {
   /// Null for a row with nothing to play.
   final VoidCallback? onPlay;
 
+  /// The episode downloads, so a download under way shows where Play is;
+  /// null where there are none (the web).
+  final EpisodeDownloadCoordinator? downloads;
+
   /// The player, so a row whose episode is playing says so ("Playing",
   /// a tap pauses) instead of offering a second Play beside the bar's.
   /// Null where nothing plays.
@@ -385,6 +390,7 @@ class WorkRow extends StatelessWidget {
     this.onTap,
     this.onPlay,
     this.player,
+    this.downloads,
     this.second,
     this.onRead,
     this.menuBuilder,
@@ -564,13 +570,37 @@ class WorkRow extends StatelessWidget {
   /// would only have paused it under a Play glyph. A tap pauses; paused,
   /// the row offers Play again, which resumes it.
   Widget _playOrPlaying(ButtonStyle style) {
-    Widget playButton() => TextButton.icon(
+    Widget plainPlay() => TextButton.icon(
           key: Key('play-$_id'),
           style: style,
           onPressed: onPlay,
           icon: const Icon(Icons.play_circle_outline),
           label: const Text('Play'),
         );
+    // A download under way shows where Play is: how far, and Play still
+    // plays it (as the setting says, or when it lands).
+    final d = downloads;
+    Widget playButton() => d == null
+        ? plainPlay()
+        : ListenableBuilder(
+            listenable: d,
+            builder: (context, _) {
+              final s = d.stateOf(_id);
+              if (!s.downloading) return plainPlay();
+              final fraction = downloadFraction(s);
+              return TextButton.icon(
+                key: Key('play-$_id'),
+                style: style,
+                onPressed: onPlay,
+                icon: SizedBox.square(
+                  dimension: 18,
+                  child: CircularProgressIndicator(
+                      value: fraction, strokeWidth: 2),
+                ),
+                label: Text(downloadingWords(s)),
+              );
+            },
+          );
     final p = player;
     if (p == null) return playButton();
     return _WhilePlaying(

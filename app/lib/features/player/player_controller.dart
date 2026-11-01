@@ -612,8 +612,10 @@ class PlayerController extends ChangeNotifier {
   /// what was playing plays on meanwhile. [auto] is the queue moving on
   /// by itself, which streams whatever the setting: nobody pressed
   /// anything, and a fetch that had to wait would leave the queue silent.
+  /// [downloadFirst] chooses for this one Play, over the setting: "Stream
+  /// now" or "Download, then play" on the episode's page and its ⋮.
   Future<void> playWork(Work work,
-      {Duration? startAt, bool auto = false}) async {
+      {Duration? startAt, bool auto = false, bool? downloadFirst}) async {
     if (_current?.id == work.id && _player != null) return toggle();
     final url = work.sourceUrl;
     if (url == null || url.isEmpty) return;
@@ -621,7 +623,7 @@ class PlayerController extends ChangeNotifier {
     // is still downloading to start when it lands.
     if (!auto) {
       final intent = ++_playIntent;
-      if (!await _fetchedFirst(work, url, intent)) return;
+      if (!await _fetchedFirst(work, url, intent, downloadFirst)) return;
       // Asking is itself a wait, even when nothing is fetched: an X or
       // another Play pressed during it has already won.
       if (intent != _playIntent) return;
@@ -719,15 +721,26 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// What Play does with an episode that isn't downloaded, as Settings
+  /// has it: true downloads it first, false streams it.
+  Future<bool> playsDownloadFirst() async =>
+      await _downloadFirst?.call() ?? false;
+
+  /// Whether this player can download an episode before playing it (not
+  /// on the web, which has no disk to put it on).
+  bool get canDownloadFirst =>
+      _beginFetch != null && _localAudioFileFor != null;
+
   /// Whether [work] may load now. False when Download first applies and
   /// the fetch is waiting for Wi-Fi, failed, was paused, or landed after
   /// the listener asked for something else ([intent] is no longer the
   /// newest).
-  Future<bool> _fetchedFirst(Work work, String url, int intent) async {
+  Future<bool> _fetchedFirst(
+      Work work, String url, int intent, bool? downloadFirst) async {
     final begin = _beginFetch;
     final local = _localAudioFileFor?.call(work.id, url);
     if (begin == null || local == null || local.existsSync()) return true;
-    if (!(await _downloadFirst?.call() ?? false)) return true;
+    if (!(downloadFirst ?? await playsDownloadFirst())) return true;
     if (intent != _playIntent) return false;
     final landing = await begin(work, url);
     if (intent != _playIntent) return false;

@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:brain_wiring/brain_wiring.dart' show BrainTier;
+import 'package:drift/drift.dart' show TableUpdate, TableUpdateQuery;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:loom_core/loom_core.dart' as core;
@@ -25,6 +26,7 @@ import '../player/media_item_mapping.dart';
 import '../player/mini_player_host.dart';
 import '../player/playback_session.dart';
 import '../player/player_controller.dart';
+import '../transcribe/transcript_so_far.dart';
 import '../transcribe/transcript_writer.dart' show decodeWordTimingBlob;
 import '../study/card_editing.dart' show CardDraft, clozeFromSentence;
 import '../study/card_editor_screen.dart';
@@ -298,6 +300,23 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   /// Whether [ReaderScreen.startSegmentIdx] still applies to a load.
   bool _startPending = true;
+
+  /// A transcript still being made (1.6.9): how far it has got, for the
+  /// line at the top; null when the transcript is whole.
+  TranscriptMaking? _making;
+
+  /// Writes to this work's transcript and its job, while a transcript
+  /// is made under the open page.
+  StreamSubscription<Set<TableUpdate>>? _transcriptWrites;
+
+  /// The alignments the page was last loaded with, as (count, end): a
+  /// write that changes them brings new text.
+  (int, int) _loadedAligned = (0, 0);
+
+  /// New text arrived while the page was busy (reading on, speaking, a
+  /// translation shown); it is put in when the page is still again.
+  bool _transcriptStale = false;
+  bool _reloadingTranscript = false;
 
   /// Whether the work page's entry request (speak, a layer, the picker)
   /// is still to be carried out: once, after the first load.
@@ -631,6 +650,77 @@ class _ReaderScreenState extends State<ReaderScreen>
     p?.addListener(_onPlayerTurn);
     _load();
     unawaited(_findAnthropic());
+    // Only an episode's transcript is made under an open page.
+    if (widget.work.sourceUrl != null) {
+      _transcriptWrites = widget.db
+          .tableUpdates(TableUpdateQuery.onAllTables(
+              [widget.db.alignments, widget.db.jobsTable]))
+          .listen((_) => unawaited(_onTranscriptWrite()));
+    }
+  }
+
+  /// A window of the transcript landed, or its job moved on: the line at
+  /// the top follows, and new text goes onto the page.
+  Future<void> _onTranscriptWrite() async {
+    final making = await transcriptMaking(widget.db, widget.work.id);
+    final aligned = await widget.db.spineDao.alignmentsOf(widget.work.id);
+    if (!mounted) return;
+    if (making != _making) setState(() => _making = making);
+    if (_alignedShape(aligned.map((a) => a.tEndMs)) != _loadedAligned) {
+      await _reloadTranscript();
+    }
+  }
+
+  /// (count, latest end) of a work's alignments, from their ends.
+  static (int, int) _alignedShape(Iterable<int> ends) {
+    var count = 0;
+    var end = 0;
+    for (final e in ends) {
+      count++;
+      if (e > end) end = e;
+    }
+    return (count, end);
+  }
+
+  /// Reads the page again for the new text and keeps the cursor on the
+  /// word it was on. Waits while the page is busy.
+  Future<void> _reloadTranscript() async {
+    if (_playing ||
+        _speaking ||
+        _activeLang != null ||
+        _translationOnlyActive ||
+        _reloadingTranscript) {
+      _transcriptStale = true;
+      return;
+    }
+    _transcriptStale = false;
+    _reloadingTranscript = true;
+    try {
+      final doc = _doc;
+      final blocks = _blocks;
+      (int, int)? at;
+      if (doc != null && blocks != null && doc.words.isNotEmpty) {
+        final c = cursorAt(doc, _wordIdx);
+        at = (blocks[c.segment].idx, c.word);
+      }
+      final atMs = _cursorAtMs;
+      await _load();
+      if (!mounted || at == null) return;
+      final fresh = _doc;
+      final freshBlocks = _blocks;
+      if (fresh == null || freshBlocks == null || fresh.words.isEmpty) return;
+      final pos = freshBlocks.indexWhere((b) => b.idx == at!.$1);
+      if (pos < 0) return;
+      final idx = globalWordIndex(fresh, pos, at.$2);
+      setState(() {
+        _cursorIdx = idx;
+        _cursorAtMs = atMs;
+        _scrollAnchor = cursorAt(fresh, idx).segment;
+      });
+    } finally {
+      _reloadingTranscript = false;
+    }
+    if (_transcriptStale && mounted) unawaited(_reloadTranscript());
   }
 
   @override
@@ -640,6 +730,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     // no-ops on an unheld listener) — every listener this screen ever
     // adds gets exactly one matching removal on its way out.
     widget.player?.removeListener(_onPlayerTick);
+    unawaited(_transcriptWrites?.cancel());
     _followPoll?.cancel();
     _sweep?.cancel();
     widget.player?.removeListener(_onSpeechSpeed);
@@ -767,6 +858,9 @@ class _ReaderScreenState extends State<ReaderScreen>
     // re-fetches per tick.
     final alignmentRows =
         await widget.db.spineDao.alignmentsOf(widget.work.id);
+    final making = widget.work.sourceUrl == null
+        ? null
+        : await transcriptMaking(widget.db, widget.work.id);
     final hasAlignedAudio =
         widget.work.sourceUrl != null && alignmentRows.isNotEmpty;
     final wordTimings = {
@@ -825,6 +919,8 @@ class _ReaderScreenState extends State<ReaderScreen>
       _sourceLang = sourceLang;
       _spine = spine;
       _wordTimings = wordTimings;
+      _making = making;
+      _loadedAligned = _alignedShape(alignmentRows.map((a) => a.tEndMs));
       _activeTranslationLang = activeLang;
       _showTranslation = showTranslation;
       _translatedSentences = translatedSentences;
@@ -1194,6 +1290,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     final pipeline = _pipelineHolder;
     if (pipeline != null) await pipeline.stop();
     unawaited(_savePosition(modality: 'speak').catchError((_) {}));
+    if (_transcriptStale && mounted) unawaited(_reloadTranscript());
   }
 
   /// The language the page's own text is in: an mt layer's, else what
@@ -2221,6 +2318,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (!_playing) return;
     setState(() => _playing = false);
     unawaited(_savePosition().catchError((_) {}));
+    if (_transcriptStale) unawaited(_reloadTranscript());
   }
 
   void _seekBy(int delta) {
@@ -2746,6 +2844,27 @@ class _ReaderScreenState extends State<ReaderScreen>
     );
   }
 
+  /// The plain line over a transcript still being made: how far it has
+  /// got, and whether more is coming.
+  Widget _soFarBar(BuildContext context, TranscriptMaking making) {
+    final theme = Theme.of(context);
+    return ColoredBox(
+      key: const Key('reader-so-far'),
+      color: theme.colorScheme.surfaceContainerHighest,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        child: Row(
+          children: [
+            Expanded(
+              child: Text(soFarReaderLine(making),
+                  style: theme.textTheme.bodyMedium),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _recapOfferBar(BuildContext context) {
     final theme = Theme.of(context);
     return ColoredBox(
@@ -2999,6 +3118,7 @@ class _ReaderScreenState extends State<ReaderScreen>
             _noteBar(context, note),
           if (_download != null) _downloadCard(),
           if (_translationJob != null) _translationProgressCard(),
+          if (_making case final making?) _soFarBar(context, making),
           // Natural-height, not an AppBar.bottom fixed slot — see
           // _recapOfferBar's own doc comment for why. Only once there is
           // real content to catch up on, matching the switch's own

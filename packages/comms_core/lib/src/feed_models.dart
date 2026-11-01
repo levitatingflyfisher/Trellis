@@ -51,10 +51,17 @@ class FeedItem {
     this.notesHtml,
     this.imageUrl,
     this.durationMs,
+    this.guid = '',
   });
 
   final String title;
   final String link;
+
+  /// The item's own identity as the feed gives it: RSS `<guid>` or Atom
+  /// `<id>`, trimmed; empty when the feed gives none. Many shows link
+  /// every episode to the same show page, so [link] alone cannot tell
+  /// episodes apart.
+  final String guid;
 
   /// The raw date string from the feed (pubDate / published / updated) —
   /// the donor never parsed it at this layer.

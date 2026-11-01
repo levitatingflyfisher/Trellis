@@ -1,8 +1,11 @@
 /// Writing a finished transcription onto the episode work (ADR-0002).
 ///
-/// One transaction replaces the work's spine rows — segments, every layer,
-/// alignments — and clears stale positions (a cursor over vanished segments
-/// would lie). The alignment blob carries best-effort word timings as JSON
+/// One transaction replaces the work's spine rows — segments, layers,
+/// alignments — from the first segment that changed. It is written again
+/// after every window while the transcript is made, so the unchanged part
+/// keeps its rows and a reader's place in it. Over the show notes (no
+/// alignments yet) everything is replaced and the place cleared: a cursor
+/// over vanished segments would lie. The alignment blob carries best-effort word timings as JSON
 /// `[[word, t0, t1], …]`; sentence-level stays the guarantee.
 ///
 /// A translate pass rides along as `mt` layer rows projected onto the SAME
@@ -24,7 +27,9 @@ import '../../db/database.dart';
 /// falls inside [a]'s span. Empty when the engine produced no word timings —
 /// an absence, never an invention.
 List<List<Object>> wordTimingRows(
-    core.Alignment a, List<TranscriptChunk> chunks) {
+  core.Alignment a,
+  List<TranscriptChunk> chunks,
+) {
   final rows = <List<Object>>[];
   for (final c in chunks) {
     for (final w in c.words ?? const <WordTiming>[]) {
@@ -41,13 +46,13 @@ Uint8List encodeWordTimingBlob(List<List<Object>> rows) =>
     Uint8List.fromList(utf8.encode(jsonEncode(rows)));
 
 List<List<Object>> decodeWordTimingBlob(Uint8List blob) => [
-      for (final row in jsonDecode(utf8.decode(blob)) as List)
-        [
-          (row as List)[0] as String,
-          (row[1] as num).toInt(),
-          (row[2] as num).toInt(),
-        ]
-    ];
+  for (final row in jsonDecode(utf8.decode(blob)) as List)
+    [
+      (row as List)[0] as String,
+      (row[1] as num).toInt(),
+      (row[2] as num).toInt(),
+    ],
+];
 
 /// segmentIdx → English text: every translated span (via its alignment)
 /// joins the transcript segment whose span holds its midpoint; several
@@ -56,9 +61,7 @@ Map<int, String> projectTranslation({
   required List<core.Alignment> transcriptAlignments,
   required TranscriptionResult translated,
 }) {
-  final textOf = {
-    for (final s in translated.segments) s.idx: s.text,
-  };
+  final textOf = {for (final s in translated.segments) s.idx: s.text};
   final out = <int, String>{};
   final sorted = [...translated.alignments]
     ..sort((a, b) => a.tStartMs.compareTo(b.tStartMs));
@@ -96,47 +99,90 @@ Future<void> writeTranscript({
   final mt = translation == null
       ? const <int, String>{}
       : projectTranslation(
-          transcriptAlignments: result.alignments, translated: translation);
+          transcriptAlignments: result.alignments,
+          translated: translation,
+        );
 
   await db.transaction(() async {
-    await (db.delete(db.positions)..where((p) => p.workId.equals(workId)))
+    // Written again after every window while it is made: the part that
+    // did not change keeps its rows, so a reader's place there stays.
+    final keep = await _unchangedPrefix(db, workId, result);
+    if (keep == null || result.segments.isEmpty) {
+      // Not a transcript yet (the show notes): a place over them would lie.
+      await (db.delete(
+        db.positions,
+      )..where((p) => p.workId.equals(workId))).go();
+    } else {
+      // A place past a tail that got shorter goes to the last sentence.
+      await (db.update(db.positions)..where(
+            (p) =>
+                p.workId.equals(workId) &
+                p.segmentIdx.isBiggerOrEqualValue(result.segments.length),
+          ))
+          .write(
+            PositionsCompanion(
+              segmentIdx: Value(result.segments.length - 1),
+              wordIdx: const Value(0),
+            ),
+          );
+    }
+    final from = keep ?? 0;
+    await (db.delete(db.alignments)..where(
+          (a) =>
+              a.workId.equals(workId) & a.segmentIdx.isBiggerOrEqualValue(from),
+        ))
         .go();
-    await (db.delete(db.alignments)..where((a) => a.workId.equals(workId)))
+    await (db.delete(db.layers)..where(
+          (l) =>
+              l.workId.equals(workId) &
+              (l.segmentIdx.isBiggerOrEqualValue(from) |
+                  (translation == null
+                      ? const Constant(false)
+                      : l.kind.equals(core.LayerKind.mt.name) &
+                            l.lang.equals(translation.lang))),
+        ))
         .go();
-    await (db.delete(db.layers)..where((l) => l.workId.equals(workId))).go();
-    await (db.delete(db.segments)..where((s) => s.workId.equals(workId)))
+    await (db.delete(db.segments)..where(
+          (s) => s.workId.equals(workId) & s.idx.isBiggerOrEqualValue(from),
+        ))
         .go();
 
     await db.spineDao.insertSegments(workId, [
       for (final s in result.segments)
-        (idx: s.idx, kind: s.kind.name, text: s.text)
+        if (s.idx >= from) (idx: s.idx, kind: s.kind.name, text: s.text),
     ]);
     await db.spineDao.insertLayers(workId, [
       for (final l in result.layers)
-        (
-          segmentIdx: l.segmentIdx,
-          lang: l.lang,
-          kind: l.kind.name,
-          text: l.text
-        ),
+        if (l.segmentIdx >= from)
+          (
+            segmentIdx: l.segmentIdx,
+            lang: l.lang,
+            kind: l.kind.name,
+            text: l.text,
+          ),
       for (final e in mt.entries)
         (
           segmentIdx: e.key,
           lang: translation!.lang,
           kind: core.LayerKind.mt.name,
-          text: e.value
+          text: e.value,
         ),
     ]);
-    await db.batch((b) => b.insertAll(db.alignments, [
-          for (final a in result.alignments)
+    await db.batch(
+      (b) => b.insertAll(db.alignments, [
+        for (final a in result.alignments)
+          if (a.segmentIdx >= from)
             AlignmentsCompanion.insert(
-                workId: workId,
-                segmentIdx: a.segmentIdx,
-                tStartMs: a.tStartMs,
-                tEndMs: a.tEndMs,
-                wordTimings: Value(encodeWordTimingBlob(
-                    wordTimingRows(a, result.mergedChunks))))
-        ]));
+              workId: workId,
+              segmentIdx: a.segmentIdx,
+              tStartMs: a.tStartMs,
+              tEndMs: a.tEndMs,
+              wordTimings: Value(
+                encodeWordTimingBlob(wordTimingRows(a, result.mergedChunks)),
+              ),
+            ),
+      ]),
+    );
 
     // 'und' is an honest "could not tell", never worth persisting.
     if (result.layerKind == core.LayerKind.transcript &&
@@ -148,3 +194,49 @@ Future<void> writeTranscript({
     }
   });
 }
+
+/// How many of [result]'s segments the work already holds unchanged, text
+/// and times, from the first; null when what it holds is not a transcript
+/// (no alignments: the show notes), which is replaced whole.
+Future<int?> _unchangedPrefix(
+  AppDatabase db,
+  int workId,
+  TranscriptionResult result,
+) async {
+  final aligned = {
+    for (final a in await db.spineDao.alignmentsOf(workId)) a.segmentIdx: a,
+  };
+  if (aligned.isEmpty) return null;
+  final held = await db.spineDao.segmentsOf(workId);
+  var keep = 0;
+  while (keep < held.length && keep < result.segments.length) {
+    final h = held[keep];
+    final a = aligned[h.idx];
+    final want = result.alignments[keep];
+    if (h.idx != keep ||
+        h.body != result.segments[keep].text ||
+        a == null ||
+        a.tStartMs != want.tStartMs ||
+        a.tEndMs != want.tEndMs) {
+      break;
+    }
+    keep++;
+  }
+  return keep;
+}
+
+/// Takes [workId]'s transcript away whole — segments, layers, alignments
+/// and the place in them — in one transaction: what discarding a
+/// transcription whose text showed as it was made leaves behind. The show
+/// notes stay in their own table.
+Future<void> removeTranscript(AppDatabase db, int workId) =>
+    db.transaction(() async {
+      await (db.delete(db.positions)..where((p) => p.workId.equals(workId)))
+          .go();
+      await (db.delete(db.alignments)..where((a) => a.workId.equals(workId)))
+          .go();
+      await (db.delete(db.layers)..where((l) => l.workId.equals(workId)))
+          .go();
+      await (db.delete(db.segments)..where((s) => s.workId.equals(workId)))
+          .go();
+    });

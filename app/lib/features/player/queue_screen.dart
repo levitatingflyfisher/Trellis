@@ -190,6 +190,7 @@ class _QueueScreenState extends State<QueueScreen> {
     final entry = (work: work, episode: episode);
     final isAudio = episode?.enclosureUrl != null || work.kind == 'audiobook';
     return WorkRow(
+      downloads: _actions.downloader,
       work: work,
       episode: episode,
       facts: WorkRowFacts.of(work, episode, _rowState,

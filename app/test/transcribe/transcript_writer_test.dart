@@ -280,6 +280,121 @@ void main() {
       expect(await db.spineDao.layersOf(workId, lang: 'pt'), hasLength(2));
     });
 
+    group('as it is made (written again after every window)', () {
+      TranscriptionResult so(List<(String, int, int)> pieces,
+              {String lang = 'pt',
+              core.LayerKind kind = core.LayerKind.transcript}) =>
+          TranscriptionResult(
+            lang: lang,
+            layerKind: kind,
+            segments: [
+              for (var i = 0; i < pieces.length; i++)
+                core.Segment(
+                    idx: i, kind: core.SegmentKind.prose, text: pieces[i].$1)
+            ],
+            alignments: [
+              for (var i = 0; i < pieces.length; i++)
+                core.Alignment(
+                    segmentIdx: i,
+                    tStartMs: pieces[i].$2,
+                    tEndMs: pieces[i].$3)
+            ],
+            layers: [
+              for (var i = 0; i < pieces.length; i++)
+                core.Layer(
+                    segmentIdx: i, lang: lang, kind: kind, text: pieces[i].$1)
+            ],
+            mergedChunks: [
+              for (final p in pieces)
+                TranscriptChunk(text: p.$1, tStartMs: p.$2, tEndMs: p.$3)
+            ],
+          );
+
+      Future<(int, int)?> place() async {
+        final p =
+            await db.spineDao.position(profileId: profileId, workId: workId);
+        return p == null ? null : (p.segmentIdx, p.wordIdx);
+      }
+
+      test('a reader\'s place in the part already written stays put',
+          () async {
+        await writeTranscript(
+            db: db,
+            workId: workId,
+            result: so([('Olá mundo.', 0, 1500), ('Tudo', 1500, 2000)]));
+        await db.spineDao.savePosition(
+            profileId: profileId,
+            workId: workId,
+            segmentIdx: 0,
+            wordIdx: 1,
+            lastModality: 'read');
+
+        await writeTranscript(
+            db: db,
+            workId: workId,
+            result: so([
+              ('Olá mundo.', 0, 1500),
+              ('Tudo bem?', 1500, 2600),
+              ('Sim.', 2600, 3000),
+            ]));
+
+        expect(await place(), (0, 1));
+        expect([for (final s in await db.spineDao.segmentsOf(workId)) s.body],
+            ['Olá mundo.', 'Tudo bem?', 'Sim.'],
+            reason: 'the revised tail is replaced, never repeated');
+        expect(await db.spineDao.layersOf(workId, lang: 'pt'), hasLength(3));
+        expect((await db.spineDao.alignmentsOf(workId)).last.tEndMs, 3000);
+      });
+
+      test('a place past a tail that got shorter moves to the last sentence',
+          () async {
+        await writeTranscript(
+            db: db,
+            workId: workId,
+            result: so([
+              ('Olá.', 0, 500),
+              ('Mundo', 500, 900),
+              ('e', 900, 1000),
+            ]));
+        await db.spineDao.savePosition(
+            profileId: profileId,
+            workId: workId,
+            segmentIdx: 2,
+            wordIdx: 0,
+            lastModality: 'read');
+
+        await writeTranscript(
+            db: db,
+            workId: workId,
+            result: so([('Olá.', 0, 500), ('Mundo e tudo.', 500, 1500)]));
+
+        expect(await place(), (1, 0));
+      });
+
+      test('a translation that grows is written once per segment', () async {
+        final text = so([('Olá mundo.', 0, 1500), ('Tudo bem?', 1500, 2600)]);
+        await writeTranscript(
+            db: db,
+            workId: workId,
+            result: text,
+            translation: so([('Hello world.', 0, 1400)],
+                lang: 'en', kind: core.LayerKind.mt));
+        await writeTranscript(
+            db: db,
+            workId: workId,
+            result: text,
+            translation: so(
+                [('Hello world.', 0, 1400), ('How are you?', 1600, 2500)],
+                lang: 'en',
+                kind: core.LayerKind.mt));
+
+        expect(
+            [for (final l in await db.spineDao.layersOf(workId, lang: 'en'))
+              l.body],
+            ['Hello world.', 'How are you?']);
+      });
+    });
+
     test('json blob content survives the drift blob column', () async {
       await writeTranscript(db: db, workId: workId, result: transcriptResult());
       final alignment = (await db.spineDao.alignmentsOf(workId)).first;

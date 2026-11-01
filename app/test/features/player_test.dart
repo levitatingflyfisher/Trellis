@@ -1518,6 +1518,36 @@ void main() {
       expect(c.current?.id, work.id);
     });
 
+    test('Stream now, this once, under Download first: it streams at once '
+        'and fetches nothing', () async {
+      final c = make();
+      final work = await seedEpisode();
+      expect(await c.playsDownloadFirst(), isTrue);
+
+      await c.playWork(work, downloadFirst: false);
+
+      expect(player.loadedUrl, 'https://cast.test/1.mp3');
+      expect(fetched, isEmpty);
+    });
+
+    test('Download, then play, this once, under Stream: it fetches first '
+        'and plays the file', () async {
+      downloadFirst = false;
+      final c = make();
+      final work = await seedEpisode();
+      expect(await c.playsDownloadFirst(), isFalse);
+      expect(c.canDownloadFirst, isTrue);
+
+      final played = c.playWork(work, downloadFirst: true);
+      await pumpEventQueue();
+      expect(fetched, [work.id]);
+      expect(player.loadedUrl, isNull);
+
+      land(work);
+      await played;
+      expect(player.loadedFilePath, fileOf(work).path);
+    });
+
     test('already downloaded: it plays at once and nothing is fetched',
         () async {
       final c = make();

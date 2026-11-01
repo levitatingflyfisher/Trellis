@@ -744,6 +744,7 @@ class _FeedsScreenState extends State<FeedsScreen> {
     }
 
     return WorkRow(
+      downloads: _actions.downloader,
       key: Key('book-${b.work.id}'),
       work: b.work,
       facts: WorkRowFacts.of(b.work, null, _bookState),

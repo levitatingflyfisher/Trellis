@@ -33,6 +33,7 @@ import '../jobs/failure_reason.dart';
 import '../models/model_store.dart';
 import 'foreground_gate.dart';
 import 'transcribe_executor.dart';
+import 'transcript_so_far.dart';
 import 'transcript_writer.dart';
 
 String transcribeJobId(int workId) => 'transcribe-$workId';
@@ -65,6 +66,11 @@ class TranscribeCardState {
   final int? totalBytes;
   final String? error;
 
+  /// Where the text written so far ends, in the episode; null until a
+  /// window's text has landed on the work (or when it is not shown as it
+  /// is made).
+  final int? soFarMs;
+
   const TranscribeCardState({
     required this.workId,
     required this.title,
@@ -76,6 +82,7 @@ class TranscribeCardState {
     this.receivedBytes,
     this.totalBytes,
     this.error,
+    this.soFarMs,
   });
 
   TranscribeCardState _with({
@@ -86,6 +93,7 @@ class TranscribeCardState {
     int? receivedBytes,
     int? totalBytes,
     String? error,
+    int? soFarMs,
   }) =>
       TranscribeCardState(
         workId: workId,
@@ -98,6 +106,8 @@ class TranscribeCardState {
         receivedBytes: receivedBytes,
         totalBytes: totalBytes,
         error: error,
+        // What can be read stays readable whatever the job does next.
+        soFarMs: soFarMs ?? this.soFarMs,
       );
 }
 
@@ -111,6 +121,31 @@ class TranscribePlan {
       {required this.model, required this.needsModel, required this.needsAudio});
 
   bool get needsDownloads => needsModel || needsAudio;
+}
+
+/// Writes the transcript so far one write at a time; a request made while
+/// one is waiting to start adds nothing, since every write reads the
+/// latest committed checkpoint itself. A failed write is only a late
+/// one: the next window writes again.
+class _SoFarWriter {
+  final Future<void> Function() _write;
+  _SoFarWriter(this._write);
+
+  Future<void> _chain = Future.value();
+  bool _queued = false;
+
+  void request() {
+    if (_queued) return;
+    _queued = true;
+    _chain = _chain.then((_) async {
+      _queued = false;
+      try {
+        await _write();
+      } catch (_) {}
+    });
+  }
+
+  Future<void> get settled => _chain;
 }
 
 class _Flow {
@@ -171,6 +206,7 @@ class TranscribeCoordinator extends ChangeNotifier {
       if (workId == null || _cards.containsKey(workId)) continue;
       final killed = row.state == JobState.running.name;
       if (killed) _interrupted.add(workId);
+      final making = await transcriptMaking(db, workId);
       _cards[workId] = TranscribeCardState(
         workId: workId,
         title: payload['title'] as String? ?? 'Episode',
@@ -185,6 +221,7 @@ class TranscribeCoordinator extends ChangeNotifier {
         error: row.state == JobState.failed.name
             ? row.failureReason ?? genericFailureReason
             : null,
+        soFarMs: making?.soFarMs,
       );
     }
     notifyListeners();
@@ -250,10 +287,15 @@ class TranscribeCoordinator extends ChangeNotifier {
     // count.
     String? lockedLang;
     String? lockedSource;
+    // Its text shows as it is made only when the work has no transcript:
+    // part of a new one must never stand in for a whole old one.
+    final bool soFar;
     if (prior != null) {
       lockedLang = prior['lang'] as String?;
       lockedSource = prior['langSource'] as String?;
+      soFar = prior['soFar'] as bool? ?? false;
     } else {
+      soFar = (await db.spineDao.alignmentsOf(workId)).isEmpty;
       final declared = whisperLanguageOf(lang);
       final fromFeed = declared == null
           ? whisperLanguageOf(await db.feedsDao.languageOfWorkFeed(workId))
@@ -272,6 +314,7 @@ class TranscribeCoordinator extends ChangeNotifier {
       'lang': lockedLang,
       'langSource': lockedSource,
       'translate': translate,
+      'soFar': soFar,
     });
     if (existing == null) {
       await db.jobsDao.save(Job(
@@ -320,6 +363,9 @@ class TranscribeCoordinator extends ChangeNotifier {
   Future<void> dismiss(int workId) async {
     _flows[workId]?.cancel();
     _interrupted.remove(workId);
+    // The transcript so far goes with its job: kept, it would pass for
+    // the episode's and hide Transcribe.
+    final partial = await transcriptMaking(db, workId) != null;
     final dl = downloads;
     if (dl != null && dl.entries.any((e) => e.workId == workId)) {
       await dl.dismiss(workId);
@@ -331,6 +377,10 @@ class TranscribeCoordinator extends ChangeNotifier {
     // Sync delete on purpose: real-io futures never complete under widget
     // fake-async zones, and the file is small.
     if (pcm.existsSync()) pcm.deleteSync();
+    if (partial) {
+      await removeTranscript(db, workId);
+      onTranscribed?.call(workId);
+    }
     if (payloadless != null) notifyListeners();
   }
 
@@ -359,6 +409,7 @@ class TranscribeCoordinator extends ChangeNotifier {
         ? null
         : payload['langSource'] as String? ?? 'declared';
     final translate = payload['translate'] as bool? ?? false;
+    final soFar = payload['soFar'] as bool? ?? false;
 
     final gate = services.foregroundGate;
     var holdsGate = false;
@@ -475,6 +526,26 @@ class TranscribeCoordinator extends ChangeNotifier {
         lang: lang,
         langSource: langSource,
         phase: TranscribePhase.transcribing,
+        writeSoFar: !soFar
+            ? null
+            : (checkpoint) async {
+                if (checkpoint == null) return;
+                final so = transcriptSoFar(checkpoint, lang: lang);
+                if (so.segments.isEmpty) return;
+                await writeTranscript(
+                    db: db,
+                    workId: workId,
+                    result: so,
+                    langSource: langSource);
+                _update(workId,
+                    (c) => c._with(
+                        phase: c.phase,
+                        doneUnits: c.doneUnits,
+                        totalUnits: c.totalUnits,
+                        etaMs: c.etaMs,
+                        soFarMs: so.alignments.last.tEndMs));
+                onTranscribed?.call(workId);
+              },
       );
       if (first.state != JobState.done) {
         return await _afterStoppedStage(workId, first.state);
@@ -514,6 +585,19 @@ class TranscribeCoordinator extends ChangeNotifier {
                   ? 'detected'
                   : null,
           phase: TranscribePhase.translating,
+          // The whole transcript, with the English so far beside it.
+          writeSoFar: (checkpoint) async {
+            await writeTranscript(
+                db: db,
+                workId: workId,
+                result: first.result!,
+                translation: checkpoint == null
+                    ? null
+                    : transcriptSoFar(checkpoint,
+                        task: WhisperTask.translate),
+                langSource: langSource);
+            onTranscribed?.call(workId);
+          },
         );
         if (second.state != JobState.done) {
           return await _afterStoppedStage(workId, second.state);
@@ -559,7 +643,18 @@ class TranscribeCoordinator extends ChangeNotifier {
     required String? lang,
     required String? langSource,
     required TranscribePhase phase,
+    Future<void> Function(String? checkpoint)? writeSoFar,
   }) async {
+    // The text so far, written after every committed window and once at
+    // the start from what a kill or a pause left. Read from the committed
+    // checkpoint each time, never from the beat, and one write at a time,
+    // so the work only ever shows a committed state and a late write can
+    // never land over the next stage's.
+    final soFar = writeSoFar == null
+        ? null
+        : _SoFarWriter(() async =>
+            writeSoFar((await db.jobsDao.load(jobId))?.checkpoint));
+    soFar?.request();
     final run = services.executor.start(
       TranscribeSpec(
         jobId: jobId,
@@ -583,6 +678,7 @@ class TranscribeCoordinator extends ChangeNotifier {
               etaMs: p.etaMs));
       unawaited(gate.jobProgress(
           title, '${p.doneUnits} of ${p.totalUnits} parts done'));
+      soFar?.request();
     });
     try {
       return await run.done;
@@ -590,6 +686,7 @@ class TranscribeCoordinator extends ChangeNotifier {
       // Never awaited (see the model stage): the stream is already done.
       unawaited(sub.cancel());
       flow.cancelStage = null;
+      await soFar?.settled;
     }
   }
 

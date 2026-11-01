@@ -710,4 +710,30 @@ void main() {
       expect(dur('1:xx'), isNull);
     });
   });
+
+  group('item identity', () {
+    test('an RSS item keeps its own <guid>, trimmed', () {
+      final feed = parseRssFeed('''
+<rss version="2.0"><channel><title>t</title>
+  <item>
+    <title>One</title>
+    <link>https://show.test/</link>
+    <guid isPermaLink="false">  show-ep-1  </guid>
+  </item>
+  <item><title>Two</title><link>https://show.test/</link></item>
+</channel></rss>
+''', 'https://show.test/feed');
+      expect(feed.items.map((i) => i.guid), ['show-ep-1', '']);
+    });
+
+    test('an Atom entry keeps its <id> as its guid', () {
+      final feed = parseRssFeed('''
+<feed xmlns="http://www.w3.org/2005/Atom"><title>t</title>
+  <entry><title>One</title><id>urn:uuid:1</id>
+    <link rel="alternate" href="https://show.test/"/></entry>
+</feed>
+''', 'https://show.test/feed');
+      expect(feed.items.single.guid, 'urn:uuid:1');
+    });
+  });
 }

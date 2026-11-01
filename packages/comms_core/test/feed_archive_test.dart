@@ -223,4 +223,32 @@ void main() {
             'walker treats like any other failed hop');
     expect(result.pagesFetched, 0);
   });
+
+  test('items that share one link but carry their own guids all come '
+      'through: many shows link every episode to the show page', () async {
+    String page(List<String> guids, {String? next}) {
+      final items = guids
+          .map((g) => '<item><title>$g</title><link>https://x.test/</link>'
+              '<guid>$g</guid></item>')
+          .join();
+      final nextLink =
+          next == null ? '' : '<atom:link rel="next" href="$next"/>';
+      return '<rss><channel><title>t</title>$nextLink$items</channel></rss>';
+    }
+
+    final fetcher = ScriptedFetcher((url, headers) {
+      final u = url.toString();
+      if (u == 'https://x.test/page1') {
+        return textResponse(
+            page(['e1', 'e2'], next: 'https://x.test/page2'));
+      }
+      if (u == 'https://x.test/page2') return textResponse(page(['e2', 'e3']));
+      throw Exception('unexpected $u');
+    });
+
+    final result = await walkFeedArchive(client(fetcher),
+        startPageUrl: 'https://x.test/page1');
+
+    expect(result.items.map((i) => i.guid), ['e1', 'e2', 'e3']);
+  });
 }

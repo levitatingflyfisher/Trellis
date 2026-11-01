@@ -693,6 +693,44 @@ Paths are under `app/test/` unless they say otherwise.
   the image shown in a session with no network, the backup carrying the
   files, and the Anki export adding them as media.
 
+- ✅ shipped: **The transcript appears as it is made.** An episode with
+  no transcript gets the text of each finished window on its page as the
+  window lands, so Read shows what is done so far. The text is built from
+  the committed checkpoint through the same overlap merge as the finished
+  transcript (`transcriptSoFar` in `packages/transcribe_core`), so a kill
+  leaves the last window’s text and a resume never repeats a word
+  (`packages/transcribe_core/test/transcript_so_far_test.dart`). Writing
+  it again keeps the rows that did not change, and a reader’s place in
+  them (`transcribe/transcript_writer_test.dart`). The job’s card says
+  “You can read the first 12 minutes now”; an open reader takes in new
+  text when it is still and says how far the transcript has got, or that
+  it stopped part way (`features/transcribe_flow_test.dart`,
+  `transcribe/transcript_so_far_test.dart`,
+  `features/reader_transcript_so_far_test.dart`). A job over a transcript
+  the work already has shows nothing part way; Discard takes the part
+  away; making an episode in another language waits for the whole
+  transcript (`features/listen_chain_test.dart`).
+- ✅ shipped: **Stream or download, chosen per episode.** Settings still
+  says what Listen and Play do with an episode that isn’t downloaded. The
+  episode’s page offers the other way for this play, “Stream now” or
+  “Download, then play”, and every row’s ⋮ offers both. While an episode
+  downloads, its progress shows where Play is, on the page’s Listen and
+  on the row (`features/works/stream_or_download_test.dart`,
+  `features/player_test.dart`).
+- ✅ shipped: **History as far back as AntennaPod.** Episodes are told
+  apart by the feed’s own guid (RSS `<guid>`, Atom `<id>`), then the link
+  as before. Keyed on the link alone, a show that links every episode to
+  its home page kept one episode of its whole catalogue. Episodes stored
+  the old way are matched and take their guid, so none comes back as
+  new. Following a paged feed (RFC 5005 `rel="next"` or `prev-archive`,
+  in RSS or Atom) now walks its archive in the background, as AntennaPod
+  loads every page; Fetch older stays for shows followed before. There
+  is no cap on how many episodes or how old: a 1,200-episode feed lands
+  whole (`features/feed_ingest_test.dart`,
+  `packages/comms_core/test/feed_archive_test.dart`,
+  `packages/comms_core/test/feed_parser_test.dart`). Not compared yet:
+  one real show side by side with AntennaPod on a phone.
+
 ## Fleet rollout (2026-09): shared conventions adopted
 
 - **Deletes.** Removing a work, unfollowing a feed, removing a saved word

@@ -191,7 +191,18 @@ class EpisodeActions {
     unawaited(listenJobs?.refresh());
   }
 
-  Future<void> play(Work work) async => player?.playWork(work);
+  /// [downloadFirst] chooses for this one Play over the setting: see
+  /// [PlayerController.playWork].
+  Future<void> play(Work work, {bool? downloadFirst}) async =>
+      player?.playWork(work, downloadFirst: downloadFirst);
+
+  /// Whether [e] can be played either way, streamed or downloaded first:
+  /// an episode not on the phone, where downloads exist.
+  bool offersPlayChoice(Episode e) =>
+      e.enclosureUrl != null &&
+      canDownload &&
+      (player?.canDownloadFirst ?? false) &&
+      !isDownloaded(e);
 
   Future<void> playNext(int workId) => db.queueDao
       .playNext(profileId: profileId, workId: workId, nowMs: _nowMs());
@@ -378,6 +389,18 @@ class EpisodeActions {
           key: Key('play-last-$id'),
           value: 'play-last',
           child: const Text('Play last')),
+      // Stream or download, said plainly (owner, 23 Oct): Play does what
+      // Settings says; these choose for this one play.
+      if (offersPlayChoice(e.episode)) ...[
+        PopupMenuItem(
+            key: Key('stream-now-$id'),
+            value: 'stream-now',
+            child: const Text('Stream now')),
+        PopupMenuItem(
+            key: Key('download-play-$id'),
+            value: 'download-play',
+            child: const Text('Download, then play')),
+      ],
       if (canDownload && !isDownloaded(e.episode))
         PopupMenuItem(
             key: Key('download-$id'),
@@ -567,6 +590,8 @@ class EpisodeActions {
   static const commonChoices = {
     'play-next',
     'play-last',
+    'stream-now',
+    'download-play',
     'download',
     'mark-played',
     'mark-unplayed',
@@ -643,6 +668,10 @@ class EpisodeActions {
         await playNext(e.work.id);
       case 'play-last':
         await playLast(e.work.id);
+      case 'stream-now':
+        await play(e.work, downloadFirst: false);
+      case 'download-play':
+        await play(e.work, downloadFirst: true);
       case 'download':
         await download(context, e);
       case 'mark-played':

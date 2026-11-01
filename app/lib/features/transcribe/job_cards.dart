@@ -11,6 +11,7 @@ import 'package:flutter/material.dart';
 
 import '../models/format.dart';
 import 'transcribe_coordinator.dart';
+import 'transcript_so_far.dart';
 
 /// What transcribing will roughly cost, in words: `about N min` from the
 /// episode's length and this phone's measured speed, or an honest
@@ -236,6 +237,13 @@ class TranscribeJobCard extends StatelessWidget {
             Text(_status,
                 key: Key('job-status-$workId'),
                 style: theme.textTheme.bodySmall),
+            if (card.soFarMs case final soFar?
+                when card.phase != TranscribePhase.translating) ...[
+              const SizedBox(height: 4),
+              Text(soFarCardLine(soFar, working: _running),
+                  key: Key('job-so-far-$workId'),
+                  style: theme.textTheme.bodySmall),
+            ],
             const SizedBox(height: 8),
             LinearProgressIndicator(value: transcribeProgress(card)),
             Align(

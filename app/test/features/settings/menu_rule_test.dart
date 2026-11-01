@@ -202,6 +202,9 @@ void main() {
     const shared = [
       'Play next',
       'Play last',
+      // Stream or download, said plainly (owner, 23 Oct).
+      'Stream now',
+      'Download, then play',
       'Download',
       'Mark played',
       'Transcribe',

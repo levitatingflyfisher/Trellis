@@ -3460,6 +3460,17 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
     return n == null || n.html.isEmpty ? null : n;
   }
 
+  /// This feed's stored guids, each with its episode's enclosure URL.
+  Future<Map<String, String?>> guidEnclosuresOf(int feedId) async {
+    final q = selectOnly(episodes)
+      ..addColumns([episodes.guid, episodes.enclosureUrl])
+      ..where(episodes.feedId.equals(feedId));
+    return {
+      for (final r in await q.get())
+        r.read(episodes.guid)!: r.read(episodes.enclosureUrl),
+    };
+  }
+
   Future<Set<String>> guidsOf(int feedId) async {
     final q = selectOnly(episodes)
       ..addColumns([episodes.guid])

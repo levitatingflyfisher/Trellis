@@ -588,6 +588,104 @@ void main() {
           contains('https://cast.test/two.mp3'));
     });
 
+    group('episode identity (AntennaPod sees further back)', () {
+      // Many shows link every episode to the show page. Keyed on the link,
+      // a whole back catalogue collapsed into one episode.
+      List<FeedItem> shared(int n, {bool guids = true}) => [
+            for (var i = 0; i < n; i++)
+              FeedItem(
+                  title: 'Episode $i',
+                  link: 'https://show.test/',
+                  date: '',
+                  desc: '',
+                  guid: guids ? 'show-ep-$i' : '',
+                  enclosure: Enclosure(url: 'https://show.test/$i.mp3')),
+          ];
+
+      test('a long feed whose episodes share one link keeps every episode',
+          () async {
+        final added = await ingestFeedItems(
+            db: db,
+            profileId: profileId,
+            feedId: feedId,
+            items: shared(1200),
+            nowMs: nowMs);
+        expect(added, 1200);
+        expect(await db.feedsDao.guidsOf(feedId), hasLength(1200));
+        expect(
+            await ingestFeedItems(
+                db: db,
+                profileId: profileId,
+                feedId: feedId,
+                items: shared(1200),
+                nowMs: nowMs),
+            0);
+      });
+
+      test('episodes stored under their link before guids were read are '
+          'matched, not added again, and take their guid', () async {
+        final old = [
+          for (var i = 0; i < 3; i++)
+            FeedItem(
+                title: 'Episode $i',
+                link: 'https://show.test/$i',
+                date: '',
+                desc: '',
+                enclosure: Enclosure(url: 'https://show.test/$i.mp3')),
+        ];
+        await ingestFeedItems(
+            db: db,
+            profileId: profileId,
+            feedId: feedId,
+            items: old,
+            nowMs: nowMs);
+        final now = [
+          for (final o in old)
+            FeedItem(
+                title: o.title,
+                link: o.link,
+                date: '',
+                desc: '',
+                guid: 'g-${o.title}',
+                enclosure: o.enclosure),
+        ];
+        expect(
+            await ingestFeedItems(
+                db: db,
+                profileId: profileId,
+                feedId: feedId,
+                items: now,
+                nowMs: nowMs),
+            0);
+        expect(await db.feedsDao.guidsOf(feedId),
+            {'g-Episode 0', 'g-Episode 1', 'g-Episode 2'});
+      });
+
+      test('the one episode a shared link kept is matched by its audio; the '
+          'rest of the catalogue arrives', () async {
+        // What the old key stored: the first of them, under the link.
+        await ingestFeedItems(
+            db: db,
+            profileId: profileId,
+            feedId: feedId,
+            items: shared(4, guids: false),
+            nowMs: nowMs);
+        expect(await db.feedsDao.guidsOf(feedId), {'https://show.test/'});
+        final kept = (await db.spineDao.worksOf(profileId)).single;
+
+        final added = await ingestFeedItems(
+            db: db,
+            profileId: profileId,
+            feedId: feedId,
+            items: shared(4),
+            nowMs: nowMs);
+        expect(added, 3);
+        final episode = (await db.feedsDao.episodeOf(kept.id))!;
+        expect(episode.guid, 'show-ep-0');
+        expect(await db.feedsDao.guidsOf(feedId), hasLength(4));
+      });
+    });
+
     test('an untitled item gets a calm placeholder title', () async {
       await ingestFeedItems(
           db: db,
@@ -1651,6 +1749,32 @@ void main() {
       expect(await db.feedsDao.riverItems(profileId), hasLength(2));
     });
 
+    test('a paged feed brings its archive along after subscribing, the '
+        'way AntennaPod loads every page', () async {
+      String page(Iterable<int> ids, {String? next}) =>
+          '<rss><channel><title>Paged</title>'
+          '${next == null ? '' : '<atom:link rel="next" href="$next"/>'}'
+          '${ids.map((i) => '<item><title>E$i</title>'
+              '<link>https://cast.test/</link><guid>e$i</guid>'
+              '<enclosure url="https://cast.test/$i.mp3" type="audio/mpeg"/>'
+              '</item>').join()}'
+          '</channel></rss>';
+      final fetcher = ScriptedFetcher((url, headers) => textResponse(
+          switch (url.toString()) {
+            'https://cast.test/feed' =>
+              page([0, 1], next: 'https://cast.test/feed?page=2'),
+            'https://cast.test/feed?page=2' =>
+              page([2, 3], next: 'https://cast.test/feed?page=3'),
+            _ => page([4]),
+          }));
+      final r = repo(fetcher);
+      final result = await r.subscribe(
+          profileId: profileId, rawUrl: 'https://cast.test/feed');
+      expect((result as SubscribeSuccess).newItems, 2);
+      await r.artworkSettled;
+      expect(await db.feedsDao.riverItems(profileId), hasLength(5));
+    });
+
     test('subscribing records where the source came from', () async {
       final r = repo(ScriptedFetcher((url, headers) =>
           textResponse(url.path == '/blog' ? _rssBlog : _rssTwo)));
@@ -2018,6 +2142,35 @@ void main() {
       final titles =
           (await db.feedsDao.episodesOfFeed(feed.id)).map((r) => r.work.title);
       expect(titles, contains('Comet watch'));
+    });
+
+    test('a paged feed whose episodes share one link arrives whole, page '
+        'after page', () async {
+      final feed = await seedFeedWithNextPage('https://cast.test/feed?page=2');
+      String page(Iterable<int> ids, {String? next}) =>
+          '<rss><channel><title>t</title>'
+          '${next == null ? '' : '<atom:link rel="next" href="$next"/>'}'
+          '${ids.map((i) => '<item><title>E$i</title>'
+              '<link>https://cast.test/</link><guid>e$i</guid>'
+              '<enclosure url="https://cast.test/$i.mp3" type="audio/mpeg"/>'
+              '</item>').join()}'
+          '</channel></rss>';
+      final fetcher = ScriptedFetcher((url, headers) {
+        final u = url.toString();
+        if (u == 'https://cast.test/feed?page=2') {
+          return textResponse(page([for (var i = 0; i < 50; i++) i],
+              next: 'https://cast.test/feed?page=3'));
+        }
+        if (u == 'https://cast.test/feed?page=3') {
+          return textResponse(page([for (var i = 50; i < 100; i++) i]));
+        }
+        throw Exception('unexpected $u');
+      });
+
+      final outcome = await repo(fetcher).fetchOlderEpisodes(feed);
+
+      expect(outcome.newItems, 100);
+      expect(await db.feedsDao.episodesOfFeed(feed.id), hasLength(100));
     });
 
     test('an archive with nothing new reports the "no older episodes" '

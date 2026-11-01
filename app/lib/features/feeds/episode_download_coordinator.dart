@@ -54,6 +54,21 @@ enum DownloadOutcome { done, paused, failed }
 /// One episode's download snapshot, as the UI reads it. The absence of an
 /// entry (see [EpisodeDownloadCoordinator.stateOf]'s default) means "no
 /// download job", so this type needs no idle variant.
+/// How far a download has got, 0 to 1; null while one runs whose size
+/// is not known yet.
+double? downloadFraction(EpisodeDownloadState s) {
+  final total = s.totalBytes;
+  if (total == null || total == 0) return s.downloading ? null : 0;
+  return ((s.receivedBytes ?? 0) / total).clamp(0, 1).toDouble();
+}
+
+/// "Downloading, 40%", or "Downloading" while the size is unknown: the
+/// words where Play is while an episode downloads.
+String downloadingWords(EpisodeDownloadState s) {
+  final f = downloadFraction(s);
+  return f == null ? 'Downloading' : 'Downloading, ${(f * 100).floor()}%';
+}
+
 class EpisodeDownloadState {
   final String title;
   final bool downloading;

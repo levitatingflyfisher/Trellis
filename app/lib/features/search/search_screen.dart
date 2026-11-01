@@ -124,6 +124,7 @@ class SearchItemTile extends StatelessWidget {
     final selecting = selection?.active ?? false;
     final isAudio = episode?.enclosureUrl != null || work.kind == 'audiobook';
     return WorkRow(
+      downloads: actions.downloader,
       key: Key('item-${work.id}'),
       work: work,
       episode: episode,

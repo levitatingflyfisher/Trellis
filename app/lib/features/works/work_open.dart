@@ -125,14 +125,16 @@ class WorkDoors {
       ? read(context, e)
       : read(context, e, openOnPage: true);
 
-  /// The row's Play button.
-  Future<void> play(Work work) async {
+  /// The row's Play button. [downloadFirst] chooses for this one Play
+  /// over the setting (an episode's "Stream now" or "Download, then
+  /// play").
+  Future<void> play(Work work, {bool? downloadFirst}) async {
     final p = player;
     if (p == null) return;
     if (work.kind == 'audiobook') {
       await p.playAudiobook(work);
     } else {
-      await p.playWork(work);
+      await p.playWork(work, downloadFirst: downloadFirst);
     }
   }
 }

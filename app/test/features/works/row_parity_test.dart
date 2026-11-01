@@ -250,6 +250,10 @@ void main() {
       'Play next',
       'Play last',
       'Download',
+      // The page has Listen, which does what Settings says, and a button
+      // for the other way; neither repeats in its ⋮.
+      'Stream now',
+      'Download, then play',
       // Only an untranscribed episode's Translate… is the same act; aurora
       // has a transcript, so its ⋮ keeps it.
     };

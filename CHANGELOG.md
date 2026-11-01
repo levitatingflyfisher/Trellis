@@ -7,6 +7,12 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.6.9 — 2026-11-12
+
+- **Read the transcript while it is being made.** Each finished part appears as it lands, and the job says how much you can read now. Your place holds, and a transcription stopped by the phone picks up where it left off.
+- **Stream or download, for each play.** An episode’s page and every row’s menu offer “Stream now” or “Download, then play”, beside your usual choice in Settings. A download in progress shows on Play.
+- **Every episode of a show.** Some shows link every episode to the same home page, and Trellis kept only one of them. Episodes are now told apart by their own id, so the whole show arrives, and subscribing to a show with archive pages fetches its older episodes in the background.
+
 ## 1.6.8 — 2026-11-12
 
 - **Share sends the audio.** Share on an episode made in another language sends the audio file itself, named by its title, with a line saying the voice is machine made. A downloaded episode offers the link or the file. A file in a host’s own cloned voice is shared only if you turn that on in Settings (off by default).

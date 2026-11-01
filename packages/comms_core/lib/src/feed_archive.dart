@@ -68,10 +68,12 @@ class FeedArchiveResult {
 }
 
 /// Item identity for the walk's own cross-page dedup — mirrors the app
-/// layer's guid choice (link, else enclosure, else title#date) without
-/// depending on it: this is an in-memory dedup over one walk's results,
-/// not the persisted-storage dedup the caller applies afterward.
+/// layer's guid choice (the feed's own guid, else link, else enclosure,
+/// else title#date) without depending on it: this is an in-memory dedup
+/// over one walk's results, not the persisted-storage dedup the caller
+/// applies afterward.
 String _archiveItemKey(FeedItem item) {
+  if (item.guid.isNotEmpty) return item.guid;
   if (item.link.isNotEmpty) return item.link;
   if (item.audio.isNotEmpty) return item.audio;
   return '${item.title}#${item.date}';

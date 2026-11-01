@@ -25,6 +25,7 @@ import '../reader/translation/sentence_units.dart';
 import '../reader/translation/translation_route.dart'
     show pivotLanguage, resolveSourceLanguage;
 import '../transcribe/foreground_gate.dart';
+import '../transcribe/transcript_so_far.dart';
 import 'spoken_episode.dart';
 
 enum ListenStage { transcribing, translating, speaking, ready, failed }
@@ -249,11 +250,12 @@ class ListenChain extends ChangeNotifier {
       held = true;
 
       // 1. The transcript.
-      if ((await db.spineDao.alignmentsOf(work.id)).isEmpty) {
+      // Whole: part of one, still being made, is carried on first.
+      if (!await transcriptIsWhole(db, work.id)) {
         _set(work.id, ListenState(ListenStage.transcribing, lang: lang));
         await transcribe(work, episode);
         check();
-        if ((await db.spineDao.alignmentsOf(work.id)).isEmpty) {
+        if (!await transcriptIsWhole(db, work.id)) {
           _set(work.id, fail('The transcript wasn’t made, so there is '
               'nothing to translate. Jobs says why.'));
           return null;

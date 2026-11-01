@@ -373,6 +373,7 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
     final canPlay = isAudio && widget.playerController != null;
     final selecting = _selection.active;
     return WorkRow(
+      downloads: _actions.downloader,
       work: e.work,
       episode: e.episode,
       facts: WorkRowFacts.of(e.work, e.episode, _rowState,

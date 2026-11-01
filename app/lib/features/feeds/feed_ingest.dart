@@ -217,11 +217,48 @@ bool preparesOffThread(List<FeedItem> items) {
 const offThreadPrepareCount = 40;
 const offThreadPrepareChars = 32 * 1024;
 
-/// Item identity for dedupe: link, else enclosure URL, else title#date.
+/// Item identity for dedupe: the feed's own guid, else link, else
+/// enclosure URL, else title#date. Many shows link every episode to the
+/// show page, so the link alone kept one episode of a whole catalogue.
 String guidOf(FeedItem item) {
+  if (item.guid.isNotEmpty) return item.guid;
+  return legacyGuidOf(item);
+}
+
+/// The key an item was stored under before 1.6.9 read the feed's guid:
+/// link, else enclosure URL, else title#date.
+String legacyGuidOf(FeedItem item) {
   if (item.link.isNotEmpty) return item.link;
   if (item.audio.isNotEmpty) return item.audio;
   return '${item.title}#${item.date}';
+}
+
+/// Which stored rows, keyed the old way, are [items] under their own
+/// guid: `(stored key, new key)` pairs to rename. [stored] maps each
+/// stored key to its enclosure URL. A link counts as the item's only when
+/// no other item in the listing has it, or when the stored row's audio is
+/// the item's own: of a shared link the old key kept just one episode,
+/// and its audio says which. Each stored row is claimed once.
+List<(String, String)> legacyRenames(
+    List<FeedItem> items, Map<String, String?> stored) {
+  final links = <String, int>{};
+  for (final item in items) {
+    if (item.link.isNotEmpty) links[item.link] = (links[item.link] ?? 0) + 1;
+  }
+  final claimed = <String>{};
+  final renames = <(String, String)>[];
+  for (final item in items) {
+    final key = guidOf(item);
+    final old = legacyGuidOf(item);
+    if (key == old || stored.containsKey(key)) continue;
+    if (!stored.containsKey(old) || claimed.contains(old)) continue;
+    final ownLink = old != item.link || links[item.link] == 1;
+    final ownAudio = item.audio.isNotEmpty && stored[old] == item.audio;
+    if (!ownLink && !ownAudio) continue;
+    claimed.add(old);
+    renames.add((old, key));
+  }
+  return renames;
 }
 
 /// Inserts unseen items as ephemeron works + episode rows in one
@@ -290,7 +327,21 @@ Future<int> ingestFeedItems(
     // Read inside the transaction: drift runs transactions one at a time,
     // so a "Try again" overlapping a refresh of the same feed sees what
     // the other wrote instead of inserting the same items twice.
-    final seen = await db.feedsDao.guidsOf(feedId);
+    final stored = await db.feedsDao.guidEnclosuresOf(feedId);
+    // Rows stored under the old key take their own guid first, so the
+    // reads below and every later refresh match them directly.
+    for (final (from, to) in legacyRenames(items, stored)) {
+      await db.customUpdate(
+          'UPDATE episodes SET guid = ? WHERE feed_id = ? AND guid = ?',
+          variables: [
+            Variable.withString(to),
+            Variable.withInt(feedId),
+            Variable.withString(from),
+          ],
+          updates: {db.episodes});
+      stored[to] = stored.remove(from);
+    }
+    final seen = stored.keys.toSet();
     final gaps = await db.feedsDao.metadataGapsOf(feedId);
     final lacking = await db.feedsDao.notesGapIdsOf(feedId);
     // Ids are handed out here, under the lock, so every table's rows can

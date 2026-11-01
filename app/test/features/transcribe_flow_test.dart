@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -10,6 +11,7 @@ import 'package:trellis/db/database.dart';
 import 'package:trellis/features/listen/listen_jobs.dart' show listenLineKey;
 import 'package:trellis/features/transcribe/decoder.dart';
 import 'package:trellis/features/transcribe/transcribe_coordinator.dart';
+import 'package:trellis/features/transcribe/transcript_so_far.dart';
 import 'package:trellis/main.dart';
 
 import '../support/fake_player.dart';
@@ -648,5 +650,171 @@ void main() {
     });
 
     expect(await db.deviceSettingsDao.read(listenLineKey), isNull);
+  });
+
+  group('the transcript appears as it is made', () {
+    const one = ['Ola mundo.', 'Tudo bem?'];
+
+    Future<(TranscribeCoordinator, List<List<String>>)> coordinatorFor(
+        int workId,
+        {void Function(TranscribeCoordinator c)? onEachWrite}) async {
+      final services = testServices(tmp,
+          modelStore: FakeModelStore(downloadedIds: {'whisper-tiny-ggml'}));
+      services.audioFileFor(workId, enclosure)
+        ..parent.createSync(recursive: true)
+        ..writeAsBytesSync([1, 2, 3]);
+      final seen = <List<String>>[];
+      late TranscribeCoordinator coordinator;
+      coordinator = TranscribeCoordinator(
+          db: db,
+          services: services,
+          onTranscribed: (id) {}); // replaced below
+      coordinator.onTranscribed = (id) {
+        // Read synchronously enough: the write has landed when this fires.
+        unawaited(() async {
+          seen.add([
+            for (final s in await db.spineDao.segmentsOf(id)) s.body
+          ]);
+        }());
+        onEachWrite?.call(coordinator);
+      };
+      return (coordinator, seen);
+    }
+
+    test('each window\'s text is on the work before the job ends, and the '
+        'card says how far it has got', () async {
+      final seeded = await seedEpisode();
+      final soFar = <int?>[];
+      final jobsAlive = <bool>[];
+      final (coordinator, seen) = await coordinatorFor(seeded.workId,
+          onEachWrite: (c) {
+        soFar.add(c.cards.isEmpty ? null : c.cards.single.soFarMs);
+        jobsAlive.add(c.isActive(seeded.workId));
+      });
+
+      await coordinator.start(
+          workId: seeded.workId,
+          title: 'Um episódio',
+          enclosureUrl: enclosure,
+          translate: false);
+      await pumpEventQueue();
+
+      // 60 s is three windows: the text grows window by window, and each
+      // write replaces rather than adds.
+      expect(seen.take(3).toList(), [
+        one,
+        [...one, ...one],
+        [...one, ...one, ...one],
+      ]);
+      expect(jobsAlive.first, isTrue,
+          reason: 'the first window shows while the job still runs');
+      expect(soFar.first, 2600);
+      expect([for (final s in await db.spineDao.segmentsOf(seeded.workId))
+            s.body], [...one, ...one, ...one]);
+      expect(await db.jobsDao.unfinished(), isEmpty);
+    });
+
+    test('a pause leaves the transcript so far on the work; Resume finishes '
+        'it without a sentence twice', () async {
+      final seeded = await seedEpisode();
+      var paused = false;
+      final (coordinator, _) = await coordinatorFor(seeded.workId,
+          onEachWrite: (c) {
+        if (paused) return;
+        paused = true;
+        c.cancel(seeded.workId);
+      });
+
+      await coordinator.start(
+          workId: seeded.workId,
+          title: 'Um episódio',
+          enclosureUrl: enclosure,
+          translate: false);
+      await pumpEventQueue();
+
+      expect(coordinator.cards.single.phase, TranscribePhase.paused);
+      final partial = [
+        for (final s in await db.spineDao.segmentsOf(seeded.workId)) s.body
+      ];
+      expect(partial, isNotEmpty);
+      expect(partial.length, lessThan(6));
+      expect(await transcriptIsWhole(db, seeded.workId), isFalse,
+          reason: 'a partial transcript is never taken for the episode');
+
+      await coordinator.resume(seeded.workId);
+      await pumpEventQueue();
+
+      expect([for (final s in await db.spineDao.segmentsOf(seeded.workId))
+            s.body], [...one, ...one, ...one]);
+      expect(await transcriptIsWhole(db, seeded.workId), isTrue);
+    });
+
+    test('after a kill, the transcript so far is back on the work as the job '
+        'picks itself up', () async {
+      final seeded = await seedEpisode();
+      // Killed after the first of three windows committed.
+      await seedJob(seeded.workId,
+          state: JobState.running,
+          checkpoint: jsonEncode({
+            'nextWindowStartMs': 25000,
+            'chunks': [
+              {'text': 'Ola mundo.', 't0': 0, 't1': 1500, 'words': null},
+              {'text': 'Tudo bem?', 't0': 1500, 't1': 2600, 'words': null},
+            ],
+          }),
+          totalUnits: 3,
+          doneUnits: 1);
+      final payload =
+          jsonDecode(await db.jobsDao.payloadOf('transcribe-${seeded.workId}'))
+              as Map<String, dynamic>;
+      await db.jobsDao.setPayload('transcribe-${seeded.workId}',
+          jsonEncode({...payload, 'soFar': true}));
+      final (coordinator, seen) = await coordinatorFor(seeded.workId);
+
+      await coordinator.restore();
+      await coordinator.resumeInterrupted();
+      await pumpEventQueue();
+
+      expect(seen.first, one,
+          reason: 'the committed window shows before any new one runs');
+      expect([for (final s in await db.spineDao.segmentsOf(seeded.workId))
+            s.body], [...one, ...one, ...one]);
+    });
+
+    test('a job over a transcript the work already has never shows part of '
+        'one in its place', () async {
+      final seeded = await seedEpisode(transcribed: true);
+      final (coordinator, seen) = await coordinatorFor(seeded.workId);
+
+      await coordinator.start(
+          workId: seeded.workId,
+          title: 'Um episódio',
+          enclosureUrl: enclosure,
+          translate: false);
+      await pumpEventQueue();
+
+      // One write, the finished transcript: the old one stood until then.
+      expect(seen, [
+        [...one, ...one, ...one]
+      ]);
+    });
+
+    test('Discard takes the transcript so far away with the job', () async {
+      final seeded = await seedEpisode();
+      final (coordinator, _) = await coordinatorFor(seeded.workId,
+          onEachWrite: (c) => c.cancel(seeded.workId));
+      await coordinator.start(
+          workId: seeded.workId,
+          title: 'Um episódio',
+          enclosureUrl: enclosure,
+          translate: false);
+      await pumpEventQueue();
+      expect(await db.spineDao.alignmentsOf(seeded.workId), isNotEmpty);
+
+      await coordinator.dismiss(seeded.workId);
+
+      expect(await db.spineDao.alignmentsOf(seeded.workId), isEmpty);
+      expect(await db.spineDao.segmentsOf(seeded.workId), isEmpty);
+    });
   });
 }

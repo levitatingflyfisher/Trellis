@@ -29,6 +29,7 @@ import '../reader/translation/translation_route.dart' show planRoute;
 import '../feeds/background/feed_check_platform.dart';
 import '../feeds/background/feed_check_settings.dart';
 import '../transcribe/transcribe_coordinator.dart';
+import '../transcribe/transcript_so_far.dart';
 import 'listen_chain.dart';
 import 'listen_jobs.dart';
 import 'listen_languages.dart';
@@ -192,7 +193,7 @@ Future<List<DownloadItem>> listenDownloads({
 }) async {
   final items = <DownloadItem>[];
   final url = episode.enclosureUrl;
-  if (url != null && (await db.spineDao.alignmentsOf(work.id)).isEmpty) {
+  if (url != null && !await transcriptIsWhole(db, work.id)) {
     final plan = await transcriber.planFor(workId: work.id, enclosureUrl: url);
     if (plan.needsModel) {
       items.add(DownloadItem('${modelLabel(plan.model.id)} '
@@ -237,7 +238,7 @@ Future<List<DownloadItem>> listenModelDownloads({
   final items = <DownloadItem>[];
   final url = episode.enclosureUrl;
   if (url != null &&
-      (forShow || (await db.spineDao.alignmentsOf(work.id)).isEmpty)) {
+      (forShow || !await transcriptIsWhole(db, work.id))) {
     final plan = await transcriber.planFor(workId: work.id, enclosureUrl: url);
     if (plan.needsModel) {
       items.add(DownloadItem('${modelLabel(plan.model.id)} '

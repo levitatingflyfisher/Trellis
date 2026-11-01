@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:jobs_core/jobs_core.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/listen/listen_chain.dart';
 import 'package:trellis/features/listen/spoken_episode.dart';
@@ -242,6 +243,30 @@ void main() {
     expect(c.stateOf(work.id)!.stage, ListenStage.failed);
     expect(c.stateOf(work.id)!.message, contains('transcript'));
     expect(ran, ['transcribe']);
+  });
+
+  test('part of a transcript, still being made, is not translated: the '
+      'transcription is carried on, and a pause there stops it', () async {
+    // A transcription shown as it is made, paused after its first windows.
+    await writeTranscript();
+    await db.jobsDao.save(Job(
+        id: 'transcribe-${work.id}',
+        kind: 'transcribe',
+        state: JobState.cancelled,
+        checkpoint: null,
+        totalUnits: 9,
+        doneUnits: 2,
+        createdAtMs: 5));
+    await db.jobsDao.setPayload(
+        'transcribe-${work.id}', '{"workId": ${work.id}, "soFar": true}');
+    transcribeWorks = false;
+    final c = chain();
+
+    expect(await c.start(work, 'es'), isNull);
+
+    expect(ran, ['transcribe']);
+    expect(c.stateOf(work.id)!.stage, ListenStage.failed);
+    expect(c.stateOf(work.id)!.message, contains('transcript'));
   });
 
   test('the translator’s own sentence is what is shown when it fails',

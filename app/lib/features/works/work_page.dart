@@ -23,6 +23,8 @@ import 'package:drift/drift.dart' show TableUpdate, TableUpdateQuery;
 import 'package:flutter/material.dart';
 import 'package:openhearth_design/openhearth_design.dart';
 
+import '../feeds/episode_download_coordinator.dart'
+    show EpisodeDownloadState, downloadFraction, downloadingWords;
 import '../transcribe/job_cards.dart';
 import '../../db/database.dart' hide Alignment;
 import '../episodes/episode_actions.dart';
@@ -204,7 +206,41 @@ class _WorkPageState extends State<WorkPage> {
 
   void _onDownloads() {
     if (!mounted) return;
-    if (_onDisk(_episode) != (_facts?.downloaded ?? false)) _load();
+    if (_onDisk(_episode) != (_facts?.downloaded ?? false)) {
+      _load();
+    } else if (_downloading != null || _wasDownloading) {
+      // How far it has got, where Listen is.
+      setState(() {});
+    }
+    _wasDownloading = _downloading != null;
+  }
+
+  bool _wasDownloading = false;
+
+  /// This episode's download while one is under way; null otherwise.
+  EpisodeDownloadState? get _downloading {
+    final s = _actions?.downloader?.stateOf(_work.id);
+    return s != null && s.downloading ? s : null;
+  }
+
+  /// What Play does with this episode when it isn't downloaded, as
+  /// Settings has it; null until read.
+  bool? _playsDownloadFirst;
+
+  /// The other way to play this episode, for this one play: shown on the
+  /// page beside Listen, which does what Settings says.
+  bool get _offersPlayChoice =>
+      _isAudio &&
+      !_isAudiobook &&
+      _language.isOriginal &&
+      _playsDownloadFirst != null &&
+      _downloading == null &&
+      (_episode == null ? false : _actions?.offersPlayChoice(_episode!) ?? false);
+
+  Future<void> _playOtherWay() async {
+    _remember(WorkMode.listen);
+    await _doors.play(_work, downloadFirst: !_playsDownloadFirst!);
+    await _load();
   }
 
   @override
@@ -267,6 +303,7 @@ class _WorkPageState extends State<WorkPage> {
       orElse: () => const WorkLanguage.original(),
     );
     final captures = await _db.capturesDao.capturesOf(id);
+    final playsDownloadFirst = await _doors.player?.playsDownloadFirst();
     final stored = await loadWorkStorage(_db,
         services: _actions?.services, onlyWorkId: id);
     final versions = episode == null ||
@@ -298,6 +335,7 @@ class _WorkPageState extends State<WorkPage> {
       _translations = translations;
       _language = language;
       _captures = captures;
+      _playsDownloadFirst = playsDownloadFirst;
       _stored = stored.isEmpty ? null : stored.single;
       _versions = versions;
       _loaded = true;
@@ -637,6 +675,7 @@ class _WorkPageState extends State<WorkPage> {
   Set<String> get _shownAsButtons => {
     if (_episode?.enclosureUrl != null) ...{'play-next', 'play-last'},
     if (_showsDownload) 'download',
+    if (_offersPlayChoice) ...{'stream-now', 'download-play'},
     if (_showsTranscribe) 'transcribe',
   };
 
@@ -914,14 +953,33 @@ class _WorkPageState extends State<WorkPage> {
     );
 
     final original = four ? 'Original' : null;
-    final listen = mode(
-      WorkMode.listen,
-      Icons.headphones_outlined,
-      'Listen',
-      listenWhy,
-      four ? () => _inOriginal(_listen) : _listen,
-      sub: original,
-    );
+    final downloading = _downloading;
+    final listen = downloading == null
+        ? mode(
+            WorkMode.listen,
+            Icons.headphones_outlined,
+            'Listen',
+            listenWhy,
+            four ? () => _inOriginal(_listen) : _listen,
+            sub: original,
+          )
+        // A download under way shows where Play is (owner, 9 Nov).
+        : choice(
+            key: const Key('mode-listen'),
+            icon: SizedBox.square(
+              dimension: 24,
+              child: CircularProgressIndicator(
+                value: downloadFraction(downloading),
+                strokeWidth: 2.5,
+              ),
+            ),
+            label: 'Listen',
+            sub: downloadingWords(downloading),
+            selected: _mode == WorkMode.listen,
+            onPressed: listenWhy == null
+                ? (four ? () => _inOriginal(_listen) : _listen)
+                : null,
+          );
     final read = mode(
       WorkMode.read,
       Icons.chrome_reader_mode_outlined,
@@ -995,6 +1053,7 @@ class _WorkPageState extends State<WorkPage> {
           ],
           _learningStatus(theme, offer),
         ],
+        if (_offersPlayChoice) _playChoice(),
         for (final r in reasons)
           Padding(
             padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
@@ -1022,6 +1081,32 @@ class _WorkPageState extends State<WorkPage> {
                     : const SizedBox.shrink(),
           ),
       ],
+    );
+  }
+
+  /// Stream or download, said plainly (owner, 23 Oct): Listen does what
+  /// Settings says, and this plays it the other way, this once.
+  Widget _playChoice() {
+    final stream = _playsDownloadFirst!;
+    return Padding(
+      padding: const EdgeInsets.only(top: 4),
+      child: Align(
+        alignment: Alignment.centerLeft,
+        child: Tooltip(
+          message: stream
+              ? 'Play it now over the internet, without downloading it first'
+              : 'Download it to this phone, then play it',
+          child: TextButton.icon(
+            key: Key('page-play-other-${_work.id}'),
+            style: const ButtonStyle(
+              minimumSize: WidgetStatePropertyAll(Size(48, 48)),
+            ),
+            onPressed: _playOtherWay,
+            icon: Icon(stream ? Icons.wifi : Icons.download_outlined),
+            label: Text(stream ? 'Stream now' : 'Download, then play'),
+          ),
+        ),
+      ),
     );
   }
 
