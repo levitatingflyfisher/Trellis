@@ -7,6 +7,12 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.6.17 — 2026-11-14
+
+- **Storage counts kept pages.** Settings › Models & storage › Storage by item shows the pages a text keeps under that text: how many, about how big, and one delete. The text and its links stay, and keeping a page again gets it as it is that day. A page two texts link to counts once, under the older one.
+- **The voices’ licence record follows the owner’s ruling.** ADR-0022’s bar is the code, the weights and every voice clip, with the training data named where the maker names it. The 1.6.14 voices stay as they are.
+- **Known limit.** Keeping linked pages has not yet been tried on a phone.
+
 ## 1.6.16 — 2026-11-14
 
 - **Copies of the pages an article links to.** A saved article now keeps its links, and they look like links in the reader. Tap one to read the copy kept on this phone, to keep a copy (Trellis asks first, then gets the page once and keeps its text, dated), or to open it in the browser. Linked pages in the reader’s ⋮ lists every link and can keep them all at once. Settings › Keep linked pages when saving does it for every article you save; it is off until you turn it on. Kept pages are not listed in the Library or search: you reach them from the text that links to them, and they go when that text goes. Articles saved before this keep no links.

@@ -210,6 +210,64 @@ void main() {
     expect(find.text('Bo\'s diary'), findsNothing);
   });
 
+  group('kept pages', () {
+    late int text;
+    late int kept;
+    setUp(() async {
+      text = await db.spineDao.insertWork(
+          profileId: profile,
+          kind: 'article',
+          title: 'On the aurora',
+          persistence: 'work',
+          firstSeenEpochDay: 1);
+      await db.spineDao.insertSegments(
+          text, const [(idx: 0, kind: 'prose', text: 'See the source.')]);
+      await db.spineDao.insertLinks(text,
+          const [(segIdx: 0, start: 8, end: 14, href: 'https://s.test/a')]);
+      kept = await db.spineDao.storeKeptCopy(
+          profileId: profile,
+          href: 'https://s.test/a',
+          title: 'Source',
+          epochDay: 20000,
+          rows: const [(idx: 0, kind: 'prose', text: 'kept words here')]);
+    });
+
+    testWidgets('count under the text that links to them, never on their own',
+        (tester) async {
+      await pump(tester);
+      expect(find.text('On the aurora'), findsOneWidget);
+      expect(find.text('Source'), findsNothing);
+      expect(
+          find.descendant(
+              of: part('kept-pages', text),
+              matching: find.text('Kept linked pages')),
+          findsOneWidget);
+      expect(
+          find.descendant(
+              of: part('kept-pages', text),
+              matching: find.text('1 page, about 15 B')),
+          findsOneWidget);
+    });
+
+    testWidgets('go after one question, and the text stays', (tester) async {
+      await pump(tester);
+      await tester.tap(find.byKey(Key('stored-delete-kept-pages-$text')));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsOneWidget,
+          reason: 'Recently deleted keeps no kept page, so it asks');
+      expect(find.textContaining('fetches them again'), findsOneWidget);
+      await tester.tap(find.descendant(
+          of: find.byType(AlertDialog),
+          matching: find.text('Delete kept pages')));
+      await tester.pumpAndSettle();
+      expect(find.text('Deleted 1 kept page.'), findsOneWidget);
+      expect(part('kept-pages', text), findsNothing);
+      expect(await tester.runAsync(() => db.spineDao.workById(kept)), isNull);
+      expect(await tester.runAsync(() => db.spineDao.workById(text)),
+          isNotNull);
+    });
+  });
+
   testWidgets('a partial download is not a stored item', (tester) async {
     File('${services.audioFileFor(5, url).path}.part')
         .writeAsBytesSync(List.filled(100, 1));

@@ -1662,13 +1662,18 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
     return id;
   });
 
-  /// Kept copies no remaining text reaches, through its links or through
-  /// another kept copy's: they go with the last text that cited them.
-  Future<List<int>> _unreachedKeptCopies() async {
+  /// Each kept copy a text reaches, through its links or through another
+  /// kept copy's, with the text it counts under: the oldest text (lowest
+  /// id) that reaches it, so a page two texts cite counts once. [direct]
+  /// holds, per copy, how many texts link to it themselves.
+  Future<({Map<int, int> ownerOf, Set<int> keptIds, Map<int, int> direct})>
+      _keptCopyOwners() async {
     final kept = await (select(works)
           ..where((w) => w.kind.equals(keptCopyKind)))
         .get();
-    if (kept.isEmpty) return const [];
+    if (kept.isEmpty) {
+      return (ownerOf: <int, int>{}, keptIds: <int>{}, direct: <int, int>{});
+    }
     final keptIds = {for (final w in kept) w.id};
     final copyOf = {
       for (final w in kept) (w.profileId, w.sourceUrl ?? ''): w.id,
@@ -1684,19 +1689,110 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
       profileOf[w] = r.read<int>('p');
       hrefsOf.putIfAbsent(w, () => []).add(r.read<String>('h'));
     }
-    final reached = <int>{};
-    final todo = [
+    final ownerOf = <int, int>{};
+    final direct = <int, int>{};
+    final texts = [
       for (final w in hrefsOf.keys)
         if (!keptIds.contains(w)) w,
-    ];
-    while (todo.isNotEmpty) {
-      final w = todo.removeLast();
-      for (final h in hrefsOf[w] ?? const <String>[]) {
-        final c = copyOf[(profileOf[w]!, keptKeyOf(h))];
-        if (c != null && reached.add(c)) todo.add(c);
+    ]..sort();
+    for (final text in texts) {
+      final cited = <int>{
+        for (final h in hrefsOf[text]!)
+          ?copyOf[(profileOf[text]!, keptKeyOf(h))],
+      };
+      for (final c in cited) {
+        direct[c] = (direct[c] ?? 0) + 1;
+      }
+      // A copy an older text owns has its own reach owned already.
+      final todo = [
+        for (final c in cited)
+          if (!ownerOf.containsKey(c)) c,
+      ];
+      for (final c in todo) {
+        ownerOf[c] = text;
+      }
+      while (todo.isNotEmpty) {
+        final w = todo.removeLast();
+        for (final h in hrefsOf[w] ?? const <String>[]) {
+          final c = copyOf[(profileOf[w]!, keptKeyOf(h))];
+          if (c != null && !ownerOf.containsKey(c)) {
+            ownerOf[c] = text;
+            todo.add(c);
+          }
+        }
       }
     }
-    return [for (final id in keptIds) if (!reached.contains(id)) id];
+    return (ownerOf: ownerOf, keptIds: keptIds, direct: direct);
+  }
+
+  /// Kept copies no remaining text reaches, through its links or through
+  /// another kept copy's: they go with the last text that cited them.
+  Future<List<int>> _unreachedKeptCopies() async {
+    final o = await _keptCopyOwners();
+    return [
+      for (final id in o.keptIds)
+        if (!o.ownerOf.containsKey(id)) id,
+    ];
+  }
+
+  /// The kept pages each text holds on this device (the storage page):
+  /// the copies counted under it, their size (text and link addresses)
+  /// and whether another text links to one of them too ([shared]). Only
+  /// text [workId]'s when given.
+  Future<List<({int workId, List<int> copyIds, int bytes, bool shared})>>
+      keptPagesByText({int? workId}) async {
+    final o = await _keptCopyOwners();
+    final byText = <int, List<int>>{};
+    o.ownerOf.forEach((copy, text) {
+      if (workId == null || text == workId) {
+        byText.putIfAbsent(text, () => []).add(copy);
+      }
+    });
+    if (byText.isEmpty) return const [];
+    final ids = [for (final l in byText.values) ...l];
+    final size = <int, int>{};
+    for (final c in chunksForSql(ids)) {
+      final marks = List.filled(c.length, '?').join(',');
+      final rows = await customSelect(
+          'SELECT work_id, SUM(n) AS bytes FROM ('
+          ' SELECT work_id, LENGTH(CAST(body AS BLOB)) AS n FROM segments'
+          ' WHERE work_id IN ($marks)'
+          ' UNION ALL'
+          ' SELECT work_id, LENGTH(CAST(href AS BLOB)) FROM segment_links'
+          ' WHERE work_id IN ($marks)'
+          ') GROUP BY work_id',
+          variables: [
+            for (final id in [...c, ...c]) Variable.withInt(id),
+          ],
+          readsFrom: {segments, segmentLinks}).get();
+      for (final r in rows) {
+        size[r.read<int>('work_id')] = r.read<int>('bytes');
+      }
+    }
+    return [
+      for (final MapEntry(key: text, value: copies) in byText.entries)
+        (
+          workId: text,
+          copyIds: copies..sort(),
+          bytes: copies.fold(0, (a, c) => a + (size[c] ?? 0)),
+          shared: copies.any((c) => (o.direct[c] ?? 0) > 1),
+        ),
+    ];
+  }
+
+  /// Deletes the kept copies among [workIds]; any other work among them
+  /// stays. A copy reached only through one of them goes too.
+  Future<void> deleteKeptCopies(Iterable<int> workIds) async {
+    final ids = workIds.toSet().toList();
+    final kept = <int>[];
+    for (final c in chunksForSql(ids)) {
+      kept.addAll(await (selectOnly(works)
+            ..addColumns([works.id])
+            ..where(works.id.isIn(c) & works.kind.equals(keptCopyKind)))
+          .map((r) => r.read(works.id)!)
+          .get());
+    }
+    await deleteWorks(kept);
   }
 
   Future<void> insertSegments(

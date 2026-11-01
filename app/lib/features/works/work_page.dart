@@ -599,6 +599,7 @@ class _WorkPageState extends State<WorkPage> {
         StoredKind.transcript => 'delete-transcript',
         StoredKind.translation => 'delete-translation-${p.lang}',
         StoredKind.decoded => 'delete-decoded',
+        StoredKind.keptPages => 'delete-kept-pages',
       };
 
   StoredPart? _deletablePart(String value) {

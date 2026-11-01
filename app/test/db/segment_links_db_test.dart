@@ -134,6 +134,73 @@ void main() {
         ['https://n.test/']);
   });
 
+  group('kept pages in storage', () {
+    // 'kept words here' is 15 bytes; each link adds its address.
+    test('a text\'s kept pages count under it, with their size', () async {
+      final a = await article('A', ['https://a.test/1', 'https://b.test/2']);
+      final k1 = await keep('https://a.test/1');
+      final k2 = await keep('https://b.test/2#x');
+      final rows = await db.spineDao.keptPagesByText();
+      expect(rows, hasLength(1));
+      expect(rows.single.workId, a);
+      expect(rows.single.copyIds.toSet(), {k1, k2});
+      expect(rows.single.bytes, 30);
+      expect(rows.single.shared, isFalse);
+    });
+
+    test('a page kept from a kept page counts under the first text',
+        () async {
+      final a = await article('A', ['https://a.test/1']);
+      final k1 = await keep('https://a.test/1', links: ['https://c.test/3']);
+      final k3 = await keep('https://c.test/3');
+      final row = (await db.spineDao.keptPagesByText()).single;
+      expect(row.workId, a);
+      expect(row.copyIds.toSet(), {k1, k3});
+      expect(row.bytes, 15 + 'https://c.test/3'.length + 15);
+    });
+
+    test('a page two texts link to counts once, under the older, as shared',
+        () async {
+      final a = await article('A', ['https://a.test/1']);
+      final b = await article('B', ['https://a.test/1', 'https://b.test/2']);
+      final k1 = await keep('https://a.test/1');
+      final k2 = await keep('https://b.test/2');
+      final rows = {
+        for (final r in await db.spineDao.keptPagesByText()) r.workId: r
+      };
+      expect(rows[a]!.copyIds, [k1]);
+      expect(rows[a]!.shared, isTrue);
+      expect(rows[b]!.copyIds, [k2]);
+      expect(rows[b]!.shared, isFalse);
+    });
+
+    test('one text\'s count alone', () async {
+      await article('A', ['https://a.test/1']);
+      final b = await article('B', ['https://b.test/2']);
+      await keep('https://a.test/1');
+      final k2 = await keep('https://b.test/2');
+      final rows = await db.spineDao.keptPagesByText(workId: b);
+      expect(rows, hasLength(1));
+      expect(rows.single.workId, b);
+      expect(rows.single.copyIds, [k2]);
+    });
+
+    test('deleting a text\'s kept pages keeps the text and its links',
+        () async {
+      final a = await article('A', ['https://a.test/1']);
+      final k1 = await keep('https://a.test/1', links: ['https://c.test/3']);
+      final k3 = await keep('https://c.test/3');
+      await db.spineDao.deleteKeptCopies([k1, a]);
+      expect(await db.spineDao.workById(a), isNotNull,
+          reason: 'only kept copies are deleted here');
+      expect(await db.spineDao.linksOf(a), hasLength(1));
+      expect(await db.spineDao.workById(k1), isNull);
+      expect(await db.spineDao.workById(k3), isNull,
+          reason: 'nothing reaches it any more');
+      expect(await db.spineDao.keptPagesByText(), isEmpty);
+    });
+  });
+
   test('schema migration v35 -> v36 adds the links table, keeping every row',
       () async {
     final dir = Directory.systemTemp.createTempSync('trellis-migration-v36');

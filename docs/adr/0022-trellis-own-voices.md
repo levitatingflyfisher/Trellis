@@ -14,13 +14,16 @@ Kokoro. On the owner's phone the only languages Trellis could speak were
 Spanish, French and Portuguese, all through Supertonic 2, whose weights are
 OpenRAIL-M and whose maker is reported dissolved.
 
-A clean licence here means the code, the weights and the training data
+A clean licence here means the code, the weights and every voice clip
 are MIT, Apache-2.0, BSD, CC-BY or CC0, and nothing at run time needs
-espeak-ng (GPL-3).
+espeak-ng (GPL-3). Where the maker names its training data, the voices
+reference names it too. (Owner's ruling, 14 November 2026: the earlier
+bar also required clean training data. That was this ADR's own rule,
+not a law or a licence term; Trellis ships under the licences of the
+weights and the clips, and the NOTICE credits them.)
 
-Correction (13 November, after 1.6.14 shipped): the training data of
-both engines was not checked before the release, and neither meets that
-bar as written.
+What the makers say about training data (found 13 November, after
+1.6.14 shipped):
 - **Pocket TTS.** Kyutai does not state the training data of its
   released models. The paper its model card cites (arXiv 2509.06926,
   appendix D) trained its TTS models on AMI, Earnings-22 (CC-BY-SA),
@@ -30,8 +33,8 @@ bar as written.
   granted" by LongMaoData, a dataset company, with no licence named.
   Synthetic English made with closed TTS services is also mixed in.
 - The weights themselves are CC-BY-4.0 and Apache-2.0, and every voice
-  clip is CC0 or CC-BY-4.0. Whether the shipped voices stay is the
-  owner's call (board, 13 November).
+  clip is CC0 or CC-BY-4.0. The owner kept the shipped voices (14
+  November), with no new disclaimer and no licence change.
 
 ## Decision
 

@@ -1,0 +1,1 @@
+Storage by item now shows the pages an article keeps, under that article, with their size and one delete.

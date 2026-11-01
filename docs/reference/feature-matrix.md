@@ -824,7 +824,7 @@ Paths are under `app/test/` unless they say otherwise.
   `packages/comms_core/test/feed_archive_test.dart`,
   `packages/comms_core/test/feed_parser_test.dart`). Not compared yet:
   one real show side by side with AntennaPod on a phone.
-- ✅ built, not yet released: **Frozen copies of the pages a text cites**
+- ✅ released in 1.6.16: **Frozen copies of the pages a text cites**
   (owner, 21 and 24 Oct). A saved article keeps its links (schema 36,
   `segment_links`); the linked words look like links in the reader. A
   tap offers the copy kept on this device with the day it was kept,
@@ -837,7 +837,11 @@ Paths are under `app/test/` unless they say otherwise.
   a backup (`features/references/`, `db/segment_links_db_test.dart`,
   `reader/linked_words_test.dart`,
   `packages/intake_core/test/article_links_test.dart`). Articles saved
-  before keep no links. Not heard on a phone yet.
+  before keep no links. Storage by item counts kept pages under the text
+  that links to them (Kept linked pages: how many, about how big, one
+  delete that asks first, since Recently deleted keeps no copy); a page
+  two texts link to counts once, under the older text
+  (`models/storage_by_item_test.dart`). Not tried on a phone yet.
 
 ## Fleet rollout (2026-09): shared conventions adopted
 

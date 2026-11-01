@@ -80,8 +80,9 @@ class _StorageByItemScreenState extends State<StorageByItemScreen> {
                     child: Padding(
                       padding: const EdgeInsets.all(24),
                       child: Text(
-                        'Nothing stored yet. Downloads, transcripts and '
-                        'translations show here, item by item.',
+                        'Nothing stored yet. Downloads, transcripts, '
+                        'translations and kept pages show here, item by '
+                        'item.',
                         key: const Key('storage-by-item-empty'),
                         textAlign: TextAlign.center,
                         style: theme.textTheme.bodyMedium,

@@ -19,7 +19,9 @@ import '../reader/translation/language_names.dart';
 import '../reader/translation/translation_job.dart';
 import 'recently_deleted.dart';
 
-enum StoredKind { audio, decoded, transcript, translation }
+/// [keptPages]: the copies of linked pages a text keeps (frozen
+/// references), counted under that text.
+enum StoredKind { audio, decoded, transcript, translation, keptPages }
 
 class StoredPart {
   final StoredKind kind;
@@ -28,22 +30,40 @@ class StoredPart {
   final String? lang;
   final int bytes;
 
-  const StoredPart(this.kind, this.bytes, {this.lang});
+  /// The kept copies a [StoredKind.keptPages] part holds; empty otherwise.
+  final List<int> keptIds;
+
+  /// Whether another text links to one of [keptIds] too.
+  final bool shared;
+
+  const StoredPart(this.kind, this.bytes,
+      {this.lang, this.keptIds = const [], this.shared = false});
 
   /// Text in the database is measured, but the file only shrinks once
   /// SQLite reuses the pages, so its size is "about".
   bool get inDatabase =>
+      kind != StoredKind.audio && kind != StoredKind.decoded;
+
+  /// Whether Recently deleted can keep it: a kept page is not kept there.
+  bool get restorable =>
       kind == StoredKind.transcript || kind == StoredKind.translation;
+
+  String get _pages =>
+      keptIds.length == 1 ? '1 page' : '${keptIds.length} pages';
 
   String get label => switch (kind) {
         StoredKind.audio => 'Downloaded audio',
         StoredKind.decoded => 'Decoded audio',
         StoredKind.transcript => 'Transcript',
         StoredKind.translation => '${_langName(lang!)} translation',
+        StoredKind.keptPages => 'Kept linked pages',
       };
 
-  String get sizeLabel =>
-      inDatabase ? 'about ${formatBytes(bytes)}' : formatBytes(bytes);
+  String get sizeLabel => kind == StoredKind.keptPages
+      ? '$_pages, about ${formatBytes(bytes)}'
+      : inDatabase
+          ? 'about ${formatBytes(bytes)}'
+          : formatBytes(bytes);
 
   /// The ⋮ item and the delete button: names the act.
   String get deleteLabel => switch (kind) {
@@ -51,21 +71,37 @@ class StoredPart {
         StoredKind.decoded => 'Delete decoded audio',
         StoredKind.transcript => 'Delete transcript',
         StoredKind.translation => 'Delete ${_langName(lang!)} translation',
+        StoredKind.keptPages => 'Delete kept pages',
       };
 
-  /// A stable key fragment: `audio`, `transcript`, `translation-ru`.
-  String get keyName =>
-      kind == StoredKind.translation ? 'translation-$lang' : kind.name;
+  /// A stable key fragment: `audio`, `transcript`, `translation-ru`,
+  /// `kept-pages`.
+  String get keyName => switch (kind) {
+        StoredKind.translation => 'translation-$lang',
+        StoredKind.keptPages => 'kept-pages',
+        _ => kind.name,
+      };
 
   @override
   bool operator ==(Object other) =>
       other is StoredPart &&
       other.kind == kind &&
       other.lang == lang &&
-      other.bytes == bytes;
+      other.bytes == bytes &&
+      other.shared == shared &&
+      _sameIds(other.keptIds, keptIds);
+
+  static bool _sameIds(List<int> a, List<int> b) {
+    if (a.length != b.length) return false;
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
 
   @override
-  int get hashCode => Object.hash(kind, lang, bytes);
+  int get hashCode =>
+      Object.hash(kind, lang, bytes, shared, Object.hashAll(keptIds));
 }
 
 String _langName(String code) =>
@@ -136,6 +172,12 @@ Future<List<WorkStorage>> loadWorkStorage(
             ? StoredPart(StoredKind.transcript, r.bytes)
             : StoredPart(StoredKind.translation, r.bytes, lang: r.lang));
   }
+  for (final r in await db.spineDao.keptPagesByText(workId: onlyWorkId)) {
+    add(
+        r.workId,
+        StoredPart(StoredKind.keptPages, r.bytes,
+            keptIds: r.copyIds, shared: r.shared));
+  }
 
   final ids = parts.keys.toList();
   final works = <int, Work>{};
@@ -188,7 +230,7 @@ void _scan(Directory dir, void Function(int id, String name, int bytes) on) {
 Future<bool> confirmDeletePart(
     BuildContext context, WorkStorage w, StoredPart p,
     {bool restorable = false}) {
-  if (restorable && p.inDatabase) return Future.value(true);
+  if (restorable && p.restorable) return Future.value(true);
   final (title, message) = switch (p.kind) {
     StoredKind.audio => (
         'Remove download?',
@@ -212,6 +254,14 @@ Future<bool> confirmDeletePart(
     StoredKind.translation => (
         'Delete the ${_langName(p.lang!)} translation?',
         'The transcript stays. You can translate again.'
+      ),
+    StoredKind.keptPages => (
+        'Delete kept pages?',
+        [
+          'The kept copies go (${p._pages}). The text and its links stay. '
+              'Keeping them again fetches them again, as they are that day.',
+          if (p.shared) ' Another text links to one of them too.',
+        ].join()
       ),
   };
   return showOhConfirm(
@@ -297,6 +347,9 @@ Future<String> deletePart(
               delete: () => db.spineDao.deleteTranslation(id, lang)) ??
           'Deleted the ${_langName(lang)} translation. Restore it from '
               'Recently deleted.';
+    case StoredKind.keptPages:
+      await db.spineDao.deleteKeptCopies(p.keptIds);
+      return 'Deleted ${p._pages.replaceFirst('page', 'kept page')}.';
   }
 }
 
