@@ -700,6 +700,7 @@ class _RiverScreenState extends State<RiverScreen>
           ? () => _selection.toggle(e.work.id)
           : () => _openItem(e),
       onPlay: isAudio ? () => _playItem(e) : null,
+      player: widget.playerController,
       onRead: _workDoors.canRead(entry)
           ? () async {
               await _workDoors.readFromRow(context, entry);

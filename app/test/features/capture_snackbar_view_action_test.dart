@@ -58,6 +58,9 @@ void main() {
     await tester.tap(find.byKey(Key('play-$workId')));
     await tester.pumpAndSettle();
 
+    // 1.5.9: Capture lives in the bar's ⋮ menu.
+    await tester.tap(find.byKey(const Key('player-menu')));
+    await tester.pumpAndSettle();
     expect(find.byKey(const Key('player-capture')), findsOneWidget);
     await tester.tap(find.byKey(const Key('player-capture')));
     await tester.pump();

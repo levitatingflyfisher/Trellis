@@ -16,6 +16,8 @@ import '../episodes/episode_actions.dart';
 import '../episodes/episode_selection.dart' show EpisodeBulk;
 import '../models/format.dart';
 import '../reader/translation/language_names.dart';
+import '../reader/translation/translation_job.dart';
+import 'recently_deleted.dart';
 
 enum StoredKind { audio, decoded, transcript, translation }
 
@@ -180,9 +182,13 @@ void _scan(Directory dir, void Function(int id, String name, int bytes) on) {
   }
 }
 
-/// Asks once, honest about what goes and how it comes back.
+/// Asks once, honest about what goes and how it comes back. A transcript
+/// or translation that Recently deleted keeps ([restorable]) goes without
+/// asking: the lasting way back replaces the question (1.5.9).
 Future<bool> confirmDeletePart(
-    BuildContext context, WorkStorage w, StoredPart p) {
+    BuildContext context, WorkStorage w, StoredPart p,
+    {bool restorable = false}) {
+  if (restorable && p.inDatabase) return Future.value(true);
   final (title, message) = switch (p.kind) {
     StoredKind.audio => (
         'Remove download?',
@@ -220,7 +226,10 @@ Future<bool> confirmDeletePart(
 
 /// Deletes [p] and says what happened. A transcribing job keeps what it
 /// is using (the audio, its decoded copy, the transcript it will write),
-/// the same rule as Remove download.
+/// the same rule as Remove download; a translating one keeps its
+/// language, and the transcript that language is keyed to. With a
+/// Recently deleted folder ([DeviceServices.recentlyDeleted]; none on the
+/// web) a transcript or translation is kept there first.
 Future<String> deletePart(
   WorkStorage w,
   StoredPart p, {
@@ -249,7 +258,7 @@ Future<String> deletePart(
       }
       return 'Removed the download.';
     case StoredKind.decoded:
-      if (await _transcribing(db, id)) {
+      if (await isTranscribing(db, id)) {
         return 'Kept: a transcription is using it.';
       }
       if (services != null) {
@@ -258,15 +267,107 @@ Future<String> deletePart(
       }
       return 'Deleted the decoded audio.';
     case StoredKind.transcript:
-      if (await _transcribing(db, id)) {
+      if (await isTranscribing(db, id)) {
         return 'Kept: a transcription is running for this item.';
       }
-      await db.spineDao.deleteTranscript(id);
-      return 'Deleted the transcript. You can transcribe again.';
+      if (await isTranslating(db, id)) {
+        return 'Kept: a translation is running for this item.';
+      }
+      final bin = services?.recentlyDeleted;
+      if (bin == null) {
+        await db.spineDao.deleteTranscript(id);
+        return 'Deleted the transcript. You can transcribe again.';
+      }
+      return await _keepThenDelete(db, bin, w, p,
+              snapshot: () => db.spineDao.snapshotTranscript(id),
+              delete: () => db.spineDao.deleteTranscript(id)) ??
+          'Deleted the transcript. Restore it from Recently deleted.';
     case StoredKind.translation:
-      await db.spineDao.deleteTranslation(id, p.lang!);
-      return 'Deleted the ${_langName(p.lang!)} translation.';
+      final lang = p.lang!;
+      if (await isTranslating(db, id, lang)) {
+        return 'Kept: a translation is running for this item.';
+      }
+      final bin = services?.recentlyDeleted;
+      if (bin == null) {
+        await db.spineDao.deleteTranslation(id, lang);
+        return 'Deleted the ${_langName(lang)} translation.';
+      }
+      return await _keepThenDelete(db, bin, w, p,
+              snapshot: () => db.spineDao.snapshotTranslation(id, lang),
+              delete: () => db.spineDao.deleteTranslation(id, lang)) ??
+          'Deleted the ${_langName(lang)} translation. Restore it from '
+              'Recently deleted.';
   }
+}
+
+/// Reads, saves and deletes in one transaction: if the copy can't be
+/// written nothing is deleted, and nothing can change between what is
+/// kept and what goes. Null when it went; otherwise why it was kept. The
+/// files aren't part of the transaction, so a delete that fails after the
+/// copy was saved lets the copy go too: Recently deleted never lists
+/// something that is still there.
+Future<String?> _keepThenDelete(
+  AppDatabase db,
+  RecentlyDeleted bin,
+  WorkStorage w,
+  StoredPart p, {
+  required Future<SnapshotRows> Function() snapshot,
+  required Future<void> Function() delete,
+}) async {
+  final id = bin.newId(w.workId, p.kind, p.lang);
+  try {
+    await db.transaction(() async {
+      final rows = await snapshot();
+      try {
+        await bin.save(
+            DeletedSnapshot(
+              id: id,
+              workId: w.workId,
+              workTitle: w.title,
+              kind: p.kind,
+              lang: p.lang,
+              deletedAt: bin.now(),
+              bytes: p.bytes,
+            ),
+            rows);
+      } catch (e) {
+        throw _CopyNotSaved(e);
+      }
+      await delete();
+    });
+    return null;
+  } catch (e) {
+    debugPrint('Delete of ${w.workId} ${p.kind.name} kept: $e');
+    try {
+      await bin.discard(id);
+    } catch (e) {
+      debugPrint('Recently deleted: could not discard $id: $e');
+    }
+    return deleteFailedMessage(e);
+  }
+}
+
+class _CopyNotSaved implements Exception {
+  final Object cause;
+  _CopyNotSaved(this.cause);
+  @override
+  String toString() => 'copy not saved: $cause';
+}
+
+/// Why a delete that threw kept everything, in plain words.
+@visibleForTesting
+String deleteFailedMessage(Object error) {
+  final cause = error is _CopyNotSaved ? error.cause : error;
+  // ENOSPC is 28 on Linux and Android, the only tier that keeps copies.
+  if (cause is FileSystemException &&
+      (cause.osError?.errorCode == 28 ||
+          (cause.osError?.message.contains('No space') ?? false))) {
+    return 'Kept: there was no room to keep a copy, so nothing was deleted.';
+  }
+  if (error is _CopyNotSaved || cause is FileSystemException) {
+    return 'Kept: a copy couldn’t be saved, so nothing was deleted.';
+  }
+  return 'Kept: it couldn’t be deleted, so nothing changed.';
 }
 
 /// Deletes [id]'s complete files in [dir]; returns how many.
@@ -284,17 +385,35 @@ int _deleteNamed(Directory dir, int id) {
   return n;
 }
 
-Future<bool> _transcribing(AppDatabase db, int workId) async {
+/// Whether an unfinished transcribe job (either stage) holds [workId].
+Future<bool> isTranscribing(AppDatabase db, int workId) async =>
+    (await _transcribeJobsOf(db, workId)).isNotEmpty;
+
+/// Whether something is writing [workId]'s translation into [lang] (any
+/// language when null). Two writers: a transcribe-and-translate job, from
+/// the same job rows [isTranscribing] reads, whose Whisper translate
+/// stage only ever writes English; and the reader's run, which has no job
+/// row and is asked directly ([TranslationRun.isLive]).
+Future<bool> isTranslating(AppDatabase db, int workId, [String? lang]) async {
+  if (TranslationRun.isLive(workId, lang)) return true;
+  if (lang != null && lang != 'en') return false;
+  return (await _transcribeJobsOf(db, workId))
+      .any((payload) => payload['translate'] == true);
+}
+
+Future<List<Map<Object?, Object?>>> _transcribeJobsOf(
+    AppDatabase db, int workId) async {
+  final out = <Map<Object?, Object?>>[];
   for (final j in await db.jobsDao.unfinished()) {
     if (j.kind != 'transcribe') continue;
     try {
       final payload = jsonDecode(j.payloadJson);
       if (payload is Map && (payload['workId'] as num?)?.toInt() == workId) {
-        return true;
+        out.add(payload);
       }
     } on FormatException {
       continue;
     }
   }
-  return false;
+  return out;
 }

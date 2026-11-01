@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:trellis/features/feeds/feed_detail_screen.dart';
 import 'package:trellis/features/works/work_page.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/main.dart';
@@ -353,6 +354,43 @@ void main() {
     expect(find.byKey(const Key('mini-player')), findsOneWidget);
   });
 
+  // 1.5.9, user: tapping the bar should open the episode, and the show
+  // should be easy to reach. Both open inside the tab, under its bar.
+  testWidgets('the bar opens its episode and its show inside the tab',
+      (tester) async {
+    final profileId = await seedProfile();
+    final feedId = await db.feedsDao.insertFeed(
+      profileId: profileId,
+      url: 'https://a/f',
+      title: 'A feed',
+    );
+    final workId = await seedRiverItem(
+      profileId: profileId,
+      feedId: feedId,
+      title: 'An audio item',
+      publishedAtMs: 1000,
+      enclosureUrl: 'https://a/1.mp3',
+    );
+
+    await pumpApp(tester, ScriptedFetcher((u, h) => textResponse(_rssOne)));
+    await openRiver(tester);
+    await tester.tap(find.byKey(Key('play-$workId')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('player-open-work')));
+    await tester.pumpAndSettle();
+    expect(find.byType(WorkPage), findsOneWidget);
+    expect(find.byType(NavigationBar), findsOneWidget,
+        reason: 'opened in the tab, so the bottom bar stays');
+
+    await tester.tap(find.byKey(const Key('player-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Go to show'));
+    await tester.pumpAndSettle();
+    expect(find.byType(FeedDetailScreen), findsOneWidget);
+    expect(find.byType(NavigationBar), findsOneWidget);
+  });
+
   // 1.5.5 (user: "I'd like the little pop up of play controls to exist
   // wherever I am in the app"): pushed pages carry the bar too, once,
   // and a popup over the shell never adds a second.
@@ -383,7 +421,10 @@ void main() {
     expect(find.byType(WorkPage), findsOneWidget);
     expect(find.byKey(const Key('mini-player')), findsOneWidget);
 
-    // Its sleep timer opens from the bar above the Navigator.
+    // Its sleep timer opens from the bar above the Navigator, through
+    // the bar's ⋮ menu.
+    await tester.tap(find.byKey(const Key('player-menu')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('open-sleep-timer')));
     await tester.pumpAndSettle();
     expect(find.byType(BottomSheet), findsOneWidget);
@@ -1160,6 +1201,8 @@ void main() {
 
       await pumpApp(tester, ScriptedFetcher((u, h) => textResponse(_rssOne)));
       await tester.tap(find.byKey(Key('play-$workId')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('player-menu')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('open-queue')));
       await tester.pumpAndSettle();

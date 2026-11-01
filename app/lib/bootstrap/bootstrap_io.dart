@@ -8,10 +8,12 @@
 /// decisions and are what the bootstrap tests pin.
 library;
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:comms_core/comms_core.dart';
 import 'package:drift/drift.dart' show DatabaseConnection;
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:drift/native.dart';
 import 'package:just_audio_background/just_audio_background.dart';
 import 'package:path/path.dart' as p;
@@ -75,7 +77,8 @@ File databaseFileIn(Directory documentsDir) =>
 /// threaded through for the storage panel. Also sweeps [speechTempDir]
 /// (ADR-0006): a session killed mid-speech leaves WAVs behind with no
 /// chance to run its own stop()/dispose() cleanup — this is app start's
-/// one shot to reclaim them. Real disk IO, so it belongs here in the async
+/// one shot to reclaim them, and the one place Recently deleted lets go
+/// of what has waited 30 days. Real disk IO, so it belongs here in the async
 /// wrapper, never in [servicesFor]'s channel-free core, and never on the
 /// web side (dart:io Directory operations throw under dart2js).
 Future<DeviceServices> createServices() async {
@@ -84,7 +87,26 @@ Future<DeviceServices> createServices() async {
     databaseFile: databaseFileIn(await getApplicationDocumentsDirectory()),
   );
   await sweepStaleSpeechTempFiles(services.speechTempDir);
+  await purgeRecentlyDeleted(services);
+  // Not awaited: launch never waits on disk housekeeping.
+  unawaited(tidyModels(services));
   return services;
+}
+
+/// Deletes model files the registry no longer pins (1.5.9: the old
+/// 175-193 MB decoders, Qwen). Prune only: it touches no network
+/// (ADR-0003: no egress at boot without a user gesture). The config
+/// top-up runs where the user asks for translation, and prune never
+/// needs it first, since it judges only files on disk. Never throws: a
+/// model left on disk a while longer harms nothing.
+Future<void> tidyModels(DeviceServices services) async {
+  try {
+    final freed =
+        await services.modelStore.pruneUnreferenced(services.registry);
+    if (freed > 0) debugPrint('Models: pruned $freed bytes no longer pinned');
+  } catch (e) {
+    debugPrint('Models: prune skipped: $e');
+  }
 }
 
 /// Channel-free core of [createServices].
@@ -128,3 +150,14 @@ Future<void> initAudioBackground() => JustAudioBackground.init(
   androidNotificationIcon: audioNotificationIcon,
   androidNotificationOngoing: true,
 );
+
+/// Lets go of deleted transcripts and translations kept 30 days. Never
+/// throws: a failure here would fall back to the detached services, and
+/// a stale copy kept a while longer harms nothing.
+Future<void> purgeRecentlyDeleted(DeviceServices services) async {
+  try {
+    await services.recentlyDeleted?.purgeOlderThan(const Duration(days: 30));
+  } catch (e) {
+    debugPrint('Recently deleted: purge skipped: $e');
+  }
+}

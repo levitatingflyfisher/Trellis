@@ -116,8 +116,28 @@ void main() {
         reason: 'text in the database is measured, not freed at once');
   });
 
-  testWidgets('the transcript asks once, then it and its translations go',
+  testWidgets(
+      'the transcript goes at once, with its translations, and waits in '
+      'Recently deleted', (tester) async {
+    await pump(tester);
+    await tester.tap(find.byKey(Key('stored-delete-transcript-$episode')));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing,
+        reason: 'a lasting way back replaces the question');
+    expect(
+        find.text('Deleted the transcript. Restore it from Recently deleted.'),
+        findsOneWidget);
+    expect(part('transcript', episode), findsNothing);
+    expect(part('translation-es', episode), findsNothing);
+    expect(part('audio', episode), findsOneWidget);
+    expect(await tester.runAsync(() => db.spineDao.alignmentsOf(episode)),
+        isEmpty);
+    expect(await tester.runAsync(services.recentlyDeleted!.list), hasLength(1));
+  });
+
+  testWidgets('the web tier keeps no copy, so it still asks once',
       (tester) async {
+    services = testServices(dir, localMlAvailable: false);
     await pump(tester);
     await tester.tap(find.byKey(Key('stored-delete-transcript-$episode')));
     await tester.pumpAndSettle();
@@ -131,7 +151,6 @@ void main() {
     await delete(tester, 'transcript', episode);
     expect(part('transcript', episode), findsNothing);
     expect(part('translation-es', episode), findsNothing);
-    expect(part('audio', episode), findsOneWidget);
     expect(await db.spineDao.alignmentsOf(episode), isEmpty);
   });
 

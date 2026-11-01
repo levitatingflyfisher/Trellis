@@ -110,6 +110,9 @@ class JustAudioEpisodePlayer implements EpisodePlayer {
   bool get playing => _player.playing;
 
   @override
+  bool get idle => _player.processingState == ProcessingState.idle;
+
+  @override
   Stream<Duration> get positionStream => _player.positionStream;
 
   @override

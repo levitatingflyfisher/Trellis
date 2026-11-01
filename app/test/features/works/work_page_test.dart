@@ -596,6 +596,18 @@ void main() {
       await tester.pumpAndSettle();
     }
 
+    // A transcript or translation waits in Recently deleted instead
+    // (1.5.9), so it goes without asking.
+    Future<void> menuDeleteKept(WidgetTester tester, String key) async {
+      await tester.tap(find.byKey(const Key('work-page-menu')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(Key(key)));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(find.textContaining('Restore it from Recently deleted.'),
+          findsOneWidget);
+    }
+
     testWidgets('nothing stored, nothing to delete in the ⋮', (tester) async {
       await pumpPage(tester, episode);
       final values = await pageMenuValues(tester);
@@ -624,8 +636,7 @@ void main() {
       await transcribeEpisode();
       await pumpPage(tester, episode);
       expect(find.byKey(Key('page-transcribe-$episode')), findsNothing);
-      await menuDelete(
-          tester, 'delete-transcript-$episode', 'Delete transcript');
+      await menuDeleteKept(tester, 'delete-transcript-$episode');
       expect(await db.spineDao.alignmentsOf(episode), isEmpty);
       expect(find.byKey(Key('page-transcribe-$episode')), findsOneWidget);
     });
@@ -641,8 +652,7 @@ void main() {
           body: 'El pantano al alba.');
       await pumpPage(tester, article);
       expect(find.byKey(const Key('lang-es')), findsOneWidget);
-      await menuDelete(tester, 'delete-translation-es-$article',
-          'Delete Spanish translation');
+      await menuDeleteKept(tester, 'delete-translation-es-$article');
       expect(await db.spineDao.translationLangsOf(article), isEmpty);
       expect(find.byKey(const Key('lang-es')), findsNothing);
     });

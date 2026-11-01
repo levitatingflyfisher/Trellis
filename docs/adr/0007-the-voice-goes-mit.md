@@ -3,7 +3,8 @@
 - Status: Accepted (the engine, the registry entry, and sherpa's removal
   are shipped; proven through the interface with a faked ONNX Runtime
   boundary, not yet exercised on real hardware — see Consequences)
-- Date: 2026-08-14
+- Date: 2026-08-14; amended 2026-11-07 (the voice moved to T1 in
+  1.5.8, and was heard on an emulator in 1.5.9; see the last section)
 - Supersedes: ADR-0006's Licensing section (that section stays as
   written — a record of what was true when it was written — this ADR is
   the current answer; ADR-0006 now carries a pointer to here rather than
@@ -189,6 +190,9 @@ consumer is corpse enough to remove on its own, independently
 reviewable terms.
 
 ### minTier moves from t1 to t2
+
+(Reversed in 1.5.8: the voice is back at t1. See “1.5.8: the voice moves
+to T1” at the end.)
 
 Piper's voice was 23.4MB, registered at `t1` ("cheap phone + one 40MB
 download"). Supertonic's is ~263MB — a T1 device downloading whisper-
@@ -400,3 +404,35 @@ options) without committing to either here. Not built this pass.
   Supertone's own release note) is a recorded, low-risk future re-pin —
   not evaluated further this pass, per this campaign's own scope
   discipline.
+
+## 1.5.8: the voice moves to T1 (amended 2026-11-07)
+
+`supertonic-en-m1` registers at `DeviceTier.t1` since 1.5.8, reversing
+“minTier moves from t1 to t2” above. The app has no tier probe: every
+device runs at T1 (`DeviceServices`’ default tier). At t2,
+`resolveSpeechEngine` never picked the voice, so a phone that had
+downloaded all 263 MB of it still read aloud with the system voice. The
+size argument above still holds as a fact about the download, and the
+Models screen states the size before any tap; what it can’t do is gate
+the voice behind a tier no device is ever placed in. Translation pairs sit
+at t1 for the same reason (ADR-0020).
+
+Guards: `packages/ml_runtime/test/registry_test.dart` (“the neural voice
+is picked at t1, the tier the app runs at”, which also checks that
+transcription stays on whisper-tiny at t1) and
+`app/test/services/device_services_real_tier_test.dart` (“the real wiring
+uses a downloaded neural voice”, through `DeviceServices.real`).
+
+**1.5.9: heard on an emulator.** Read aloud on a podcast transcript fell
+silent after the first sentence: the voice’s own `AudioPlayer` asked
+`just_audio_background` for its single player slot, which the episode
+player already held. `JustAudioSpeechQueue` now drives just_audio’s
+method channel with its own player id and takes audio focus through
+`audio_session` (`app/test/reader/speech/just_audio_speech_queue_test.dart`,
+whose fake mirrors the Android plugin’s behaviour). A release build of
+3444ab8 on an x86_64 emulator (2026-11-07) spoke all four test sentences
+with an episode loaded, paused a playing episode, stopped and restarted
+cleanly, ran at 1.5× and left the episode playable, with no platform
+errors in the log. That partly closes the “not on real hardware” gap in
+Consequences: the four ONNX sessions load and the denoising loop makes
+audible speech. An arm64 phone is still a release check.

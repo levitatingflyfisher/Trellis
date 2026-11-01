@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:loom_core/loom_core.dart' as core;
 import 'package:trellis/db/database.dart';
+import 'package:trellis/features/player/episode_player.dart';
 import 'package:trellis/features/player/mini_player_bar.dart';
 import 'package:trellis/features/player/player_controller.dart';
 import 'package:trellis/features/player/shake_detector.dart';
@@ -33,9 +34,22 @@ void main() {
   // sleep timer ones ever triggers it, so this stays 0 for everyone else.
   late int hapticCalls;
 
+  // How many players the controller has asked for. Each call gets a fresh
+  // fake (the first is the one `player` already names, so a test can steer
+  // it before the first load) and `player` follows the newest: a
+  // controller that kept using a released player would hit a disposed
+  // fake, which throws.
+  late int playersMade;
+  EpisodePlayer nextPlayer() {
+    if (playersMade > 0) player = FakeEpisodePlayer();
+    playersMade++;
+    return player;
+  }
+
   setUp(() async {
     db = AppDatabase.forTesting(NativeDatabase.memory());
     player = FakeEpisodePlayer();
+    playersMade = 0;
     profileId = await db.profilesDao.create('Ada');
     feedId = await db.feedsDao
         .insertFeed(profileId: profileId, url: 'https://cast.test/feed');
@@ -44,7 +58,7 @@ void main() {
     controller = PlayerController(
         db: db,
         profileId: profileId,
-        createPlayer: () => player,
+        createPlayer: nextPlayer,
         now: () => DateTime.fromMillisecondsSinceEpoch(clockMs),
         haptic: () async {
           hapticCalls++;
@@ -244,6 +258,269 @@ void main() {
       expect((await db.feedsDao
               .playerPosition(profileId: profileId, workId: work.id))!
           .tMs, 30000);
+    });
+
+    // 1.5.9, user: "X doesn't reliably close the bar". Each of these was
+    // a way the bar (or the sound) outlived the X.
+    group('stop closes for good', () {
+      PlayerController freshController() {
+        final c = PlayerController(
+            db: db,
+            profileId: profileId,
+            createPlayer: () => FakeEpisodePlayer(),
+            now: () => DateTime.fromMillisecondsSinceEpoch(clockMs));
+        addTearDown(c.dispose);
+        return c;
+      }
+
+      test('a work restored after a restart, not loaded yet, is cleared',
+          () async {
+        final work = await seedEpisode();
+        await controller.playWork(work);
+        await controller.toggle();
+        final fresh = freshController();
+        await fresh.rehydrateLastPlayed();
+        expect(fresh.current, isNotNull);
+
+        await fresh.stop();
+
+        expect(fresh.current, isNull);
+      });
+
+      test('a load still in flight never starts playing after stop',
+          () async {
+        final work = await seedEpisode();
+        final gate = Completer<void>();
+        player.loadGate = gate;
+        final loading = controller.playWork(work);
+        await Future<void>.delayed(Duration.zero);
+
+        await controller.stop();
+        gate.complete();
+        await loading;
+
+        expect(controller.current, isNull);
+        expect(player.log, isNot(contains('play')));
+      });
+
+      test('the audio is released, so the lock screen lets go too',
+          () async {
+        await controller.playWork(await seedEpisode());
+
+        await controller.stop();
+
+        expect(player.disposed, isTrue);
+        expect(controller.isLoaded(1), isFalse);
+      });
+
+      test('a closed player is not restored on the next launch, until '
+          'something plays', () async {
+        final work = await seedEpisode();
+        await controller.playWork(work);
+        await controller.stop();
+
+        final fresh = freshController();
+        await fresh.rehydrateLastPlayed();
+        expect(fresh.current, isNull);
+
+        // The home-screen widget's Play still finds the last work.
+        await fresh.rehydrateLastPlayed(evenIfClosed: true);
+        expect(fresh.current?.id, work.id);
+
+        await controller.playWork(work);
+        final again = freshController();
+        await again.rehydrateLastPlayed();
+        expect(again.current?.id, work.id);
+      });
+
+      test('play after stop loads a fresh player from the saved place',
+          () async {
+        final work = await seedEpisode();
+        await controller.playWork(work);
+        player.emitPosition(const Duration(seconds: 30));
+        await controller.stop();
+        player.log.clear();
+
+        await controller.playWork(work);
+
+        expect(controller.playing, isTrue);
+        expect(player.log, contains('seek:30000'));
+      });
+
+      // The engine sits at zero while it loads; the saved place is only
+      // reached by the seek after it. A save in between wrote zero over
+      // the listener's place.
+      test('X while a restored episode is still loading keeps the saved '
+          'place', () async {
+        final work = await seedEpisode();
+        await db.feedsDao.savePlayerPosition(
+            profileId: profileId, workId: work.id, tMs: 1800000);
+        await db.profilesDao.recordLastPlayed(profileId, work.id);
+        final gate = Completer<void>();
+        final loading = FakeEpisodePlayer()..loadGate = gate;
+        final fresh = PlayerController(
+            db: db, profileId: profileId, createPlayer: () => loading);
+        addTearDown(fresh.dispose);
+        await fresh.rehydrateLastPlayed();
+        unawaited(fresh.toggle());
+        await pumpEventQueue();
+        expect(loading.log, contains('setUrl:https://cast.test/1.mp3'));
+
+        await fresh.stop();
+        gate.complete();
+        await pumpEventQueue();
+
+        expect((await db.feedsDao
+                .playerPosition(profileId: profileId, workId: work.id))!
+            .tMs, 1800000);
+      });
+
+      test('X while loading never moves the reader\'s place either',
+          () async {
+        final work = await seedEpisode(withAlignments: true);
+        await db.spineDao.savePosition(
+            profileId: profileId,
+            workId: work.id,
+            segmentIdx: 1,
+            wordIdx: 0,
+            lastModality: 'read');
+        final gate = Completer<void>();
+        player.loadGate = gate;
+        unawaited(controller.playWork(work));
+        await pumpEventQueue();
+
+        await controller.stop();
+        gate.complete();
+        await pumpEventQueue();
+
+        final pos = await db.spineDao
+            .position(profileId: profileId, workId: work.id);
+        expect(pos!.segmentIdx, 1);
+        expect(pos.lastModality, 'read');
+      });
+
+      test('choosing another episode while one loads keeps the first one\'s '
+          'place, and the first load gives way', () async {
+        final a = await seedEpisode(title: 'A');
+        final b = await seedEpisode(
+            title: 'B', enclosure: 'https://cast.test/2.mp3');
+        await db.feedsDao.savePlayerPosition(
+            profileId: profileId, workId: a.id, tMs: 600000);
+        final gate = Completer<void>();
+        player.loadGate = gate;
+        unawaited(controller.playWork(a));
+        await pumpEventQueue();
+        player.loadGate = null;
+
+        await controller.playWork(b);
+        gate.complete();
+        await pumpEventQueue();
+
+        expect((await db.feedsDao
+                .playerPosition(profileId: profileId, workId: a.id))!
+            .tMs, 600000);
+        expect(controller.current?.id, b.id);
+        expect(player.log, isNot(contains('seek:600000')),
+            reason: 'A\'s load, finishing late, must not seek B to A\'s place');
+      });
+
+      test('X as an episode ends does not start the next one in the queue',
+          () async {
+        final first = await seedEpisode(title: 'One');
+        final second = await seedEpisode(
+            title: 'Two', enclosure: 'https://cast.test/2.mp3');
+        await db.queueDao
+            .playLast(profileId: profileId, workId: first.id, nowMs: 1);
+        await db.queueDao
+            .playLast(profileId: profileId, workId: second.id, nowMs: 2);
+        await controller.playWork(first);
+
+        player.emitCompleted();
+        await controller.stop();
+        await pumpEventQueue();
+
+        expect(controller.current, isNull);
+        expect(controller.playing, isFalse);
+        expect(playersMade, 1, reason: 'nothing was loaded after X');
+      });
+
+      test('Play tapped while X is still letting go of the player waits for '
+          'it, then plays', () async {
+        final work = await seedEpisode();
+        FakeEpisodePlayer? last;
+        final releasing = Completer<void>();
+        final c = PlayerController(
+            db: db,
+            profileId: profileId,
+            createPlayer: () {
+              final prev = last;
+              // Background audio allows one player per process.
+              if (prev != null && !prev.disposeDone) {
+                throw StateError('single player instance');
+              }
+              final p = FakeEpisodePlayer();
+              if (prev == null) p.disposeGate = releasing;
+              return last = p;
+            });
+        addTearDown(c.dispose);
+        await c.playWork(work);
+        final first = last!;
+
+        final stopping = c.stop();
+        final replay = c.playWork(work);
+        await pumpEventQueue();
+        expect(last, same(first));
+        releasing.complete();
+        await stopping;
+        await replay;
+
+        expect(c.current?.id, work.id);
+        expect(c.playing, isTrue);
+        expect(last, isNot(same(first)));
+      });
+
+      test('a load X cancelled leaves no show or synced text behind',
+          () async {
+        final work = await seedEpisode(withAlignments: true);
+        // X at each point the load can be waiting: before it shows, and
+        // while it reads the show and the synced text.
+        for (var ticks = 0; ticks < 12; ticks++) {
+          final loading = controller.playWork(work);
+          for (var i = 0; i < ticks; i++) {
+            await Future<void>.delayed(Duration.zero);
+          }
+          await controller.stop();
+          await loading;
+
+          expect(controller.current, isNull, reason: 'X after $ticks ticks');
+          expect(controller.hasAlignments, isFalse,
+              reason: 'X after $ticks ticks');
+          expect(controller.currentFeed, isNull,
+              reason: 'X after $ticks ticks');
+        }
+      });
+    });
+
+    test('the show\'s artwork is looked up once per show, not per frame',
+        () async {
+      var lookups = 0;
+      final c = PlayerController(
+          db: db,
+          profileId: profileId,
+          createPlayer: nextPlayer,
+          artworkFileFor: (feedId) {
+            lookups++;
+            return File('/nonexistent/art-$feedId.jpg');
+          });
+      addTearDown(c.dispose);
+      await c.playWork(await seedEpisode());
+      final before = lookups;
+
+      for (var i = 0; i < 5; i++) {
+        expect(c.currentArtwork, isNull);
+      }
+
+      expect(lookups - before, lessThanOrEqualTo(1));
     });
 
     group('listenFrom — the study crown\'s "Listen from here" verb', () {
@@ -891,7 +1168,7 @@ void main() {
       final shaky = PlayerController(
           db: db,
           profileId: profileId,
-          createPlayer: () => player,
+          createPlayer: nextPlayer,
           now: () => DateTime.fromMillisecondsSinceEpoch(clockMs),
           accelerometerSamples: () => shakes.stream);
       addTearDown(shaky.dispose);
@@ -922,7 +1199,7 @@ void main() {
       final shaky = PlayerController(
           db: db,
           profileId: profileId,
-          createPlayer: () => player,
+          createPlayer: nextPlayer,
           now: () => DateTime.fromMillisecondsSinceEpoch(clockMs),
           accelerometerSamples: () => shakes.stream);
       addTearDown(shaky.dispose);
@@ -946,7 +1223,7 @@ void main() {
       final c = PlayerController(
           db: db,
           profileId: profileId,
-          createPlayer: () => player,
+          createPlayer: nextPlayer,
           now: () => DateTime.fromMillisecondsSinceEpoch(clockMs),
           localAudioFileFor: resolver);
       addTearDown(c.dispose);
@@ -1105,6 +1382,17 @@ void main() {
   });
 
   group('MiniPlayerBar', () {
+    // 1.5.9: the rarer doors live in the bar's ⋮ menu.
+    Future<void> openBarMenu(WidgetTester tester) async {
+      await tester.tap(find.byKey(const Key('player-menu')));
+      await tester.pumpAndSettle();
+    }
+
+    double progress(WidgetTester tester) => tester
+        .widget<LinearProgressIndicator>(
+            find.byKey(const Key('player-slider')))
+        .value!;
+
     Future<void> pumpBar(WidgetTester tester) async {
       await tester.pumpWidget(MaterialApp(
         home: Scaffold(
@@ -1130,8 +1418,8 @@ void main() {
 
     testWidgets('a rehydrated (not-yet-loaded) work shows a plain '
         '"Paused at mm:ss" caption instead of a misleading full slider — '
-        'duration is genuinely unknown, so the slider must not pin near '
-        'full (Campaign 9 Phase 2)', (tester) async {
+        'duration is genuinely unknown, so the progress line must not pin '
+        'near full (Campaign 9 Phase 2)', (tester) async {
       final work = await seedEpisode(title: 'Aurora season');
       await controller.playWork(work);
       player.emitPosition(const Duration(minutes: 12, seconds: 34));
@@ -1156,15 +1444,13 @@ void main() {
 
       expect(find.text('Aurora season'), findsOneWidget);
       expect(find.text('Paused at 12:34'), findsOneWidget);
-      final slider =
-          tester.widget<Slider>(find.byKey(const Key('player-slider')));
-      expect(slider.value, 0,
+      expect(progress(tester), 0,
           reason: 'no live duration exists yet — showing any progress on '
-              'the slider itself would misrepresent how far in this is');
+              'the line itself would misrepresent how far in this is');
     });
 
     testWidgets('a rehydrated work whose duration was learned on the last '
-        'play shows the slider at the saved position, not at the start',
+        'play shows the progress at the saved position, not at the start',
         (tester) async {
       // User: "when the podcast is paused, the little circle doesn't
       // represent where in the timeline it is."
@@ -1191,10 +1477,7 @@ void main() {
       ));
       await tester.pump();
 
-      final slider =
-          tester.widget<Slider>(find.byKey(const Key('player-slider')));
-      expect(slider.max, 3600000);
-      expect(slider.value, 754000);
+      expect(progress(tester), closeTo(754000 / 3600000, 1e-9));
       expect(find.text('Paused at 12:34'), findsOneWidget);
     });
 
@@ -1210,12 +1493,15 @@ void main() {
       await tester.pump();
       expect(player.playing, isFalse);
 
+      // Back 15 is on the bar itself (1.5.9 fix round); Forward 30 is in ⋮.
       await tester.tap(find.byKey(const Key('player-back15')));
-      await tester.pump();
+      await tester.pumpAndSettle();
       expect(player.log, contains('seek:${(5 * 60 - 15) * 1000}'));
 
+      await openBarMenu(tester);
       await tester.tap(find.byKey(const Key('player-fwd30')));
-      await tester.pump();
+      await tester.pumpAndSettle();
+      expect(player.log, contains('seek:${(5 * 60 - 15 + 30) * 1000}'));
 
       await tester.drag(
           find.byKey(const Key('player-speed')), const Offset(0, -60));
@@ -1228,20 +1514,16 @@ void main() {
       expect(find.byKey(const Key('mini-player')), findsNothing);
     });
 
-    testWidgets('the seek slider maps its full range onto the duration',
+    testWidgets('the progress line shows how far in, over the duration',
         (tester) async {
       final work = await seedEpisode();
       await controller.playWork(work);
       await pumpBar(tester);
       player.emitDuration(const Duration(minutes: 10));
+      player.emitPosition(const Duration(minutes: 5));
       await tester.pump();
 
-      final slider = find.byKey(const Key('player-slider'));
-      expect(slider, findsOneWidget);
-      await tester.drag(slider, const Offset(400, 0));
-      await tester.pump();
-      expect(player.position, const Duration(minutes: 10),
-          reason: 'dragging to the far right seeks to the end');
+      expect(progress(tester), 0.5);
     });
 
     testWidgets(
@@ -1250,6 +1532,7 @@ void main() {
       final work = await seedEpisode();
       await controller.playWork(work);
       await pumpBar(tester);
+      await openBarMenu(tester);
 
       expect(find.byKey(const Key('player-capture')), findsNothing);
       expect(find.byKey(const Key('open-captures')), findsNothing);
@@ -1267,9 +1550,10 @@ void main() {
       ));
       await tester.pump();
 
+      await openBarMenu(tester);
       expect(find.byKey(const Key('player-capture')), findsOneWidget);
       await tester.tap(find.byKey(const Key('player-capture')));
-      await tester.pump();
+      await tester.pumpAndSettle();
       expect(captured, isTrue);
     });
 
@@ -1285,9 +1569,10 @@ void main() {
       ));
       await tester.pump();
 
+      await openBarMenu(tester);
       expect(find.byKey(const Key('open-captures')), findsOneWidget);
       await tester.tap(find.byKey(const Key('open-captures')));
-      await tester.pump();
+      await tester.pumpAndSettle();
       expect(opened, isTrue);
     });
 
@@ -1303,13 +1588,12 @@ void main() {
         ),
       ));
       await tester.pump();
+      await openBarMenu(tester);
 
-      final captureIcon = tester
-          .widget<IconButton>(find.byKey(const Key('player-capture')))
-          .icon as Icon;
-      final capturesListIcon = tester
-          .widget<IconButton>(find.byKey(const Key('open-captures')))
-          .icon as Icon;
+      Icon iconOf(String key) => tester.widget<Icon>(find.descendant(
+          of: find.byKey(Key(key)), matching: find.byType(Icon)));
+      final captureIcon = iconOf('player-capture');
+      final capturesListIcon = iconOf('open-captures');
       expect(captureIcon.icon, Icons.bookmark_add_outlined);
       expect(capturesListIcon.icon, Icons.collections_bookmark_outlined,
           reason: 'the captures-list door must read as a LIST, distinct '
@@ -1323,6 +1607,7 @@ void main() {
       await controller.playWork(work);
       await pumpBar(tester);
 
+      await openBarMenu(tester);
       await tester.tap(find.byKey(const Key('open-sleep-timer')));
       await tester.pumpAndSettle();
       expect(find.text('Sleep timer'), findsOneWidget);
@@ -1343,6 +1628,7 @@ void main() {
       await controller.playWork(work);
       await pumpBar(tester);
 
+      await openBarMenu(tester);
       await tester.tap(find.byKey(const Key('open-sleep-timer')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('sleep-timer-end-of-episode')));
@@ -1359,6 +1645,7 @@ void main() {
       controller.startSleepTimer(duration: const Duration(minutes: 30));
       await pumpBar(tester);
 
+      await openBarMenu(tester);
       await tester.tap(find.byKey(const Key('open-sleep-timer')));
       await tester.pumpAndSettle();
       expect(find.textContaining('30:00'), findsOneWidget,
@@ -1375,6 +1662,7 @@ void main() {
       await controller.playWork(work);
       await pumpBar(tester);
 
+      await openBarMenu(tester);
       await tester.tap(find.byKey(const Key('open-sleep-timer')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('sleep-timer-custom')));
@@ -1402,8 +1690,9 @@ void main() {
       ));
       await tester.pump();
 
+      await openBarMenu(tester);
       await tester.tap(find.byKey(const Key('open-queue')));
-      await tester.pump();
+      await tester.pumpAndSettle();
 
       expect(opened, isTrue);
     });
@@ -1413,6 +1702,7 @@ void main() {
       final work = await seedEpisode();
       await controller.playWork(work);
       await pumpBar(tester);
+      await openBarMenu(tester);
 
       expect(find.byKey(const Key('open-queue')), findsNothing);
     });
@@ -1458,7 +1748,7 @@ void main() {
       final withArt = PlayerController(
         db: db,
         profileId: profileId,
-        createPlayer: () => player,
+        createPlayer: nextPlayer,
         now: () => DateTime.fromMillisecondsSinceEpoch(nowMs),
         artworkFileFor: (id) => File('${dir.path}/$id.img'),
       );
@@ -1478,7 +1768,7 @@ void main() {
       final withArt = PlayerController(
         db: db,
         profileId: profileId,
-        createPlayer: () => player,
+        createPlayer: nextPlayer,
         now: () => DateTime.fromMillisecondsSinceEpoch(nowMs),
         artworkFileFor: (id) => File('${dir.path}/$id.img'),
       );

@@ -20,9 +20,12 @@
   voice goes MIT (Supertonic), 0008 Babel — the translation organ, 0009
   the study crown, 0010 reader depth, 0011 triage & rules, 0012 offline
   DSP, 0013 audiobooks are a door, 0014 Babel widens, 0015 honest feeds +
-  the media-session gap. (This list was stale by six entries before
-  Campaign 9 caught it — keep it current going forward rather than
-  letting it drift again.)
+  the media-session gap, 0016 episodes you can tell apart, 0017 the
+  fundamentals pass, 0018 background refresh, 0019 Latest is a permanent
+  archive, 0020 translation runs on device, verified. (This list was
+  stale by six entries before Campaign 9 caught it, and by four again
+  before 1.5.9. Keep it current going forward rather than letting it
+  drift again.)
 - **Personas**: [explanation/personas.md](explanation/personas.md), who agents
   play when they test the UI, with scenarios.
 - **Provenance** — [research/](research/): the 12-agent design panel's donor

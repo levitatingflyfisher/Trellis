@@ -61,6 +61,11 @@ abstract class EpisodePlayer {
   Duration? get duration;
   bool get playing;
 
+  /// Whether the engine holds no audio (just_audio's idle processing
+  /// state): before a load, and once the notification's Stop has let it
+  /// go. A position it reports then is not where the listener is.
+  bool get idle;
+
   Stream<Duration> get positionStream;
   Stream<Duration?> get durationStream;
   Stream<bool> get playingStream;

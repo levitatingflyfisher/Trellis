@@ -161,6 +161,27 @@ void main() {
       expect(prefs.typography.fontScale, 1.4);
       expect(prefs.lastPlayedWorkId, 7);
     });
+
+    // 1.5.9: the player, the reader and the typography screen all write
+    // the one blob. Each change is applied to what is stored at that
+    // moment, never to a copy read earlier, so no writer undoes another.
+    test('writers of the shared blob never undo one another', () async {
+      final profileId = await db.profilesDao.create('Ada');
+
+      await Future.wait([
+        db.profilesDao.recordLastPlayed(profileId, 7),
+        db.profilesDao.updateReaderPrefs(
+            profileId,
+            (p) => p.copyWith(
+                typography: const ReaderTypography(fontScale: 1.4))),
+        db.profilesDao.recordPlayerClosed(profileId),
+      ]);
+
+      final prefs = await db.profilesDao.readerPrefs(profileId);
+      expect(prefs.lastPlayedWorkId, 7);
+      expect(prefs.typography.fontScale, 1.4);
+      expect(prefs.playerClosed, isTrue);
+    });
   });
 
   group('schema migration v8 → v9', () {

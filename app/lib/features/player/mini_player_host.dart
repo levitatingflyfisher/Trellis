@@ -97,6 +97,10 @@ class MiniPlayerHostState extends State<MiniPlayerHost> {
 
   MiniPlayerRoutes get routes => widget.routes;
 
+  /// A bar is attached, so a pushed page with something current has the
+  /// bar's Play under it.
+  bool get hasBar => _bar != null;
+
   /// A context a modal sheet can open from, for the bar here, which sits
   /// above the Navigator.
   BuildContext? get navigatorContext => widget.navigatorKey.currentContext;

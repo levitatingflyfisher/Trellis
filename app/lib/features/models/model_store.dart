@@ -125,12 +125,28 @@ abstract class ModelStore {
   /// Starts (or resumes) the download. Throws [StateError] before anything
   /// touches the wire when any file of [spec] is unpinned.
   ModelDownload download(ModelSpec spec);
+
+  /// Deletes model files [registry] no longer pins and returns the bytes
+  /// freed: a model it dropped, a file its spec dropped, a file whose pin
+  /// changed size (a re-pinned decoder keeps its file name), and a `.part`
+  /// that can never finish. Size-based stale detection covers plain files
+  /// only: a re-pinned archive spec (dictionary, voice) keeps its extracted
+  /// directory and is not detected. Never touches a model whose download is in
+  /// flight, a paused `.part` that can still resume, extracted voice or
+  /// dictionary directories, or anything outside the models directory.
+  Future<int> pruneUnreferenced(ModelRegistry registry);
 }
 
 class DiskModelStore implements ModelStore {
   final Directory baseDir;
   final Dio dio;
   final int Function() _nowMs;
+
+  /// Running downloads per spec id in this store; [pruneUnreferenced]
+  /// leaves their directories alone whatever the registry says. A count,
+  /// not a set: two overlapping downloads of one spec keep the guard
+  /// until the last one ends.
+  final Map<String, int> _inFlight = {};
 
   DiskModelStore({required this.baseDir, Dio? dio, int Function()? nowMs})
       : dio = dio ?? Dio(),
@@ -297,6 +313,7 @@ class DiskModelStore implements ModelStore {
     final controller = StreamController<ModelDownloadProgress>.broadcast();
     final cancelToken = CancelToken();
     final eta = DownloadEta();
+    _inFlight.update(spec.id, (n) => n + 1, ifAbsent: () => 1);
 
     Future<ModelInstallOutcome> run() async {
       try {
@@ -366,6 +383,12 @@ class DiskModelStore implements ModelStore {
         }
         return ModelInstallOutcome.installed;
       } finally {
+        final left = _inFlight[spec.id]! - 1;
+        if (left == 0) {
+          _inFlight.remove(spec.id);
+        } else {
+          _inFlight[spec.id] = left;
+        }
         unawaited(controller.close());
       }
     }
@@ -376,5 +399,77 @@ class DiskModelStore implements ModelStore {
         onCancel: () {
           if (!cancelToken.isCancelled) cancelToken.cancel();
         });
+  }
+
+  @override
+  Future<int> pruneUnreferenced(ModelRegistry registry) async {
+    if (!baseDir.existsSync()) return 0;
+    final byId = {for (final s in registry.specs) s.id: s};
+    var freed = 0;
+    // Links are never followed or removed: only what the store itself
+    // wrote under baseDir is a candidate.
+    for (final entry in baseDir.listSync(followLinks: false)) {
+      if (entry is! Directory) continue; // loose files here aren't ours
+      final id = _baseName(entry.path);
+      if (_inFlight.containsKey(id)) continue;
+      final spec = byId[id];
+      if (spec == null) {
+        // A model this registry no longer has (Qwen, 1.5.9): nothing can
+        // download into it again, so it goes whole.
+        freed += _bytesUnder(entry);
+        await entry.delete(recursive: true);
+        continue;
+      }
+      // Keyed by file name, not full path: listSync's spelling of a path
+      // (a trailing slash on baseDir, say) need not match pathOf's, and a
+      // mismatch would read every installed file as unlisted.
+      final pinned = {for (final f in spec.files) _fileName(f): f.bytes};
+      for (final child in entry.listSync(followLinks: false)) {
+        // Subdirectories are extracted voices/dictionaries or a staging
+        // dir; only plain files are judged. A validator may already have
+        // gone with its `.part`.
+        if (child is! File || !child.existsSync()) continue;
+        final path = _baseName(child.path);
+        final String? stale;
+        if (path.endsWith('.part.validator')) {
+          final part = path.substring(0, path.length - '.validator'.length);
+          final base = part.substring(0, part.length - '.part'.length);
+          stale = pinned.containsKey(base) ? null : path;
+        } else if (path.endsWith('.part')) {
+          final base = path.substring(0, path.length - '.part'.length);
+          final pin = pinned[base];
+          // A partial longer than its file can't resume into a match.
+          stale = pin == null || child.lengthSync() > pin ? path : null;
+        } else {
+          final pin = pinned[path];
+          // Only promote() puts a file here, after its hash matched, so a
+          // length off the pin is an earlier pin's file.
+          stale = pin == null || child.lengthSync() != pin ? path : null;
+        }
+        if (stale == null || _inFlight.containsKey(id)) continue;
+        freed += child.lengthSync();
+        await child.delete();
+        if (stale.endsWith('.part')) {
+          final validator = File('${child.path}.validator');
+          if (validator.existsSync()) {
+            freed += validator.lengthSync();
+            await validator.delete();
+          }
+        }
+      }
+    }
+    return freed;
+  }
+
+  static String _baseName(String path) =>
+      path.split(Platform.pathSeparator).lastWhere((s) => s.isNotEmpty,
+          orElse: () => path);
+
+  static int _bytesUnder(Directory dir) {
+    var sum = 0;
+    for (final e in dir.listSync(recursive: true, followLinks: false)) {
+      if (e is File) sum += e.lengthSync();
+    }
+    return sum;
   }
 }

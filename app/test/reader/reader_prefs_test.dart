@@ -149,4 +149,30 @@ void main() {
         const ReaderSession());
     expect(ReaderPrefs.decode('{}').session, const ReaderSession());
   });
+
+  test('playerClosed (1.5.9) round-trips, keeps the last-played id, and '
+      'defaults to open', () {
+    expect(const ReaderPrefs().playerClosed, isFalse);
+    expect(ReaderPrefs.decode('{"lastPlayedWorkId":3}').playerClosed, isFalse);
+    final closed = const ReaderPrefs(lastPlayedWorkId: 3)
+        .copyWith(playerClosed: true);
+    final back = ReaderPrefs.decode(closed.encode());
+    expect(back.playerClosed, isTrue);
+    expect(back.lastPlayedWorkId, 3);
+    expect(back.copyWith(lastPlayedWorkId: 4).playerClosed, isTrue,
+        reason: 'only an explicit playerClosed changes it');
+  });
+
+  test('read aloud voices (1.5.9) round-trip per language; junk is '
+      'dropped', () {
+    expect(const ReaderPrefs().voices, isEmpty);
+    const prefs = ReaderPrefs(
+        voices: {'ru': 'system:ru-ru-x-rud-local', 'en': 'neural'});
+    final back = ReaderPrefs.decode(prefs.encode());
+    expect(back.voices, prefs.voices);
+    expect(back.copyWith(playerClosed: true).voices, prefs.voices);
+    expect(ReaderPrefs.decode('{"voices":{"ru":3,"en":"default"}}').voices,
+        {'en': 'default'});
+    expect(ReaderPrefs.decode('{"voices":"ru"}').voices, isEmpty);
+  });
 }

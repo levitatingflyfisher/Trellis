@@ -188,6 +188,7 @@ class _QueueScreenState extends State<QueueScreen> {
         // Removed from its page: reload once the Undo goes.
         removal?.then((_) => mounted ? _load() : null);
       },
+      player: widget.player,
       onPlay: isAudio && widget.player != null
           ? () async {
               await _doors.play(work);

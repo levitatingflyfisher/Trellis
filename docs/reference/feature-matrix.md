@@ -26,7 +26,11 @@ land, entries gain a `✅ shipped` mark; until then this is the plan of record.
   purpose, generation fencing across both paths — proven end to end
   through fakes (`reader_speak_synthesis_test.dart`). Not yet proven on a
   real device: the ONNX Runtime sessions actually opening and producing
-  audible PCM. No UI for pause (the engine/pipeline support it; the existing
+  audible PCM. (1.5.8: the voice registers at T1, the tier the app runs
+  at, so a downloaded voice is actually used: `registry_test.dart`,
+  `device_services_real_tier_test.dart`. 1.5.9: heard in a release build
+  on an x86_64 emulator, with an episode loaded; an arm64 phone is still
+  a release check. See ADR-0007’s last section.) No UI for pause (the engine/pipeline support it; the existing
   speak-toggle is binary and a third state would be new surface, declined
   this pass). NOT planned to ship at all in v1: word highlight (no engine
   exposes word timing — sentence-exact is the permanent contract, not a
@@ -145,7 +149,7 @@ land, entries gain a `✅ shipped` mark; until then this is the plan of record.
   same-origin, same as the installed app. LAN/phone access to that same
   daemon is an open problem (docs/adr/0005), not shipped.
 - Web-surface local ML at v1.0: NO in-browser Whisper/translation/Kokoro at launch — browser users get the full T0 app + BYOK cloud LLM + SpeechSynthesis system TTS; the transformers.js-v4 interop tier (whisper-tiny int8 ~41MB, WASM/WebGPU) is Phase 6. Until then a browser-only user cannot transcribe locally, which the donor could do (slowly, unreliably, English-only).
-- Translation: v1's whisper-transcript mechanism is unchanged (X->EN only, timestamp-projected onto the transcript's segments) — a prior version of this entry claimed a Brain-routed LLM-translation mechanism (Qwen2.5 local / stove / BYOK); that was never built and the claim was wrong (caught auditing ADR-0008, corrected there). ADR-0008 "Babel" shipped a SECOND mechanism, en->es only; Campaign 8 "Babel widens" (ADR-0014) generalized it to any registered pair. Shipped pairs: en<->de, en<->ru (both directions, verified excellent), zh->en (verified excellent), en->zh (verified usable but demoted — see below). Evaluated and NOT shipped: en<->pt (no clean-licensed ONNX conversion clears the trust ladder), en<->jap (pure `<pad>`-token collapse at decode step one; incoherent even past that — Japanese needs a Brain, not the offline floor). Three things remain genuinely unverified or deliberately withheld, not just "not built": (1) the ONNX Runtime sessions — Marian's AND Supertonic's — have never opened on a real device, only proven against faked session boundaries and, for Marian specifically, against the real models in Python; (2) Supertonic speaking Spanish (or any of the five languages `supertonicSupportedLangs` architecturally claims) is UNTESTED, not confirmed — nobody has heard the result, and de/ru/zh route through the system voice entirely regardless, since Supertonic's own coverage never reached them; (3) `opus-mt-en-zh` (English->Chinese) is registered nowhere — a golden-test render of the scroll-mode display showed the translated Chinese text as tofu boxes (the app's bundled fonts carry no CJK glyphs, and a measured 8.3MB single-region font subset doesn't fit the remaining APK size budget), so the pair is withheld until either is fixed; `opus-mt-zh-en` (English output) is unaffected. A `BrainTranslator` rung (chunked Brain requests, strict JSON parsing, per-sentence fail-closed) is built and fully tested but has zero call sites in the live app — no tier ladder, consent routing, or UI picker reaches it yet (ADR-0014 Phase 5). NLLB's 200-language long tail remains unavailable. The UI names the translating model so quality expectations stay honest. Superseded in part by 1.5.5: en->zh, en->ar and en->hi are now registered, relying on Android's system fonts for display, which nobody has seen on a device. pt ships through en-ROMANCE with `>>pt<<`, and ja->en through a newer `ja` model, quality unchecked. Still missing: en->ja, en->ko, en->pl (no trusted ONNX export).
+- Translation: v1's whisper-transcript mechanism is unchanged (X->EN only, timestamp-projected onto the transcript's segments) — a prior version of this entry claimed a Brain-routed LLM-translation mechanism (a local model / stove / BYOK); that was never built and the claim was wrong (caught auditing ADR-0008, corrected there). ADR-0008 "Babel" shipped a SECOND mechanism, en->es only; Campaign 8 "Babel widens" (ADR-0014) generalized it to any registered pair. Shipped pairs: en<->de, en<->ru (both directions, verified excellent), zh->en (verified excellent), en->zh (verified usable but demoted — see below). Evaluated and NOT shipped: en<->pt (no clean-licensed ONNX conversion clears the trust ladder), en<->jap (pure `<pad>`-token collapse at decode step one; incoherent even past that — Japanese needs a Brain, not the offline floor). Three things remain genuinely unverified or deliberately withheld, not just "not built": (1) the ONNX Runtime sessions — Marian's AND Supertonic's — have never opened on a real device, only proven against faked session boundaries and, for Marian specifically, against the real models in Python; (2) Supertonic speaking Spanish (or any of the five languages `supertonicSupportedLangs` architecturally claims) is UNTESTED, not confirmed — nobody has heard the result, and de/ru/zh route through the system voice entirely regardless, since Supertonic's own coverage never reached them; (3) `opus-mt-en-zh` (English->Chinese) is registered nowhere — a golden-test render of the scroll-mode display showed the translated Chinese text as tofu boxes (the app's bundled fonts carry no CJK glyphs, and a measured 8.3MB single-region font subset doesn't fit the remaining APK size budget), so the pair is withheld until either is fixed; `opus-mt-zh-en` (English output) is unaffected. A `BrainTranslator` rung (chunked Brain requests, strict JSON parsing, per-sentence fail-closed) is built and fully tested but has zero call sites in the live app — no tier ladder, consent routing, or UI picker reaches it yet (ADR-0014 Phase 5). NLLB's 200-language long tail remains unavailable. The UI names the translating model so quality expectations stay honest. Superseded in part by 1.5.5: en->zh, en->ar and en->hi are now registered, relying on Android's system fonts for display, which nobody has seen on a device. pt ships through en-ROMANCE with `>>pt<<`, and ja->en through a newer `ja` model, quality unchecked. Still missing: en->ja, en->ko, en->pl (no trusted ONNX export). Gap (1) above is narrower since 1.5.7 and 1.5.9: release builds keep ONNX Runtime’s Java classes (`android_keep_classes_test.dart`), and in 1.5.9 a release build on an x86_64 emulator ran both a Marian pair (en→ru) and the Supertonic voice; an arm64 phone is a release check (ADR-0020).
 - Voice-clone read-aloud: the donor's 4 SpeechT5/CMU-ARCTIC preset voice
   identities do not carry over — v1's Supertonic voice is one English
   voice, not a clone gallery (ADR-0007). Whole-doc synthesize+cache,
@@ -431,12 +435,119 @@ donor-parity checklist.
   unverified by any test — see the "Background podcast playback" row
   above, moved from Degraded to Covered and worded the same way.
 
+## Beyond both donors: 1.5.8 and 1.5.9
+
+Owner reports from daily use, fixed release by release. Every line names
+the test that holds it. Paths are under `app/test/` unless they say
+otherwise.
+
+### 1.5.8 (2026-10-27)
+
+- ✅ shipped: **Follow along** lights each word as it is heard, at any
+  speed up to 4×, with one “Back to audio” in every mode
+  (`features/reader_follows_player_test.dart`,
+  `features/reader_speak_speed_test.dart`).
+- ✅ shipped: **Translations in every reading mode**: RSVP, Line and
+  Follow along, as Translation only or Both, remembered per work (schema
+  32; `features/reader_translation_modes_test.dart`,
+  `db/translation_view_db_test.dart`).
+- ✅ shipped: **Pages open inside their tab**, so the bottom bar stays;
+  + Add and Subscriptions in the Library (`features/tab_navigation_test.dart`).
+- ✅ shipped: **Storage by item**: Remove download, Delete transcript and
+  Delete translation on the work page (`models/storage_by_item_test.dart`,
+  `db/work_storage_db_test.dart`).
+- ✅ shipped: **The neural voice is used once downloaded**: it registers
+  at T1 (`packages/ml_runtime/test/registry_test.dart`,
+  `services/device_services_real_tier_test.dart`; ADR-0007).
+
+### 1.5.9
+
+- ✅ shipped: **Recently deleted.** Deleting a transcript or a
+  translation no longer asks first. A copy of every row it removes is
+  saved beside the database, listed under Recently deleted in Models &
+  storage (title, kind, language, date, size; Restore, and ⋮ Delete now)
+  and let go after 30 days at start-up. A restore that would mix with a
+  newer transcript or translation, or whose transcript changed, or whose
+  item is gone, is refused with a plain sentence. A translation being
+  made can’t be deleted (`features/storage/recently_deleted_test.dart`,
+  `bootstrap_io_test.dart`). The web tier keeps no copy, so there the
+  delete still asks.
+- ✅ shipped: **The player bar.** One slim row (at most 72 px at text
+  scale 1.0, fits 320 dp at 2.0): art and title open the episode, a drag
+  across them scrubs (cancel puts it back), Back 15, Play/Pause, speed
+  and X. ⋮ holds Go to show and the rarer controls. X closes the bar for
+  good, in every state (playing, paused, buffering, mid-skip, at the end
+  of an episode with another queued), and keeps the place heard
+  (`features/player/mini_player_bar_test.dart`, `features/player_test.dart`).
+- ✅ shipped: **One primary Play per screen.** At most one filled action
+  on the work page, the show page and the reader. A playing row shows
+  “Playing” and pauses on a tap. The RSVP pacer is “Start”, not a second
+  Play. One voice at a time: Read aloud pauses the episode, and the
+  episode playing again stops Read aloud
+  (`features/works/work_page_actions_test.dart`).
+- ✅ shipped: **Read aloud on podcast transcripts with the neural
+  voice.** The voice drives its own native player instead of competing
+  with the episode for `just_audio_background`’s single slot; calls and
+  unplugged headphones pause it, and a failed voice ends the run with a
+  plain sentence (`reader/speech/just_audio_speech_queue_test.dart`,
+  `reader/speech/speech_playback_pipeline_test.dart`). Heard on an x86_64
+  emulator release build; an arm64 phone is a release check.
+- ✅ shipped: **Read aloud in the translation’s language.** Translation
+  only reads the translation; Both reads each sentence, then its
+  translation, by default (“Read the ⟨language⟩ aloud too”, which replaced
+  “Speak in ⟨language⟩”). A voice per language is picked in ⋮ › Read
+  aloud voices and remembered. If the downloaded voice can’t read every
+  language in the run, the whole run uses the phone’s voices. With no
+  voice for a language, nothing is read and a plain sentence points at
+  Android’s Text-to-speech settings; Russian is never read by an English
+  voice (`features/reader_speak_translation_test.dart`,
+  `features/reader_speak_spanish_test.dart`,
+  `services/flutter_tts_speaker_test.dart`, `features/reader_entry_test.dart`).
+  **Degraded:** in Both with Russian, the English is read by the phone’s
+  voice too, not the downloaded one; on the web a picked browser voice is
+  not applied (the browser answers nothing), so the first voice for the
+  language reads.
+- ✅ shipped: **Translation downloads are less than half the size.** The
+  six oldest pairs take Xenova’s int8 decoder after a parity check (about
+  249 → 116 MB a pair). A pair already on the phone reads “Update
+  available” with its size; the old decoder is pruned at start-up, which
+  downloads nothing (`packages/ml_runtime/test/translation_catalog_test.dart`,
+  `models/model_store_prune_test.dart`, `models/models_screen_test.dart`,
+  `features/reader_translate_test.dart`, `bootstrap_io_test.dart`; the
+  parity table is in ADR-0020).
+- ✅ shipped: **The unused Qwen download is gone.** The registry has no
+  Qwen spec, and a copy already on a phone is pruned
+  (`packages/ml_runtime/test/registry_test.dart`,
+  `models/model_store_prune_test.dart`).
+- ✅ shipped: **The listening place is kept whichever way Play was
+  pressed.** Saved every 10 seconds while playing, whenever playback
+  stops (the app, the lock screen, the notification, a headset), and
+  after every seek. A scrub from the lock screen while paused sticks. An
+  older place never overwrites a newer one, and a reader left open with
+  an untouched cursor no longer writes over the player’s place
+  (`features/player/listening_place_test.dart`,
+  `features/reader_keeps_listening_place_test.dart`).
+- ✅ shipped: **Calmer reading spacing.** Follow along steps lines by
+  the line height like Line does, sets words a real space apart at any
+  text scale, and moves no word as the highlight moves; the current word
+  is a solid chip that stands out in light and dark. A translation sits
+  close under its sentence; Line’s Both spacing changed slightly too
+  (`features/reader_spacing_test.dart`,
+  `features/reader_cursor_contrast_test.dart`,
+  `visual/reader_spacing_golden_test.dart`).
+- ✅ shipped: **Starting a translation into a new language** no longer
+  shows or reads the old language’s sentences while it starts
+  (`features/reader_speak_translation_test.dart`, “a new language started
+  while another is stored”).
+
 ## Fleet rollout (2026-09): shared conventions adopted
 
 - **Deletes.** Removing a work, unfollowing a feed, removing a saved word
   and removing a reader act at once and offer an Undo bar that never times
   out; the rows go only when the offer is let go. Swiping a word away asks
   first. Removing a model or clearing a cache asks first (large files).
+  Deleting a transcript or a translation acts at once and keeps a copy in
+  Recently deleted for 30 days (1.5.9; see below).
   Removing a podcast episode or feed article from the Library only takes it
   out of the Library: it stays in Latest and on its show's page, transcript
   and all (ADR-0019 §1).

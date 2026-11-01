@@ -58,7 +58,7 @@ void main() {
         findsOneWidget, reason: 'a paused partial is honest disk usage too');
 
     expect(
-        find.byKey(const Key('storage-model-qwen2.5-0.5b-instruct-litert')),
+        find.byKey(const Key('storage-model-whisper-base-ggml')),
         findsNothing,
         reason: 'a model with no bytes on disk is not storage');
   });

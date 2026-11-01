@@ -35,6 +35,7 @@ void main() {
   late List<int> started;
 
   late List<int> doneCount;
+  late int failed;
 
   SpeechPlaybackPipeline buildPipeline({int lookahead = 2}) {
     return SpeechPlaybackPipeline(
@@ -43,6 +44,7 @@ void main() {
       tempFiles: tempFiles,
       onSentenceStart: started.add,
       onDone: () => doneCount.add(1),
+      onFailed: () => failed++,
       lookahead: lookahead,
     );
   }
@@ -53,6 +55,7 @@ void main() {
     tempFiles = _FakeTempFiles();
     started = [];
     doneCount = [];
+    failed = 0;
   });
 
   test('kicks off synthesis lookahead sentences ahead of the one playing',
@@ -184,6 +187,65 @@ void main() {
 
     expect(queue.appended, isEmpty);
     expect(tempFiles.writeCalls, isEmpty);
+  });
+
+  group('a run that cannot go on ends, and says so (onFailed)', () {
+    test('a synthesis error', () async {
+      final pipeline = buildPipeline(lookahead: 0);
+      await pipeline.start(['One.', 'Two.']);
+      engine.complete(0);
+      await Future<void>.delayed(Duration.zero);
+      engine.completeWithError(1, Exception('no voice for this language'));
+      await pipeline.done;
+      await Future<void>.delayed(Duration.zero);
+
+      expect(failed, 1);
+      expect(queue.clearCalls, greaterThanOrEqualTo(2),
+          reason: 'start cleared once; the failure clears what played');
+      expect(tempFiles.deleteCalls, ['sentence-0.wav']);
+      expect(doneCount, isEmpty);
+    });
+
+    test('a clip the player refuses', () async {
+      final pipeline = buildPipeline(lookahead: 0);
+      queue.appendError = Exception('PlatformException(error)');
+      await pipeline.start(['One.', 'Two.']);
+      engine.complete(0);
+      await pipeline.done; // completes; nothing escapes into the zone
+      await Future<void>.delayed(Duration.zero);
+
+      expect(failed, 1);
+      expect(queue.playCalls, 0);
+      expect(engine.calls, hasLength(1), reason: 'nothing more is asked');
+      expect(tempFiles.deleteCalls, ['sentence-0.wav']);
+    });
+
+    test('the player failing under the run', () async {
+      final pipeline = buildPipeline(lookahead: 0);
+      await pipeline.start(['One.', 'Two.']);
+      engine.complete(0);
+      await Future<void>.delayed(Duration.zero);
+      final cleared = queue.clearCalls;
+      queue.emitError(Exception('Source error'));
+      await Future<void>.delayed(Duration.zero);
+
+      expect(failed, 1);
+      expect(queue.clearCalls, cleared + 1);
+      engine.complete(1); // the stale lookahead never reaches the queue
+      await pipeline.done;
+      expect(queue.appended, isEmpty);
+    });
+
+    test('not after the run was stopped', () async {
+      final pipeline = buildPipeline(lookahead: 0);
+      await pipeline.start(['One.']);
+      await pipeline.stop();
+      queue.emitError(Exception('late'));
+      engine.completeWithError(0, Exception('late'));
+      await pipeline.done;
+      await Future<void>.delayed(Duration.zero);
+      expect(failed, 0);
+    });
   });
 
   test('pause/resume delegate straight to the queue', () async {

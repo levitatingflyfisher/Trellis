@@ -340,7 +340,31 @@ class TranslationRun extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// The runs between [start] and its last write, by work: what a delete
+  /// of a translation (or of the transcript it is keyed to) must wait for,
+  /// or the sentence in flight would land after it and bring the language
+  /// back. In memory on purpose: a run the system killed writes nothing
+  /// more, and the marker it leaves is cleared by the delete.
+  static final Map<int, List<Set<String>>> _live = {};
+
+  /// Whether a run is writing [lang] for [workId] (any language when
+  /// [lang] is null). A run via English writes English too.
+  static bool isLive(int workId, [String? lang]) =>
+      _live[workId]?.any((langs) => lang == null || langs.contains(lang)) ??
+      false;
+
   Future<void> start() async {
+    final langs = {target, for (final s in steps) s.lang};
+    (_live[workId] ??= []).add(langs);
+    try {
+      await _run();
+    } finally {
+      final runs = _live[workId]!..remove(langs);
+      if (runs.isEmpty) _live.remove(workId);
+    }
+  }
+
+  Future<void> _run() async {
     await dao.setTranslationRunLang(workId, target);
     _set(TranslationJobPhase.running, 0);
     var before = 0;

@@ -650,6 +650,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
       showTitle: e.feedTitle,
       artwork: episode == null ? null : _actions.artworkFor(episode),
       onTap: () => _open(e),
+      player: widget.player,
       onPlay: isAudio && widget.player != null
           ? () async {
               await _doors.play(work);

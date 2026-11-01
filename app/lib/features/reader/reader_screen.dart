@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart' show kIsWeb;
@@ -19,6 +20,7 @@ import '../intake/paste_intake.dart' show epochDayUtcNow;
 import '../models/consent.dart';
 import '../models/format.dart';
 import '../models/model_store.dart';
+import '../player/mini_player_host.dart';
 import '../player/player_controller.dart';
 import '../transcribe/transcript_writer.dart' show decodeWordTimingBlob;
 import 'dictionary_sheet.dart';
@@ -35,7 +37,7 @@ import 'speech/speech_audio_queue.dart';
 import 'speech/speech_engine.dart';
 import 'speech/speech_playback_pipeline.dart';
 import 'speech/speech_temp_files.dart';
-import 'speech/supertonic_voice_handle.dart' show supertonicSupportedLangs;
+import 'speech/read_aloud_voices.dart';
 import 'translation/language_names.dart';
 import 'translation/sentence_units.dart';
 import 'translation/translation_job.dart';
@@ -80,6 +82,16 @@ String pageHighlightDescription(ReaderMode m) => switch (m) {
       ReaderMode.lines => 'Lights one line of text at a time.',
       _ => 'Lights each word as it is spoken.',
     };
+
+/// Both's rhythm (1.5.9: "the reading layout spacing is horrible"): a
+/// translation sits [kTranslationGapAbove] under its own sentence, and the
+/// next sentence stands [kTranslationGapBelow] clear of it, so each pair
+/// reads as one, apart from the next and still closer than a paragraph.
+/// The line height is pinned because the translation's script often falls
+/// back to a system font, whose own default leading differs.
+const double kTranslationGapAbove = 4;
+const double kTranslationGapBelow = 12;
+const double kTranslationLineHeight = 1.5;
 
 IconData readerModeIcon(ReaderMode m) => switch (m) {
       ReaderMode.rsvp => Icons.center_focus_strong,
@@ -217,7 +229,24 @@ class _ReaderScreenState extends State<ReaderScreen>
     with WidgetsBindingObserver {
   List<core.Segment>? _blocks;
   core.TokenizedDocument? _doc;
-  int _wordIdx = 0;
+
+  /// The cursor, written through [_wordIdx], which stamps a real move; a
+  /// load or a re-projection (the same place in other text) sets this
+  /// field alone.
+  int _cursorIdx = 0;
+
+  /// When the cursor last really moved (wall clock, the database's own
+  /// stamp), or the saved row's stamp when a load put it there. Every
+  /// save carries it, so a cursor left alone never lands over a place the
+  /// player saved since (1.5.9: follow off, the app sent to the
+  /// background, a kill, and the episode resumed where the reader opened).
+  int _cursorAtMs = 0;
+
+  int get _wordIdx => _cursorIdx;
+  set _wordIdx(int idx) {
+    if (idx != _cursorIdx) _cursorAtMs = DateTime.now().millisecondsSinceEpoch;
+    _cursorIdx = idx;
+  }
 
   /// Where a search hit opened the reader; null otherwise. Saving waits
   /// until the cursor leaves it (see [ReaderScreen.startSegmentIdx]).
@@ -303,8 +332,21 @@ class _ReaderScreenState extends State<ReaderScreen>
   bool _preferSystemVoice = false;
 
   SpeechAudioQueue? _queueHolder;
-  SpeechAudioQueue get _queue =>
-      _queueHolder ??= (widget.createSpeechAudioQueue ?? JustAudioSpeechQueue.new)();
+  SpeechAudioQueue get _queue => _queueHolder ??= _openSpeechQueue();
+  StreamSubscription<SpeechInterruption>? _speechInterruptions;
+
+  /// A call, an alarm or pulled headphones stopped read aloud (set only
+  /// when it was speaking). Any start or stop by hand clears it, so the
+  /// end of the call never overrides the reader.
+  bool _resumeAfterInterruption = false;
+
+  SpeechAudioQueue _openSpeechQueue() {
+    final queue =
+        (widget.createSpeechAudioQueue ?? JustAudioSpeechQueue.new)();
+    _speechInterruptions =
+        queue.interruptionStream.listen(_onSpeechInterruption);
+    return queue;
+  }
 
   SpeechPlaybackPipeline? _pipelineHolder;
 
@@ -315,9 +357,28 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// check is `_speakGen`'s own fencing law, carried one level lower
   /// (mirrors the utterance path's `gen == _speakGen` check in `live()`,
   /// on top of — not instead of — the pipeline's own internal fencing).
-  List<({int seg, int wordIdx, String text, String? lang})> _synthUnits =
-      const [];
+  List<_SpeechUnit> _synthUnits = const [];
   int _synthGen = 0;
+
+  /// Read aloud's voice per language ([ReaderPrefs.voices]), loaded in
+  /// [_load] and changed in the voices sheet.
+  Map<String, String> _voiceChoices = const {};
+
+  /// The current run reads on the phone's voices (not the downloaded
+  /// one), so a speed change goes to them.
+  bool _runOnSystemVoice = false;
+
+  /// Read aloud is saying a translation under its original (Both), so
+  /// that translation's line is what lights.
+  bool _voicingTranslation = false;
+
+  /// Whether the translation of the sentence at words [start, end) lights:
+  /// while it is heard, or (not reading aloud) while the cursor or the
+  /// audio is in its sentence.
+  bool _translationLit(int start, int end) =>
+      _wordIdx >= start &&
+      _wordIdx < end &&
+      (!_speaking || _voicingTranslation);
 
   /// The language toggle (ADR-0002: layers project onto the SAME cursor).
   /// [_original] holds the canonical segments; [_mtLangs] the mt layers on
@@ -414,13 +475,50 @@ class _ReaderScreenState extends State<ReaderScreen>
   bool get _hasStoredTranslation =>
       _activeTranslationLang != null && _translatedSentences.isNotEmpty;
 
-  /// Speak-in-⟨language⟩ (ADR-0008 "Babel" Phase 4, generalized): offered
-  /// only while [_showTranslation] is on, session-only (never persisted —
-  /// unlike [_showTranslation], there is no natural "was this on last
-  /// time" question for a run-time speech choice). Reset to false
-  /// whenever Show ⟨language⟩ itself is turned off, so a hidden menu item
-  /// can never silently keep affecting a later run.
-  bool _speakTranslation = false;
+  /// Under Both, Read aloud reads each sentence and then its translation
+  /// (1.5.9; before, "Speak in ⟨language⟩" swapped the translation in,
+  /// which is what Translation only now does). On by default, because
+  /// Both shows the two; the ⋮ item turns the translation off for this
+  /// session, to hear the original alone.
+  bool _speakTranslation = true;
+
+  /// Under Both, the ⋮ item that turns [_speakTranslation] off: there once
+  /// a translation shows or is being made (its sentences are read as
+  /// they arrive).
+  bool get _offersSpeakTranslation =>
+      _showTranslation &&
+      (_hasStoredTranslation || _translationJob != null) &&
+      _activeLang == null &&
+      !_translationOnly;
+
+  /// A run reads the translation, now or as it arrives: Translation only,
+  /// or Both with [_speakTranslation]. Its language is then in the run's
+  /// plan even before a translated sentence exists, so a sentence that
+  /// arrives mid-run is never read by another language's voice (the web
+  /// says yes to any language).
+  bool get _readsTranslation =>
+      _activeTranslationLang != null &&
+      _activeLang == null &&
+      _showTranslation &&
+      (_hasStoredTranslation || _translationJob != null) &&
+      (_translationOnlyActive || _speakTranslation);
+
+  /// The phone's voices, listed once per visit: a list is a platform round
+  /// trip (in a browser, up to a second's wait while it loads them). The
+  /// voices sheet lists them afresh, so a voice added in Settings shows
+  /// once the sheet is opened again. An empty list is never kept: a
+  /// browser slower than the speaker's wait may have its voices by the
+  /// next press.
+  List<SystemVoice>? _phoneVoices;
+  bool _phoneVoicesListed = false;
+
+  Future<List<SystemVoice>?> _listVoices({bool fresh = false}) async {
+    if (_phoneVoicesListed && !fresh) return _phoneVoices;
+    final voices = await _tts.voices();
+    _phoneVoices = voices;
+    _phoneVoicesListed = voices == null || voices.isNotEmpty;
+    return voices;
+  }
 
   /// Translation only (1.5.8, remembered per work in
   /// [Works.translationView]): the translated text in place of the
@@ -442,6 +540,9 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// whole while following audio under Translation only: word timings
   /// don't cross languages, sentences do.
   (int, int)? _litSentence;
+
+  /// [_wordSpace]'s memo: Page rebuilds on every word step.
+  final Map<(TextStyle?, TextScaler), double> _spaceWidths = {};
 
   /// Campaign 4 Phase 1: this profile's print-reader typography, loaded
   /// once in [_load] (the residency law — no re-fetch per rebuild). RSVP
@@ -467,6 +568,9 @@ class _ReaderScreenState extends State<ReaderScreen>
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     widget.player?.addListener(_onSpeechSpeed);
+    final p = widget.player;
+    if (p != null) _lastTurn = (id: p.current?.id, playing: p.playing);
+    p?.addListener(_onPlayerTurn);
     _load();
   }
 
@@ -480,6 +584,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     _followPoll?.cancel();
     _sweep?.cancel();
     widget.player?.removeListener(_onSpeechSpeed);
+    widget.player?.removeListener(_onPlayerTurn);
     _timer?.cancel();
     // Silence the voice without creating one: only an already-used speaker
     // needs stopping (fake-async law 1: fire-and-forget, never await here).
@@ -492,6 +597,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     // ever opened gets a dispose() call on its way out.
     final pipeline = _pipelineHolder;
     if (pipeline != null) unawaited(pipeline.dispose().catchError((_) {}));
+    unawaited(_speechInterruptions?.cancel());
     final queue = _queueHolder;
     if (queue != null) unawaited(queue.dispose().catchError((_) {}));
     final synthEngine = _synthEngineHolder;
@@ -635,7 +741,9 @@ class _ReaderScreenState extends State<ReaderScreen>
       _activeLang = null;
       _blocks = blocks;
       _doc = doc;
-      _wordIdx = wordIdx;
+      _cursorIdx = wordIdx;
+      _cursorAtMs =
+          saved?.updatedAtMs ?? DateTime.now().millisecondsSinceEpoch;
       _scrollAnchor = doc.words.isEmpty ? 0 : cursorAt(doc, wordIdx).segment;
       _preferSystemVoice = preferSystemVoice;
       _synthEngineHolder = synthEngine;
@@ -651,6 +759,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       _origDoc = doc;
       _projStarts = const {};
       _typography = readerPrefs.typography;
+      _voiceChoices = readerPrefs.voices;
       // How this reader last read: mode, speed, nearby words (persona A1:
       // "the reader forgets their settings" was a reason to quit).
       final session = readerPrefs.session;
@@ -706,16 +815,21 @@ class _ReaderScreenState extends State<ReaderScreen>
         _activeLang = layer;
         _blocks = blocks;
         _doc = newDoc;
-        _wordIdx =
+        _cursorIdx =
             newDoc.words.isEmpty ? 0 : globalWordIndex(newDoc, segment, 0);
         _scrollAnchor = segment;
       });
     }
-    if (widget.speakTranslation && _hasStoredTranslation) {
+    // Listen in the translation (the work page's language choice): the
+    // page shows and reads the translation alone for this visit, without
+    // changing the work's remembered Both / Translation only.
+    if (widget.speakTranslation && _hasStoredTranslation && _activeLang == null) {
+      final at = _cursorSentence();
       setState(() {
         _showTranslation = true;
-        _speakTranslation = true;
+        _translationOnly = true;
       });
+      _applyProjection(at);
     }
     if (widget.startSpeaking) _startSpeak();
     if (widget.openTranslatePicker) {
@@ -757,7 +871,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       _activeLang = next;
       _blocks = blocks;
       _doc = newDoc;
-      _wordIdx = newDoc.words.isEmpty
+      _cursorIdx = newDoc.words.isEmpty
           ? 0
           : globalWordIndex(newDoc, currentSegment, 0);
       _scrollAnchor = currentSegment;
@@ -877,12 +991,12 @@ class _ReaderScreenState extends State<ReaderScreen>
       _doc = doc;
       _projStarts = starts;
       if (doc.words.isEmpty || blocks.isEmpty) {
-        _wordIdx = 0;
+        _cursorIdx = 0;
         return;
       }
       final seg = at.segment.clamp(0, blocks.length - 1);
       final shown = _shownStarts(seg);
-      _wordIdx = globalWordIndex(doc, seg,
+      _cursorIdx = globalWordIndex(doc, seg,
           shown.isEmpty ? 0 : shown[at.sentence.clamp(0, shown.length - 1)]);
       _scrollAnchor = seg;
       _recenterGen++;
@@ -891,12 +1005,16 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   /// The menu's Translation only / Both: remembered for this work.
   Future<void> _setTranslationOnly(bool only) async {
-    if (only == _translationOnly) return;
-    _pause();
-    unawaited(_stopSpeak());
-    final at = _cursorSentence();
-    _translationOnly = only;
-    _applyProjection(at);
+    if (only != _translationOnly) {
+      _pause();
+      unawaited(_stopSpeak());
+      final at = _cursorSentence();
+      _translationOnly = only;
+      _applyProjection(at);
+    }
+    // Written even when the page already shows it: a Listen visit shows
+    // Translation only without remembering it, and picking it there is a
+    // choice to keep.
     await widget.db.spineDao.setTranslationOnly(widget.work.id, only);
   }
 
@@ -986,7 +1104,8 @@ class _ReaderScreenState extends State<ReaderScreen>
         workId: widget.work.id,
         segmentIdx: blocks[c.segment].idx,
         wordIdx: c.word,
-        lastModality: modality);
+        lastModality: modality,
+        readAtMs: _cursorAtMs);
     // Campaign 4 Phase 5's write side: every position save is proof the
     // cursor actually advanced today, so this is the one honest place to
     // mark a reading day (idempotent — see ReadingDays' own doc comment).
@@ -997,6 +1116,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   // ───── speak mode (the TtsSpeaker seam; cursor law ADR-0002) ─────
 
   void _toggleSpeak() {
+    _resumeAfterInterruption = false;
     if (_speaking) {
       unawaited(_stopSpeak());
     } else {
@@ -1010,9 +1130,9 @@ class _ReaderScreenState extends State<ReaderScreen>
   void _startSpeak() {
     final doc = _doc;
     if (doc == null || doc.words.isEmpty) return;
+    if (_pauseAudioThen(_startSpeak, anyWork: true)) return;
     _pause();
     setState(() => _speaking = true);
-    _applySpeechSpeed();
     if (widget.offerNeuralVoice && !_offeredNeuralVoice) {
       _offeredNeuralVoice = true;
       ScaffoldMessenger.of(context)
@@ -1041,184 +1161,270 @@ class _ReaderScreenState extends State<ReaderScreen>
     unawaited(_savePosition(modality: 'speak').catchError((_) {}));
   }
 
-  /// Which engine THIS run speaks through (ADR-0006): the neural voice
-  /// primed in [_load], unless the settings escape has pinned this profile
-  /// to the system voice — the system voice either way when nothing
-  /// resolved. A profile with no neural voice ever downloaded is
-  /// unaffected by [_preferSystemVoice]'s value: there is nothing to
-  /// prefer away from.
+  /// The language the page's own text is in: an mt layer's, else what
+  /// the work is written in. Null when nobody knows (the voice's default).
+  String? get _sourceSpeechLang =>
+      _activeLang ?? _sourceLang ?? _workLang ?? widget.work.lang;
+
+  /// What the downloaded voice reads (ADR-0006/0007): the language it
+  /// was resolved for in [_load], and those it speaks; nothing when there
+  /// is none or the listener set it aside. Russian, German and Chinese
+  /// are never in it: its character table has no Cyrillic or CJK
+  /// (docs/reference/tts-voices.md).
+  Set<String> get _neuralLangs =>
+      _synthEngineHolder == null || _preferSystemVoice
+          ? const {}
+          : neuralLangsFor(baseLanguage(_workLang ?? widget.work.lang));
+
+  /// What Read aloud says for block [seg] of [_blocks], in order — the
+  /// one authority both voices read from (1.5.9):
   ///
-  /// Campaign 8 "Babel widens" discovery: the neural voice's own language
-  /// gate (`supertonicSupportedLangs`, currently `{'en', 'es'}`) throws
-  /// `SupertonicUnsupportedLangException` — UNCAUGHT — the instant a
-  /// per-utterance `lang` tag it doesn't cover reaches it
-  /// (`_preprocessText`, called from every `synthesize`/`speak`). The
-  /// neural engine is primed for the WORK's source language (always
-  /// covered, since it primed successfully), but Speak-in-⟨language⟩
-  /// substitutes a DIFFERENT tag per translated sentence — so a target
-  /// this campaign ships (de/ru/zh: none in `supertonicSupportedLangs`)
-  /// would crash the run the instant a translated sentence's turn came
-  /// up. This is engine-SELECTION-level, not per-utterance: forcing the
-  /// system voice for the WHOLE run when Speak-in-⟨language⟩ is on for
-  /// an uncovered target sidesteps ever needing to catch the exception
-  /// mid-run.
-  SpeechEngine _resolveEngine() {
-    final synth = _synthEngineHolder;
-    final speakingUncoveredTarget = (_speakTranslation ||
-            _translationOnlyActive) &&
-        _activeTranslationLang != null &&
-        !supertonicSupportedLangs.contains(_activeTranslationLang);
-    if (!_preferSystemVoice && synth != null && !speakingUncoveredTarget) {
-      return synth;
+  ///  * Translation only: each original sentence's translation (the
+  ///    original where it has none yet), in its own language, swept over
+  ///    the translated words the page shows.
+  ///  * Both, with [_speakTranslation]: each sentence, then its
+  ///    translation; while the translation is heard the cursor holds the
+  ///    sentence's start, which lights the translation's line.
+  ///  * Otherwise: the shown text's sentences.
+  ///
+  /// The sentence numbering is always the original's
+  /// (`core.splitSentences` over [_original]), the numbering the stored
+  /// translations were written under. Sentinel blocks (code/table/
+  /// figure) and blank ones say nothing.
+  List<_SpeechUnit> _blockUnits(int seg) {
+    final blocks = _blocks!;
+    final block = blocks[seg];
+    final speakable = block.kind == core.SegmentKind.prose ||
+        block.kind == core.SegmentKind.heading;
+    if (!speakable || block.text.trim().isEmpty) return const [];
+    final source = _sourceSpeechLang;
+    final target = _activeTranslationLang;
+    String? translationOf(core.Segment original, List<core.Sentence> ss,
+            int i) =>
+        target == null
+            ? null
+            : translatedTextFor(
+                stored: _translatedSentences,
+                segIdx: original.idx,
+                sentenceIdx: i,
+                currentSourceText: ss[i].text);
+    final units = <_SpeechUnit>[];
+    if (_translationOnlyActive) {
+      final original = _original[seg];
+      final sentences = core.splitSentences(original.text);
+      final starts = _projStarts[seg] ?? const <int>[];
+      for (var i = 0; i < sentences.length; i++) {
+        if (sentences[i].text.trim().isEmpty) continue;
+        final translated = translationOf(original, sentences, i);
+        units.add(_SpeechUnit(
+            seg: seg,
+            from: i < starts.length ? starts[i] : 0,
+            to: i + 1 < starts.length ? starts[i + 1] : null,
+            text: translated ?? sentences[i].text,
+            lang: translated != null ? target : source));
+      }
+      return units;
     }
-    return UtteranceSpeechEngine(_tts);
+    final sentences = core.splitSentences(block.text);
+    final alsoTranslation = _interlinear && _activeLang == null &&
+        _speakTranslation;
+    for (var i = 0; i < sentences.length; i++) {
+      if (sentences[i].text.trim().isEmpty) continue;
+      final from = sentences[i].firstWordIdx;
+      final to = i + 1 < sentences.length ? sentences[i + 1].firstWordIdx : null;
+      units.add(_SpeechUnit(
+          seg: seg, from: from, to: to, text: sentences[i].text, lang: source));
+      final translated =
+          alsoTranslation ? translationOf(block, sentences, i) : null;
+      if (translated != null) {
+        units.add(_SpeechUnit(
+            seg: seg,
+            from: from,
+            to: to,
+            text: translated,
+            lang: target,
+            sweep: false));
+      }
+    }
+    return units;
   }
 
-  /// One speaking run, forked over which kind of voice this run has (the
-  /// two [SpeechEngine] shapes): an utterance engine keeps the reader's
-  /// original per-sentence awaited loop; a synthesis engine hands the rest
-  /// of the document's sentences to [SpeechPlaybackPipeline], which
-  /// synthesizes and plays them gaplessly, ahead of playback — the reader
-  /// only reacts to its callbacks. Both paths advance the SAME cursor under
-  /// the SAME law (ADR-0002): stopping anywhere leaves Position at that
-  /// sentence's start.
+  /// Every unit from block [fromSeg] to the end: what a run will say.
+  List<_SpeechUnit> _remainingUnits(int fromSeg) => [
+        for (var seg = fromSeg; seg < _blocks!.length; seg++)
+          ..._blockUnits(seg),
+      ];
+
+  /// One speaking run (ADR-0006): decides its voices first
+  /// ([planReadAloud]: the downloaded voice only when it reads every
+  /// language in the run, else the phone's, each language with its own
+  /// voice), refuses with a plain sentence when a language has no voice
+  /// at all, then reads. An utterance engine keeps the reader's
+  /// per-sentence awaited loop; a synthesis engine hands the rest of the
+  /// document to [SpeechPlaybackPipeline], which synthesizes and plays
+  /// gaplessly, ahead of playback. Both paths advance the SAME cursor
+  /// under the SAME law (ADR-0002): stopping anywhere leaves Position at
+  /// that sentence's start.
   Future<void> _speakLoop() async {
     final gen = ++_speakGen;
     final doc = _doc!;
     final blocks = _blocks!;
     bool live() => mounted && _speaking && gen == _speakGen;
     final seg = cursorAt(doc, _wordIdx).segment;
-
-    switch (_resolveEngine()) {
-      case UtteranceSpeechEngine u:
-        await _speakWithUtterance(u, doc, blocks, seg, live);
-      case SynthesisSpeechEngine s:
-        await _speakWithSynthesis(s, blocks, seg, gen, live);
+    final units = _remainingUnits(seg);
+    final target = baseLanguage(_activeTranslationLang);
+    final langs = {
+      for (final u in units) ?baseLanguage(u.lang),
+      if (_readsTranslation) ?target,
+    };
+    final synth = _synthEngineHolder;
+    final neuralLangs = _neuralLangs;
+    var plan = planReadAloud(
+        langs: langs,
+        neuralLangs: neuralLangs,
+        choices: _voiceChoices,
+        installed: null);
+    if (!plan.neural) {
+      final installed = await _listVoices();
+      if (!live()) return;
+      plan = planReadAloud(
+          langs: langs,
+          neuralLangs: neuralLangs,
+          choices: _voiceChoices,
+          installed: installed);
+    }
+    if (plan.missing.isNotEmpty) {
+      setState(() => _speaking = false);
+      // The translation's language first: the one most likely missing,
+      // and the one the listener is asking for. Under Both the original
+      // can still be heard alone, and the message says how.
+      final missing =
+          plan.missing.contains(target) ? target! : plan.missing.first;
+      final original = baseLanguage(_sourceSpeechLang);
+      _say(noVoiceMessage(missing,
+          originalLang: missing == target &&
+                  _offersSpeakTranslation &&
+                  original != null &&
+                  !plan.missing.contains(original)
+              ? original
+              : null));
+      return;
+    }
+    _runOnSystemVoice = !plan.neural;
+    _voicingTranslation = false;
+    _applySpeechSpeed();
+    if (plan.neural) {
+      await _speakWithSynthesis(synth!, units, gen, live);
+    } else {
+      await _speakWithUtterance(
+          UtteranceSpeechEngine(_tts), plan, doc, blocks, seg, live);
     }
   }
 
-  /// The system voice's path — unchanged from before this pass: whatever
-  /// layer the reader is showing ([_blocks] IS the projection), starting at
-  /// the cursor's segment; each advance moves the cursor to the next
-  /// SENTENCE's first word and saves the Position row BEFORE speaking on.
-  /// Sentinel segments (code/table/figure) have no sensible reading — the
-  /// voice passes over them the way an eye does, in one silent beat. A
-  /// heading IS spoken (it's prose-shaped, just styled differently).
-  Future<void> _speakWithUtterance(UtteranceSpeechEngine engine,
-      core.TokenizedDocument doc, List<core.Segment> blocks, int startSeg,
+  void _say(String message) => ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(SnackBar(
+        content: Text(message, key: const Key('read-aloud-message')),
+        duration: const Duration(seconds: 8)));
+
+  /// The phone voice's path: block by block from the cursor's, each
+  /// [_blockUnits] unit in turn; each advance moves the cursor to the
+  /// unit's sentence and saves the Position row BEFORE speaking on. A
+  /// block with nothing to say (a sentinel) is still one stop for the
+  /// cursor, passed in one silent beat, the way an eye passes it. A
+  /// sentence the engine refuses ([TtsNoVoiceException]: it has no voice
+  /// for that language after all) ends the run with the same plain
+  /// message as the check before it.
+  Future<void> _speakWithUtterance(
+      UtteranceSpeechEngine engine,
+      ReadAloudVoicePlan plan,
+      core.TokenizedDocument doc,
+      List<core.Segment> blocks,
+      int startSeg,
       bool Function() live) async {
     var seg = startSeg;
     var first = true;
     while (live() && seg < blocks.length) {
-      final block = blocks[seg];
-      final speakable = block.kind == core.SegmentKind.prose ||
-          block.kind == core.SegmentKind.heading;
-      final sentences = speakable && block.text.trim().isNotEmpty
-          ? core.splitSentences(block.text)
-          : const <core.Sentence>[];
-      // A block with no sentence boundaries (a sentinel, or nothing
-      // speakable in it) is still one stop for the cursor — the
-      // whole-block unit the reader always understood, now expressed as a
-      // single-sentence list so the loop below stays uniform.
-      final units = sentences.isEmpty
-          ? [core.Sentence(text: block.text, firstWordIdx: 0)]
-          : sentences;
-      for (var i = 0; i < units.length; i++) {
-        final sentence = units[i];
-        if (!live()) return;
+      final units = _blockUnits(seg);
+      if (units.isEmpty) {
         if (!first) {
-          setState(() => _wordIdx =
-              globalWordIndex(doc, seg, sentence.firstWordIdx));
+          setState(() => _wordIdx = globalWordIndex(doc, seg, 0));
           await _savePosition(modality: 'speak');
           if (!live()) return;
         }
         first = false;
-        if (speakable && sentence.text.trim().isNotEmpty) {
-          // Speak-in-⟨language⟩ (ADR-0008 Phase 4, generalized Campaign
-          // 8): `i` here is the RAW core.splitSentences index (this loop
-          // only reaches `units[i]` through the real `sentences` list —
-          // the empty-sentences whole-block fallback never has non-blank
-          // speakable text, so `i` never collides with a real
-          // sentenceIdx from a different numbering). A sentence with no
-          // stored translation falls back to English, spoken in its
-          // original language — no gap.
-          final translated = _speakTranslation && _activeTranslationLang != null
-              ? translatedTextFor(
-                  stored: _translatedSentences,
-                  segIdx: block.idx,
-                  sentenceIdx: i,
-                  currentSourceText: sentence.text)
-              : null;
-          final from = globalWordIndex(doc, seg, sentence.firstWordIdx);
-          if (translated == null) {
-            _sweepSentence(
-                doc,
-                from,
-                i + 1 < units.length
-                    ? globalWordIndex(doc, seg, units[i + 1].firstWordIdx)
-                    : _blockEnd(doc, seg));
-          }
-          await engine.speak(translated ?? sentence.text,
-              lang: translated != null
-                  ? _activeTranslationLang
-                  : (_shownLang ?? _workLang ?? widget.work.lang));
-          _stopSweep();
+        seg++;
+        continue;
+      }
+      for (final unit in units) {
+        if (!live()) return;
+        final from = globalWordIndex(doc, seg, unit.from);
+        if (!first) {
+          setState(() {
+            _wordIdx = from;
+            _voicingTranslation = !unit.sweep;
+          });
+          await _savePosition(modality: 'speak');
           if (!live()) return;
         }
+        first = false;
+        if (unit.sweep) {
+          _sweepSentence(doc, from, _unitEnd(doc, unit));
+        }
+        final lang = unit.lang;
+        try {
+          await engine.speak(unit.text,
+              lang: lang,
+              voice: plan.systemVoices[baseLanguage(lang)]);
+        } on TtsNoVoiceException catch (e) {
+          if (!live()) return;
+          await _stopSpeak();
+          final missing = baseLanguage(e.lang) ?? e.lang;
+          _say(noVoiceMessage(missing,
+              internetVoice: _phoneVoices?.any(
+                      (v) => v.lang == missing && v.needsInternet) ??
+                  false));
+          return;
+        } on TtsSpeakException {
+          if (!live()) return;
+          await _stopSpeak();
+          _say(_needsInternet(baseLanguage(lang), plan)
+              ? 'This voice needs the internet.'
+              : 'Read aloud stopped: the voice couldn’t play.');
+          return;
+        } catch (_) {
+          if (!live()) return;
+          await _stopSpeak();
+          _say('Read aloud stopped: the voice couldn’t play.');
+          return;
+        }
+        _stopSweep();
+        if (!live()) return;
       }
       seg++;
     }
     _finishSpeaking(live);
   }
 
-  /// The remaining speakable units from [fromSeg] to the end of the
-  /// document — the flat list [SpeechPlaybackPipeline] needs up front to
-  /// synthesize ahead of playback (unlike the utterance path, which only
-  /// ever needs ONE sentence at a time). Sentinel segments (code/table/
-  /// figure) carry nothing to synthesize and are skipped outright here —
-  /// the utterance path's silent "blip" through them has no analogue in a
-  /// flat gapless list, so the neural voice simply passes over them
-  /// without a cursor stop. A deliberate, tested behavior difference
-  /// between the two engines (`reader_speak_synthesis_test.dart`), not a
-  /// bug: synthesizing "[code]" aloud would be worse than skipping it.
-  ///
-  /// Speak-in-⟨language⟩ (ADR-0008 Phase 4, generalized Campaign 8):
-  /// [text] carries the STORED translation in place of the original
-  /// wherever one exists and [_speakTranslation] is on — [lang] is that
-  /// substitution's own tag ([_activeTranslationLang]), null otherwise,
-  /// so [SpeechPlaybackPipeline.start]'s `langOverrides` can tag each
-  /// sentence in the language it's ACTUALLY written in rather than one
-  /// language for the whole batch. [seg]/[wordIdx] always point at the
-  /// ORIGINAL sentence's position — the cursor never moves to reflect
-  /// which language is playing.
-  List<({int seg, int wordIdx, String text, String? lang})>
-      _remainingSpeechUnits(List<core.Segment> blocks, int fromSeg) {
-    final units = <({int seg, int wordIdx, String text, String? lang})>[];
-    for (var seg = fromSeg; seg < blocks.length; seg++) {
-      final block = blocks[seg];
-      final speakable = block.kind == core.SegmentKind.prose ||
-          block.kind == core.SegmentKind.heading;
-      if (!speakable || block.text.trim().isEmpty) continue;
-      final sentences = core.splitSentences(block.text);
-      for (var i = 0; i < sentences.length; i++) {
-        final sentence = sentences[i];
-        if (sentence.text.trim().isEmpty) continue;
-        final translated = _speakTranslation && _activeTranslationLang != null
-            ? translatedTextFor(
-                stored: _translatedSentences,
-                segIdx: block.idx,
-                sentenceIdx: i,
-                currentSourceText: sentence.text)
-            : null;
-        units.add((
-          seg: seg,
-          wordIdx: sentence.firstWordIdx,
-          text: translated ?? sentence.text,
-          lang: translated != null ? _activeTranslationLang : null,
-        ));
-      }
-    }
-    return units;
+  /// Whether the voice reading [lang] in [plan] needs the internet: the
+  /// one picked, or, for the language's default, every voice listed for
+  /// it (then the default can only be one of those).
+  bool _needsInternet(String? lang, ReadAloudVoicePlan plan) {
+    final picked = plan.systemVoices[lang];
+    if (picked != null) return picked.needsInternet;
+    final listed = [
+      for (final v in _phoneVoices ?? const <SystemVoice>[])
+        if (v.lang == lang) v
+    ];
+    return listed.isNotEmpty && listed.every((v) => v.needsInternet);
+  }
+
+  /// The global index one past [unit]'s sentence.
+  int _unitEnd(core.TokenizedDocument doc, _SpeechUnit unit) {
+    final to = unit.to;
+    return to == null
+        ? _blockEnd(doc, unit.seg)
+        : globalWordIndex(doc, unit.seg, to);
   }
 
   /// The neural voice's path: hands every remaining sentence to a
@@ -1229,9 +1435,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// and [_onSynthDone] carry it the rest of the way via the pipeline's
   /// callbacks.
   Future<void> _speakWithSynthesis(SynthesisSpeechEngine engine,
-      List<core.Segment> blocks, int fromSeg, int gen,
-      bool Function() live) async {
-    final units = _remainingSpeechUnits(blocks, fromSeg);
+      List<_SpeechUnit> units, int gen, bool Function() live) async {
     if (units.isEmpty) {
       _finishSpeaking(live);
       return;
@@ -1246,10 +1450,11 @@ class _ReaderScreenState extends State<ReaderScreen>
           (widget.createSpeechTempFiles ?? _fallbackSpeechTempFiles)(),
       onSentenceStart: _onSynthSentenceStart,
       onDone: _onSynthDone,
+      onFailed: _onSynthFailed,
     );
     unawaited(_queue.setSpeed(_speechSpeed).catchError((_) {}));
     await pipeline.start([for (final u in units) u.text],
-        lang: _shownLang ?? _workLang ?? widget.work.lang,
+        lang: _sourceSpeechLang,
         langOverrides: [for (final u in units) u.lang]);
   }
 
@@ -1264,21 +1469,16 @@ class _ReaderScreenState extends State<ReaderScreen>
     final doc = _doc;
     if (doc == null) return;
     final unit = _synthUnits[index];
-    final from = globalWordIndex(doc, unit.seg, unit.wordIdx);
-    final next = index + 1 < _synthUnits.length ? _synthUnits[index + 1] : null;
+    final from = globalWordIndex(doc, unit.seg, unit.from);
     _stopSweep();
     if (index > 0) {
-      setState(() => _wordIdx = from);
+      setState(() {
+        _wordIdx = from;
+        _voicingTranslation = !unit.sweep;
+      });
       unawaited(_savePosition(modality: 'speak').catchError((_) {}));
     }
-    if (unit.lang == null) {
-      _sweepSentence(
-          doc,
-          from,
-          next != null && next.seg == unit.seg
-              ? globalWordIndex(doc, next.seg, next.wordIdx)
-              : _blockEnd(doc, unit.seg));
-    }
+    if (unit.sweep) _sweepSentence(doc, from, _unitEnd(doc, unit));
   }
 
   /// The global index one past block [seg]'s last word.
@@ -1331,7 +1531,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   void _applySpeechSpeed() {
     final speed = _speechSpeed;
     _appliedSpeechSpeed = speed;
-    if (_resolveEngine() is UtteranceSpeechEngine) {
+    if (_runOnSystemVoice) {
       unawaited(_tts.setRate(kIsWeb ? speed : speed / 2).catchError((_) {}));
     }
     final queue = _queueHolder;
@@ -1342,6 +1542,75 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (_speaking && _speechSpeed != _appliedSpeechSpeed) _applySpeechSpeed();
   }
 
+  // ───── one voice at a time (1.5.9) ─────
+  //
+  // The report that started this: a transcribed episode's reader had the
+  // bar's Play, the page's Listen and a third Play (the one-word pacer, or
+  // Read aloud) that ignored the other two, so audio and the page's own
+  // pace or voice ran over each other. Now whichever starts last wins:
+  // Read aloud pauses any audio (two voices at once is never wanted), the
+  // pacer pauses this episode (it would otherwise race the words), and
+  // the episode starting to play, from the bar, the lock screen or
+  // anywhere, stops both and takes the cursor back.
+
+  /// Pauses the audio [start] must not run over, then runs [start] once
+  /// it is quiet. True when it took over (the caller returns).
+  ///
+  /// A pause that fails starts nothing while the audio still plays: a
+  /// second voice over the first is the very thing this prevents. The
+  /// listener is told, in words, and the bar's Pause is right there.
+  bool _pauseAudioThen(VoidCallback start, {required bool anyWork}) {
+    final p = widget.player;
+    if (p == null || !p.playing) return false;
+    if (!anyWork && p.current?.id != widget.work.id) return false;
+    unawaited(p.toggle().catchError((Object _) {}).then((_) {
+      if (!mounted) return;
+      if (!p.playing) return start();
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(
+            content:
+                Text('Couldn’t pause the audio. Pause it, then try again.')));
+    }));
+    return true;
+  }
+
+  /// The player's (current work, playing) at the last notification, so
+  /// [_onPlayerTurn] acts on a start, not on every position tick.
+  ({int? id, bool playing})? _lastTurn;
+
+  void _onPlayerTurn() {
+    final p = widget.player;
+    if (p == null || !mounted) return;
+    final turn = (id: p.current?.id, playing: p.playing);
+    final started = turn.playing && turn != _lastTurn;
+    _lastTurn = turn;
+    if (!started) return;
+    // The episode took over: the end of a call must not take it back.
+    _resumeAfterInterruption = false;
+    if (_speaking) unawaited(_stopSpeak());
+    if (turn.id != widget.work.id) return;
+    if (_playing) _pause();
+    // Resumed from anywhere (the bar, the lock screen): the page follows
+    // the voice again, so the two never drift apart. A hand that takes
+    // the cursor while it plays still detaches, until the next start.
+    _attachAudioFollow();
+  }
+
+  /// The bar (MiniPlayerHost's, on every pushed screen) is playing this
+  /// work and the page is following it: the bar's Play is this page's
+  /// Play then, and the page doesn't repeat it. Paused, or with the
+  /// reader away from the voice, Listen from here stays: the bar would
+  /// resume where the voice stopped, not where the reader is.
+  bool get _barHoldsListen {
+    final p = widget.player;
+    return p != null &&
+        p.current?.id == widget.work.id &&
+        p.playing &&
+        _followingAudio &&
+        (MiniPlayerHost.maybeOf(context)?.hasBar ?? false);
+  }
+
   /// The synthesis path's natural end — fired only once every sentence has
   /// genuinely finished playing (the pipeline's own `onDone` contract) —
   /// restores the non-speaking state through the exact same call the
@@ -1349,6 +1618,40 @@ class _ReaderScreenState extends State<ReaderScreen>
   void _onSynthDone() {
     if (!mounted || !_speaking || _synthGen != _speakGen) return;
     _finishSpeaking(() => mounted && _speaking && _synthGen == _speakGen);
+  }
+
+  /// The synthesis run could not go on (a sentence that would not
+  /// synthesize, a clip or player that failed): the page leaves speaking
+  /// through the same path as Stop, and says so, instead of sitting on
+  /// Stop in silence.
+  void _onSynthFailed() {
+    if (!mounted || !_speaking || _synthGen != _speakGen) return;
+    unawaited(_stopSpeak());
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(
+          content: Text('Read aloud stopped: the voice couldn’t play.')));
+  }
+
+  /// The audio session took the speaker (the queue has already paused).
+  /// The page stops the way Stop does, the cursor back at the sentence's
+  /// start, so what it shows matches what is heard. A passing
+  /// interruption hands the voice back, as it does the podcast
+  /// (just_audio resumes a player a call paused), but only to a page that
+  /// is on screen, the one place read aloud ever plays.
+  void _onSpeechInterruption(SpeechInterruption why) {
+    if (!mounted) return;
+    switch (why) {
+      case SpeechInterruption.began:
+      case SpeechInterruption.noisy:
+        if (!_speaking) return;
+        unawaited(_stopSpeak());
+        _resumeAfterInterruption = why == SpeechInterruption.began;
+      case SpeechInterruption.ended:
+        final resume = _resumeAfterInterruption;
+        _resumeAfterInterruption = false;
+        if (resume && !_speaking && _onScreen) _startSpeak();
+    }
   }
 
   void _finishSpeaking(bool Function() live) {
@@ -1361,6 +1664,42 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   static SpeechTempFiles _fallbackSpeechTempFiles() => DiskSpeechTempFiles(
       dir: Directory('${Directory.systemTemp.path}/trellis-speech-temp'));
+
+  /// The Read aloud voices sheet: a voice for each language this work
+  /// reads in (its own, and the translation's while one shows).
+  Future<void> _openReadAloudVoices() async {
+    final installed = await _listVoices(fresh: true);
+    if (!mounted) return;
+    final source = _sourceSpeechLang;
+    final target = _hasStoredTranslation && _activeLang == null
+        ? _activeTranslationLang
+        : null;
+    final langs =
+        <String>{?baseLanguage(source), ?baseLanguage(target)}.toList();
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (_) => ReadAloudVoicesSheet(
+          langs: langs,
+          neuralLangs: _neuralLangs,
+          installed: installed,
+          choices: _voiceChoices,
+          onPick: _pickVoice,
+          systemVoiceOn: _synthEngineHolder != null && _preferSystemVoice),
+    );
+  }
+
+  /// Remembers [voiceId] for [lang] (the whole prefs blob is shared, so
+  /// it changes through [ProfilesDao.updateReaderPrefs]). The next run
+  /// reads with it.
+  void _pickVoice(String lang, String voiceId) {
+    setState(() => _voiceChoices = {..._voiceChoices, lang: voiceId});
+    unawaited(widget.db.profilesDao
+        .updateReaderPrefs(widget.profileId,
+            (p) => p.copyWith(voices: {...p.voices, lang: voiceId}))
+        .catchError((Object _) {}));
+  }
 
   /// The settings escape (ADR-0006): flips the persisted preference and
   /// takes effect on the NEXT speak run — a run already under way keeps
@@ -1469,9 +1808,14 @@ class _ReaderScreenState extends State<ReaderScreen>
     await _startTranslation(fresh);
   }
 
-  /// "Ready", "Via English · Ready", "Download 113 MB", ...
+  /// "Ready", "Via English · Ready", "Download 113 MB", "Update
+  /// available: 60 MB" (a pair already here whose decoder was re-pinned).
   static String _routeLine(TranslationRoute r) {
-    final how = r.ready ? 'Ready' : 'Download ${formatBytes(r.missingBytes)}';
+    final how = r.ready
+        ? 'Ready'
+        : r.update
+            ? 'Update available: ${formatBytes(r.missingBytes)}'
+            : 'Download ${formatBytes(r.missingBytes)}';
     return r.viaEnglish ? 'Via English · $how' : how;
   }
 
@@ -1485,8 +1829,8 @@ class _ReaderScreenState extends State<ReaderScreen>
     final ok = await confirmDownload(context, items: [
       for (final l in missing)
         DownloadItem('${languageDisplayName(l.source)} to '
-            '${languageDisplayName(l.target)} translator, '
-            '${formatBytes(l.missingBytes)}'),
+            '${languageDisplayName(l.target)} translator'
+            '${l.update ? ' update' : ''}, ${formatBytes(l.missingBytes)}'),
       if (missing.length > 1)
         DownloadItem('${formatBytes(route.missingBytes)} in all, to '
             'translate via English'),
@@ -1558,7 +1902,18 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (_activeLang != null || _translationJob != null) return;
     await widget.db.spineDao
         .setActiveTranslationLang(widget.work.id, route.target);
+    // The sentences in memory are the old target's until this run ends:
+    // left there, Both would show another language's sentences under the
+    // new one's name, and Read aloud would hand them to the new
+    // language's voice. Swap in what is stored for the new target (none,
+    // or what an interrupted run already made).
+    final stored = route.target == _activeTranslationLang
+        ? _translatedSentences
+        : await widget.db.spineDao
+            .translationSentencesOf(widget.work.id, lang: route.target);
     if (!mounted) return;
+    final from = _cursorSentence();
+    final onlyBefore = _translationOnlyActive;
     final run = TranslationRun(
       dao: widget.db.spineDao,
       workId: widget.work.id,
@@ -1572,9 +1927,11 @@ class _ReaderScreenState extends State<ReaderScreen>
     run.addListener(_onTranslationProgress);
     setState(() {
       _activeTranslationLang = route.target;
+      _translatedSentences = stored;
       _showTranslation = true;
       _translationJob = run;
     });
+    if (onlyBefore || _translationOnlyActive) _applyProjection(from);
     await run.start();
     run.removeListener(_onTranslationProgress);
     if (!mounted) return;
@@ -1603,25 +1960,19 @@ class _ReaderScreenState extends State<ReaderScreen>
   void _cancelTranslation() => _translationJob?.cancel();
 
   /// The scroll-mode dual-display toggle: persisted through the DAO (not
-  /// local-only state), same law [_toggleVoicePreference] follows. Turning
-  /// it off also turns [_speakTranslation] off — its own menu item is
-  /// about to disappear, and a stale `true` behind a hidden control would
-  /// keep substituting the translation into a run the user has no way to
-  /// see, let alone turn off again.
+  /// local-only state), same law [_toggleVoicePreference] follows. With
+  /// it off Read aloud reads the original only, whatever
+  /// [_speakTranslation] says: that choice is about Both.
   Future<void> _toggleShowTranslation() async {
     final next = !_showTranslation;
     final at = _cursorSentence();
     final wasOnly = _translationOnlyActive;
-    setState(() {
-      _showTranslation = next;
-      if (!next) _speakTranslation = false;
-    });
+    setState(() => _showTranslation = next);
     if (wasOnly != _translationOnlyActive) _applyProjection(at);
     await widget.db.spineDao.setShowTranslationLayer(widget.work.id, next);
   }
 
-  /// Speak-in-⟨language⟩ (ADR-0008 "Babel" Phase 4, generalized): takes
-  /// effect on the NEXT speak run, the same law [_toggleVoicePreference]
+  /// Reading the translation under Both: takes effect on the NEXT run, the same law [_toggleVoicePreference]
   /// follows — a run already under way keeps speaking whatever it
   /// started with.
   void _toggleSpeakTranslation() =>
@@ -1650,6 +2001,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   void _play() {
     final doc = _doc;
     if (doc == null || doc.words.isEmpty) return;
+    if (_pauseAudioThen(_play, anyWork: false)) return;
     unawaited(_stopSpeak()); // one cursor-advancer at a time
     _detachAudioFollow(); // the pacer is a hand on the cursor too
     // Every fresh play starts follow-along's own dedupe clean, so the
@@ -1742,16 +2094,13 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// Remembers how this reader reads, for the next open (read-modify-write:
   /// the same blob carries typography and the last-played work).
   Future<void> _rememberSession() async {
-    final dao = widget.db.profilesDao;
-    final prefs = await dao.readerPrefs(widget.profileId);
-    await dao.setReaderPrefs(
-        widget.profileId,
-        prefs.copyWith(
-            session: ReaderSession(
-                mode: _modeToWire(_mode),
-                wpm: _wpm,
-                nearbyWords: _parafoveal,
-                focusSpread: _sigma)));
+    final session = ReaderSession(
+        mode: _modeToWire(_mode),
+        wpm: _wpm,
+        nearbyWords: _parafoveal,
+        focusSpread: _sigma);
+    await widget.db.profilesDao.updateReaderPrefs(
+        widget.profileId, (p) => p.copyWith(session: session));
   }
 
   void _setMode(ReaderMode next) {
@@ -1865,7 +2214,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// The reader's one visible Play (1.5.5: a Play that makes sound). With
   /// aligned audio it listens: it hands the cursor to the player, and
   /// pauses it, with the speed control beside it. A text is read aloud,
-  /// the same as the bar's Read aloud. RSVP's own controls hold its Play.
+  /// the same as the bar's Read aloud. RSVP's own controls hold its pacer.
   Widget? _playButton({required bool fab}) {
     if (!_canListen) {
       if (!fab) return null;
@@ -1891,8 +2240,14 @@ class _ReaderScreenState extends State<ReaderScreen>
     return ListenableBuilder(
       listenable: player,
       builder: (context, _) {
-        final listening =
-            player.current?.id == widget.work.id && player.playing;
+        // The bar's Play is this episode's one Play; the speed is there
+        // too.
+        if (_barHoldsListen) return const SizedBox.shrink();
+        // Pause only where no bar holds it, and only while the page
+        // follows; otherwise this starts the voice at the cursor.
+        final listening = player.current?.id == widget.work.id &&
+            player.playing &&
+            _followingAudio;
         final VoidCallback onPressed = listening
             ? () => unawaited(player.toggle())
             : () {
@@ -1901,8 +2256,11 @@ class _ReaderScreenState extends State<ReaderScreen>
                 unawaited(_stopSpeak());
                 unawaited(_listenFromHere());
               };
-        final icon = Icon(listening ? Icons.pause : Icons.play_arrow);
-        final tooltip = listening ? 'Pause' : 'Listen';
+        // Headphones, as on the work page's Listen: beside the bar's
+        // Play, a second play glyph read as a duplicate.
+        final icon =
+            Icon(listening ? Icons.pause : Icons.headphones_outlined);
+        final tooltip = listening ? 'Pause' : 'Listen from here';
         if (!fab) {
           return OhIconButton.filledTonal(
               key: const Key('reader-play'),
@@ -2216,6 +2574,7 @@ class _ReaderScreenState extends State<ReaderScreen>
             onSelected: (value) {
               if (value == 'distill') unawaited(_distill());
               if (value == 'system-voice') unawaited(_toggleVoicePreference());
+              if (value == 'voices') unawaited(_openReadAloudVoices());
               if (value == 'translate') unawaited(_openTranslatePicker());
               if (value == 'show-translation') {
                 unawaited(_toggleShowTranslation());
@@ -2272,6 +2631,12 @@ class _ReaderScreenState extends State<ReaderScreen>
                   checked: _preferSystemVoice,
                   child: const Text('Use the system voice'),
                 ),
+              // A voice for each language (1.5.9): rare, so here, not on
+              // the bar.
+              const PopupMenuItem(
+                  key: Key('read-aloud-voices'),
+                  value: 'voices',
+                  child: Text('Read aloud voices')),
               // The model gate (ADR-0008; generalized to any pair,
               // Campaign 8 "Babel widens"): offered only once at least
               // one target pair for this work's source language is
@@ -2324,17 +2689,17 @@ class _ReaderScreenState extends State<ReaderScreen>
                 ),
               ],
               // Under Translation only the voice already reads the
-              // translation, so there is nothing to switch.
-              if (_showTranslation &&
-                  _hasStoredTranslation &&
-                  _activeLang == null &&
-                  !_translationOnly)
+              // translation, so there is nothing to switch; under Both it
+              // reads each sentence, then its translation, unless this
+              // is off.
+              if (_offersSpeakTranslation)
                 CheckedPopupMenuItem<String>(
                   key: const Key('speak-translation-toggle'),
                   value: 'speak-translation',
                   checked: _speakTranslation,
-                  child: Text(
-                      'Speak in ${languageDisplayName(_activeTranslationLang!)}'),
+                  child: Text('Read the '
+                      '${languageDisplayName(_activeTranslationLang!)} '
+                      'aloud too'),
                 ),
             ],
           ),
@@ -2857,14 +3222,18 @@ class _ReaderScreenState extends State<ReaderScreen>
             spacing: 12,
             runSpacing: 8,
             children: [
-              OhIconButton.filled(
+              // The pacer runs the words, silent. Worded and outlined, not
+              // a filled Play: beside the bar's Play (and Listen) a second
+              // one read as a duplicate (1.5.9). "Start", not a mode's
+              // name; while it runs the voice is paused, so its Pause is
+              // the only Pause on screen.
+              OutlinedButton.icon(
                 key: const Key('play-toggle'),
-                iconSize: 36,
-                tooltip: _playing ? 'Pause' : 'Play',
-                // Glyph contrast (Campaign 9 Phase 0's "blank circles")
-                // is pinned by OhIconButton, not here.
+                style: OutlinedButton.styleFrom(
+                    minimumSize: const Size(48, 48)),
                 onPressed: _playing ? _pause : _play,
-                icon: Icon(_playing ? Icons.pause : Icons.play_arrow),
+                icon: Icon(_playing ? Icons.pause : Icons.speed),
+                label: Text(_playing ? 'Pause' : 'Start'),
               ),
               ?_playButton(fab: false),
               // The shared speed, for listening and reading aloud alike.
@@ -3149,7 +3518,8 @@ class _ReaderScreenState extends State<ReaderScreen>
         if (translated != null) {
           rows.add(_translatedLine(translated, theme,
               key: Key('translation-${block.idx}-$i'),
-              lit: _wordIdx >= sStart && _wordIdx < sEnd));
+              lit: _translationLit(sStart, sEnd),
+              last: i == sentences.length - 1));
         }
       }
       body = Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows);
@@ -3212,7 +3582,8 @@ class _ReaderScreenState extends State<ReaderScreen>
       if (translated != null) {
         rows.add(_translatedLine(translated, theme,
             key: Key('translation-${block.idx}-$i'),
-            lit: _wordIdx >= sStart && _wordIdx < sEnd));
+            lit: _translationLit(sStart, sEnd),
+            last: i == sentences.length - 1));
       }
     }
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: rows);
@@ -3223,9 +3594,14 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// widget tree stays byte-identical.
   Widget _wordWrap(core.TokenizedDocument doc, int start, int end,
       TextStyle? base, ThemeData theme) {
+    // Line's rhythm (1.5.9): words a plain space apart at the reader's
+    // text scale, and lines stepped by the line height alone. A fixed gap
+    // and run spacing set Follow along looser than the same text on Line,
+    // and the gap didn't grow with the text.
+    final space = _wordSpace(base);
     return Wrap(
-      spacing: 6,
-      runSpacing: 4,
+      spacing: space,
+      runSpacing: 0,
       // Ragged-right by default; justified distributes each line's words
       // across the full measure INCLUDING the last line (this is a
       // per-word Wrap, not Flutter's TextAlign.justify, which special-
@@ -3240,7 +3616,7 @@ class _ReaderScreenState extends State<ReaderScreen>
           GestureDetector(
             onTap: () => _seekToWord(w),
             onLongPress: () => _openDefinitionSheet(doc.words[w]),
-            child: _flowWord(doc, w, base, theme),
+            child: _flowWord(doc, w, base, theme, space),
           ),
       ],
     );
@@ -3252,11 +3628,14 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// primary element).
   ///
   /// [lit] marks the translation of the sentence being read or heard (1.5.8:
-  /// word timings don't map across languages, so it lights whole).
+  /// word timings don't map across languages, so it lights whole). The
+  /// block's [last] line leaves the gap below to the paragraph spacing,
+  /// so a translated paragraph ends no further from the next than any.
   Widget _translatedLine(String text, ThemeData theme,
-          {Key? key, bool lit = false}) =>
+          {Key? key, bool lit = false, bool last = false}) =>
       Padding(
-        padding: const EdgeInsets.only(top: 2, bottom: 6),
+        padding: EdgeInsets.only(
+            top: kTranslationGapAbove, bottom: last ? 0 : kTranslationGapBelow),
         child: _litBox(lit, theme, Text(text,
             key: key,
             // Arabic (and any other right-to-left target) reads from the
@@ -3268,6 +3647,7 @@ class _ReaderScreenState extends State<ReaderScreen>
                 fontFamily: readerTypefaceFontFamily(ReaderTypeface.lora),
                 package: kReaderFontPackage,
                 fontStyle: FontStyle.italic,
+                height: kTranslationLineHeight,
                 color: lit
                     ? theme.colorScheme.onSurface
                     : theme.colorScheme.onSurfaceVariant))),
@@ -3297,7 +3677,8 @@ class _ReaderScreenState extends State<ReaderScreen>
           currentSourceText: sentences[i].text);
       if (translated != null) {
         lines.add(_translatedLine(translated, theme,
-            key: Key('translation-${block.idx}-$i')));
+            key: Key('translation-${block.idx}-$i'),
+            last: i == sentences.length - 1));
       }
     }
     if (lines.isEmpty) return null;
@@ -3309,33 +3690,87 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// drop cap; the cursor word carries the highlight; both behaviors stack
   /// because the drop cap sits inside the same gesture detector and
   /// highlight box as any other word.
+  ///
+  /// Neither highlight changes a word's size (1.5.9): a bold face or a
+  /// padded box widened the lit words, so every step shoved the rest of
+  /// the line along and could rewrap the paragraph under the reader's
+  /// eye. The band is painted out into the gap beside the word instead;
+  /// a lit sentence's bands meet across the gaps as one.
+  ///
+  /// The cursor's band is the strong tertiary with its own ink, not the
+  /// lit sentence's pale container: the pale one all but vanished on the
+  /// current paragraph's tint, and inside a lit sentence it was the same
+  /// colour as the sentence (reader_cursor_contrast_test.dart pins 3:1).
   Widget _flowWord(core.TokenizedDocument doc, int w, TextStyle? base,
-      ThemeData theme) {
+      ThemeData theme, double space) {
     final current = w == _wordIdx;
     final lit = _litSentence;
     final inLit = lit != null && w >= lit.$1 && w < lit.$2;
-    final style = current ? base?.copyWith(fontWeight: FontWeight.w700) : base;
+    final scheme = theme.colorScheme;
+    final style = current ? base?.copyWith(color: scheme.onTertiary) : base;
     final Widget child = w == 0
-        ? DropCap(word: doc.words[w], bodyStyle: style)
+        ? DropCap(
+            word: doc.words[w],
+            bodyStyle: style,
+            color: current ? scheme.onTertiary : null)
         : Text(doc.words[w],
             key: current ? const Key('cursor-word') : null, style: style);
     if (!current && !inLit) return child;
-    if (!current) {
-      return Container(
-        key: const Key('sentence-lit'),
-        padding: const EdgeInsets.symmetric(horizontal: 3),
-        color: theme.colorScheme.tertiaryContainer,
-        child: child,
-      );
-    }
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 3),
-      decoration: BoxDecoration(
-          color: theme.colorScheme.tertiaryContainer,
-          borderRadius: BorderRadius.circular(4)),
+    return CustomPaint(
+      key: current ? null : const Key('sentence-lit'),
+      painter: WordBandPainter(
+          color: current ? scheme.tertiary : scheme.tertiaryContainer,
+          spread: current ? math.min(3, space / 2) : space / 2,
+          radius: current ? 4 : 0),
       child: child,
     );
   }
+
+  /// The width of a space in [style] at the reader's text scale: the gap
+  /// Line's flowing text leaves between words.
+  double _wordSpace(TextStyle? style) {
+    final scaler = MediaQuery.textScalerOf(context);
+    return _spaceWidths.putIfAbsent((style, scaler), () {
+      double width(String text) {
+        final painter = TextPainter(
+            text: TextSpan(text: text, style: style),
+            textDirection: TextDirection.ltr,
+            textScaler: scaler)
+          ..layout();
+        final w = painter.width;
+        painter.dispose();
+        return w;
+      }
+
+      // The primary font's space: a word in a fallback font (Cyrillic on
+      // Android) may want a slightly different gap.
+      return width('a a') - width('aa');
+    });
+  }
+}
+
+/// A highlight band behind one flowing word, reaching [spread] into the
+/// gaps either side without taking any room of its own. Public for
+/// reader_cursor_contrast_test.dart, which reads its colour.
+@visibleForTesting
+class WordBandPainter extends CustomPainter {
+  const WordBandPainter(
+      {required this.color, required this.spread, required this.radius});
+
+  final Color color;
+  final double spread;
+  final double radius;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final rect = Rect.fromLTRB(-spread, 0, size.width + spread, size.height);
+    canvas.drawRRect(RRect.fromRectAndRadius(rect, Radius.circular(radius)),
+        Paint()..color = color);
+  }
+
+  @override
+  bool shouldRepaint(WordBandPainter old) =>
+      old.color != color || old.spread != spread || old.radius != radius;
 }
 
 /// The print signature (proposal-2 §12): the work's opening word sets its
@@ -3346,7 +3781,11 @@ class _ReaderScreenState extends State<ReaderScreen>
 class DropCap extends StatelessWidget {
   final String word;
   final TextStyle? bodyStyle;
-  const DropCap({super.key, required this.word, this.bodyStyle});
+
+  /// The cap's ink, when the word is the cursor's (on its band); the
+  /// theme's otherwise.
+  final Color? color;
+  const DropCap({super.key, required this.word, this.bodyStyle, this.color});
 
   @override
   Widget build(BuildContext context) {
@@ -3357,7 +3796,8 @@ class DropCap extends StatelessWidget {
         fontFamily: readerTypefaceFontFamily(ReaderTypeface.lora),
         package: kReaderFontPackage,
         fontWeight: FontWeight.w700,
-        height: 1.0);
+        height: 1.0,
+        color: color);
     return Row(
       mainAxisSize: MainAxisSize.min,
       crossAxisAlignment: CrossAxisAlignment.baseline,
@@ -3413,4 +3853,25 @@ class _BarMenuFace extends StatelessWidget {
     return OhBarFoldable(
         worded: face(worded: true), folded: face(worded: false));
   }
+}
+
+/// One thing Read aloud says: a sentence in block [seg] of the page's
+/// blocks, words [from, to) of that block (`to` null: to the block's end),
+/// in [lang]. [sweep] false: a translation heard under its original
+/// (Both), where the cursor holds the original's start instead of
+/// sweeping words that aren't the ones being said.
+class _SpeechUnit {
+  final int seg;
+  final int from;
+  final int? to;
+  final String text;
+  final String? lang;
+  final bool sweep;
+  const _SpeechUnit(
+      {required this.seg,
+      required this.from,
+      required this.to,
+      required this.text,
+      required this.lang,
+      this.sweep = true});
 }

@@ -36,11 +36,18 @@ class SpeechPlaybackPipeline {
   /// reader restores its non-speaking state through the same path either
   /// way, but only a natural end should fire it.
   final void Function()? onDone;
+
+  /// Fires once when the run cannot go on: a sentence would not
+  /// synthesize, the player refused a clip, or the player failed under
+  /// it. The run is already over (queue cleared, files deleted, as on
+  /// [stop]); without this the reader would sit on "speaking" in silence.
+  final void Function()? onFailed;
   final int lookahead;
 
   int _gen = 0;
   StreamSubscription<int>? _indexSub;
   StreamSubscription<void>? _completedSub;
+  StreamSubscription<Object>? _errorSub;
 
   /// Set once THIS run's synthesis loop has appended its last sentence —
   /// the fact [SpeechAudioQueue.completedStream] alone cannot see (it
@@ -57,6 +64,7 @@ class SpeechPlaybackPipeline {
     required this.tempFiles,
     required this.onSentenceStart,
     this.onDone,
+    this.onFailed,
     this.lookahead = 2,
   });
 
@@ -93,6 +101,7 @@ class SpeechPlaybackPipeline {
       if (!_reachedEnd) return; // playback caught up to synthesis — not done
       onDone?.call();
     });
+    _errorSub = queue.errorStream.listen((_) => _fail(gen));
 
     final runDone = Completer<void>();
     _done = runDone.future;
@@ -117,11 +126,9 @@ class SpeechPlaybackPipeline {
         try {
           result = await futureFor(i);
         } catch (_) {
-          // Honest failure: stop this run cleanly rather than wedge the
-          // queue on a sentence that will never arrive. The typed-error
-          // surface to the reader's speak-mode door is Phase 2's concern
-          // (SupertonicSpeechEngine, ADR-0007); the pipeline's job is just
-          // to not hang.
+          // Honest failure: end this run rather than wedge the queue on a
+          // sentence that will never arrive.
+          _fail(gen);
           return;
         }
         if (gen != _gen) return;
@@ -132,10 +139,15 @@ class SpeechPlaybackPipeline {
           return;
         }
         _liveFiles.add(path);
-        await queue.append(path);
-        if (gen != _gen) return;
-
-        if (i == startAt) await queue.play();
+        try {
+          await queue.append(path);
+          if (gen != _gen) return;
+          if (i == startAt) await queue.play();
+        } catch (_) {
+          // The player refused the clip: every later one would follow it.
+          _fail(gen);
+          return;
+        }
       }
       // The for-loop exhausted every sentence without being fenced out —
       // this run genuinely has nothing left to append. From here on a
@@ -161,6 +173,14 @@ class SpeechPlaybackPipeline {
   /// teardown, is the caller's call, not this pipeline's.
   Future<void> dispose() => _reset();
 
+  /// Ends run [gen] on a failure, once: [_reset] moves the generation on,
+  /// so a second failure of the same run finds it already over.
+  void _fail(int gen) {
+    if (gen != _gen) return;
+    unawaited(_reset().catchError((Object _) {}));
+    onFailed?.call();
+  }
+
   Future<void> _reset() async {
     _gen++;
     _reachedEnd = false;
@@ -168,6 +188,8 @@ class SpeechPlaybackPipeline {
     _indexSub = null;
     await _completedSub?.cancel();
     _completedSub = null;
+    await _errorSub?.cancel();
+    _errorSub = null;
     await queue.clear();
     final files = List<String>.of(_liveFiles);
     _liveFiles.clear();

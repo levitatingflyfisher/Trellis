@@ -20,7 +20,7 @@ library;
 
 import 'dart:typed_data';
 
-import '../../../services/device_services.dart' show TtsSpeaker;
+import '../../../services/device_services.dart' show SystemVoice, TtsSpeaker;
 
 sealed class SpeechEngine {
   bool get canPause;
@@ -36,8 +36,8 @@ class UtteranceSpeechEngine implements SpeechEngine {
   @override
   bool get canPause => false;
 
-  Future<void> speak(String sentence, {String? lang}) =>
-      speaker.speak(sentence, lang: lang);
+  Future<void> speak(String sentence, {String? lang, SystemVoice? voice}) =>
+      speaker.speak(sentence, lang: lang, voice: voice);
 
   Future<void> stop() => speaker.stop();
 }

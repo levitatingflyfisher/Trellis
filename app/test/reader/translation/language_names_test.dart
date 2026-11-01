@@ -47,4 +47,17 @@ void main() {
     expect(isRightToLeft('de'), isFalse);
     expect(isRightToLeft(null), isFalse);
   });
+
+  group('localeDisplayName', () {
+    test('a voice\'s locale reads as its language and place', () {
+      expect(localeDisplayName('ru-RU'), 'Russian (Russia)');
+      expect(localeDisplayName('en-GB'), 'English (United Kingdom)');
+      expect(localeDisplayName('es_MX'), 'Spanish (Mexico)');
+    });
+
+    test('no place, or one the table lacks: never blank', () {
+      expect(localeDisplayName('ru'), 'Russian');
+      expect(localeDisplayName('ru-KG'), 'Russian (KG)');
+    });
+  });
 }

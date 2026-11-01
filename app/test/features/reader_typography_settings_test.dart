@@ -136,6 +136,26 @@ void main() {
             "wipe the player's own key in the same blob");
   });
 
+  testWidgets('a slider moved after the player wrote the blob keeps what '
+      'the player wrote (1.5.9)', (tester) async {
+    await open(tester);
+    // While this screen is open, something plays and then the bar's X
+    // closes it: both land in the same blob this screen read on open.
+    await db.profilesDao.recordLastPlayed(profileId, 42);
+    await db.profilesDao.recordPlayerClosed(profileId);
+
+    tester
+        .widget<Slider>(find.byKey(const Key('fontscale-slider')))
+        .onChanged!(1.5);
+    await tester.pump();
+
+    final saved = await db.profilesDao.readerPrefs(profileId);
+    expect(saved.typography.fontScale, 1.5);
+    expect(saved.lastPlayedWorkId, 42);
+    expect(saved.playerClosed, isTrue,
+        reason: 'a stale copy would bring a closed bar back at launch');
+  });
+
   testWidgets('the real terms are explained here, once, in plain words',
       (tester) async {
     await open(tester);

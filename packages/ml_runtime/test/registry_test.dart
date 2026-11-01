@@ -219,7 +219,7 @@ void main() {
     });
 
     test('no candidate for the task means null, not a guess', () {
-      expect(reg.pickModel(ModelTask.llm, DeviceTier.t3), isNull);
+      expect(reg.pickModel(ModelTask.tts, DeviceTier.t3), isNull);
     });
 
     test('same minTier: the larger model wins', () {
@@ -378,7 +378,7 @@ void main() {
 
     test(
         'carries the pinned v1 catalog: whisper tiny/base ggml, silero '
-        'vad, qwen2.5 litert, the supertonic starter voice, the Babel '
+        'vad, the supertonic starter voice, the Babel '
         'starter translation pair, the Wiktionary StarDict dictionary',
         () {
       expect(
@@ -387,7 +387,6 @@ void main() {
           'whisper-tiny-ggml',
           'whisper-base-ggml',
           'silero-vad',
-          'qwen2.5-0.5b-instruct-litert',
           'supertonic-en-m1',
           'opus-mt-en-es',
           'wiktionary-en-en-stardict',
@@ -471,13 +470,21 @@ void main() {
     });
 
     test(
-        'the tier ladder matches the proposal-2 ML plan: T1 = tiny+vad, T2 = base+llm',
+        'the tier ladder matches the proposal-2 ML plan: T1 = tiny+vad, T2 = base',
         () {
       expect(starter.byId('whisper-tiny-ggml')!.minTier, DeviceTier.t1);
       expect(starter.byId('silero-vad')!.minTier, DeviceTier.t1);
       expect(starter.byId('whisper-base-ggml')!.minTier, DeviceTier.t2);
+    });
+
+    test('registry has no Qwen spec (1.5.9: unused, and no Chinese-vendor '
+        'models; a small assistant returns with Gemma in 1.7)', () {
+      expect(starter.specs.where((s) => s.id.toLowerCase().contains('qwen')),
+          isEmpty);
       expect(
-          starter.byId('qwen2.5-0.5b-instruct-litert')!.minTier, DeviceTier.t2);
+          starter.specs.where(
+              (s) => s.files.any((f) => f.url.toLowerCase().contains('qwen'))),
+          isEmpty);
     });
 
     test('selection over the starter catalog follows the ladder', () {
@@ -486,9 +493,6 @@ void main() {
       expect(starter.pickModel(ModelTask.asr, DeviceTier.t2)?.id,
           'whisper-base-ggml');
       expect(starter.pickModel(ModelTask.vad, DeviceTier.t1)?.id, 'silero-vad');
-      expect(starter.pickModel(ModelTask.llm, DeviceTier.t1), isNull);
-      expect(starter.pickModel(ModelTask.llm, DeviceTier.t2)?.id,
-          'qwen2.5-0.5b-instruct-litert');
     });
 
     test('the neural voice is picked at t1, the tier the app runs at '
@@ -502,24 +506,22 @@ void main() {
     });
 
     test('sizes carry the research packet size classes', () {
-      // ~41MB tiny / ~77MB base / ~2MB vad / ~500MB qwen q8 (research-ml.md).
+      // ~41MB tiny / ~77MB base / ~2MB vad (research-ml.md).
       expect(starter.byId('whisper-tiny-ggml')!.sizeBytes,
           closeTo(41000000, 5000000));
       expect(starter.byId('whisper-base-ggml')!.sizeBytes,
           closeTo(77000000, 8000000));
       expect(starter.byId('silero-vad')!.sizeBytes, closeTo(2000000, 1000000));
-      expect(starter.byId('qwen2.5-0.5b-instruct-litert')!.sizeBytes,
-          closeTo(500000000, 50000000));
       // ~263MB fp32 (ADR-0007 Phase 0: no official quantized build exists,
       // and the one unofficial int8 repack failed verification — see the
       // ADR).
       expect(starter.byId('supertonic-en-m1')!.sizeBytes,
           closeTo(263000000, 5000000));
-      // ~246MB for the int8-quantized encoder+decoder pair (ADR-0008):
-      // larger than the spec's original ~113MB guess — verified by
-      // downloading both files directly, not assumed from a listing.
+      // ~116MB since 1.5.9: onnx-community's encoder with Xenova's int8
+      // merged decoder (60MB, down from onnx-community's 193MB, which
+      // was barely quantised); parity-checked before the swap.
       expect(starter.byId('opus-mt-en-es')!.sizeBytes,
-          closeTo(246000000, 5000000));
+          closeTo(116000000, 5000000));
     });
 
     test('every file is https and every license named', () {
@@ -557,16 +559,6 @@ void main() {
             'https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx',
             '1a153a22f4509e292a94e67d6f9b85e8deb25b4988682b7e174c65279d8788e3',
             2327524,
-          ),
-        ],
-        // NOTE: the repo ships NO seq128 .task bundle — the only q8 .task is
-        // the multi-prefill-seq variant. The old canonical-looking seq128
-        // URL 404s; this is why pins are verified, not assumed.
-        'qwen2.5-0.5b-instruct-litert': [
-          (
-            'https://huggingface.co/litert-community/Qwen2.5-0.5B-Instruct/resolve/main/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
-            'e608953f169aeb1bd7b9155fec2559825e08453fc209b84eda3a781ed0452fd2',
-            546660344,
           ),
         ],
         // Verified 2026-08-14: downloaded every file directly from
@@ -734,14 +726,14 @@ void main() {
       expect(starter.byId('opus-mt-en-de')!.marianLayout!.targetToken, isNull);
     });
 
-    test('spot pins: the shipped en-es files are unchanged (a phone that '
-        'has them must not re-download 246 MB) and en-ROMANCE matches the '
-        'files downloaded and hashed for this pass', () {
+    test('spot pins: the shipped en-es encoder is unchanged (a phone that '
+        'has it fetches only the new 60 MB decoder, 1.5.9) and en-ROMANCE '
+        'matches the files downloaded and hashed for this pass', () {
       final es = starter.byId('opus-mt-en-es')!;
       expect(es.files[0].sha256,
           '13ec84a3afebfe97cae004a5f39881ea38541308514ec26c18a0b807476d6fba');
       expect(es.files[1].sha256,
-          '832c4e0c1630a401f3115f0fcb08922f473b7f4996a5371d02ff880dc55f9399');
+          '58ee5ddd6e22d1693d8722b90c1486afb93700a4376cf28fd74175052ad530ae');
       expect(
           es.files[0].url,
           matches(RegExp(r'^https://huggingface\.co/onnx-community/'

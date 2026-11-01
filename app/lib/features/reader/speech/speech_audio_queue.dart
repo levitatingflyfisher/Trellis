@@ -11,6 +11,20 @@
 /// sentence, an index change IS a sentence boundary, by construction.
 library;
 
+/// Something outside the app took the speaker. The queue has already
+/// paused itself; the reader decides what the page shows.
+enum SpeechInterruption {
+  /// Focus went elsewhere (a call, an alarm, another app's audio).
+  began,
+
+  /// A passing interruption that [began] is over: the voice may go on.
+  /// Never follows focus lost for good, nor [noisy].
+  ended,
+
+  /// The headphones came out: pause and stay paused, as the podcast does.
+  noisy,
+}
+
 abstract class SpeechAudioQueue {
   /// Appends one more clip to the tail of the queue. Safe to call while
   /// the queue is already playing — that's the whole point (synthesize
@@ -50,6 +64,13 @@ abstract class SpeechAudioQueue {
   /// the run's real end once its OWN synthesis loop has appended every
   /// sentence, which is the fact this stream alone cannot see.
   Stream<void> get completedStream;
+
+  /// Fires when the player fails under a run (a clip it could not play,
+  /// the player gone): nothing more will sound, so the run is over.
+  Stream<Object> get errorStream;
+
+  /// See [SpeechInterruption].
+  Stream<SpeechInterruption> get interruptionStream;
 
   Future<void> dispose();
 }

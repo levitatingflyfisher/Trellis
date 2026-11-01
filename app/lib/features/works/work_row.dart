@@ -13,6 +13,7 @@ import 'package:flutter/rendering.dart';
 
 import '../../db/database.dart' hide Alignment;
 import '../models/format.dart';
+import '../player/player_controller.dart';
 
 /// A work as a list holds it: the episode is there when it came from a
 /// feed.
@@ -340,6 +341,11 @@ class WorkRow extends StatelessWidget {
   /// Null for a row with nothing to play.
   final VoidCallback? onPlay;
 
+  /// The player, so a row whose episode is playing says so ("Playing",
+  /// a tap pauses) instead of offering a second Play beside the bar's.
+  /// Null where nothing plays.
+  final PlayerController? player;
+
   /// Opens the text: a book or article in the reader, an episode's
   /// transcript. Shown only where [WorkRowFacts.readable], beside Play:
   /// reading and listening are equal ways in.
@@ -373,6 +379,7 @@ class WorkRow extends StatelessWidget {
     this.below = const [],
     this.onTap,
     this.onPlay,
+    this.player,
     this.onRead,
     this.menuBuilder,
     this.onMenu,
@@ -509,14 +516,7 @@ class WorkRow extends StatelessWidget {
       alignment: WrapAlignment.end,
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
-        if (play)
-          TextButton.icon(
-            key: Key('play-$_id'),
-            style: style,
-            onPressed: onPlay,
-            icon: const Icon(Icons.play_circle_outline),
-            label: const Text('Play'),
-          ),
+        if (play) _playOrPlaying(style),
         if (read)
           facts.audio
               ? Tooltip(
@@ -544,6 +544,42 @@ class WorkRow extends StatelessWidget {
           ? 0
           : _markerGap * (markers.length - 1),
       actions: actions,
+    );
+  }
+
+  /// Play, or "Playing" while this row's episode is the one playing: the
+  /// bar already has its Play, and the row's Play on the current episode
+  /// would only have paused it under a Play glyph. A tap pauses; paused,
+  /// the row offers Play again, which resumes it.
+  Widget _playOrPlaying(ButtonStyle style) {
+    Widget playButton() => TextButton.icon(
+          key: Key('play-$_id'),
+          style: style,
+          onPressed: onPlay,
+          icon: const Icon(Icons.play_circle_outline),
+          label: const Text('Play'),
+        );
+    final p = player;
+    if (p == null) return playButton();
+    return _WhilePlaying(
+      player: p,
+      workId: _id,
+      builder: (playing) {
+        if (!playing) return playButton();
+        return Tooltip(
+          message: 'Pause',
+          // The label says it; the tooltip would say "Pause" twice.
+          excludeFromSemantics: true,
+          child: TextButton.icon(
+            key: const Key('row-playing'),
+            style: style,
+            onPressed: () => p.toggle(),
+            icon: const Icon(Icons.graphic_eq),
+            // Heard, the state and what a tap does.
+            label: const Text('Playing', semanticsLabel: 'Playing, pause'),
+          ),
+        );
+      },
     );
   }
 
@@ -932,3 +968,55 @@ class _Marker extends StatelessWidget {
 /// ~36 MB of image cache instead of ~100 kB.
 int thumbCacheWidth(BuildContext context, double logical) =>
     (logical * MediaQuery.devicePixelRatioOf(context)).ceil();
+
+/// Builds from whether [workId] is the one playing, and rebuilds only when
+/// that changes. The player notifies on every position tick, several
+/// times a second; a list of rows rebuilding on each would be wasted work.
+class _WhilePlaying extends StatefulWidget {
+  final PlayerController player;
+  final int workId;
+  final Widget Function(bool playing) builder;
+
+  const _WhilePlaying(
+      {required this.player, required this.workId, required this.builder});
+
+  @override
+  State<_WhilePlaying> createState() => _WhilePlayingState();
+}
+
+class _WhilePlayingState extends State<_WhilePlaying> {
+  late bool _playing = _now();
+
+  bool _now() =>
+      widget.player.current?.id == widget.workId && widget.player.playing;
+
+  void _changed() {
+    final now = _now();
+    if (now != _playing) setState(() => _playing = now);
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    widget.player.addListener(_changed);
+  }
+
+  @override
+  void didUpdateWidget(_WhilePlaying old) {
+    super.didUpdateWidget(old);
+    if (old.player != widget.player) {
+      old.player.removeListener(_changed);
+      widget.player.addListener(_changed);
+    }
+    _playing = _now();
+  }
+
+  @override
+  void dispose() {
+    widget.player.removeListener(_changed);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.builder(_playing);
+}

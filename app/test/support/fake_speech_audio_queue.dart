@@ -20,8 +20,15 @@ class FakeSpeechAudioQueue implements SpeechAudioQueue {
   final _indexController = StreamController<int>.broadcast();
   final _completedController = StreamController<void>.broadcast();
 
+  /// Test hook: the next appends throw this, as a refused clip would.
+  Object? appendError;
+
   @override
-  Future<void> append(String filePath) async => appended.add(filePath);
+  Future<void> append(String filePath) async {
+    final error = appendError;
+    if (error != null) throw error;
+    appended.add(filePath);
+  }
 
   @override
   Future<void> play() async {
@@ -69,10 +76,33 @@ class FakeSpeechAudioQueue implements SpeechAudioQueue {
   /// appended so far and stopping on its own.
   void emitCompleted() => _completedController.add(null);
 
+  final _errorController = StreamController<Object>.broadcast();
+
+  @override
+  Stream<Object> get errorStream => _errorController.stream;
+
+  /// Test hook: simulates the player failing under a run.
+  void emitError(Object error) => _errorController.add(error);
+
+  final _interruptionController =
+      StreamController<SpeechInterruption>.broadcast();
+
+  @override
+  Stream<SpeechInterruption> get interruptionStream =>
+      _interruptionController.stream;
+
+  /// Test hook: simulates the audio session (a call, headphones out).
+  void emitInterruption(SpeechInterruption i) {
+    if (i != SpeechInterruption.ended) _playing = false;
+    _interruptionController.add(i);
+  }
+
   @override
   Future<void> dispose() async {
     disposed = true;
     await _indexController.close();
     await _completedController.close();
+    await _errorController.close();
+    await _interruptionController.close();
   }
 }

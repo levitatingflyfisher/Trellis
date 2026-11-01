@@ -17,7 +17,7 @@ import 'translation_catalog.dart';
 /// Phase 3: a StarDict set) — it rides the same pinned-file/archive-
 /// extraction/download-engine law as every other entry, so it earns a
 /// task rather than a parallel registry.
-enum ModelTask { asr, vad, tts, llm, translation, dictionary }
+enum ModelTask { asr, vad, tts, translation, dictionary }
 
 /// The device-capability ladder (proposal-2 "ML plan"):
 ///
@@ -408,29 +408,6 @@ class ModelRegistry {
           ],
           licenses: const ['MIT'],
           minTier: DeviceTier.t1,
-        ),
-        // T2 LLM — the fleet's clean-license pick: Apache-2.0, ungated
-        // (research-ml: Qwen is "the only friction-free family" for a
-        // no-account product). The 1.5B variant for 4GB+ phones is the
-        // integrator's to add alongside its verified size.
-        //
-        // The only q8 .task bundle the repo ships is the multi-prefill-seq
-        // variant — the canonical-looking seq128 .task URL 404s (only a
-        // .tflite exists at seq128). Verified against the live file tree.
-        ModelSpec(
-          id: 'qwen2.5-0.5b-instruct-litert',
-          task: ModelTask.llm,
-          files: [
-            ModelFile(
-              url:
-                  'https://huggingface.co/litert-community/Qwen2.5-0.5B-Instruct/resolve/main/Qwen2.5-0.5B-Instruct_multi-prefill-seq_q8_ekv1280.task',
-              sha256:
-                  'e608953f169aeb1bd7b9155fec2559825e08453fc209b84eda3a781ed0452fd2',
-              bytes: 546660344,
-            ),
-          ],
-          licenses: const ['Apache-2.0'],
-          minTier: DeviceTier.t2,
         ),
         // T1 TTS — the Supertonic rung's starter voice (ADR-0007): the
         // official Supertone/supertonic-2 weights (v2: 66M params,

@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:crypto/crypto.dart' show sha256;
 import 'package:drift/drift.dart';
 import 'package:jobs_core/jobs_core.dart' as jobs;
 import 'package:loom_core/loom_core.dart' as core;
@@ -1329,19 +1330,37 @@ class ProfilesDao extends DatabaseAccessor<AppDatabase>
     return ReaderPrefs.decode(row?.readerPrefsJson ?? '{}');
   }
 
+  /// Replaces the whole blob. App code changes it through
+  /// [updateReaderPrefs] instead, so it never writes back a stale copy.
   Future<void> setReaderPrefs(int profileId, ReaderPrefs prefs) =>
       (update(profiles)..where((p) => p.id.equals(profileId)))
           .write(ProfilesCompanion(readerPrefsJson: Value(prefs.encode())));
 
+  /// The one way to change the shared blob: [change] is applied to what is
+  /// stored now, inside a transaction, so the player, the reader and the
+  /// typography screen never write back a copy read before another of
+  /// them wrote (1.5.9: a stale typography save brought a closed bar back).
+  Future<void> updateReaderPrefs(
+          int profileId, ReaderPrefs Function(ReaderPrefs) change) =>
+      transaction(() async {
+        final prefs = await readerPrefs(profileId);
+        final next = change(prefs);
+        if (next.encode() == prefs.encode()) return;
+        await setReaderPrefs(profileId, next);
+      });
+
   /// Campaign 9 Phase 2 ("resume after restart"): records [workId] as the
   /// most recently played work, in the SAME shared blob [readerPrefs]
-  /// already owns — a read-modify-write so whatever else lives in the
-  /// blob (typography today) rides along untouched, the same law
-  /// [ReaderPrefs.copyWith] itself enforces.
-  Future<void> recordLastPlayed(int profileId, int workId) async {
-    final prefs = await readerPrefs(profileId);
-    await setReaderPrefs(profileId, prefs.copyWith(lastPlayedWorkId: workId));
-  }
+  /// already owns; whatever else lives there (typography, the reader's
+  /// session) rides along untouched.
+  Future<void> recordLastPlayed(int profileId, int workId) =>
+      updateReaderPrefs(profileId,
+          (p) => p.copyWith(lastPlayedWorkId: workId, playerClosed: false));
+
+  /// The bar's X: the last-played work is kept (the widget's Play reads
+  /// it) but a launch no longer brings the bar back.
+  Future<void> recordPlayerClosed(int profileId) =>
+      updateReaderPrefs(profileId, (p) => p.copyWith(playerClosed: true));
 
   /// Campaign 4 Phase 5's write side (see [ReadingDays]'s own doc comment
   /// for why this table exists at all): idempotent by the composite
@@ -1507,22 +1526,31 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
 
   /// One tiny row per (profile, work) — the donor's rewrite-the-book jank is
   /// structurally impossible (spine_db_test pins the row count).
+  ///
+  /// [readAtMs] is for a place read before an await and written after it
+  /// (the player's X): the row is stamped with when the place was true,
+  /// and a row another writer moved on since is left alone.
   Future<void> savePosition({
     required int profileId,
     required int workId,
     required int segmentIdx,
     required int wordIdx,
     required String lastModality,
-  }) => into(positions).insertOnConflictUpdate(
-    PositionsCompanion.insert(
+    int? readAtMs,
+  }) {
+    final row = PositionsCompanion.insert(
       profileId: profileId,
       workId: workId,
       segmentIdx: segmentIdx,
       wordIdx: wordIdx,
       lastModality: lastModality,
-      updatedAtMs: DateTime.now().millisecondsSinceEpoch,
-    ),
-  );
+      updatedAtMs: readAtMs ?? DateTime.now().millisecondsSinceEpoch,
+    );
+    if (readAtMs == null) return into(positions).insertOnConflictUpdate(row);
+    return into(positions).insert(row,
+        onConflict: DoUpdate((_) => row,
+            where: (old) => old.updatedAtMs.isSmallerOrEqualValue(readAtMs)));
+  }
 
   Future<Position?> position({required int profileId, required int workId}) =>
       (select(positions)..where(
@@ -1859,6 +1887,259 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
         ));
       });
 
+  /// Everything [deleteTranscript] removes or clears, as raw rows by
+  /// table (1.5.9), so Recently deleted can put it back exactly: the
+  /// segments, timings, layers, every translation, the reading place,
+  /// which sentence each capture was bound to, and the work's translation
+  /// choices. Raw SQL values (blobs included), not data classes, so a
+  /// restore writes back the very values that were read.
+  Future<SnapshotRows> snapshotTranscript(int workId) async => {
+        for (final table in const [
+          'segments',
+          'alignments',
+          'layers',
+          'translation_sentences',
+          'positions',
+        ])
+          table: await _rawRows(
+              'SELECT * FROM $table WHERE work_id = ?', [workId]),
+        'captures': await _rawRows(
+            'SELECT id, segment_idx FROM captures '
+            'WHERE work_id = ? AND segment_idx IS NOT NULL',
+            [workId]),
+        'works': await _rawRows(
+            'SELECT ${_clearedWorkColumns.join(', ')} FROM works '
+            'WHERE id = ?',
+            [workId]),
+        'identity': await _identity(workId),
+      };
+
+  /// Everything [deleteTranslation] removes for [lang]: its sentences,
+  /// its `mt` layer, and only the work's choices that named it.
+  Future<SnapshotRows> snapshotTranslation(int workId, String lang) async {
+    final work = await (select(works)..where((w) => w.id.equals(workId)))
+        .getSingleOrNull();
+    return {
+      'translation_sentences': await _rawRows(
+          'SELECT * FROM translation_sentences '
+          'WHERE work_id = ? AND lang = ?',
+          [workId, lang]),
+      'layers': await _rawRows(
+          "SELECT * FROM layers WHERE work_id = ? AND lang = ? AND kind = 'mt'",
+          [workId, lang]),
+      'works': [
+        if (work != null)
+          {
+            if (work.activeTranslationLang == lang) ...{
+              'active_translation_lang': lang,
+              'show_translation_layer': work.showTranslationLayer ? 1 : 0,
+              'translation_view': work.translationView,
+            },
+            if (work.readLang == lang) 'read_lang': lang,
+            if (work.translationRunLang == lang) 'translation_run_lang': lang,
+          },
+      ],
+      'identity': await _identity(workId),
+      'source': [
+        {'fingerprint': await _sourceFingerprint(workId)},
+      ],
+    };
+  }
+
+  /// Puts back a [snapshotTranscript], in one transaction. Refuses rather
+  /// than mix: a transcript made since stays, and the old one waits.
+  Future<RestoreResult> restoreTranscript(int workId, SnapshotRows rows) =>
+      transaction(() async {
+        if (!await _sameItem(workId, rows)) return RestoreResult.workGone;
+        // Any part of a transcript counts, not just its sentences: a stray
+        // layer or translation row would share keys with the copy, and
+        // skipping those rows would put back a transcript mixed with
+        // another's. Refusing keeps both whole; deleting the newer one
+        // clears every one of these tables, so the copy can then come in.
+        if (await _any(
+            [
+              for (final t in const [
+                'segments',
+                'alignments',
+                'layers',
+                'translation_sentences',
+              ])
+                'SELECT 1 FROM $t WHERE work_id = ?',
+            ].join(' UNION ALL '),
+            [workId, workId, workId, workId])) {
+          return RestoreResult.transcriptExists;
+        }
+        for (final table in const [
+          'segments',
+          'alignments',
+          'layers',
+          'translation_sentences',
+        ]) {
+          await _insertRaw(table, workId, rows[table]);
+        }
+        // A reading place set since (none can be, without sentences) wins.
+        await _insertRaw('positions', workId, rows['positions'],
+            orIgnore: true);
+        for (final c in rows['captures'] ?? const <Map<String, Object?>>[]) {
+          await customUpdate(
+              'UPDATE captures SET segment_idx = ? '
+              'WHERE id = ? AND work_id = ? AND segment_idx IS NULL',
+              variables: [
+                Variable<Object>(c['segment_idx']),
+                Variable<Object>(c['id']),
+                Variable.withInt(workId),
+              ],
+              updates: {captures});
+        }
+        await _restoreWorkChoices(workId, rows['works']);
+        return RestoreResult.restored;
+      });
+
+  /// Puts back a [snapshotTranslation] into [lang], in one transaction.
+  /// Refuses if that language was made again, or if the sentences it is
+  /// keyed to are gone (restore the transcript first) or are no longer the
+  /// ones it was made from.
+  Future<RestoreResult> restoreTranslation(
+          int workId, String lang, SnapshotRows rows) =>
+      transaction(() async {
+        if (!await _sameItem(workId, rows)) return RestoreResult.workGone;
+        if (await _any(
+            'SELECT 1 FROM translation_sentences WHERE work_id = ? AND lang = ? '
+            "UNION ALL SELECT 1 FROM layers WHERE work_id = ? AND lang = ? "
+            "AND kind = 'mt'",
+            [workId, lang, workId, lang])) {
+          return RestoreResult.translationExists;
+        }
+        if (!await _any('SELECT 1 FROM segments WHERE work_id = ?', [workId])) {
+          return RestoreResult.sourceGone;
+        }
+        // Rows are keyed by sentence number, so a transcript made again
+        // would take the old translation onto other sentences.
+        final saved = rows['source'];
+        if (saved == null ||
+            saved.isEmpty ||
+            saved.first['fingerprint'] != await _sourceFingerprint(workId)) {
+          return RestoreResult.sourceChanged;
+        }
+        for (final table in const ['translation_sentences', 'layers']) {
+          await _insertRaw(table, workId, rows[table]);
+        }
+        await _restoreWorkChoices(workId, rows['works']);
+        return RestoreResult.restored;
+      });
+
+  static const _clearedWorkColumns = [
+    'active_translation_lang',
+    'show_translation_layer',
+    'translation_view',
+    'read_lang',
+    'translation_run_lang',
+  ];
+
+  /// Each choice comes back only where nothing was chosen since: the
+  /// active language with its toggle and view as one, the reading
+  /// language, and an unfinished run (the reader resumes it on open).
+  Future<void> _restoreWorkChoices(
+      int workId, List<Map<String, Object?>>? rows) async {
+    final saved = rows == null || rows.isEmpty ? null : rows.first;
+    if (saved == null) return;
+    final now = await (select(works)..where((w) => w.id.equals(workId)))
+        .getSingle();
+    final active = saved['active_translation_lang'] as String?;
+    final readLang = saved['read_lang'] as String?;
+    final runLang = saved['translation_run_lang'] as String?;
+    await (update(works)..where((w) => w.id.equals(workId))).write(
+        WorksCompanion(
+      activeTranslationLang: active != null && now.activeTranslationLang == null
+          ? Value(active)
+          : const Value.absent(),
+      showTranslationLayer: active != null && now.activeTranslationLang == null
+          ? Value(saved['show_translation_layer'] == 1)
+          : const Value.absent(),
+      translationView: active != null && now.activeTranslationLang == null
+          ? Value(saved['translation_view'] as String?)
+          : const Value.absent(),
+      readLang: readLang != null && now.readLang == null
+          ? Value(readLang)
+          : const Value.absent(),
+      translationRunLang: runLang != null && now.translationRunLang == null
+          ? Value(runLang)
+          : const Value.absent(),
+    ));
+  }
+
+  Future<List<Map<String, Object?>>> _rawRows(
+          String sql, List<Object> args) async =>
+      [
+        for (final r in await customSelect(sql,
+                variables: [for (final a in args) Variable<Object>(a)])
+            .get())
+          Map.of(r.data),
+      ];
+
+  Future<bool> _any(String sql, List<Object> args) async =>
+      (await _rawRows(sql, args)).isNotEmpty;
+
+  /// What makes [workId] the item it is, beyond its id: an id can name
+  /// another item after a backup is restored. The title, and an episode's
+  /// guid, which its feed keeps stable.
+  Future<List<Map<String, Object?>>> _identity(int workId) => _rawRows(
+      'SELECT w.title AS title, '
+      '(SELECT guid FROM episodes WHERE work_id = w.id) AS guid '
+      'FROM works w WHERE w.id = ?',
+      [workId]);
+
+  /// Whether [workId] is still the item [rows] were taken from. A copy
+  /// without an identity can't show that it is, so it is treated as gone.
+  Future<bool> _sameItem(int workId, SnapshotRows rows) async {
+    final now = await _identity(workId);
+    final saved = rows['identity'];
+    if (now.isEmpty || saved == null || saved.isEmpty) return false;
+    return now.first['title'] == saved.first['title'] &&
+        now.first['guid'] == saved.first['guid'];
+  }
+
+  /// A hash of [workId]'s sentences, number and text, in order: equal
+  /// only for the same transcript.
+  Future<String> _sourceFingerprint(int workId) async {
+    final rows = await _rawRows(
+        'SELECT idx, body FROM segments WHERE work_id = ? ORDER BY idx',
+        [workId]);
+    return sha256
+        .convert(utf8.encode(jsonEncode([
+          for (final r in rows) [r['idx'], r['body']],
+        ])))
+        .toString();
+  }
+
+  static final _sqlName = RegExp(r'^[a-z_]+$');
+
+  /// Inserts snapshot [rows] into [table] as they were read. Column names
+  /// come from a file on disk, so each is checked to be a plain name, and
+  /// every row is pinned to [workId] whatever the file says.
+  Future<void> _insertRaw(
+      String table, int workId, List<Map<String, Object?>>? rows,
+      {bool orIgnore = false}) async {
+    for (final row in rows ?? const <Map<String, Object?>>[]) {
+      final values = {...row, 'work_id': workId};
+      final columns = values.keys.toList();
+      if (!columns.every(_sqlName.hasMatch)) {
+        throw FormatException('bad column in a $table snapshot');
+      }
+      // Named as written, so open pages (the work page, the home widget's
+      // place) hear the rows come back.
+      await customInsert(
+          'INSERT ${orIgnore ? 'OR IGNORE ' : ''}INTO $table '
+          '(${columns.join(', ')}) '
+          'VALUES (${List.filled(columns.length, '?').join(', ')})',
+          variables: [for (final c in columns) Variable<Object>(values[c])],
+          updates: {
+            attachedDatabase.allTables
+                .firstWhere((t) => t.actualTableName == table),
+          });
+    }
+  }
+
   /// What each work keeps as text beyond its own body (1.5.8), for the
   /// storage page: one row per transcribed work (`lang` null: its
   /// sentences, layers and word timings) and one per translation language.
@@ -2182,6 +2463,32 @@ class DailyReviewDao extends DatabaseAccessor<AppDatabase>
     ])..where(works.profileId.equals(profileId))).get();
     return [for (final r in rows) r.readTable(captures)];
   }
+}
+
+/// A deleted transcript or translation as raw rows by table name, the
+/// shape Recently deleted keeps on disk (1.5.9).
+typedef SnapshotRows = Map<String, List<Map<String, Object?>>>;
+
+/// What putting a deleted transcript or translation back did. Every
+/// refusal leaves the database as it was.
+enum RestoreResult {
+  restored,
+
+  /// A transcript was made since; two never mix.
+  transcriptExists,
+
+  /// That language was translated again since.
+  translationExists,
+
+  /// The item itself is no longer in the library.
+  workGone,
+
+  /// A translation's transcript is gone too; it comes back first.
+  sourceGone,
+
+  /// A translation's transcript was made again since, with other
+  /// sentences: the old translation would sit on the wrong ones.
+  sourceChanged,
 }
 
 /// Segments and characters in one work's text.
@@ -3386,20 +3693,30 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
   /// audiobook [tMs] is relative to; 0 (the default, and every
   /// pre-campaign caller) for a single-file work, where there is only
   /// ever "file 0".
+  ///
+  /// [readAtMs]: as [SpineDao.savePosition]'s, a place read before an
+  /// await never overwrites one written since.
   Future<void> savePlayerPosition({
     required int profileId,
     required int workId,
     required int tMs,
     int fileIdx = 0,
-  }) => into(playerPositions).insertOnConflictUpdate(
-    PlayerPositionsCompanion.insert(
+    int? readAtMs,
+  }) {
+    final row = PlayerPositionsCompanion.insert(
       profileId: profileId,
       workId: workId,
       tMs: tMs,
       fileIdx: Value(fileIdx),
-      updatedAtMs: DateTime.now().millisecondsSinceEpoch,
-    ),
-  );
+      updatedAtMs: readAtMs ?? DateTime.now().millisecondsSinceEpoch,
+    );
+    if (readAtMs == null) {
+      return into(playerPositions).insertOnConflictUpdate(row);
+    }
+    return into(playerPositions).insert(row,
+        onConflict: DoUpdate((_) => row,
+            where: (old) => old.updatedAtMs.isSmallerOrEqualValue(readAtMs)));
+  }
 
   Future<PlayerPosition?> playerPosition({
     required int profileId,

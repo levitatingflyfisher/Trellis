@@ -12,8 +12,8 @@ import '../support/fake_player.dart';
 /// `mini_player_bar.dart`'s own doc comment claims "compact enough for
 /// 320dp at 2x text scale — the fleet's sweep pins that", and
 /// narrow_screen_test.dart machine-checks that claim for an EPISODE with
-/// alignments (6 simultaneous icons: karaoke, capture, captures, queue,
-/// sleep timer, close). ADR-0013 flagged the audiobook's Chapters icon as
+/// alignments. Since 1.5.9 the doors below sit in the bar's ⋮ menu, so
+/// the check here is that the bar and its open menu both fit. ADR-0013 flagged the audiobook's Chapters icon as
 /// an unverified "seventh conditional icon" — this test settles it
 /// directly rather than leaving the gap open: an audiobook never has
 /// alignments (`_loadAudiobook` sets them to `const []`), so the karaoke
@@ -68,6 +68,10 @@ void main() {
     ));
     await tester.pump();
 
+    expect(tester.takeException(), isNull);
+    // 1.5.9: the doors are in the bar's ⋮ menu, which must fit too.
+    await tester.tap(find.byKey(const Key('player-menu')));
+    await tester.pumpAndSettle();
     expect(tester.takeException(), isNull);
     expect(find.byKey(const Key('open-chapters')), findsOneWidget);
     expect(find.byKey(const Key('open-karaoke')), findsNothing);

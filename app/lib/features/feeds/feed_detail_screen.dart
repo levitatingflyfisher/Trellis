@@ -378,6 +378,7 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
       onLongPress: selecting
           ? () => _selection.toggle(e.work.id)
           : () => _selection.enter(e.work.id),
+      player: widget.playerController,
       onPlay: canPlay
           ? () async {
               await _actions.play(e.work);

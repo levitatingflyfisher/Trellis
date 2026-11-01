@@ -7,6 +7,21 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.5.9 — 2026-11-07
+
+- Deleting a transcript or a translation no longer asks first. It goes to Recently deleted, in Models & storage, for 30 days, where Restore brings it back. A restore that would mix with a newer transcript or translation is refused with a plain message, and a translation can’t be deleted while it’s being made.
+- The player bar is one slim row. Tap the title or the art to open the episode; drag across the title to scrub; Back 15 is on the bar; ⋮ has Go to show and the rarer controls. X closes the bar for good, until you play something again.
+- One Play per screen. Read aloud pauses any show that’s playing: one voice at a time. A playing row says “Playing”. The RSVP pacer button is now “Start”.
+- Read aloud works on podcast transcripts with the downloaded neural voice, and stops with a plain message if the voice fails or a call comes in.
+- Read aloud reads translations in their own language. Both reads each sentence, then its translation, by default; “Speak in X” became “Read the X aloud too”. Translation only reads the translation. Listen in a translation, from the work page, opens Translation only for that visit. Pick a voice per language in ⋮, Read aloud voices.
+- With a translation into a language the downloaded voice can’t speak (Russian, say), the whole run uses the phone’s voices, the English included. With no voice installed for the language, Read aloud says so and points to Android’s Text-to-speech settings instead of reading it in the wrong voice.
+- Translation downloads are about 115 MB a pair instead of about 249 MB: the six oldest pairs use a smaller decoder, checked against the old one sentence by sentence (ADR-0020). Pairs already on the phone show “Update available” (about 60 MB) once, and the old file is deleted. A translation interrupted under 1.5.8 needs that update, then the language picked again.
+- Start-up never downloads anything on its own. It only clears away model files nothing uses any more.
+- The unused Qwen download is gone, and a copy already on the phone is deleted.
+- Your listening place is kept whichever way you pressed Play: the app, the widget, the lock screen, the notification or a headset. It’s saved every 10 seconds while playing and whenever playback stops, and a scrub on the lock screen sticks.
+- Calmer spacing in Follow along: lines step evenly, words sit a normal space apart, and nothing shifts as the highlight moves. The current word is shown as a solid chip. A translation sits close under its sentence. The Line view’s Both spacing changed slightly too.
+- Fix: starting a translation into a new language no longer shows or reads the old one while it starts.
+
 ## 1.5.8 — 2026-10-27
 
 - Follow along lights each word as it is heard, at any speed up to 4x; one "Back to audio" button in every mode.

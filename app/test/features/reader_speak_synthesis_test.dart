@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:openhearth_design/openhearth_design.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/reader/reader_screen.dart';
+import 'package:trellis/features/reader/speech/speech_audio_queue.dart';
 import 'package:trellis/features/reader/speech/speech_engine.dart';
 import 'package:trellis/features/reader/speech/speech_temp_files.dart';
 
@@ -235,6 +236,99 @@ void main() {
       await tester.pump();
       expect(rsvpWord(tester), 'Ola',
           reason: 'index 0 of the NEW run is still its own starting sentence');
+    });
+  });
+
+  group('when the voice cannot go on, the page says so', () {
+    String label(WidgetTester tester) => tester
+        .widget<OhBarAction>(find.byKey(const Key('speak-toggle')))
+        .label;
+
+    Future<void> speakFirstSentence(WidgetTester tester) async {
+      await pumpReader(tester,
+          resolveSpeechEngine: ({lang}) async => engine);
+      await tester.tap(find.byKey(const Key('speak-toggle')));
+      await tester.pump();
+      engine.complete(0);
+      await tester.pump();
+      queue.emitIndex(0);
+      await tester.pump();
+      expect(label(tester), 'Stop');
+    }
+
+    Future<void> settle(WidgetTester tester) async {
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      await tester.pump();
+    }
+
+    testWidgets('the player failing ends read aloud with a plain message',
+        (tester) async {
+      await speakFirstSentence(tester);
+      queue.emitError(Exception('Source error'));
+      await settle(tester);
+
+      expect(label(tester), 'Read aloud');
+      expect(find.textContaining('Read aloud stopped'), findsOneWidget);
+      expect(queue.clearCalls, greaterThanOrEqualTo(2));
+    });
+
+    testWidgets('a voice that will not synthesize ends read aloud the same '
+        'way', (tester) async {
+      await pumpReader(tester,
+          resolveSpeechEngine: ({lang}) async => engine);
+      await tester.tap(find.byKey(const Key('speak-toggle')));
+      await tester.pump();
+      engine.completeWithError(0, Exception('native init failed'));
+      await settle(tester);
+
+      expect(label(tester), 'Read aloud');
+      expect(find.textContaining('Read aloud stopped'), findsOneWidget);
+    });
+
+    testWidgets('a call stops read aloud the way Stop does, and it reads on '
+        'once the call ends', (tester) async {
+      await speakFirstSentence(tester);
+      final callsBefore = engine.calls.length;
+      queue.emitInterruption(SpeechInterruption.began);
+      await settle(tester);
+      expect(label(tester), 'Read aloud');
+      expect(find.textContaining('Read aloud stopped'), findsNothing,
+          reason: 'an interruption is not a failure');
+
+      queue.emitInterruption(SpeechInterruption.ended);
+      await settle(tester);
+      expect(label(tester), 'Stop');
+      expect(engine.calls.length, greaterThan(callsBefore),
+          reason: 'a new run started from the cursor');
+    });
+
+    testWidgets('headphones out stop read aloud, and it stays stopped',
+        (tester) async {
+      await speakFirstSentence(tester);
+      queue.emitInterruption(SpeechInterruption.noisy);
+      await settle(tester);
+      expect(label(tester), 'Read aloud');
+
+      queue.emitInterruption(SpeechInterruption.ended);
+      await settle(tester);
+      expect(label(tester), 'Read aloud');
+    });
+
+    testWidgets('a hand on Read aloud during the call wins over the call '
+        'ending', (tester) async {
+      await speakFirstSentence(tester);
+      queue.emitInterruption(SpeechInterruption.began);
+      await settle(tester);
+      await tester.tap(find.byKey(const Key('speak-toggle'))); // start
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('speak-toggle'))); // stop
+      await settle(tester);
+      expect(label(tester), 'Read aloud');
+
+      queue.emitInterruption(SpeechInterruption.ended);
+      await settle(tester);
+      expect(label(tester), 'Read aloud',
+          reason: 'the reader stopped it by hand; the call ending is moot');
     });
   });
 

@@ -8,12 +8,17 @@
 /// names the repo's commit rather than `main`, so a re-export upstream
 /// can't break a pinned hash and strand a language.
 ///
-/// The first six (onnx-community) are the pairs shipped before 1.5.5;
-/// their ONNX pins are unchanged, so a phone that has them only fetches
-/// the two config files now registered beside them. Every later pair is
-/// Xenova's export: the same optimum merged-decoder shape (checked by
-/// running en-ROMANCE for real), with a merged decoder about a third the
-/// size, so a direction costs about 110 MB instead of about 240 MB.
+/// The first six are the pairs shipped before 1.5.5, from onnx-community.
+/// Every later pair is Xenova's export: the same optimum merged-decoder
+/// shape (checked by running en-ROMANCE for real), with a merged decoder
+/// about a third the size, so a direction costs about 115 MB instead of
+/// about 230-250 MB. Since 1.5.9 the first six take Xenova's decoder too
+/// (pinned 2026-11-06), after greedy decoding over 50 sentences matched
+/// onnx-community's on 90-98% of them, chrF 98.6-99.9 (Task 5's parity
+/// check, cited in the 1.5.9 ADR). They keep onnx-community's encoder,
+/// tokenizer and configs, which a phone already has, so it fetches only
+/// the new decoder; the decoder keeps its file name, and the store
+/// prunes the old one by its size (DiskModelStore.pruneUnreferenced).
 ///
 /// `licenses` names the license of the weights: onnx-community's own
 /// cards say CC-BY-4.0; Xenova's cards carry none, so the upstream
@@ -48,9 +53,9 @@ const List<_Pair> _pairs = [
         52875078
       ),
       (
-        'https://huggingface.co/onnx-community/opus-mt-en-es/resolve/b5eba94a023a1954c90401b43537f479f962981d/onnx/decoder_model_merged_quantized.onnx',
-        '832c4e0c1630a401f3115f0fcb08922f473b7f4996a5371d02ff880dc55f9399',
-        193290224
+        'https://huggingface.co/Xenova/opus-mt-en-es/resolve/4b002a4c7edd54a7ced58877258b87f7efd3f892/onnx/decoder_model_merged_quantized.onnx',
+        '58ee5ddd6e22d1693d8722b90c1486afb93700a4376cf28fd74175052ad530ae',
+        60212804
       ),
       (
         'https://huggingface.co/onnx-community/opus-mt-en-es/resolve/b5eba94a023a1954c90401b43537f479f962981d/source.spm',
@@ -87,9 +92,9 @@ const List<_Pair> _pairs = [
         49342278
       ),
       (
-        'https://huggingface.co/onnx-community/opus-mt-en-de/resolve/b4306231768977e5956c21c26c3ae14d6b2713c4/onnx/decoder_model_merged_quantized.onnx',
-        '492004d70327f4552fbddba033f8d8ce946edb87b66cbf8f9a7b41d14fe683cc',
-        175598624
+        'https://huggingface.co/Xenova/opus-mt-en-de/resolve/1ca130c44c4c5441ef16d48aae521a424ab644f7/onnx/decoder_model_merged_quantized.onnx',
+        '8b46a825964cdd182fe47cc780f0fb87d357eae1f47cf20aa63c1c09be5b510c',
+        56652404
       ),
       (
         'https://huggingface.co/onnx-community/opus-mt-en-de/resolve/b4306231768977e5956c21c26c3ae14d6b2713c4/source.spm',
@@ -126,9 +131,9 @@ const List<_Pair> _pairs = [
         49342278
       ),
       (
-        'https://huggingface.co/onnx-community/opus-mt-de-en/resolve/85f2f23c5f1863b741db8b9128cfbe7a5cbc0653/onnx/decoder_model_merged_quantized.onnx',
-        'd789d6a132d540fa40d6fa5901c3ba1e6209c69bf201ffef54f73833fa9b5a6c',
-        175598624
+        'https://huggingface.co/Xenova/opus-mt-de-en/resolve/399dfd68706739fffd503f876093e455ae268a06/onnx/decoder_model_merged_quantized.onnx',
+        '4712800584b2d77c2f9e620bf29523e2b20b62f65ade5011ee01780e2b0ea5d3',
+        56652404
       ),
       (
         'https://huggingface.co/onnx-community/opus-mt-de-en/resolve/85f2f23c5f1863b741db8b9128cfbe7a5cbc0653/source.spm',
@@ -165,9 +170,9 @@ const List<_Pair> _pairs = [
         51603782
       ),
       (
-        'https://huggingface.co/onnx-community/opus-mt-en-ru/resolve/c6967b328d292f9f3d14bab6e9de40f9bd367114/onnx/decoder_model_merged_quantized.onnx',
-        '5d15c48566e60dcaa5af7422bcceca24ccc8f3eaa8f1b3aedc5d6170e6c232f3',
-        186923812
+        'https://huggingface.co/Xenova/opus-mt-en-ru/resolve/e050376e960175e8ddc5cff85025dc8436cddd68/onnx/decoder_model_merged_quantized.onnx',
+        '7efefcd793a5663bc204224a92a123524f3dfe2ffad59e5f73d6734d1b11ad04',
+        58931576
       ),
       (
         'https://huggingface.co/onnx-community/opus-mt-en-ru/resolve/c6967b328d292f9f3d14bab6e9de40f9bd367114/source.spm',
@@ -204,9 +209,9 @@ const List<_Pair> _pairs = [
         51603782
       ),
       (
-        'https://huggingface.co/onnx-community/opus-mt-ru-en/resolve/92ef0d550ca96ebd9cd5d13aab6ad41854d99a3d/onnx/decoder_model_merged_quantized.onnx',
-        '0fef11505dc0564d0d6d54e37529d7ba949826fe19fd7193052610989fccbf28',
-        186923812
+        'https://huggingface.co/Xenova/opus-mt-ru-en/resolve/afe8c6c738ec81b6d033fd8f44f9678a639a7c67/onnx/decoder_model_merged_quantized.onnx',
+        '25e7ff97b201bce64ab9c39749761d657b70b8602bcbc1ce01c67f713e90ffdf',
+        58931576
       ),
       (
         'https://huggingface.co/onnx-community/opus-mt-ru-en/resolve/92ef0d550ca96ebd9cd5d13aab6ad41854d99a3d/source.spm',
@@ -243,9 +248,9 @@ const List<_Pair> _pairs = [
         52875078
       ),
       (
-        'https://huggingface.co/onnx-community/opus-mt-zh-en/resolve/8e3032ebeebbacda779fe95efa64c03b962f83f3/onnx/decoder_model_merged_quantized.onnx',
-        '714881fafd326c8cb56bc6e3e542d1d106a5acf90e6abb71e20423ebf1b47875',
-        193290224
+        'https://huggingface.co/Xenova/opus-mt-zh-en/resolve/39d480d52a9ea3065a1f117adfe4dbc55de10e6f/onnx/decoder_model_merged_quantized.onnx',
+        'c6b7f04ff1ba0fbd1bf6852599b4c0cad6fe512d57cd887f44ef36cf705424cb',
+        60212804
       ),
       (
         'https://huggingface.co/onnx-community/opus-mt-zh-en/resolve/8e3032ebeebbacda779fe95efa64c03b962f83f3/source.spm',

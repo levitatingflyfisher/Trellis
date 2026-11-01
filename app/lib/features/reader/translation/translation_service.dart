@@ -33,23 +33,41 @@ class TranslationService {
           s.id: await store.missingBytes(s),
       };
 
+  /// Pairs missing only some whole files (a re-pinned decoder, 1.5.9):
+  /// some of the pair is installed and nothing is mid-download.
+  Future<Set<String>> _updates(Map<String, int> missing) async {
+    final updates = <String>{};
+    for (final s in registry.translationPairsAt(tier)) {
+      final m = missing[s.id] ?? s.sizeBytes;
+      if (m > 0 && m < s.sizeBytes && await store.partialBytes(s) == 0) {
+        updates.add(s.id);
+      }
+    }
+    return updates;
+  }
+
   /// Every language [source] can be translated into, installed or not,
   /// each with what is left to download.
   Future<List<TranslationRoute>> routesFrom(String source) async {
     await topUpTranslationModels(registry, store);
     final missing = await _missing();
+    final updates = await _updates(missing);
     return route_plan.routesFrom(registry, tier,
-        source: source, missingBytesOf: (s) => missing[s.id] ?? s.sizeBytes);
+        source: source,
+        missingBytesOf: (s) => missing[s.id] ?? s.sizeBytes,
+        isUpdate: (s) => updates.contains(s.id));
   }
 
   /// The route from [source] to [target] as things stand now; null for
   /// the same language or one no pair reaches.
   Future<TranslationRoute?> route(String source, String target) async {
     final missing = await _missing();
+    final updates = await _updates(missing);
     return route_plan.planRoute(registry, tier,
         source: source,
         target: target,
-        missingBytesOf: (s) => missing[s.id] ?? s.sizeBytes);
+        missingBytesOf: (s) => missing[s.id] ?? s.sizeBytes,
+        isUpdate: (s) => updates.contains(s.id));
   }
 
   /// Starts (or resumes) downloading one leg, through the same resumable,

@@ -18,7 +18,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # of the product and file versions while build-number is used as the build suffix.
 # Build number >2003: the fusion supersedes the original Trellis
 # (versionCode 2003 era) and must install over it as an upgrade.
-version: 1.5.8+2019
+version: 1.5.9+2020
 
 environment:
   sdk: ^3.10.7
@@ -81,11 +81,14 @@ dependencies:
   # ADR-0015 Decision 3): the official just_audio companion — one
   # JustAudioBackground.init() call in bootstrap_io.dart (Android/iOS
   # only, never on web) plus a MediaItem tag on every AudioSource this
-  # app's single player loads. audio_session (focus/ducking) rides in as
-  # its own transitive dependency; nothing here imports it directly, so
-  # it stays off this list rather than sit as a direct dependency this
-  # pass never calls.
+  # app's single player loads.
   just_audio_background: ^0.0.1-beta.17
+  # Read aloud's own player (1.5.9): just_audio_background serves one
+  # player, the episode's, so the neural voice reaches the native plugin
+  # through its platform interface and asks for audio focus itself. Both
+  # were already here under just_audio (same author, MIT); now imported.
+  just_audio_platform_interface: ^4.6.0
+  audio_session: ^0.2.4
   # System TTS for the reader's speak mode — always behind the app's
   # TtsSpeaker seam; widget tests never touch the plugin.
   flutter_tts: ^4.2.0

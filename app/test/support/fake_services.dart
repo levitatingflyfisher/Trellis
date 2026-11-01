@@ -27,7 +27,13 @@ import 'package:domovoi/domovoi.dart' show TransferOutcome;
 class FakeModelStore implements ModelStore {
   final Set<String> downloadedIds;
   final Map<String, int> partial = {};
+
+  /// Bytes of a not-downloaded spec already installed as whole files: a
+  /// pair whose decoder was re-pinned keeps its encoder and tokenizer, so
+  /// only the new decoder is left to fetch (an update, 1.5.9).
+  final Map<String, int> installed = {};
   final List<String> downloadsStarted = [];
+  int prunes = 0;
   final int beats;
 
   FakeModelStore({Set<String>? downloadedIds, this.beats = 3})
@@ -44,12 +50,19 @@ class FakeModelStore implements ModelStore {
   Future<int> missingBytes(ModelSpec spec) async => downloadedIds
           .contains(spec.id)
       ? 0
-      : spec.sizeBytes - (partial[spec.id] ?? 0);
+      : spec.sizeBytes - (partial[spec.id] ?? 0) - (installed[spec.id] ?? 0);
 
   @override
   Future<void> delete(ModelSpec spec) async {
     downloadedIds.remove(spec.id);
     partial.remove(spec.id);
+    installed.remove(spec.id);
+  }
+
+  @override
+  Future<int> pruneUnreferenced(ModelRegistry registry) async {
+    prunes++;
+    return 0;
   }
 
   @override
@@ -93,6 +106,7 @@ class FakeModelStore implements ModelStore {
       }
       downloadedIds.add(spec.id);
       partial.remove(spec.id);
+      installed.remove(spec.id);
       await controller.close();
       return ModelInstallOutcome.installed;
     }

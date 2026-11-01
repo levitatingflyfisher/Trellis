@@ -8,6 +8,7 @@
 /// channel, or an isolate it didn't ask for.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -30,6 +31,9 @@ import '../features/dsp/dsp_encoder.dart';
 import '../features/dsp/dsp_ffmpeg_encoder.dart';
 import '../features/reader/translation/marian_engine.dart';
 import '../features/reader/translation/translation_service.dart';
+import '../features/reader/translation/translation_route.dart'
+    show baseLanguage;
+import '../features/storage/recently_deleted.dart';
 import '../features/transcribe/audio_fetcher.dart';
 import '../features/transcribe/decoder.dart';
 import '../features/transcribe/ffmpeg_decoder.dart';
@@ -46,9 +50,60 @@ import '../features/transcribe/whisper_library.dart';
 /// the reader's speak loop paces itself on that completion, segment by
 /// segment (ADR-0002: the cursor advances with speech).
 abstract interface class TtsSpeaker {
-  Future<void> speak(String text, {String? lang});
+  /// [voice], when given, is the installed voice to read with (one the
+  /// listener picked for [lang]); otherwise the engine's default voice
+  /// for [lang]. Throws [TtsNoVoiceException] when the engine has no
+  /// voice for [lang] rather than reading it with another language's.
+  Future<void> speak(String text, {String? lang, SystemVoice? voice});
   Future<void> stop();
   Future<void> setRate(double r);
+
+  /// The voices installed on this device, or null when the platform
+  /// can't list them (then only [speak]'s own refusal tells).
+  Future<List<SystemVoice>?> voices();
+}
+
+/// One installed platform voice, as the TTS engine names it.
+class SystemVoice {
+  /// The engine's own name for the voice (Android: "ru-ru-x-ruf-local").
+  final String name;
+
+  /// Its BCP-47 locale ("ru-RU").
+  final String locale;
+
+  /// Speaks only while online (Android's network voices).
+  final bool needsInternet;
+
+  const SystemVoice(
+      {required this.name, required this.locale, this.needsInternet = false});
+
+  /// The bare language ("ru"), the tag the reader speaks a sentence in.
+  String get lang => baseLanguage(locale) ?? '';
+
+  @override
+  bool operator ==(Object other) =>
+      other is SystemVoice && other.name == name && other.locale == locale;
+
+  @override
+  int get hashCode => Object.hash(name, locale);
+}
+
+/// The engine has no voice for [lang]: reading on would mean another
+/// language's voice reading it, which is never wanted.
+class TtsNoVoiceException implements Exception {
+  final String lang;
+  const TtsNoVoiceException(this.lang);
+  @override
+  String toString() => 'No voice for “$lang” is installed.';
+}
+
+/// The engine failed the utterance (Android's onError: a network voice
+/// offline or timed out, the engine taken by another app).
+class TtsSpeakException implements Exception {
+  final String message;
+  const TtsSpeakException(this.message);
+  @override
+  String toString() => 'The voice couldn’t play: $message';
 }
 
 /// The platform truth: flutter_tts with utterance-completion awaited, so
@@ -70,28 +125,113 @@ abstract interface class TtsSpeaker {
 /// threshold that only matters for an un-mitigated long utterance, so
 /// there is nothing left here for this class to do.
 class FlutterTtsSpeaker implements TtsSpeaker {
+  FlutterTtsSpeaker(
+      {bool? waitForVoices,
+      this.voicePoll = const Duration(milliseconds: 250),
+      this.voicePolls = 4})
+      : waitForVoices = waitForVoices ?? kIsWeb;
+
+  /// Whether an empty voice list is asked again before it is believed: a
+  /// browser's speechSynthesis lists nothing until it has loaded its
+  /// voices (Chrome: until `voiceschanged`), and the web's setLanguage
+  /// answers 1 for any language, so an empty list taken at its word would
+  /// refuse every language, and no list at all would let an English voice
+  /// read Russian. Off on a phone, whose engine answers once and truly.
+  final bool waitForVoices;
+
+  /// How long between asks, and how many more (about a second in all).
+  final Duration voicePoll;
+  final int voicePolls;
+
   FlutterTts? _tts;
-  String? _lang;
+
+  /// The utterance being spoken: flutter_tts 4.2.5 answers a speak only on
+  /// onDone or stop (Android) and drops its own completer on an error
+  /// (web), so an engine error would leave [speak] waiting forever. The
+  /// error handler ends it here instead.
+  Completer<void>? _utterance;
 
   Future<FlutterTts> _engine() async {
     if (_tts != null) return _tts!;
     final tts = FlutterTts();
+    tts.setErrorHandler((message) {
+      final c = _utterance;
+      if (c != null && !c.isCompleted) {
+        c.completeError(TtsSpeakException('$message'));
+      }
+    });
     await tts.awaitSpeakCompletion(true);
     return _tts = tts;
   }
 
   @override
-  Future<void> speak(String text, {String? lang}) async {
+  Future<void> speak(String text, {String? lang, SystemVoice? voice}) async {
     final tts = await _engine();
-    if (lang != null && lang != _lang) {
-      await tts.setLanguage(lang);
-      _lang = lang;
+    // Set before every sentence, never remembered: an engine that
+    // reconnects (another app took it, its service restarted) is back on
+    // its default language, and a remembered "already Russian" would let
+    // its English voice read on. A picked voice that has since been
+    // removed falls back to the language's default voice; only 1 is a
+    // yes (the web answers null whether or not it found the voice).
+    final picked = voice != null &&
+        await tts.setVoice({'name': voice.name, 'locale': voice.locale}) == 1;
+    if (!picked && lang != null) {
+      // Android answers 0 when it has no voice for the language and
+      // would read on with the one it has (an English voice spelling
+      // out Russian): refuse instead.
+      if (await tts.setLanguage(lang) == 0) throw TtsNoVoiceException(lang);
     }
-    await tts.speak(text);
+    final c = _utterance = Completer<void>();
+    tts.speak(text).then((_) {
+      if (!c.isCompleted) c.complete();
+    }, onError: (Object e, StackTrace s) {
+      if (!c.isCompleted) c.completeError(e, s);
+    });
+    try {
+      await c.future;
+    } finally {
+      if (identical(_utterance, c)) _utterance = null;
+    }
   }
 
   @override
-  Future<void> stop() async => (await _engine()).stop();
+  Future<List<SystemVoice>?> voices() async {
+    try {
+      final tts = await _engine();
+      var raw = await tts.getVoices;
+      for (var i = 0;
+          waitForVoices && raw is List && raw.isEmpty && i < voicePolls;
+          i++) {
+        await Future<void>.delayed(voicePoll);
+        raw = await tts.getVoices;
+      }
+      if (raw is! List) return null;
+      return [
+        for (final v in raw)
+          if (v is Map &&
+              v['name'] is String &&
+              v['locale'] is String &&
+              // A voice listed but not downloaded can't speak yet.
+              !'${v['features'] ?? ''}'.split('\t').contains('notInstalled'))
+            SystemVoice(
+                name: v['name'] as String,
+                locale: v['locale'] as String,
+                needsInternet: '${v['network_required']}' == '1'),
+      ];
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Future<void> stop() async {
+    // A stopped utterance has completed (the seam's contract): end it
+    // here, so the web, which reports a cancel as an error and never
+    // answers the speak, can't leave it waiting or fail it.
+    final c = _utterance;
+    if (c != null && !c.isCompleted) c.complete();
+    await (await _engine()).stop();
+  }
 
   @override
   Future<void> setRate(double r) async => (await _engine()).setSpeechRate(r);
@@ -101,7 +241,9 @@ class FlutterTtsSpeaker implements TtsSpeaker {
 /// tests): utterances complete immediately, nothing touches a channel.
 class NoopTtsSpeaker implements TtsSpeaker {
   @override
-  Future<void> speak(String text, {String? lang}) async {}
+  Future<void> speak(String text, {String? lang, SystemVoice? voice}) async {}
+  @override
+  Future<List<SystemVoice>?> voices() async => null;
   @override
   Future<void> stop() async {}
   @override
@@ -354,6 +496,13 @@ class DeviceServices {
   /// begin with), but safe to construct there too — the same "construct,
   /// never touch" rule as [supportDir] itself.
   Directory get speechTempDir => Directory('${supportDir.path}/speech-temp');
+
+  /// Where a deleted transcript or translation waits 30 days to be
+  /// restored (1.5.9). Null on the web tier, which has no files to keep it
+  /// in; its deletes ask first instead.
+  RecentlyDeleted? get recentlyDeleted => localMlAvailable
+      ? RecentlyDeleted(Directory('${supportDir.path}/recently_deleted'))
+      : null;
 
   /// Builds a FRESH [DiskSpeechTempFiles] for one speaking run — a factory,
   /// not a shared instance, since each run needs its own run id (the "two

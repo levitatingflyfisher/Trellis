@@ -216,7 +216,9 @@ class ReaderPrefs {
   const ReaderPrefs(
       {this.typography = const ReaderTypography(),
       this.session = const ReaderSession(),
-      this.lastPlayedWorkId});
+      this.lastPlayedWorkId,
+      this.playerClosed = false,
+      this.voices = const {}});
 
   final ReaderTypography typography;
 
@@ -228,6 +230,18 @@ class ReaderPrefs {
   /// has ever played, or the player has never recorded one yet.
   final int? lastPlayedWorkId;
 
+  /// The bar's X was the last word (1.5.9, user: "X doesn't reliably
+  /// close the bar"): a launch leaves the bar closed until something
+  /// plays. [lastPlayedWorkId] stays, so the home-screen widget's Play can
+  /// still bring that work back.
+  final bool playerClosed;
+
+  /// Read aloud's voice for each language (1.5.9), by bare language tag:
+  /// [readAloudNeuralVoice], [readAloudDefaultVoice], or a system voice's
+  /// name after [readAloudSystemVoicePrefix]. A language with no entry
+  /// reads with the downloaded voice where it can, else the default.
+  final Map<String, String> voices;
+
   /// [clearLastPlayedWorkId] is a separate flag (not "pass null") because
   /// null already means "leave the field as is" for every other optional
   /// param here — the same shape [FeedsDao.updateRefreshState]'s own
@@ -237,6 +251,8 @@ class ReaderPrefs {
     ReaderSession? session,
     int? lastPlayedWorkId,
     bool clearLastPlayedWorkId = false,
+    bool? playerClosed,
+    Map<String, String>? voices,
   }) =>
       ReaderPrefs(
         typography: typography ?? this.typography,
@@ -244,12 +260,16 @@ class ReaderPrefs {
         lastPlayedWorkId: clearLastPlayedWorkId
             ? null
             : (lastPlayedWorkId ?? this.lastPlayedWorkId),
+        playerClosed: playerClosed ?? this.playerClosed,
+        voices: voices ?? this.voices,
       );
 
   String encode() => json.encode({
         'typography': typography.toJson(),
         'session': session.toJson(),
         if (lastPlayedWorkId != null) 'lastPlayedWorkId': lastPlayedWorkId,
+        if (playerClosed) 'playerClosed': true,
+        if (voices.isNotEmpty) 'voices': voices,
       });
 
   /// Never throws: an empty column (a brand-new profile), a non-JSON
@@ -268,9 +288,24 @@ class ReaderPrefs {
               decoded['session'] is Map<String, dynamic>
                   ? decoded['session'] as Map<String, dynamic>
                   : null),
-          lastPlayedWorkId: rawId is int ? rawId : null);
+          lastPlayedWorkId: rawId is int ? rawId : null,
+          playerClosed: decoded['playerClosed'] == true,
+          voices: _voices(decoded['voices']));
     } on FormatException {
       return const ReaderPrefs();
     }
   }
 }
+
+/// [ReaderPrefs.voices] values other than a system voice's name.
+const readAloudNeuralVoice = 'neural';
+const readAloudDefaultVoice = 'default';
+const readAloudSystemVoicePrefix = 'system:';
+
+Map<String, String> _voices(Object? raw) => raw is Map
+    ? {
+        for (final e in raw.entries)
+          if (e.key is String && e.value is String)
+            e.key as String: e.value as String
+      }
+    : const {};

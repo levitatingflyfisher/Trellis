@@ -53,7 +53,10 @@ class _StorageByItemScreenState extends State<StorageByItemScreen> {
   }
 
   Future<void> _delete(WorkStorage w, StoredPart p) async {
-    if (!await confirmDeletePart(context, w, p)) return;
+    if (!await confirmDeletePart(context, w, p,
+        restorable: widget.services.recentlyDeleted != null)) {
+      return;
+    }
     final message = await deletePart(w, p,
         db: widget.db, services: widget.services, actions: widget.actions);
     await _load();

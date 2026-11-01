@@ -178,4 +178,41 @@ void main() {
     expect(find.byKey(const Key('consent-dialog')), findsNothing);
     expect(find.textContaining('1 of 25 downloaded'), findsOneWidget);
   });
+
+  testWidgets('a downloaded pair whose decoder was re-pinned reads as an '
+      'update with its download size, never as not downloaded or an error',
+      (tester) async {
+    final spec = ModelRegistry.starter().byId('opus-mt-en-es')!;
+    final decoder = spec.files[1];
+    final store = FakeModelStore();
+    store.installed[spec.id] = spec.sizeBytes - decoder.bytes;
+    await pump(tester, store: store);
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    expect(store.downloadsStarted, isEmpty,
+        reason: 'a new decoder is a real download: it waits to be asked');
+    expect(find.textContaining('1 update available'), findsOneWidget);
+
+    await tester.scrollUntilVisible(
+        find.byKey(const Key('models-translation')), 200);
+    await tester.tap(find.byKey(const Key('models-translation')));
+    await tester.pumpAndSettle();
+    final state = find.byKey(Key('model-state-${spec.id}'));
+    await tester.scrollUntilVisible(state, 200);
+    expect(tester.widget<Text>(state).data,
+        'Update available: ${formatBytes(decoder.bytes)}');
+    expect(find.byKey(Key('model-delete-${spec.id}')), findsOneWidget,
+        reason: 'what is kept can still be removed');
+
+    await tester.tap(find.byKey(Key('model-download-${spec.id}')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('(${formatBytes(decoder.bytes)})'),
+        findsOneWidget,
+        reason: 'the consent names the update size, not the whole pair');
+    await tester.tap(find.byKey(const Key('consent-accept')));
+    await tester.pump(const Duration(seconds: 1));
+    await tester.pumpAndSettle();
+    expect(store.downloadsStarted, [spec.id]);
+    expect(tester.widget<Text>(state).data, 'On this device');
+  });
 }

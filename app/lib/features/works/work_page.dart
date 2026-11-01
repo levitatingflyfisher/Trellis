@@ -513,7 +513,10 @@ class _WorkPageState extends State<WorkPage> {
   Future<void> _deletePart(StoredPart part) async {
     final stored = _stored;
     if (stored == null) return;
-    if (!await confirmDeletePart(context, stored, part)) return;
+    if (!await confirmDeletePart(context, stored, part,
+        restorable: _actions?.services?.recentlyDeleted != null)) {
+      return;
+    }
     final message = await deletePart(stored, part,
         db: _db, services: _actions?.services, actions: _actions);
     // The alignments listener only reloads an untranscribed page.
@@ -734,7 +737,9 @@ class _WorkPageState extends State<WorkPage> {
                     onPressed: action,
                     child: child,
                   )
-                : FilledButton.tonal(
+                // Outlined, not tonal: one filled action per screen
+                // (1.5.9), and the others stay the same size, in reach.
+                : OutlinedButton(
                     key: Key('mode-${mode.name}'),
                     style: style,
                     onPressed: action,

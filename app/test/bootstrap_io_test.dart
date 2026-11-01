@@ -6,9 +6,13 @@ library;
 
 import 'dart:io';
 
+import 'package:dio/dio.dart';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
 import 'package:trellis/bootstrap/bootstrap.dart';
+import 'package:trellis/features/storage/recently_deleted.dart';
+import 'package:trellis/features/storage/work_storage.dart' show StoredKind;
 import 'package:trellis/features/models/model_store.dart';
 import 'package:trellis/features/transcribe/decoder.dart';
 import 'package:trellis/features/transcribe/foreground_gate.dart';
@@ -41,6 +45,70 @@ void main() {
     // The host test runner is not Android:
     expect(s.decoder, isA<WavPassthroughDecoder>());
     expect(s.foregroundGate, isA<NoopJobForegroundGate>());
+  });
+
+  test('start-up lets go of Recently deleted past 30 days, past a broken '
+      'file', () async {
+    final dir = Directory.systemTemp.createTempSync('trellis-bootstrap');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final s = servicesFor(dir);
+    final bin = s.recentlyDeleted!;
+    DeletedSnapshot snap(String id, int daysAgo) => DeletedSnapshot(
+        id: id,
+        workId: 1,
+        workTitle: 'W',
+        kind: StoredKind.transcript,
+        lang: null,
+        deletedAt: DateTime.now().subtract(Duration(days: daysAgo)),
+        bytes: 1);
+    await bin.save(snap('old', 31), const {});
+    await bin.save(snap('new', 29), const {});
+    File(p.join(bin.dir.path, 'junk.json')).writeAsStringSync('[');
+
+    await purgeRecentlyDeleted(s);
+
+    expect([for (final x in await bin.list()) x.id], ['new']);
+  });
+
+  test('start-up tidies the model store: prunes what the registry no '
+      'longer pins, attempts no download, and never throws', () async {
+    final dir = Directory.systemTemp.createTempSync('trellis-bootstrap');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final s = servicesFor(dir);
+    // ADR-0003: no egress at boot without a user gesture. A pair one
+    // config file short is exactly what a top-up would fetch; start-up
+    // must leave it short and never reach the network.
+    final store = s.modelStore as DiskModelStore;
+    var requests = 0;
+    store.dio.interceptors.add(InterceptorsWrapper(onRequest: (o, h) {
+      requests++;
+      h.reject(DioException(requestOptions: o, message: 'no egress'));
+    }));
+    final pair = s.registry.byId('opus-mt-en-es')!;
+    final small = pair.files.reduce((a, b) => a.bytes <= b.bytes ? a : b);
+    for (final f in pair.files) {
+      if (identical(f, small)) continue;
+      final file = File(store.pathOf(pair, f))..createSync(recursive: true);
+      final raf = file.openSync(mode: FileMode.write)..truncateSync(f.bytes);
+      raf.closeSync();
+    }
+    final leftover = File(p.join(dir.path, 'models', 'retired-model', 'm.bin'))
+      ..createSync(recursive: true)
+      ..writeAsBytesSync(List.filled(10, 0));
+    final audio = File(p.join(dir.path, 'audio', '1.mp3'))
+      ..createSync(recursive: true);
+
+    await tidyModels(s);
+
+    expect(leftover.parent.existsSync(), isFalse);
+    expect(audio.existsSync(), isTrue);
+    expect(requests, 0);
+    expect(File(store.pathOf(pair, small)).existsSync(), isFalse);
+
+    // A models path that is a file, not a directory: listing throws.
+    final broken = servicesFor(Directory(p.join(dir.path, 'broken')));
+    File(p.join(dir.path, 'broken', 'models')).createSync(recursive: true);
+    await tidyModels(broken); // completes without throwing
   });
 
   test('the conditional export resolves to the IO side under the VM', () {

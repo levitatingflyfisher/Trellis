@@ -8,13 +8,14 @@ import '../support/fake_speech_audio_queue.dart';
 import '../support/fake_synthesis_engine.dart';
 import '../support/fake_tts.dart';
 
-/// Speak-in-⟨language⟩ (ADR-0008 "Babel" Phase 4; generalized to any active
-/// translation target by Campaign 8 "Babel widens" Phase 1): the speak loop
-/// substitutes each STORED translated sentence for the neural or system
-/// voice while the reading cursor keeps advancing through the ORIGINAL
-/// sentences — the karaoke cursor law is unchanged; only what is heard
-/// differs. A sentence with no stored translation still speaks, in English,
-/// from the original. This file keeps Spanish as its running example (the
+/// Reading the translation aloud under Both (ADR-0008 "Babel" Phase 4;
+/// generalized to any active translation target by Campaign 8 "Babel
+/// widens" Phase 1; since 1.5.9 each sentence, then its stored
+/// translation, rather than the translation in its place, which is what
+/// Translation only does — reader_speak_translation_test.dart): the
+/// reading cursor keeps advancing through the ORIGINAL sentences — the
+/// karaoke cursor law is unchanged; only what is heard differs. A
+/// sentence with no stored translation is read once, in English. This file keeps Spanish as its running example (the
 /// shipped, most-covered pair) and adds one German-specific group to cover
 /// the engine-selection fix Campaign 8 found: Supertonic's own language
 /// gate (`supertonicSupportedLangs`) does not cover German, so Speak-in-
@@ -94,75 +95,96 @@ void main() {
       expect(find.byKey(const Key('speak-translation-toggle')), findsNothing);
     });
 
-    testWidgets('present, labeled with the active language, once Show '
+    testWidgets('present, on, labeled with the active language, once Show '
         '⟨language⟩ is on', (tester) async {
       await db.spineDao.setShowTranslationLayer(workId, true);
       await pumpReader(tester);
       await openOverflow(tester);
       expect(find.byKey(const Key('speak-translation-toggle')), findsOneWidget);
-      expect(find.text('Speak in Spanish'), findsOneWidget);
+      expect(find.text('Read the Spanish aloud too'), findsOneWidget);
+      expect(
+          tester
+              .widget<CheckedPopupMenuItem<String>>(
+                  find.byKey(const Key('speak-translation-toggle')))
+              .checked,
+          isTrue);
     });
   });
 
+  /// Reads one Both run on the system voice, one 100ms beat per
+  /// utterance, and checks what was heard and where the cursor was left.
+  Future<void> expectBothRun(WidgetTester tester,
+      {required String lang,
+      required String first,
+      required String last}) async {
+    await tester.tap(find.byKey(const Key('speak-toggle')));
+    await tester.pump();
+    await tester.pump();
+    for (var k = 0; k < 4; k++) {
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump();
+      await tester.pump();
+    }
+    expect(tts.utterances, [
+      (text: 'Hello there.', lang: 'en'),
+      (text: first, lang: lang),
+      // Untranslated: read once, in English.
+      (text: 'How are you?', lang: 'en'),
+      (text: 'Goodbye now.', lang: 'en'),
+      (text: last, lang: lang),
+    ]);
+    // The saved cursor is the ORIGINAL segment/word — never touched by
+    // which language was actually spoken.
+    final pos =
+        await db.spineDao.position(profileId: profileId, workId: workId);
+    expect(pos!.segmentIdx, 1);
+    expect(pos.wordIdx, 0);
+  }
+
   group('the system voice path', () {
-    testWidgets('a translated sentence speaks Spanish; the untranslated '
-        'one falls back to English; the cursor advances through the '
-        'ORIGINAL sentences either way', (tester) async {
+    testWidgets('each sentence, then its Spanish; the untranslated one is '
+        'read once in English; the cursor advances through the ORIGINAL '
+        'sentences either way', (tester) async {
+      await db.spineDao.setShowTranslationLayer(workId, true);
+      await pumpReader(tester);
+      await expectBothRun(tester, lang: 'es', first: 'Hola.', last: 'Adios.');
+    });
+
+    testWidgets('turning Read the ⟨language⟩ aloud too off (before '
+        'starting) reads the original only', (tester) async {
       await db.spineDao.setShowTranslationLayer(workId, true);
       await pumpReader(tester);
       await openOverflow(tester);
       await tester.tap(find.byKey(const Key('speak-translation-toggle')));
       await tester.pumpAndSettle();
-
       await tester.tap(find.byKey(const Key('speak-toggle')));
       await tester.pump();
-      expect(tts.utterances, [(text: 'Hola.', lang: 'es')]);
-
-      // First sentence's 100ms beat completes → cursor moves to sentence 2
-      // ("How are you?", untranslated) and speaks it in English.
       await tester.pump(const Duration(milliseconds: 100));
       await tester.pump();
-      expect(tts.utterances[1], (text: 'How are you?', lang: 'en'));
-
-      await tester.pump(const Duration(milliseconds: 100));
-      await tester.pump();
-      expect(tts.utterances[2], (text: 'Adios.', lang: 'es'));
-
-      final pos = await db.spineDao.position(profileId: profileId, workId: workId);
-      // The saved cursor is the ORIGINAL segment/word — never touched by
-      // which language was actually spoken.
-      expect(pos!.segmentIdx, 1);
-      expect(pos.wordIdx, 0);
-    });
-
-    testWidgets('turning Speak in ⟨language⟩ off mid-session (before '
-        'starting) speaks English as usual', (tester) async {
-      await db.spineDao.setShowTranslationLayer(workId, true);
-      await pumpReader(tester);
-      await tester.tap(find.byKey(const Key('speak-toggle')));
-      await tester.pump();
-      expect(tts.utterances, [(text: 'Hello there.', lang: 'en')]);
+      expect(tts.utterances, [
+        (text: 'Hello there.', lang: 'en'),
+        (text: 'How are you?', lang: 'en'),
+      ]);
     });
   });
 
   group('the neural voice path', () {
-    testWidgets('the pipeline receives Spanish text for translated '
-        'sentences and English for the fallback, each correctly tagged; '
-        'the cursor still advances through original word positions',
+    testWidgets('the pipeline receives each sentence then its Spanish, each '
+        'correctly tagged; the cursor still advances through original word '
+        'positions, holding on a sentence while its translation plays',
         (tester) async {
       await db.spineDao.setShowTranslationLayer(workId, true);
       await pumpReader(tester, withSynthEngine: true);
-      await openOverflow(tester);
-      await tester.tap(find.byKey(const Key('speak-translation-toggle')));
-      await tester.pumpAndSettle();
 
       await tester.tap(find.byKey(const Key('speak-toggle')));
       await tester.pump();
 
-      expect(synthEngine.calls.map((c) => c.text).toList(),
-          ['Hola.', 'How are you?', 'Adios.']);
-      expect(synthEngine.calls.map((c) => c.lang).toList(),
-          ['es', 'en', 'es']);
+      // Two sentences of lookahead past the one about to play.
+      expect(synthEngine.calls.map((c) => (c.text, c.lang)).toList(), [
+        ('Hello there.', 'en'),
+        ('Hola.', 'es'),
+        ('How are you?', 'en'),
+      ]);
 
       synthEngine.complete(0);
       await tester.pump();
@@ -174,22 +196,26 @@ void main() {
       await tester.pump();
       queue.emitIndex(1);
       await tester.pump();
-      final pos = await db.spineDao.position(profileId: profileId, workId: workId);
+      var pos = await db.spineDao.position(profileId: profileId, workId: workId);
+      // "Hola." is heard under its original: the place is still "Hello".
+      expect((pos!.segmentIdx, pos.wordIdx), (0, 0));
+
+      synthEngine.complete(2);
+      await tester.pump();
+      queue.emitIndex(2);
+      await tester.pump();
+      pos = await db.spineDao.position(profileId: profileId, workId: workId);
       // Sentence 2's ORIGINAL position: segment 0, the second sentence's
       // first word ("How").
-      expect(pos!.segmentIdx, 0);
+      expect((pos!.segmentIdx, pos.wordIdx), (0, 2));
     });
   });
 
-  group('turning Show ⟨language⟩ off resets Speak in ⟨language⟩', () {
-    testWidgets('the toggle is off and hidden again after Show '
-        '⟨language⟩ is turned off, and speech reverts to English',
-        (tester) async {
+  group('turning Show ⟨language⟩ off reads the original only', () {
+    testWidgets('the toggle is hidden after Show ⟨language⟩ is turned off, '
+        'and speech is English only', (tester) async {
       await db.spineDao.setShowTranslationLayer(workId, true);
       await pumpReader(tester);
-      await openOverflow(tester);
-      await tester.tap(find.byKey(const Key('speak-translation-toggle')));
-      await tester.pumpAndSettle();
 
       await openOverflow(tester);
       await tester.tap(find.byKey(const Key('show-translation-toggle')));
@@ -205,43 +231,51 @@ void main() {
 
       await tester.tap(find.byKey(const Key('speak-toggle')));
       await tester.pump();
-      expect(tts.utterances, [(text: 'Hello there.', lang: 'en')]);
+      await tester.pump(const Duration(milliseconds: 100));
+      await tester.pump();
+      expect(tts.utterances, [
+        (text: 'Hello there.', lang: 'en'),
+        (text: 'How are you?', lang: 'en'),
+      ]);
     });
   });
 
-  group('Campaign 8 "Babel widens": the Supertonic engine-gating fix', () {
-    setUp(() async {
-      // Re-point the active layer at German — a language Supertonic's
-      // own `supertonicSupportedLangs` does not cover (verified,
-      // docs/reference/tts-voices.md).
-      await db.spineDao.setActiveTranslationLang(workId, 'de');
-      await db.spineDao.upsertTranslationSentence(
-          workId: workId,
-          segmentIdx: 0,
-          sentenceIdx: 0,
-          lang: 'de',
-          sourceText: 'Hello there.',
-          body: 'Hallo.');
-      await db.spineDao.upsertTranslationSentence(
-          workId: workId,
-          segmentIdx: 1,
-          sentenceIdx: 0,
-          lang: 'de',
-          sourceText: 'Goodbye now.',
-          body: 'Auf Wiedersehen.');
-      await db.spineDao.setShowTranslationLayer(workId, true);
-    });
+  Future<void> translateTo(String lang, String first, String last) async {
+    await db.spineDao.setActiveTranslationLang(workId, lang);
+    await db.spineDao.upsertTranslationSentence(
+        workId: workId,
+        segmentIdx: 0,
+        sentenceIdx: 0,
+        lang: lang,
+        sourceText: 'Hello there.',
+        body: first);
+    await db.spineDao.upsertTranslationSentence(
+        workId: workId,
+        segmentIdx: 1,
+        sentenceIdx: 0,
+        lang: lang,
+        sourceText: 'Goodbye now.',
+        body: last);
+    await db.spineDao.setShowTranslationLayer(workId, true);
+  }
 
-    testWidgets('Speak in German forces the SYSTEM voice even when a '
-        'neural voice is primed and preferred — never reaches '
+  group('Campaign 8 "Babel widens": the Supertonic engine-gating fix', () {
+    // German — a language Supertonic's own `supertonicSupportedLangs` does
+    // not cover (verified, docs/reference/tts-voices.md).
+    setUp(() => translateTo('de', 'Hallo.', 'Auf Wiedersehen.'));
+
+    testWidgets('reading German forces the SYSTEM voice for the whole run '
+        'even when a neural voice is primed and preferred — never reaches '
         'Supertonic\'s own language gate at all', (tester) async {
       await pumpReader(tester, withSynthEngine: true);
       await openOverflow(tester);
-      expect(find.text('Speak in German'), findsOneWidget);
-      await tester.tap(find.byKey(const Key('speak-translation-toggle')));
+      expect(find.text('Read the German aloud too'), findsOneWidget);
+      await tester.tapAt(Offset.zero);
       await tester.pumpAndSettle();
 
       await tester.tap(find.byKey(const Key('speak-toggle')));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 100));
       await tester.pump();
 
       // The system voice spoke — the neural engine's fake never saw a
@@ -250,23 +284,27 @@ void main() {
       // (which would have thrown SupertonicUnsupportedLangException,
       // uncaught, had this run reached it).
       expect(synthEngine.calls, isEmpty);
-      expect(tts.utterances, [(text: 'Hallo.', lang: 'de')]);
+      expect(tts.utterances, [
+        (text: 'Hello there.', lang: 'en'),
+        (text: 'Hallo.', lang: 'de'),
+      ]);
     });
 
-    testWidgets('Speak in German OFF (still showing German text, just '
-        'not speaking it) still uses the neural voice normally — the '
-        'gating fix is specific to the ACTIVE speak-substitution, not a '
-        'blanket refusal of the neural voice for a German-source work',
+    testWidgets('Read the German aloud too OFF (still showing German text, '
+        'just not reading it) still uses the neural voice normally — the '
+        'gating is specific to a run that reads German, not a blanket '
+        'refusal of the neural voice for a German translation',
         (tester) async {
       await pumpReader(tester, withSynthEngine: true);
-      // Speak-in-German never toggled on — Show German is on (from
-      // setUp), but that only affects DISPLAY, not speech.
+      await openOverflow(tester);
+      await tester.tap(find.byKey(const Key('speak-translation-toggle')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('speak-toggle')));
       await tester.pump();
 
       expect(synthEngine.calls, isNotEmpty,
-          reason: 'no translation substitution requested -> the neural '
-              'voice speaks the original English text normally');
+          reason: 'no translation read -> the neural voice speaks the '
+              'original English text normally');
       expect(tts.utterances, isEmpty);
     });
   });
@@ -277,195 +315,59 @@ void main() {
       'the SAME 3-sentence shape "the system voice path" proves for '
       'Spanish, so German gets the identical assurance, plus Cyrillic and '
       'CJK)', () {
-    testWidgets('Latin (German): a translated sentence speaks German; the '
-        'untranslated one falls back to English; the cursor advances '
+    testWidgets('Latin (German): each sentence then its German; the '
+        'untranslated one is read once in English; the cursor advances '
         'through the ORIGINAL sentences either way', (tester) async {
-      await db.spineDao.setActiveTranslationLang(workId, 'de');
-      await db.spineDao.upsertTranslationSentence(
-          workId: workId,
-          segmentIdx: 0,
-          sentenceIdx: 0,
-          lang: 'de',
-          sourceText: 'Hello there.',
-          body: 'Hallo.');
-      await db.spineDao.upsertTranslationSentence(
-          workId: workId,
-          segmentIdx: 1,
-          sentenceIdx: 0,
-          lang: 'de',
-          sourceText: 'Goodbye now.',
-          body: 'Auf Wiedersehen.');
-      await db.spineDao.setShowTranslationLayer(workId, true);
+      await translateTo('de', 'Hallo.', 'Auf Wiedersehen.');
       await pumpReader(tester);
-      await openOverflow(tester);
-      await tester.tap(find.byKey(const Key('speak-translation-toggle')));
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.byKey(const Key('speak-toggle')));
-      await tester.pump();
-      expect(tts.utterances, [(text: 'Hallo.', lang: 'de')]);
-
-      await tester.pump(const Duration(milliseconds: 100));
-      await tester.pump();
-      expect(tts.utterances[1], (text: 'How are you?', lang: 'en'));
-
-      await tester.pump(const Duration(milliseconds: 100));
-      await tester.pump();
-      expect(tts.utterances[2], (text: 'Auf Wiedersehen.', lang: 'de'));
-
-      final pos =
-          await db.spineDao.position(profileId: profileId, workId: workId);
-      expect(pos!.segmentIdx, 1);
-      expect(pos.wordIdx, 0);
+      await expectBothRun(tester,
+          lang: 'de', first: 'Hallo.', last: 'Auf Wiedersehen.');
     });
 
-    testWidgets('Cyrillic (Russian): a translated sentence speaks Russian; '
-        'the untranslated one falls back to English; the cursor advances '
+    testWidgets('Cyrillic (Russian): each sentence then its Russian; the '
+        'untranslated one is read once in English; the cursor advances '
         'through the ORIGINAL sentences either way', (tester) async {
-      await db.spineDao.setActiveTranslationLang(workId, 'ru');
-      await db.spineDao.upsertTranslationSentence(
-          workId: workId,
-          segmentIdx: 0,
-          sentenceIdx: 0,
-          lang: 'ru',
-          sourceText: 'Hello there.',
-          body: 'Привет.');
-      await db.spineDao.upsertTranslationSentence(
-          workId: workId,
-          segmentIdx: 1,
-          sentenceIdx: 0,
-          lang: 'ru',
-          sourceText: 'Goodbye now.',
-          body: 'До свидания.');
-      await db.spineDao.setShowTranslationLayer(workId, true);
+      await translateTo('ru', 'Привет.', 'До свидания.');
       await pumpReader(tester);
-      await openOverflow(tester);
-      await tester.tap(find.byKey(const Key('speak-translation-toggle')));
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.byKey(const Key('speak-toggle')));
-      await tester.pump();
-      expect(tts.utterances, [(text: 'Привет.', lang: 'ru')]);
-
-      await tester.pump(const Duration(milliseconds: 100));
-      await tester.pump();
-      expect(tts.utterances[1], (text: 'How are you?', lang: 'en'));
-
-      await tester.pump(const Duration(milliseconds: 100));
-      await tester.pump();
-      expect(tts.utterances[2], (text: 'До свидания.', lang: 'ru'));
-
-      final pos =
-          await db.spineDao.position(profileId: profileId, workId: workId);
-      expect(pos!.segmentIdx, 1);
-      expect(pos.wordIdx, 0);
+      await expectBothRun(tester,
+          lang: 'ru', first: 'Привет.', last: 'До свидания.');
     });
 
-    testWidgets('CJK (Chinese): a translated sentence speaks Chinese; the '
-        'untranslated one falls back to English; the cursor advances '
+    testWidgets('CJK (Chinese): each sentence then its Chinese; the '
+        'untranslated one is read once in English; the cursor advances '
         'through the ORIGINAL sentences either way — the ORIGINAL text '
         'stays plain-English ASCII (en->X direction: splitSentences never '
         'runs over the translated CJK body, only over the English '
         'source), so this needs no CJK sentence-boundary handling — that '
         'is a Phase 3 concern for CJK-SOURCED works, not this direction',
         (tester) async {
-      await db.spineDao.setActiveTranslationLang(workId, 'zh');
-      await db.spineDao.upsertTranslationSentence(
-          workId: workId,
-          segmentIdx: 0,
-          sentenceIdx: 0,
-          lang: 'zh',
-          sourceText: 'Hello there.',
-          body: '你好。');
-      await db.spineDao.upsertTranslationSentence(
-          workId: workId,
-          segmentIdx: 1,
-          sentenceIdx: 0,
-          lang: 'zh',
-          sourceText: 'Goodbye now.',
-          body: '再见。');
-      await db.spineDao.setShowTranslationLayer(workId, true);
+      await translateTo('zh', '你好。', '再见。');
       await pumpReader(tester);
-      await openOverflow(tester);
-      await tester.tap(find.byKey(const Key('speak-translation-toggle')));
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.byKey(const Key('speak-toggle')));
-      await tester.pump();
-      expect(tts.utterances, [(text: '你好。', lang: 'zh')]);
-
-      await tester.pump(const Duration(milliseconds: 100));
-      await tester.pump();
-      expect(tts.utterances[1], (text: 'How are you?', lang: 'en'));
-
-      await tester.pump(const Duration(milliseconds: 100));
-      await tester.pump();
-      expect(tts.utterances[2], (text: '再见。', lang: 'zh'));
-
-      final pos =
-          await db.spineDao.position(profileId: profileId, workId: workId);
-      expect(pos!.segmentIdx, 1);
-      expect(pos.wordIdx, 0);
+      await expectBothRun(tester, lang: 'zh', first: '你好。', last: '再见。');
     });
 
-    testWidgets('Cyrillic (Russian) is gated the SAME way German is: '
-        'Speak in Russian forces the system voice even with a neural '
-        'voice primed and preferred — Cyrillic is not in Supertonic\'s '
-        'own `supertonicSupportedLangs` ({en, es}, Phase 0)', (tester) async {
-      await db.spineDao.setActiveTranslationLang(workId, 'ru');
-      await db.spineDao.upsertTranslationSentence(
-          workId: workId,
-          segmentIdx: 0,
-          sentenceIdx: 0,
-          lang: 'ru',
-          sourceText: 'Hello there.',
-          body: 'Привет.');
-      await db.spineDao.setShowTranslationLayer(workId, true);
-      await pumpReader(tester, withSynthEngine: true);
-      await openOverflow(tester);
-      await tester.tap(find.byKey(const Key('speak-translation-toggle')));
-      await tester.pumpAndSettle();
+    for (final (lang, first) in const [('ru', 'Привет.'), ('zh', '你好。')]) {
+      testWidgets('$lang is gated the SAME way German is: reading it '
+          'forces the system voice even with a neural voice primed and '
+          'preferred — its script is not in Supertonic\'s own '
+          '`supertonicSupportedLangs` ({en, es}, Phase 0)', (tester) async {
+        await translateTo(lang, first, 'x');
+        await pumpReader(tester, withSynthEngine: true);
 
-      await tester.tap(find.byKey(const Key('speak-toggle')));
-      await tester.pump();
+        await tester.tap(find.byKey(const Key('speak-toggle')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 100));
+        await tester.pump();
 
-      expect(synthEngine.calls, isEmpty,
-          reason: 'the neural engine fake never saw a call — engine '
-              'SELECTION happened before any per-utterance language tag '
-              'could reach Supertonic\'s own gate (which would have '
-              'thrown SupertonicUnsupportedLangException, uncaught, had '
-              'this run reached it)');
-      expect(tts.utterances, [(text: 'Привет.', lang: 'ru')]);
-    });
-
-    testWidgets('CJK (Chinese) is gated the SAME way German is: Speak in '
-        'Chinese forces the system voice even with a neural voice primed '
-        'and preferred — CJK is not in Supertonic\'s own '
-        '`supertonicSupportedLangs` ({en, es}, Phase 0)', (tester) async {
-      await db.spineDao.setActiveTranslationLang(workId, 'zh');
-      await db.spineDao.upsertTranslationSentence(
-          workId: workId,
-          segmentIdx: 0,
-          sentenceIdx: 0,
-          lang: 'zh',
-          sourceText: 'Hello there.',
-          body: '你好。');
-      await db.spineDao.setShowTranslationLayer(workId, true);
-      await pumpReader(tester, withSynthEngine: true);
-      await openOverflow(tester);
-      await tester.tap(find.byKey(const Key('speak-translation-toggle')));
-      await tester.pumpAndSettle();
-
-      await tester.tap(find.byKey(const Key('speak-toggle')));
-      await tester.pump();
-
-      expect(synthEngine.calls, isEmpty,
-          reason: 'the neural engine fake never saw a call — engine '
-              'SELECTION happened before any per-utterance language tag '
-              'could reach Supertonic\'s own gate (which would have '
-              'thrown SupertonicUnsupportedLangException, uncaught, had '
-              'this run reached it)');
-      expect(tts.utterances, [(text: '你好。', lang: 'zh')]);
-    });
+        expect(synthEngine.calls, isEmpty,
+            reason: 'the neural engine fake never saw a call — engine '
+                'SELECTION happened before any per-utterance language tag '
+                'could reach Supertonic\'s own gate (which would have '
+                'thrown SupertonicUnsupportedLangException, uncaught, had '
+                'this run reached it)');
+        expect(tts.utterances,
+            [(text: 'Hello there.', lang: 'en'), (text: first, lang: lang)]);
+      });
+    }
   });
 }

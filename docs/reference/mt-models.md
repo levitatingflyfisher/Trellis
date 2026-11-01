@@ -592,3 +592,22 @@ Brazilian or European forms; `>>pt_BR<<` exists but wasn't evaluated.
 apache-2.0). The Models screen's translation section carries the credit:
 "Translation models: OPUS-MT by Helsinki-NLP (University of Helsinki),
 licensed CC-BY 4.0. Converted to ONNX by Xenova and onnx-community."
+
+## Trellis 1.5.9: Xenova’s decoder for the six oldest pairs (2026-11-06)
+
+en-es, en-de, de-en, en-ru, ru-en and zh-en keep onnx-community’s
+encoder, `source.spm`, `vocab.json`, `config.json` and
+`tokenizer_config.json` at the commits in the table above. Their
+`decoder_model_merged_quantized.onnx` now comes from the matching
+`Xenova/opus-mt-<pair>` repo at a pinned commit, about 57 to 60 MB
+against 176 to 193 MB. A pair is now about 108 to 116 MB.
+
+The swap was accepted pair by pair after a 50-sentence greedy-decoding
+parity check against the old decoder: 90% to 98% identical outputs and
+chrF 98.6 to 99.9, every difference a fluent paraphrase. The method, the
+full table and the pins are in
+[ADR-0020](../adr/0020-translation-runs-on-device-verified.md). The
+license is unchanged: the same OPUS-MT weights (CC-BY 4.0), converted by
+Xenova, whose cards carry no license of their own, like the other
+Xenova pairs above.
+

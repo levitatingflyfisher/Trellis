@@ -128,6 +128,26 @@ void main() {
           reason: 'no en->ja model exists');
     });
 
+    testWidgets('a downloaded pair whose decoder was re-pinned reads as '
+        'an update with its size, and downloads only that', (tester) async {
+      final fake = FakeTranslation(beats: 1);
+      // en-es (100 MB): everything but a 60 MB decoder is already here.
+      fake.store.installed['opus-mt-en-es'] = 40000000;
+      await pumpReader(tester, translation: fake.service);
+      await openSheet(tester);
+      expect(tileLine(tester, 'es'), 'Update available: 60.0 MB');
+      expect(tileLine(tester, 'de'), 'Download 200.0 MB');
+
+      await tester.tap(find.byKey(const Key('translate-target-es')));
+      await tester.pumpAndSettle();
+      expect(find.text('• English to Spanish translator update, 60.0 MB'),
+          findsOneWidget);
+      await tester.tap(find.byKey(const Key('consent-accept')));
+      await settleDownloads(tester);
+      expect(fake.store.downloadsStarted, ['opus-mt-en-es']);
+      expect(await db.spineDao.activeTranslationLang(workId), 'es');
+    });
+
     testWidgets('an installed pair reads Ready', (tester) async {
       await pumpReader(tester,
           translation: FakeTranslation(installed: {'opus-mt-en-de'}).service);

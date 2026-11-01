@@ -235,7 +235,7 @@ void main() {
 
     await tester.tap(find.text('alpha.')); // segment 0, not the drop cap
     await tester.pump();
-    await tester.tap(find.byTooltip('Listen'));
+    await tester.tap(find.byTooltip('Listen from here'));
     await tester.pumpAndSettle();
 
     fakePlayer.emitPosition(const Duration(milliseconds: 10500));

@@ -70,7 +70,7 @@ void main() {
       await tester.pumpAndSettle();
       await toScroll(tester);
 
-      expect(find.byTooltip('Listen'), findsNothing);
+      expect(find.byTooltip('Listen from here'), findsNothing);
       expect(find.byTooltip('Read aloud'), findsWidgets,
           reason: 'without a player, Page’s Play reads the text aloud');
     });
@@ -91,7 +91,7 @@ void main() {
       await tester.pumpAndSettle();
       await toScroll(tester);
 
-      expect(find.byTooltip('Listen'), findsNothing);
+      expect(find.byTooltip('Listen from here'), findsNothing);
     });
 
     testWidgets('Listen is on the screen, not in the menu', (tester) async {
@@ -123,19 +123,19 @@ void main() {
       await tester.tap(find.text('Second'));
       await tester.pump();
 
-      await tester.tap(find.byTooltip('Listen'));
+      await tester.tap(find.byTooltip('Listen from here'));
       await tester.pumpAndSettle();
 
       expect(fakePlayer.loadedUrl, 'https://cast.test/1.mp3');
       expect(fakePlayer.log.last, 'seek:10000',
           reason: 'segment 1 (where the cursor landed) starts at 10000ms');
       expect(controller.playing, isTrue);
-      expect(find.byTooltip('Listen'), findsNothing);
+      expect(find.byTooltip('Listen from here'), findsNothing);
 
       await tester.tap(find.byTooltip('Pause'));
       await tester.pumpAndSettle();
       expect(controller.playing, isFalse);
-      expect(find.byTooltip('Listen'), findsOneWidget);
+      expect(find.byTooltip('Listen from here'), findsOneWidget);
     });
   });
 

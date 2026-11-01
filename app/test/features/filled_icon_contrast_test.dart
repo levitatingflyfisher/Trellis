@@ -20,9 +20,10 @@ import '../support/fake_tts.dart';
 /// in the exact color of the circle behind it. Not a missing icon; an
 /// invisible one.
 ///
-/// The app's two play/pause toggles (mini_player_bar.dart's transport
-/// toggle and reader_screen.dart's RSVP toggle) have since migrated onto
-/// `OhIconButton.filled` from `openhearth_design`, which pins the
+/// The app's play/pause toggles (mini_player_bar.dart's transport toggle,
+/// and once reader_screen.dart's RSVP toggle, now an outlined "Start"
+/// with no fill to collide with: 1.5.9, one filled Play per screen) moved
+/// onto `OhIconButton.filled` from `openhearth_design`, which pins the
 /// high-contrast foreground itself; the fleet's C8 conformance check now
 /// forbids a bare `IconButton.filled`/`IconButton.filledTonal` in `lib/`
 /// so the collision can't reopen unnoticed.
@@ -130,7 +131,7 @@ void main() {
       (name: 'hearthDark', data: OhTheme.hearthDark()),
     ]) {
       testWidgets(
-          "the RSVP play/pause glyph is visible under OhTheme.${theme.name}()",
+          "the RSVP pacer's glyph is visible under OhTheme.${theme.name}()",
           (tester) async {
         final work = (await db.spineDao.worksOf(profileId)).single;
         await tester.pumpWidget(MaterialApp(
@@ -143,16 +144,13 @@ void main() {
         ));
         await tester.pumpAndSettle();
 
-        final onPrimary = theme.data.colorScheme.onPrimary;
-        final primary = theme.data.colorScheme.primary;
+        // Outlined since 1.5.9: no fill of its own, so the glyph sits on
+        // the page and must not take the page's colour.
         final resolved = effectiveIconColor(tester, const Key('play-toggle'));
-
-        expect(resolved, isNot(primary),
-            reason: 'the glyph must not render in the same color as the '
-                "button's own fill — that is the blank-circle bug");
-        expect(resolved, onPrimary,
-            reason: 'OhIconButton.filled should paint its glyph with the '
-                'high-contrast onPrimary token');
+        expect(resolved, isNotNull);
+        expect(resolved, isNot(theme.data.colorScheme.surface),
+            reason: 'a glyph the colour of what is behind it is blank');
+        expect(resolved!.a, greaterThan(0.5));
       });
     }
   });

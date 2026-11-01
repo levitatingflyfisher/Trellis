@@ -98,7 +98,7 @@ void main() {
         primaryAction: find.text('Paste a course'));
   });
 
-  testWidgets('ReaderScreen: Play', (tester) async {
+  testWidgets('ReaderScreen: Start', (tester) async {
     await seedReader(withWork: true);
     await runPrimaryActionSweep(tester, pumpScreen: () async {
       await app(tester, tab: 'Library');

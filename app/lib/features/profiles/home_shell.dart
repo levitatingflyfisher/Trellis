@@ -431,7 +431,9 @@ class _HomeShellState extends State<HomeShell> {
       // the player, and a tap does what it showed.
       case WidgetActionKind.play:
         // The bar closed since: bring the last-played work back first.
-        if (_player.current == null) await _player.rehydrateLastPlayed();
+        if (_player.current == null) {
+          await _player.rehydrateLastPlayed(evenIfClosed: true);
+        }
         if (!_player.playing) await _player.toggle();
       case WidgetActionKind.pause:
         if (_player.playing) await _player.toggle();
@@ -574,12 +576,28 @@ class _HomeShellState extends State<HomeShell> {
   /// host over any pushed page.
   Widget _miniPlayerBar() => MiniPlayerBar(
         controller: _player,
+        onOpenWork: _openPlayingWork,
+        onOpenShow: _openPlayingShow,
         onOpenSyncedText: _openSyncedText,
         onCapture: _capture,
         onOpenCaptures: _openCaptures,
         onOpenQueue: _openQueue,
         onOpenChapters: _openChapters,
       );
+
+  /// The bar's title and art: the playing episode's page, inside the tab
+  /// in view, so the bottom bar stays (1.5.9, user: tapping the bar
+  /// should open the episode).
+  Future<void> _openPlayingWork() async {
+    final work = _player.current;
+    if (work != null) await _openWork(work.id);
+  }
+
+  /// The bar's "Go to show", opened where [_openPlayingWork] opens.
+  Future<void> _openPlayingShow() async {
+    final feed = _player.currentFeed;
+    if (feed != null) await _openShow(_pageContext, feed);
+  }
 
   void _openModels() {
     // The web tier gets the honest explanation, never a manager whose

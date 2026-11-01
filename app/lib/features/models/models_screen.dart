@@ -11,7 +11,8 @@
 /// file — with real byte counts and per-cache clear buttons. Clearing a
 /// cache never reaches the spine: works, segments and positions live in the
 /// database, which has no delete button here by design (data stays, cache
-/// goes).
+/// goes). Deleted transcripts and translations wait under Recently deleted
+/// (1.5.9), each with a Restore.
 library;
 
 import 'dart:async';
@@ -31,6 +32,7 @@ import 'consent.dart';
 import 'format.dart';
 import 'model_store.dart';
 import '../shared/capped_body.dart';
+import '../storage/recently_deleted.dart';
 import '../storage/storage_by_item_screen.dart';
 
 /// Human names for the registry ids; unknown ids fall back to the id.
@@ -38,7 +40,6 @@ const Map<String, String> kModelLabels = {
   'whisper-tiny-ggml': 'Whisper Tiny: speech to text, multilingual',
   'whisper-base-ggml': 'Whisper Base: speech to text, multilingual',
   'silero-vad': 'Silence filter: voice activity detection',
-  'qwen2.5-0.5b-instruct-litert': 'Qwen 2.5 0.5B: small local assistant',
   'supertonic-en-m1': 'Supertonic voice (English): read aloud, offline',
   'wiktionary-en-en-stardict': 'Wiktionary dictionary (English): word lookups, offline',
 };
@@ -146,6 +147,16 @@ class WebTierModelsNotice extends StatelessWidget {
 class _RowState {
   bool downloaded = false;
   int partialBytes = 0;
+  int missingBytes = 0;
+
+  /// Some of the model is installed, nothing is mid-download, and the
+  /// rest is missing: a file was re-pinned (1.5.9's smaller translation
+  /// decoders), so the model is an update away, not a first download.
+  bool updateOf(ModelSpec spec) =>
+      !downloaded &&
+      partialBytes == 0 &&
+      missingBytes > 0 &&
+      missingBytes < spec.sizeBytes;
   ModelDownload? active;
   StreamSubscription<ModelDownloadProgress>? sub;
   ModelDownloadProgress? progress;
@@ -156,6 +167,16 @@ class _ModelsScreenState extends State<ModelsScreen> {
   int _audioBytes = 0;
   int _pcmBytes = 0;
   int? _dbBytes;
+  List<DeletedSnapshot> _deleted = const [];
+
+  /// Snapshots being restored: their buttons wait, so a second tap can't
+  /// run a second restore that reports the first as "a newer transcript".
+  final Set<String> _restoring = {};
+
+  /// Recently deleted needs the library to restore into; without it (or
+  /// on the web, which keeps no copies) the section is absent.
+  RecentlyDeleted? get _bin =>
+      widget.db == null ? null : widget.services?.recentlyDeleted;
 
   /// Cache roots, derived through the services' own path functions so the
   /// panel can never drift from where the caches actually live.
@@ -183,6 +204,7 @@ class _ModelsScreenState extends State<ModelsScreen> {
       final row = _rows.putIfAbsent(spec.id, _RowState.new);
       row.downloaded = await widget.store.isDownloaded(spec);
       row.partialBytes = await widget.store.partialBytes(spec);
+      row.missingBytes = await widget.store.missingBytes(spec);
     }
     if (widget.services != null) {
       _audioBytes = _dirBytes(_audioDir);
@@ -197,6 +219,7 @@ class _ModelsScreenState extends State<ModelsScreen> {
                 File('${dbFile.path}$suffix').lengthSync(),
           ].fold<int>(0, (a, b) => a + b)
         : null;
+    _deleted = await _bin?.list() ?? const [];
     if (mounted) setState(() {});
   }
 
@@ -215,14 +238,22 @@ class _ModelsScreenState extends State<ModelsScreen> {
   int _modelDiskBytes(ModelSpec spec) {
     final row = _rows[spec.id];
     if (row == null) return 0;
-    return (row.downloaded ? spec.sizeBytes : 0) + row.partialBytes;
+    if (row.downloaded) return spec.sizeBytes + row.partialBytes;
+    // Whole files already installed count too: a pair waiting on an
+    // update still holds its encoder and tokenizer.
+    return spec.sizeBytes - row.missingBytes;
   }
 
   Future<void> _download(ModelSpec spec) async {
+    final row0 = _rows[spec.id];
+    final update = row0 != null && row0.updateOf(spec);
     final ok = await confirmDownload(
       context,
       items: [
-        DownloadItem('${modelLabel(spec.id)} (${formatBytes(spec.sizeBytes)})'),
+        DownloadItem(update
+            ? '${modelLabel(spec.id)} update '
+                '(${formatBytes(row0.missingBytes)})'
+            : '${modelLabel(spec.id)} (${formatBytes(spec.sizeBytes)})'),
       ],
     );
     if (!ok || !mounted) return;
@@ -262,7 +293,7 @@ class _ModelsScreenState extends State<ModelsScreen> {
       context,
       title: 'Remove this model?',
       message: '${modelLabel(spec.id)} frees '
-          '${formatBytes(spec.sizeBytes)}. You can download it again '
+          '${formatBytes(_modelDiskBytes(spec))}. You can download it again '
           'anytime.',
       confirmLabel: 'Remove model',
       cancelLabel: 'Keep',
@@ -365,6 +396,9 @@ class _ModelsScreenState extends State<ModelsScreen> {
             },
           ),
         ),
+      if ((widget.db, _bin) case (final db?, final bin?)
+          when _deleted.isNotEmpty)
+        ..._recentlyDeleted(db, bin),
       for (final spec in onDisk)
         ListTile(
           key: Key('storage-model-${spec.id}'),
@@ -433,6 +467,120 @@ class _ModelsScreenState extends State<ModelsScreen> {
     ];
   }
 
+  /// One card per deleted transcript or translation, newest first: what it
+  /// was, whose, and when, with Restore beside it. Delete now is the rare
+  /// act, so it sits in the ⋮ and asks, since nothing brings it back.
+  List<Widget> _recentlyDeleted(AppDatabase db, RecentlyDeleted bin) {
+    final theme = Theme.of(context);
+    return [
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+        child: Text('Recently deleted',
+            key: const Key('recently-deleted'),
+            style: theme.textTheme.titleSmall),
+      ),
+      Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+        child: Text(
+          'Transcripts and translations you delete wait here for 30 days, '
+          'then go for good.',
+          style: theme.textTheme.bodySmall,
+        ),
+      ),
+      for (final s in _deleted)
+        Card(
+          key: Key('deleted-${s.id}'),
+          margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 12, 4, 4),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  s.workTitle,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.titleSmall,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '${s.label} · '
+                  '${formatDay(s.deletedAt.millisecondsSinceEpoch)} · '
+                  'about ${formatBytes(s.bytes)}',
+                  style: theme.textTheme.bodySmall,
+                ),
+                Align(
+                  alignment: Alignment.centerRight,
+                  child: Wrap(
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      TextButton(
+                        key: Key('deleted-restore-${s.id}'),
+                        onPressed: _restoring.contains(s.id)
+                            ? null
+                            : () => _restore(db, bin, s),
+                        child: const Text('Restore'),
+                      ),
+                      PopupMenuButton<String>(
+                        key: Key('deleted-menu-${s.id}'),
+                        tooltip: 'More',
+                        enabled: !_restoring.contains(s.id),
+                        onSelected: (_) => _deleteNow(bin, s),
+                        itemBuilder: (_) => [
+                          PopupMenuItem(
+                            value: 'delete-now',
+                            key: Key('deleted-delete-${s.id}'),
+                            child: const Text('Delete now'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+    ];
+  }
+
+  Future<void> _restore(
+      AppDatabase db, RecentlyDeleted bin, DeletedSnapshot s) async {
+    // A tap already on its way before the button redrew is let go here.
+    if (!_restoring.add(s.id)) return;
+    setState(() {});
+    String message;
+    try {
+      message = await restoreDeleted(db, bin, s);
+    } catch (e) {
+      // restoreDeleted words its own failures; this is the last net, so
+      // a tap never ends in silence.
+      debugPrint('Recently deleted: restore of ${s.id} failed: $e');
+      message = 'Couldn’t restore it: something went wrong, so nothing '
+          'changed. The copy is kept.';
+    } finally {
+      _restoring.remove(s.id);
+    }
+    await _refresh();
+    _tell(message);
+  }
+
+  Future<void> _deleteNow(RecentlyDeleted bin, DeletedSnapshot s) async {
+    if (_restoring.contains(s.id)) return;
+    final ok = await showOhConfirm(
+      context,
+      title: 'Delete for good?',
+      message: '“${s.workTitle}”: ${s.label}. It can’t be restored after '
+          'this.',
+      confirmLabel: 'Delete now',
+      cancelLabel: 'Keep',
+      destructive: true,
+    );
+    if (!ok) return;
+    await bin.discard(s.id);
+    await _refresh();
+  }
+
   /// Same card shape as the model tiles, so the storage rows survive large
   /// text scales the same way (button below the text, never crammed into a
   /// ListTile trailing).
@@ -480,13 +628,16 @@ class _ModelsScreenState extends State<ModelsScreen> {
   Widget _translationSection() {
     final specs = _translationSpecs;
     final downloaded = specs.where((s) => _rows[s.id]?.downloaded ?? false);
+    final updates =
+        specs.where((s) => _rows[s.id]?.updateOf(s) ?? false).length;
     final theme = Theme.of(context);
     return ExpansionTile(
       key: const Key('models-translation'),
       title: const Text('Translation languages'),
       subtitle: Text(
-          '${downloaded.length} of ${specs.length} downloaded. Translate in '
-          'the reader downloads what it needs.'),
+          '${downloaded.length} of ${specs.length} downloaded'
+          '${updates == 0 ? '' : ', $updates update${updates == 1 ? '' : 's'} available'}'
+          '. Translate in the reader downloads what it needs.'),
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
@@ -504,6 +655,7 @@ class _ModelsScreenState extends State<ModelsScreen> {
     final theme = Theme.of(context);
     final row = _rows[spec.id] ?? _RowState();
     final downloading = row.active != null;
+    final update = !downloading && row.updateOf(spec);
 
     final Widget stateLine;
     if (downloading) {
@@ -527,6 +679,14 @@ class _ModelsScreenState extends State<ModelsScreen> {
     } else if (row.downloaded) {
       stateLine = Text(
         'On this device',
+        key: Key('model-state-${spec.id}'),
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: theme.colorScheme.primary,
+        ),
+      );
+    } else if (update) {
+      stateLine = Text(
+        'Update available: ${formatBytes(row.missingBytes)}',
         key: Key('model-state-${spec.id}'),
         style: theme.textTheme.bodySmall?.copyWith(
           color: theme.colorScheme.primary,
@@ -578,7 +738,18 @@ class _ModelsScreenState extends State<ModelsScreen> {
                       onPressed: () => _delete(spec),
                       child: const Text('Remove'),
                     )
-                  else
+                  else if (update) ...[
+                    TextButton(
+                      key: Key('model-delete-${spec.id}'),
+                      onPressed: () => _delete(spec),
+                      child: const Text('Remove'),
+                    ),
+                    TextButton(
+                      key: Key('model-download-${spec.id}'),
+                      onPressed: () => _download(spec),
+                      child: const Text('Update'),
+                    ),
+                  ] else
                     TextButton(
                       key: Key('model-download-${spec.id}'),
                       onPressed: () => _download(spec),

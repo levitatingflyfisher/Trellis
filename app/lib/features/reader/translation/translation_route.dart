@@ -40,7 +40,11 @@ String? resolveSourceLanguage({
 class TranslationLeg {
   final ModelSpec spec;
   final int missingBytes;
-  const TranslationLeg(this.spec, this.missingBytes);
+
+  /// The pair is already here except a re-pinned file (1.5.9's smaller
+  /// decoders): what is missing is an update, not a first download.
+  final bool update;
+  const TranslationLeg(this.spec, this.missingBytes, {this.update = false});
 
   bool get installed => missingBytes == 0;
   String get source => spec.sourceLang!;
@@ -62,6 +66,9 @@ class TranslationRoute {
       [for (final l in legs) if (!l.installed) l];
   int get missingBytes => missing.fold(0, (sum, l) => sum + l.missingBytes);
   bool get ready => missing.isEmpty;
+
+  /// Every missing leg is an update to a pair already downloaded.
+  bool get update => !ready && missing.every((l) => l.update);
 }
 
 /// The route from [source] to [target], or null when there is none: the
@@ -73,6 +80,7 @@ TranslationRoute? planRoute(
   required String source,
   required String target,
   required int Function(ModelSpec spec) missingBytesOf,
+  bool Function(ModelSpec spec)? isUpdate,
 }) {
   final from = baseLanguage(source);
   final to = baseLanguage(target);
@@ -80,7 +88,10 @@ TranslationRoute? planRoute(
   TranslationLeg? leg(String s, String t) {
     final spec =
         registry.pickTranslationPair(tier, sourceLang: s, targetLang: t);
-    return spec == null ? null : TranslationLeg(spec, missingBytesOf(spec));
+    return spec == null
+        ? null
+        : TranslationLeg(spec, missingBytesOf(spec),
+            update: isUpdate?.call(spec) ?? false);
   }
 
   final direct = leg(from, to);
@@ -101,6 +112,7 @@ List<TranslationRoute> routesFrom(
   DeviceTier tier, {
   required String source,
   required int Function(ModelSpec spec) missingBytesOf,
+  bool Function(ModelSpec spec)? isUpdate,
 }) {
   final targets = <String>{
     for (final s in registry.translationPairsAt(tier)) ...?s.langs,
@@ -109,6 +121,9 @@ List<TranslationRoute> routesFrom(
   return [
     for (final t in targets)
       ?planRoute(registry, tier,
-          source: source, target: t, missingBytesOf: missingBytesOf),
+          source: source,
+          target: t,
+          missingBytesOf: missingBytesOf,
+          isUpdate: isUpdate),
   ];
 }

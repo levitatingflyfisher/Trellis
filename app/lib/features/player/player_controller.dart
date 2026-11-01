@@ -78,6 +78,86 @@ class PlayerController extends ChangeNotifier {
   EpisodePlayer? _player;
   final List<StreamSubscription<Object?>> _subs = [];
 
+  /// Bumped by [stop] and by every new load: a load begun before sees the
+  /// change when its awaits return and gives up, rather than start the
+  /// sound under a closed bar or seek the next episode to its own place.
+  int _loadGen = 0;
+
+  /// Whether the player stands at the listener's place. False from the
+  /// start of a load until the resume seek lands: the engine sits at zero
+  /// meanwhile, and saving then wrote zero over the saved place (1.5.9,
+  /// X while buffering).
+  bool _placeKnown = false;
+
+  /// How often the place is written while playing (1.5.9, user: "I'll
+  /// listen for 30 minutes, leave, come back, and I've lost my place").
+  /// Only the app's own Pause used to write it; a pause from the lock
+  /// screen, the notification, a headset or the widget reached the engine
+  /// alone, and a process the system later killed took the session with it.
+  static const saveEvery = Duration(seconds: 10);
+
+  /// When the place was last written, on [_now]'s clock; null until this
+  /// load's first write.
+  int? _lastSavedAtMs;
+
+  /// The place as last heard from the engine while it played, as last set
+  /// by this app's own seek, or as an outside scrub left it while paused.
+  /// See [_placeMs] for why the engine's word alone is not enough.
+  int? _heardMs;
+
+  /// The audiobook file [_heardMs] is in: the engine moves on to the next
+  /// file on its own, and an offset into one file is no place in another.
+  int? _heardFileIdx;
+
+  /// Whether the engine played when last looked at, so the moment it
+  /// stops is seen once, whichever of its streams says so first.
+  bool _enginePlaying = false;
+
+  /// What the engine reported as it stopped: just_audio's stale snap-back
+  /// (see [_placeMs]). Any other position it reports while stopped is the
+  /// engine speaking: ExoPlayer's own word on where it paused, or a scrub
+  /// on the lock screen or the notification.
+  int? _snapMs;
+
+  void _hear(int ms) {
+    _heardMs = ms;
+    _heardFileIdx = _currentFileIdx;
+  }
+
+  /// Notes the engine starting or stopping, whoever did it. A stop sets
+  /// the smart-resume clock: an outside pause earns the same rewind as
+  /// the app's own.
+  void _notePlaying(EpisodePlayer p) {
+    final now = p.playing;
+    if (now == _enginePlaying) return;
+    _enginePlaying = now;
+    if (now) {
+      _snapMs = null;
+    } else {
+      _snapMs = p.position.inMilliseconds;
+      if (_placeKnown) _pausedAtMs = _nowMs;
+    }
+  }
+
+  /// Where the listener is. The engine's own position, except once
+  /// something outside the app (the lock screen, the notification) has
+  /// stopped it: just_audio then drops back to its last event, often where
+  /// this stretch of playing began, until the engine reports again, and
+  /// after the notification's Stop it never does (seen on the emulator,
+  /// 1.5.9). The place heard while playing is the truth then.
+  int _placeMs(EpisodePlayer p) {
+    final engine = p.position.inMilliseconds;
+    final heard = _heardMs;
+    if (p.playing || heard == null) return engine;
+    if (isAudiobook && _heardFileIdx != _currentFileIdx) return engine;
+    return engine < heard - 1000 ? heard : engine;
+  }
+
+  /// The release [stop] began, while the old player is still letting go.
+  /// Background audio allows one player per process, so a load waits for
+  /// it before making the next.
+  Future<void>? _releasing;
+
   Work? _current;
   List<core.Alignment> _alignments = const [];
   double _speed = 1.0;
@@ -274,6 +354,28 @@ class PlayerController extends ChangeNotifier {
   }
 
   Work? get current => _current;
+
+  /// The current episode's show, for the bar's "Go to show"; null for a
+  /// work with no feed (an audiobook, a read-aloud text).
+  Feed? get currentFeed => _currentFeed;
+
+  /// The current show's artwork on disk, or null (none downloaded, no
+  /// feed, or the web tier, where no artwork source is wired). Looked up
+  /// once per show per load, not on every rebuild of the bar.
+  File? get currentArtwork {
+    final feed = _currentFeed;
+    if (feed == null) return null;
+    if (_artworkFeedId != feed.id) {
+      _artworkFeedId = feed.id;
+      final file = _artworkFileFor?.call(feed.id);
+      _artwork = file != null && file.existsSync() ? file : null;
+    }
+    return _artwork;
+  }
+
+  int? _artworkFeedId;
+  File? _artwork;
+
   bool get playing => _player?.playing ?? false;
   Duration get position => _player?.position ?? Duration.zero;
   Duration? get duration => _player?.duration;
@@ -312,15 +414,39 @@ class PlayerController extends ChangeNotifier {
     // (Campaign 9 Phase 2) has served its purpose.
     _rehydratedPositionMs = null;
     _rehydratedDurationMs = null;
+    _enginePlaying = p.playing;
     _subs.add(
-      p.positionStream.listen((_) {
+      p.positionStream.listen((at) {
+        _notePlaying(p);
+        final ms = at.inMilliseconds;
+        var movedWhilePaused = false;
+        if (_placeKnown) {
+          if (p.playing) {
+            _hear(ms);
+          } else if (ms != _snapMs && !p.idle) {
+            // Stopped, the engine reports only when something moved it
+            // (or to correct its snap-back): that is the place now, and
+            // a process killed while paused must not lose it.
+            _hear(ms);
+            movedWhilePaused = true;
+          }
+        }
         unawaited(_tickSleepTimer());
         unawaited(_tickOutroCutoff());
         unawaited(_tickPlayed());
+        unawaited(_tickSave());
+        if (movedWhilePaused) _saveSoon();
         notifyListeners();
       }),
     );
-    _subs.add(p.playingStream.listen((_) => notifyListeners()));
+    // Whoever stopped the sound (this app, the lock screen, the
+    // notification's Stop, a headset, another app taking the audio), the
+    // place is written then: the app may never run again to do it later.
+    _subs.add(p.playingStream.listen((playing) {
+      _notePlaying(p);
+      if (!playing) _saveSoon();
+      notifyListeners();
+    }));
     _subs.add(p.durationStream.listen(_onDuration));
     _subs.add(p.completedStream.listen((_) => _finish()));
     // Campaign 7 (ADR-0013): the ONLY way `_currentFileIdx` changes once
@@ -345,10 +471,30 @@ class PlayerController extends ChangeNotifier {
     if (p.position >= cutoff) await _finish();
   }
 
+  /// The periodic write while playing; see [saveEvery]. The gap is taken
+  /// either way round: a clock set back mid-session must not stall it.
+  Future<void> _tickSave() async {
+    if (!playing || !_placeKnown) return;
+    final last = _lastSavedAtMs;
+    if (last != null && (_nowMs - last).abs() < saveEvery.inMilliseconds) {
+      return;
+    }
+    await _saveLogged();
+  }
+
+  /// A save nobody waits for (a stream listener's): a failure is logged,
+  /// not left to the zone as an unhandled error.
+  void _saveSoon() => unawaited(_saveLogged());
+
+  Future<void> _saveLogged() => saveProgress().catchError((Object e) {
+        debugPrint('Player: saving the listening place failed: $e');
+      });
+
   /// Marks the episode played once it is within [playedWithin] of the
   /// end, without stopping it: the listener still hears the tail.
   Future<void> _tickPlayed() async {
-    if (_playedStamped || isAudiobook) return;
+    // Mid-switch the engine still reports the last episode's place.
+    if (_playedStamped || isAudiobook || !_placeKnown) return;
     final p = _player;
     final dur = p?.duration;
     final work = _current;
@@ -375,15 +521,19 @@ class PlayerController extends ChangeNotifier {
   ///
   /// A no-op if something is already current (a normal play already
   /// happened this session; there is nothing stale to rehydrate over).
-  Future<void> rehydrateLastPlayed() async {
+  ///
+  /// A bar closed with X stays closed at launch; [evenIfClosed] is for an
+  /// explicit Play elsewhere (the home-screen widget) that names it again.
+  Future<void> rehydrateLastPlayed({bool evenIfClosed = false}) async {
     if (_current != null) return;
     final prefs = await db.profilesDao.readerPrefs(profileId);
     final workId = prefs.lastPlayedWorkId;
     if (workId == null) return;
+    if (prefs.playerClosed && !evenIfClosed) return;
     final work = await db.spineDao.workById(workId);
     if (work == null) {
-      await db.profilesDao.setReaderPrefs(
-          profileId, prefs.copyWith(clearLastPlayedWorkId: true));
+      await db.profilesDao.updateReaderPrefs(
+          profileId, (p) => p.copyWith(clearLastPlayedWorkId: true));
       return;
     }
     _current = work;
@@ -428,11 +578,21 @@ class PlayerController extends ChangeNotifier {
     final url = work.sourceUrl;
     if (url == null || url.isEmpty) return;
 
+    final gen = ++_loadGen;
     if (_current != null) await saveProgress();
+    await _awaitRelease();
+    if (gen != _loadGen) return;
     final p = _ensurePlayer();
+    _placeKnown = false;
+    _lastSavedAtMs = null;
+    _heardMs = null;
+    _heardFileIdx = null;
+    _snapMs = null;
+    _artworkFeedId = null;
     _current = work;
     _pausedAtMs = null;
     await db.profilesDao.recordLastPlayed(profileId, work.id);
+    if (gen != _loadGen) return;
     _finishHandled = false;
     _playedStamped = false;
     // Campaign 7 (ADR-0013): a previous audiobook load's state must never
@@ -442,7 +602,7 @@ class PlayerController extends ChangeNotifier {
     _currentAudiobookSettings = null;
     _currentFileIdx = null;
     await p.setVolume(1.0); // a prior sleep-timer fade never leaks in
-    _alignments = [
+    final alignments = [
       for (final a in await db.spineDao.alignmentsOf(work.id))
         core.Alignment(
           segmentIdx: a.segmentIdx,
@@ -451,9 +611,13 @@ class PlayerController extends ChangeNotifier {
         ),
     ];
     final episode = await db.feedsDao.episodeOf(work.id);
-    _currentFeed = episode == null
+    final feed = episode == null
         ? null
         : await db.feedsDao.feedById(episode.feedId);
+    // Cancelled meanwhile: what stop cleared stays cleared.
+    if (gen != _loadGen) return;
+    _alignments = alignments;
+    _currentFeed = feed;
     // Campaign 9 Phase 2e (ADR-0015 Decision 3): the lock-screen/tray tag
     // for whichever loader runs below — built once, from the SAME feed
     // row just resolved, so the album name and the per-podcast settings
@@ -468,12 +632,20 @@ class PlayerController extends ChangeNotifier {
     // same law `dismiss`'s sync delete already follows in the transcribe
     // coordinator).
     final local = _localAudioFileFor?.call(work.id, url);
-    if (local != null && local.existsSync()) {
-      await p.setFilePath(local.path, mediaItem: trackInfo);
-    } else {
-      await p.setUrl(url, mediaItem: trackInfo);
+    try {
+      if (local != null && local.existsSync()) {
+        await p.setFilePath(local.path, mediaItem: trackInfo);
+      } else {
+        await p.setUrl(url, mediaItem: trackInfo);
+      }
+    } catch (_) {
+      // X during the load releases the player, which interrupts it.
+      if (gen != _loadGen) return;
+      rethrow;
     }
+    if (gen != _loadGen) return;
     final resumeMs = await _resumeMs(work.id);
+    if (gen != _loadGen) return;
     final introSeconds = _currentFeed?.skipIntroSeconds;
     if (startAt != null) {
       await p.seek(startAt);
@@ -484,8 +656,11 @@ class PlayerController extends ChangeNotifier {
       // partway through the intro and coming back doesn't re-skip it.
       await p.seek(Duration(seconds: introSeconds));
     }
+    if (gen != _loadGen) return;
+    _placeKnown = true;
     await p.setSpeed(_currentFeed?.speedOverride ?? _speed);
     await db.feedsDao.markRead(work.id, _nowMs);
+    if (gen != _loadGen) return;
     await p.play();
     notifyListeners();
   }
@@ -499,14 +674,16 @@ class PlayerController extends ChangeNotifier {
   /// position, or file 0 offset 0 for a book never opened before.
   Future<void> playAudiobook(Work work) async {
     if (_current?.id == work.id && _player != null) return toggle();
+    final gen = ++_loadGen;
     final files = await db.audiobooksDao.filesOf(work.id);
-    if (files.isEmpty) return;
+    if (files.isEmpty || gen != _loadGen) return;
     if (_current != null) await saveProgress();
     final resume = await db.feedsDao.playerPosition(
       profileId: profileId,
       workId: work.id,
     );
     await _loadAudiobook(
+      gen,
       work,
       files,
       startFileIdx: resume?.fileIdx ?? 0,
@@ -528,10 +705,12 @@ class PlayerController extends ChangeNotifier {
     required int fileIdx,
     required int positionMs,
   }) async {
+    final gen = ++_loadGen;
     final files = await db.audiobooksDao.filesOf(work.id);
-    if (files.isEmpty) return;
+    if (files.isEmpty || gen != _loadGen) return;
     if (_current != null && _current!.id != work.id) await saveProgress();
     await _loadAudiobook(
+      gen,
       work,
       files,
       startFileIdx: fileIdx,
@@ -540,12 +719,20 @@ class PlayerController extends ChangeNotifier {
   }
 
   Future<void> _loadAudiobook(
+    int gen,
     Work work,
     List<AudiobookFileRow> files, {
     required int startFileIdx,
     required int startMs,
   }) async {
+    await _awaitRelease();
+    if (gen != _loadGen) return;
     final p = _ensurePlayer();
+    _placeKnown = false;
+    _lastSavedAtMs = null;
+    _heardMs = null;
+    _heardFileIdx = null;
+    _snapMs = null;
     _current = work;
     _currentAudiobookFiles = files;
     _currentFeed = null;
@@ -553,12 +740,15 @@ class PlayerController extends ChangeNotifier {
     _finishHandled = false;
     _playedStamped = false;
     await db.profilesDao.recordLastPlayed(profileId, work.id);
+    if (gen != _loadGen) return;
     await p.setVolume(1.0); // a prior sleep-timer fade never leaks in
     // Phase 3 (ADR-0013) note: a transcribed audiobook's alignments would
     // need a cross-file axis the reader's single-file cursor law doesn't
     // have yet — left empty here on purpose, not wired.
     _alignments = const [];
-    _currentAudiobookSettings = await db.audiobooksDao.audiobookOf(work.id);
+    final settings = await db.audiobooksDao.audiobookOf(work.id);
+    if (gen != _loadGen) return;
+    _currentAudiobookSettings = settings;
     final clampedIdx = startFileIdx.clamp(0, files.length - 1);
     // Campaign 9 Phase 2e (ADR-0015 Decision 3): no album — an audiobook
     // has no feed to name one from — and no artwork source this pass
@@ -567,19 +757,36 @@ class PlayerController extends ChangeNotifier {
     // player's own generic "no title" fallback the lock screen would
     // otherwise show.
     final trackInfo = lockScreenTagFor(work);
-    await p.setFilePaths(
-      [for (final f in files) f.path],
-      initialIndex: clampedIdx,
-      initialPosition: Duration(milliseconds: startMs),
-      mediaItem: trackInfo,
-    );
+    try {
+      await p.setFilePaths(
+        [for (final f in files) f.path],
+        initialIndex: clampedIdx,
+        initialPosition: Duration(milliseconds: startMs),
+        mediaItem: trackInfo,
+      );
+    } catch (_) {
+      if (gen != _loadGen) return;
+      rethrow;
+    }
+    if (gen != _loadGen) return;
     // Set synchronously too — the engine's own currentIndexStream tick
     // may not have fired yet by the time a caller reads currentFileIdx
     // right after this returns.
     _currentFileIdx = clampedIdx;
+    // The playlist opened at the saved place itself; no seek to wait for.
+    _placeKnown = true;
     await p.setSpeed(_currentAudiobookSettings?.speedOverride ?? _speed);
+    if (gen != _loadGen) return;
     await p.play();
     notifyListeners();
+  }
+
+  /// Waits out a release [stop] began, so the next player is made only once
+  /// the old one is gone. The caller checks its generation after: a newer
+  /// load or another X meanwhile means this load gives up.
+  Future<void> _awaitRelease() async {
+    final releasing = _releasing;
+    if (releasing != null) await releasing;
   }
 
   /// Where to pick the work up: the reader's Position row projected through
@@ -623,7 +830,8 @@ class PlayerController extends ChangeNotifier {
       return playWork(work, startAt: at);
     }
     _pausedAtMs = null;
-    await p.seek(_clamp(at));
+    await _seek(p, _clamp(at));
+    await saveProgress();
     if (!p.playing) await p.play();
     notifyListeners();
   }
@@ -669,13 +877,18 @@ class PlayerController extends ChangeNotifier {
       await saveProgress();
       _pausedAtMs = _nowMs;
     } else {
+      final place = Duration(milliseconds: _placeMs(p));
       final pausedAt = _pausedAtMs;
       if (pausedAt != null) {
         final rewind = smartResumeRewind(
           Duration(milliseconds: _nowMs - pausedAt),
         );
-        await p.seek(_clamp(p.position - rewind));
+        await _seek(p, _clamp(place - rewind));
         _pausedAtMs = null;
+      } else if (place != p.position) {
+        // Stopped from outside: the engine would start again from where
+        // the last stretch began.
+        await _seek(p, place);
       }
       await p.play();
     }
@@ -685,15 +898,23 @@ class PlayerController extends ChangeNotifier {
   Future<void> seekTo(Duration position) async {
     final p = _player;
     if (p == null) return;
-    await p.seek(_clamp(position));
+    await _seek(p, _clamp(position));
+    await saveProgress();
     notifyListeners();
   }
 
   Future<void> seekBy(Duration delta) async {
     final p = _player;
     if (p == null) return;
-    await p.seek(_clamp(p.position + delta));
+    await _seek(p, _clamp(Duration(milliseconds: _placeMs(p)) + delta));
+    await saveProgress();
     notifyListeners();
+  }
+
+  /// This app's own seek: the place is where it was sent.
+  Future<void> _seek(EpisodePlayer p, Duration to) async {
+    await p.seek(to);
+    if (identical(p, _player)) _hear(to.inMilliseconds);
   }
 
   Duration _clamp(Duration d) {
@@ -737,48 +958,137 @@ class PlayerController extends ChangeNotifier {
 
   /// The cursor-law write: projection when alignments exist, raw tMs
   /// (Campaign 7: file-index-tagged for an audiobook) when they don't.
+  /// A no-op while a load hasn't reached the saved place yet: the player's
+  /// zero then is not where the listener is. The one writer of the
+  /// listening place: every save, timed or not, comes through here.
   Future<void> saveProgress() async {
     final work = _current;
     final p = _player;
-    if (work == null || p == null) return;
-    final tMs = p.position.inMilliseconds;
-    if (isAudiobook) {
+    if (work == null || p == null || !_placeKnown) return;
+    _lastSavedAtMs = _nowMs;
+    await _writeProgress(work, _placeMs(p),
+        fileIdx: isAudiobook ? (_currentFileIdx ?? 0) : null,
+        alignments: _alignments);
+  }
+
+  /// [fileIdx] is non-null exactly for an audiobook. [readAtMs] (wall
+  /// clock, the database's own stamp) marks a place read before an await:
+  /// written only if nothing newer reached the row meanwhile.
+  Future<void> _writeProgress(Work work, int tMs,
+      {int? fileIdx,
+      required List<core.Alignment> alignments,
+      int? readAtMs}) async {
+    if (fileIdx != null) {
       await db.feedsDao.savePlayerPosition(
         profileId: profileId,
         workId: work.id,
         tMs: tMs,
-        fileIdx: _currentFileIdx ?? 0,
+        fileIdx: fileIdx,
+        readAtMs: readAtMs,
       );
-    } else if (_alignments.isNotEmpty) {
-      final pos = _spine().positionAtAudioTime(tMs);
+    } else if (alignments.isNotEmpty) {
+      final pos = core.Spine(
+              segments: const [], layers: const [], alignments: alignments)
+          .positionAtAudioTime(tMs);
       await db.spineDao.savePosition(
         profileId: profileId,
         workId: work.id,
         segmentIdx: pos.segmentIdx,
         wordIdx: 0,
         lastModality: 'listen',
+        readAtMs: readAtMs,
       );
     } else {
       await db.feedsDao.savePlayerPosition(
         profileId: profileId,
         workId: work.id,
         tMs: tMs,
+        readAtMs: readAtMs,
       );
     }
   }
 
+  /// The bar's X: closes for good (1.5.9, user: "X doesn't reliably close
+  /// the bar"). It used to return early when no player was loaded (a work
+  /// restored at launch, "Paused at …"), so X did nothing there; a load in
+  /// flight went on to play under the closed bar; the paused player kept
+  /// the lock-screen controls alive; and the next launch restored the bar.
+  /// Now it clears whatever is current, cancels any load, releases the
+  /// player, and remembers the close until something plays.
+  ///
+  /// Everything the bar shows is cleared before the first await, so a Play
+  /// tapped meanwhile starts a fresh load (which waits for the release)
+  /// instead of toggling the player being let go.
   Future<void> stop() async {
+    // Even with nothing shown yet, a load just begun is called off.
+    final gen = ++_loadGen;
+    if (_current == null && _player == null) return;
     final p = _player;
-    if (p == null) return;
-    if (p.playing) await p.pause();
-    await saveProgress();
+    final work = _current;
+    // Read now: the place is the player's before anything is cleared.
+    final save = p != null && work != null && _placeKnown
+        ? (
+            work: work,
+            tMs: _placeMs(p),
+            fileIdx: isAudiobook ? (_currentFileIdx ?? 0) : null,
+            alignments: _alignments,
+            readAtMs: DateTime.now().millisecondsSinceEpoch,
+          )
+        : null;
+    _player = null;
+    _placeKnown = false;
+    for (final s in _subs) {
+      unawaited(s.cancel());
+    }
+    _subs.clear();
     _current = null;
+    _currentFeed = null;
     _alignments = const [];
     _pausedAtMs = null;
     _currentAudiobookFiles = null;
     _currentAudiobookSettings = null;
     _currentFileIdx = null;
+    _rehydratedPositionMs = null;
+    _rehydratedDurationMs = null;
+    if (_sleepMode != null) cancelSleepTimer();
     notifyListeners();
+    if (p != null) {
+      final release = _release(p, save);
+      _releasing = release;
+      try {
+        await release;
+      } finally {
+        if (identical(_releasing, release)) _releasing = null;
+      }
+    }
+    // A Play tapped during the release already counts as playing again.
+    if (gen == _loadGen) await db.profilesDao.recordPlayerClosed(profileId);
+  }
+
+  /// Pauses, saves the place read at the X, and disposes the player, so
+  /// the next play makes a fresh one, as at launch. Disposing is what lets
+  /// the lock screen and notification go.
+  Future<void> _release(
+    EpisodePlayer p,
+    ({
+      Work work,
+      int tMs,
+      int? fileIdx,
+      List<core.Alignment> alignments,
+      int readAtMs,
+    })? save,
+  ) async {
+    try {
+      if (p.playing) await p.pause();
+      if (save != null) {
+        await _writeProgress(save.work, save.tMs,
+            fileIdx: save.fileIdx,
+            alignments: save.alignments,
+            readAtMs: save.readAtMs);
+      }
+    } finally {
+      await p.dispose();
+    }
   }
 
   /// Campaign 7 (ADR-0013): an audiobook's duration is learned per FILE,
@@ -813,9 +1123,12 @@ class PlayerController extends ChangeNotifier {
   /// of those two producers gets there first wins, and [_finishHandled]
   /// (reset per [playWork]) makes the second one a no-op rather than a
   /// double promotion.
+  ///
+  /// An X (or another load) during its awaits wins: nothing advances.
   Future<void> _finish() async {
     if (_finishHandled) return;
     _finishHandled = true;
+    final gen = _loadGen;
     final p = _player;
     if (p != null && p.playing) await p.pause();
     final work = _current;
@@ -829,6 +1142,7 @@ class PlayerController extends ChangeNotifier {
       await db.feedsDao.setFinished(work.id, _nowMs);
       await saveProgress();
     }
+    if (gen != _loadGen) return;
     // An end-of-episode timer's target WAS this completion — consumed.
     // A duration timer has no such tie to any one episode; it keeps
     // running into whatever plays next (Phase 3's auto-advance).

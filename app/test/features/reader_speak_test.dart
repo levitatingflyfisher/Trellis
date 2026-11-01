@@ -162,10 +162,10 @@ void main() {
     await tester.tap(find.byKey(const Key('speak-toggle')));
     await tester.pump();
     expect(
-        tester
-            .widget<OhIconButton>(find.byKey(const Key('play-toggle')))
-            .tooltip,
-        'Play',
+        find.descendant(
+            of: find.byKey(const Key('play-toggle')),
+            matching: find.text('Start')),
+        findsOneWidget,
         reason: 'starting speech paused the ticker');
     expect(tts.utterances.length, greaterThan(spoken));
 
