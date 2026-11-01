@@ -22,8 +22,10 @@ import '../reader/translation/brain_translator.dart'
     show anthropicTranslationEngine;
 import '../reader/translation/language_names.dart';
 import 'listen_chain.dart';
+import 'listen_clearness.dart';
 import 'listen_languages.dart';
 import 'make_ahead_jobs.dart';
+import 'spoken_episode.dart' show spokenClearnessOf;
 
 /// The device setting: the language the listener is learning.
 const learningLanguageKey = 'learning_language';
@@ -245,6 +247,11 @@ class ListenJobs extends ChangeNotifier {
   /// The learning language; null until one is chosen.
   String? get language => _language;
 
+  /// How clearly an episode made from now on is spoken (Settings ›
+  /// Learning); the chain reads the same setting when it starts a job.
+  ListenClearness get clearness => _clearness;
+  ListenClearness _clearness = ListenClearness.natural;
+
   /// Completes once every change to the record so far is written.
   Future<void> get saved => _writes;
 
@@ -392,6 +399,7 @@ class ListenJobs extends ChangeNotifier {
     try {
       final stored = await db.deviceSettingsDao.read(learningLanguageKey);
       _language = stored == null || stored.isEmpty ? null : stored;
+      _clearness = await readListenClearness(db);
       await _readMade();
       _pending.addAll(await _readLine());
       await makeAhead?.load();
@@ -528,6 +536,61 @@ class ListenJobs extends ChangeNotifier {
   Future<String?> chooseLearningLanguage(BuildContext context) =>
       pickLanguage(context, sortedForAny?.call().offered ?? const [],
           anyEpisode: true);
+
+  /// Asks how clearly the voice speaks in an episode made from now on,
+  /// and keeps the answer. Null when the question was dismissed.
+  Future<ListenClearness?> chooseClearness(BuildContext context) async {
+    final chosen = _clearness;
+    final picked = await showDialog<ListenClearness>(
+      context: context,
+      builder: (context) => SimpleDialog(
+        key: const Key('listen-clearness-dialog'),
+        title: const Text('How clearly the voice speaks'),
+        children: [
+          for (final c in ListenClearness.values)
+            Semantics(
+              selected: c == chosen,
+              child: SimpleDialogOption(
+                key: Key('listen-clearness-${c.name}'),
+                onPressed: () => Navigator.pop(context, c),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 48),
+                  child: Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Text(c.label),
+                            Text(c.help,
+                                style: Theme.of(context).textTheme.bodySmall),
+                          ],
+                        ),
+                      ),
+                      if (c == chosen)
+                        const Icon(Icons.check, semanticLabel: 'Chosen now'),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(24, 12, 24, 0),
+            child: Text('For episodes made from now on. One made already '
+                'can be made again from its button. The voice can be '
+                'slowed and given longer pauses; it can’t be made to sound '
+                'more casual than it does.'),
+          ),
+        ],
+      ),
+    );
+    if (picked == null) return null;
+    await writeListenClearness(db, picked);
+    _clearness = picked;
+    notifyListeners();
+    return picked;
+  }
 
   /// Asks which language is being learned, among [languages], and keeps
   /// the answer. Null when the question was dismissed. [anyEpisode] asks
@@ -669,10 +732,23 @@ class ListenJobs extends ChangeNotifier {
     final messenger = ScaffoldMessenger.maybeOf(context);
     final made = await chain.madeEpisodeOf(work.id, lang);
     if (made != null) {
-      await _play(made, messenger, asked: true);
-      return;
+      final madeAt = await spokenClearnessOf(db, made);
+      if (madeAt == _clearness || !context.mounted) {
+        await _play(made, messenger, asked: true);
+        return;
+      }
+      // Made at another step than the one chosen now: the listener says
+      // whether to make it again (the chain then does, in place).
+      final again = await _askRemake(context, lang, madeAt);
+      if (again == null || !context.mounted) return;
+      if (!again) {
+        await _play(made, messenger, asked: true);
+        return;
+      }
     }
-    if (lang == _language && _made.remove(work.id) != null) {
+    // Its audio is gone: the row stops offering Play. One made again at
+    // another step keeps playing as it is until the new one is ready.
+    if (made == null && lang == _language && _made.remove(work.id) != null) {
       notifyListeners();
     }
     final items = await downloadsFor(work, episode, lang);
@@ -681,6 +757,38 @@ class ListenJobs extends ChangeNotifier {
       if (!await confirmDownload(context, items: items)) return;
     }
     await _enqueue(work, lang, messenger);
+  }
+
+  /// True to make it again at the step chosen now, false to play it as
+  /// it is, null when dismissed.
+  Future<bool?> _askRemake(
+      BuildContext context, String lang, ListenClearness madeAt) {
+    final language = languageDisplayName(lang);
+    return showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        key: const Key('listen-remake-dialog'),
+        title: Text('Make the $language audio again?'),
+        content: Text('The $language audio was made at ${madeAt.label}. How '
+            'clearly the voice speaks is now ${_clearness.label}. Making it '
+            'again takes a while; the old audio is kept until the new one '
+            'is ready.'),
+        actions: [
+          TextButton(
+            key: const Key('listen-remake-play'),
+            style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('Play as it is'),
+          ),
+          TextButton(
+            key: const Key('listen-remake'),
+            style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+            onPressed: () => Navigator.pop(context, true),
+            child: Text('Make it again, ${_clearness.label.toLowerCase()}'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Asks for [work] as a tap would, minus the screen; tests need no
@@ -881,7 +989,7 @@ class ListenJobs extends ChangeNotifier {
     }
     int? id;
     try {
-      id = await chain.start(job.work, job.lang);
+      id = await chain.start(job.work, job.lang, kept: !job.ahead);
     } catch (_) {
       id = null;
     }

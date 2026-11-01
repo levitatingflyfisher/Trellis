@@ -48,6 +48,20 @@ posts themselves were not opened when this page was written.)
   It is about the translated voice, and it reaches into two things at
   once: how the words are said, and which words are chosen.
 
+## What of the follow-up is met
+
+How clearly the voice speaks is a setting (Settings › Learning), with
+four steps from Natural to Very slow. Each slows the saved voice and
+lengthens the pause after each sentence; the downloaded voice also takes
+more care over each sound. That covers the crisp and clean end, for both
+voices, on every episode made after the choice. The other end,
+"totally colloquial street speech", is not met: both voices read the
+words they are given in one register and cannot sound more casual than
+they do. It would take a casual translation (other words, not only
+other sounds) and a voice trained on casual speech. Neither has been
+heard on a phone yet. The steps and their numbers are in the feature
+matrix.
+
 ## What the exchange settles
 
 - **The wanted output is the spoken voice.** The episode is heard in

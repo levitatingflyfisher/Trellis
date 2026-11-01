@@ -240,58 +240,26 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    Finder selected(String mode) => find.descendant(
-        of: find.byKey(const Key('mode-selected')),
-        matching: find.byKey(Key('mode-$mode')));
+    /// The page's one filled button: its main action (board-0161).
+    Finder mainAction(String mode) => find.descendant(
+        of: find.byType(FilledButton), matching: find.byKey(Key('mode-$mode')),
+        matchRoot: true);
 
-    testWidgets('an untouched episode opens on Listen, a text on Read',
-        (tester) async {
+    testWidgets('an episode’s one main action is Play; a text’s is Read, '
+        'with Listen beside it', (tester) async {
       await pumpPage(tester, episode);
-      expect(selected('listen'), findsOneWidget);
+      expect(mainAction('listen'), findsOneWidget);
+      expect(
+          find.descendant(
+              of: find.byKey(const Key('mode-listen')),
+              matching: find.text('Play')),
+          findsOneWidget);
       await tester.pageBack();
       await tester.pumpAndSettle();
       await pumpPage(tester, article);
-      expect(selected('read'), findsOneWidget);
-    });
-
-    Future<void> touch({required int readAt, required int heardAt}) async {
-      await db.feedsDao
-          .savePlayerPosition(profileId: profileId, workId: episode, tMs: 5000);
-      await db.spineDao.savePosition(
-          profileId: profileId,
-          workId: episode,
-          segmentIdx: 0,
-          wordIdx: 0,
-          lastModality: 'read');
-      await db.customStatement(
-          'UPDATE positions SET updated_at_ms = $readAt WHERE work_id = $episode');
-      await db.customStatement('UPDATE player_positions SET updated_at_ms = '
-          '$heardAt WHERE work_id = $episode');
-    }
-
-    testWidgets('it opens on Read when reading came after listening',
-        (tester) async {
-      await touch(readAt: 2000, heardAt: 1000);
-      await pumpPage(tester, episode);
-      expect(selected('read'), findsOneWidget);
-    });
-
-    testWidgets('it opens on Listen when listening came after reading',
-        (tester) async {
-      await touch(readAt: 1000, heardAt: 2000);
-      await pumpPage(tester, episode);
-      expect(selected('listen'), findsOneWidget);
-    });
-
-    testWidgets('speaking a text is listening to it', (tester) async {
-      await db.spineDao.savePosition(
-          profileId: profileId,
-          workId: article,
-          segmentIdx: 0,
-          wordIdx: 0,
-          lastModality: 'speak');
-      await pumpPage(tester, article);
-      expect(selected('listen'), findsOneWidget);
+      expect(mainAction('read'), findsOneWidget);
+      expect(find.byKey(const Key('mode-listen')), findsOneWidget);
+      expect(mainAction('listen'), findsNothing);
     });
 
     testWidgets('Read on an untranscribed episode shows the notes and the '
@@ -361,17 +329,19 @@ void main() {
       expect(opened, [Uri.parse('https://maps.test/sky')]);
     });
 
-    testWidgets('the ⋮ is the shared menu, and Keep is a visible action',
-        (tester) async {
+    testWidgets('the ⋮ is the shared menu, with Keep and Transcribe in it '
+        '(owner, 12 Nov: too many buttons on the page)', (tester) async {
       await pumpPage(tester, episode);
-      expect(find.byKey(Key('page-keep-$episode')), findsOneWidget);
+      expect(find.byKey(Key('page-keep-$episode')), findsNothing);
+      expect(find.byKey(Key('page-transcribe-$episode')), findsNothing);
       await tester.tap(find.byKey(const Key('work-page-menu')));
       await tester.pumpAndSettle();
       expect(find.byKey(Key('share-$episode')), findsOneWidget);
       expect(find.byKey(Key('mark-played-$episode')), findsOneWidget);
-      // Transcribe is a visible action until there is a transcript.
-      expect(find.byKey(Key('transcribe-$episode')), findsNothing);
-      expect(find.byKey(Key('page-transcribe-$episode')), findsOneWidget);
+      expect(find.byKey(Key('transcribe-$episode')), findsOneWidget);
+      await tester.tap(find.byKey(Key('page-keep-$episode')));
+      await tester.pumpAndSettle();
+      expect((await db.spineDao.workById(episode))!.persistence, 'work');
     });
 
     testWidgets('a picked translation is remembered for next time',
@@ -384,14 +354,19 @@ void main() {
           sourceText: 'The marsh at dawn.',
           body: 'El pantano al alba.');
       await pumpPage(tester, article);
-      expect(find.text('Original · Unknown'), findsOneWidget);
+      expect(
+          find.descendant(
+              of: find.byKey(const Key('lang-original')),
+              matching: find.text('Unknown')),
+          findsOneWidget);
       await tester.tap(find.byKey(const Key('lang-es')));
       await tester.pumpAndSettle();
       expect((await db.spineDao.workById(article))!.readLang, 'es');
       expect(await db.spineDao.activeTranslationLang(article), 'es');
     });
 
-    testWidgets('picking a translation opens Read in it', (tester) async {
+    testWidgets('a picked translation is what Read opens: one language for '
+        'reading and listening', (tester) async {
       await db.spineDao.upsertTranslationSentence(
           workId: article,
           segmentIdx: 0,
@@ -402,6 +377,10 @@ void main() {
       await db.spineDao.setShowTranslationLayer(article, false);
       await pumpPage(tester, article);
       await tester.tap(find.byKey(const Key('lang-es')));
+      await tester.pumpAndSettle();
+      expect(find.byType(ReaderScreen), findsNothing,
+          reason: 'picking chooses; it opens nothing by itself');
+      await tester.tap(find.byKey(const Key('mode-read')));
       await tester.pumpAndSettle();
 
       expect(find.byType(ReaderScreen), findsOneWidget);
@@ -431,30 +410,6 @@ void main() {
       await tester.pumpAndSettle();
     }
 
-    testWidgets('Listen, then Read the transcript: the page reopens on Read',
-        (tester) async {
-      await transcribeEpisode();
-      await pumpPage(tester, episode);
-      await tester.tap(find.byKey(const Key('mode-listen')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('mode-read')));
-      await tester.pumpAndSettle();
-      await tester.pageBack(); // the transcript
-      await tester.pumpAndSettle();
-      await reopen(tester);
-      expect(selected('read'), findsOneWidget);
-    });
-
-    testWidgets('Read on the notes screen is remembered too', (tester) async {
-      await pumpPage(tester, episode);
-      await tester.tap(find.byKey(const Key('mode-read')));
-      await tester.pumpAndSettle();
-      await tester.pageBack(); // the notes screen
-      await tester.pumpAndSettle();
-      await reopen(tester);
-      expect(selected('read'), findsOneWidget);
-    });
-
     Future<List<String?>> pageMenuValues(WidgetTester tester) async {
       await tester.tap(find.byKey(const Key('work-page-menu')));
       await tester.pumpAndSettle();
@@ -470,15 +425,15 @@ void main() {
 
     testWidgets('the ⋮ holds nothing that is already a button', (tester) async {
       await pumpPage(tester, episode);
-      expect(find.byKey(Key('page-play-next-$episode')), findsOneWidget);
-      expect(find.byKey(const Key('lang-translate')), findsOneWidget);
+      expect(find.byKey(Key('page-queue-$episode')), findsOneWidget);
+      expect(find.byKey(Key('page-download-$episode')), findsOneWidget);
       final values = await pageMenuValues(tester);
       expect(values, isNotEmpty);
-      for (final shown in ['play-next', 'play-last', 'download', 'transcribe',
-          'translate', 'keep']) {
+      for (final shown in ['play-next', 'play-last', 'download', 'translate']) {
         expect(values, isNot(contains(shown)), reason: shown);
       }
-      expect(values, containsAll(['share', 'mark-played']));
+      expect(values, containsAll(['share', 'mark-played', 'keep',
+          'transcribe']));
     });
 
     // 1.5.6: an untranscribed English episode offered translating into
@@ -486,11 +441,12 @@ void main() {
     testWidgets('without a transcript Translate waits for one, and nothing '
         'promises English', (tester) async {
       await pumpPage(tester, episode);
-      final translate =
-          tester.widget<ButtonStyleButton>(find.byKey(const Key('lang-translate')));
-      expect(translate.onPressed, isNull);
+      // Never a greyed button: one line says why (board-0161).
+      expect(find.byKey(const Key('lang-translate')), findsNothing);
       expect(find.textContaining('into English'), findsNothing);
-      expect(find.text('Translating needs a transcript first.'),
+      expect(
+          find.text('Translating needs a transcript first. Transcribe is in '
+              'the menu at the top.'),
           findsOneWidget);
       expect(await pageMenuValues(tester), isNot(contains('translate')));
     });
@@ -507,15 +463,13 @@ void main() {
 
     // 1.5.6: the page went stale after a job — Read worked only after
     // leaving and coming back, and Download stayed after it finished.
-    testWidgets('Transcribe is a visible action until the transcript lands, '
-        'and then Read opens it without reopening the page', (tester) async {
+    testWidgets('until the transcript lands Read opens the notes, and then '
+        'it opens the transcript without reopening the page', (tester) async {
       await pumpPage(tester, episode);
-      expect(find.byKey(Key('page-transcribe-$episode')), findsOneWidget);
       expect(find.text('No transcript yet: Read opens the show notes.'),
           findsOneWidget);
       await transcribeEpisode();
       await tester.pumpAndSettle();
-      expect(find.byKey(Key('page-transcribe-$episode')), findsNothing);
       expect(find.text('No transcript yet: Read opens the show notes.'),
           findsNothing);
       await tester.tap(find.byKey(const Key('mode-read')));
@@ -523,23 +477,27 @@ void main() {
       expect(find.byKey(const Key('notes-screen')), findsNothing);
     });
 
-    testWidgets('Download leaves the page when the download finishes',
+    Finder downloadSays(String words) => find.descendant(
+        of: find.byKey(Key('page-download-$episode')),
+        matching: find.text(words));
+
+    testWidgets('Download turns into Downloaded when the download finishes',
         (tester) async {
       await pumpPage(tester, episode);
-      expect(find.byKey(Key('page-download-$episode')), findsOneWidget);
+      expect(downloadSays('Download'), findsOneWidget);
       final file =
           services.audioFileFor(episode, 'https://x.test/aurora.mp3');
       file.parent.createSync(recursive: true);
       file.writeAsBytesSync([1, 2, 3]);
       downloader.notifyListeners();
       await tester.pumpAndSettle();
-      expect(find.byKey(Key('page-download-$episode')), findsNothing);
+      expect(downloadSays('Remove download'), findsOneWidget);
     });
 
     testWidgets('audio a transcription fetched clears Download too',
         (tester) async {
       await pumpPage(tester, episode);
-      expect(find.byKey(Key('page-download-$episode')), findsOneWidget);
+      expect(downloadSays('Download'), findsOneWidget);
       // The transcription's own fetch: the file lands, the downloader is
       // never told, then the transcript is written.
       final file =
@@ -548,7 +506,7 @@ void main() {
       file.writeAsBytesSync([1, 2, 3]);
       await transcribeEpisode();
       await tester.pumpAndSettle();
-      expect(find.byKey(Key('page-download-$episode')), findsNothing);
+      expect(downloadSays('Remove download'), findsOneWidget);
     });
 
     testWidgets('a transcribed episode keeps Transcribe + translate in its ⋮',
@@ -579,8 +537,6 @@ void main() {
           body: 'El pantano al alba.');
       await pumpPage(tester, article);
       await tester.tap(find.byKey(const Key('lang-es')));
-      await tester.pumpAndSettle();
-      await tester.pageBack(); // the reader the pick opened
       await tester.pumpAndSettle();
       await reopen(tester);
       expect(
@@ -631,10 +587,10 @@ void main() {
       placed.writeAsBytesSync([1, 2, 3]);
       downloader.notifyListeners();
       await tester.pumpAndSettle();
-      expect(find.byKey(Key('page-download-$episode')), findsNothing);
+      expect(downloadSays('Remove download'), findsOneWidget);
       await menuDelete(tester, 'remove-download-$episode', 'Remove download');
       expect(placed.existsSync(), isFalse);
-      expect(find.byKey(Key('page-download-$episode')), findsOneWidget);
+      expect(downloadSays('Download'), findsOneWidget);
       expect(find.byType(WorkPage), findsOneWidget);
     });
 
@@ -642,10 +598,11 @@ void main() {
         (tester) async {
       await transcribeEpisode();
       await pumpPage(tester, episode);
-      expect(find.byKey(Key('page-transcribe-$episode')), findsNothing);
       await menuDeleteKept(tester, 'delete-transcript-$episode');
       expect(await db.spineDao.alignmentsOf(episode), isEmpty);
-      expect(find.byKey(Key('page-transcribe-$episode')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('work-page-menu')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(Key('transcribe-$episode')), findsOneWidget);
     });
 
     testWidgets('Delete a translation: that language leaves the page',

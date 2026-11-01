@@ -242,9 +242,9 @@ void main() {
         await job(JobState.running);
       });
       await pumpPage(tester);
-      final translate = tester
-          .widget<ButtonStyleButton>(find.byKey(const Key('lang-translate')));
-      expect(translate.onPressed, isNull);
+      // Never a greyed button (board-0161): the row is gone, the line
+      // says why.
+      expect(find.byKey(const Key('lang-translate')), findsNothing);
       expect(
           find.text('Translate waits for the whole transcript: 12 of 40 min '
               'is done.'),
@@ -254,9 +254,7 @@ void main() {
     testWidgets('a whole transcript can be translated', (tester) async {
       await tester.runAsync(transcribeSoFar);
       await pumpPage(tester);
-      final translate = tester
-          .widget<ButtonStyleButton>(find.byKey(const Key('lang-translate')));
-      expect(translate.onPressed, isNotNull);
+      expect(find.byKey(const Key('lang-translate')), findsOneWidget);
     });
 
     testWidgets('the page offers Translate once the job ends, without being '
@@ -269,9 +267,7 @@ void main() {
       await tester.runAsync(
           () => db.jobsDao.deleteJob(transcribeJobId(workId)));
       await tester.pumpAndSettle();
-      final translate = tester
-          .widget<ButtonStyleButton>(find.byKey(const Key('lang-translate')));
-      expect(translate.onPressed, isNotNull);
+      expect(find.byKey(const Key('lang-translate')), findsOneWidget);
     });
   });
 }

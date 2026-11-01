@@ -19,10 +19,12 @@ import 'package:trellis/features/works/work_open.dart';
 import '../../support/fake_player.dart';
 import '../../support/fake_services.dart';
 
-/// The episode's page holds the four choices as one group (board ruling,
-/// option B): listen or read, in the original or in the learning
-/// language. Listening in the learning language is the same one tap as
-/// the row's second button, with the same job behind it.
+/// The learning language on an episode's page (board-0161, owner:
+/// "clicking an episode is insane when there are immediately 12
+/// buttons"). The four choices (listen or read, original or learning
+/// language) became one Play, one Read and one language list: the
+/// learning language's row is the one tap that makes its audio, the same
+/// job as the row's second button, and once it is made Play plays it.
 void main() {
   late Directory dir;
   late AppDatabase db;
@@ -94,7 +96,7 @@ void main() {
           voiceFor: (_, lang) async => (
             name: 'Test voice',
             voiceKind: VoiceKind.machine,
-            say: (String t) async =>
+            say: (String t, SpeechPace p) async =>
                 SynthResult(samples: Float32List(100), sampleRate: 1000),
           ),
           audioFileFor: testServices(dir).audioFileFor,
@@ -117,7 +119,12 @@ void main() {
         profileId: profileId,
         readerDoors: ReaderDoors(player: controller),
         actions: EpisodeActions(
-            db: db, profileId: profileId, player: controller, listenJobs: j),
+            db: db,
+            profileId: profileId,
+            player: controller,
+            listenJobs: j,
+            // Where a made episode's audio is, so the page knows it is here.
+            services: testServices(dir)),
         transcribeRate: () => 1 / 12);
     final work = (await db.spineDao.workById(episode))!;
     final ep = await db.feedsDao.episodeOf(episode);
@@ -141,10 +148,10 @@ void main() {
     }
   }
 
-  const listenOriginal = Key('mode-listen');
-  const readOriginal = Key('mode-read');
-  const listenLearning = Key('listen-in-language');
-  const readLearning = Key('read-in-language');
+
+  const play = Key('mode-listen');
+  const read = Key('mode-read');
+  const learningRow = Key('listen-in-language');
 
   String wordsOf(WidgetTester tester, Key key) => tester
       .widgetList<Text>(
@@ -152,47 +159,35 @@ void main() {
       .map((t) => t.data)
       .join(' / ');
 
-  testWidgets('an episode that can be made shows four choices as one '
-      'group: listen or read, in the original or the learning language',
-      (tester) async {
+  Future<void> openMenu(WidgetTester tester) async {
+    await tester.tap(find.byKey(const Key('work-page-menu')));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('not made yet: Play is the original, Read beside it, and the '
+      'learning language is a row that makes it', (tester) async {
     await db.deviceSettingsDao.write(learningLanguageKey, 'es');
     await pumpPage(tester, jobs());
     await tester.pumpAndSettle();
 
-    expect(wordsOf(tester, listenOriginal), 'Listen / Original');
-    expect(wordsOf(tester, listenLearning), 'Listen / Spanish');
-    expect(wordsOf(tester, readOriginal), 'Read / Original');
-    expect(wordsOf(tester, readLearning), 'Read / Spanish');
-
-    // Two by two: listening above reading, the original on the left.
-    final lo = tester.getRect(find.byKey(listenOriginal));
-    final ll = tester.getRect(find.byKey(listenLearning));
-    final ro = tester.getRect(find.byKey(readOriginal));
-    final rl = tester.getRect(find.byKey(readLearning));
-    expect(lo.top, ll.top);
-    expect(ro.top, rl.top);
-    expect(lo.right, lessThanOrEqualTo(ll.left));
-    expect(lo.bottom, lessThanOrEqualTo(ro.top));
-    expect(lo.left, ro.left);
-    expect(ll.left, rl.left);
-    for (final r in [lo, ll, ro, rl]) {
-      expect(r.height, greaterThanOrEqualTo(48));
-    }
-
-    // Nothing twice: the learning language's text is in the group, not
-    // also a row below, and there is no second bar. The original's row
-    // below says where the episode stands among its languages
-    // (board-0130).
-    expect(find.byKey(const Key('lang-es')), findsNothing);
-    expect(find.text('Language'), findsNothing);
+    expect(wordsOf(tester, play), 'Play');
+    expect(
+        tester.widget<Text>(find.byKey(const Key('page-play-caption'))).data,
+        'English, the original');
+    expect(wordsOf(tester, read), 'Read');
+    expect(wordsOf(tester, learningRow),
+        'Spanish / Not made yet. Tap to make the Spanish audio');
+    expect(find.byKey(const Key('read-in-language')), findsNothing);
+    expect(find.byKey(const Key('lang-es')), findsNothing,
+        reason: 'Spanish is one row, not two');
     expect(find.text('This episode, the original'), findsOneWidget);
-    expect(find.byTooltip('Listen in Spanish'), findsOneWidget);
-    expect(find.bySemanticsLabel('Listen in Spanish'), findsOneWidget);
+    expect(tester.getSize(find.byKey(learningRow)).height,
+        greaterThanOrEqualTo(48));
   });
 
-  testWidgets('listening in the learning language is the one tap: it '
-      'shows the stage and Stop under the group, then plays, and says it '
-      'is ready', (tester) async {
+  testWidgets('the learning language’s row is the one tap: the stage and '
+      'Stop show, then it plays, and Play is in Spanish from then on',
+      (tester) async {
     await tester.runAsync(() async {
       await db.deviceSettingsDao.write(learningLanguageKey, 'es');
       held[episode] = Completer<void>();
@@ -201,7 +196,7 @@ void main() {
       await pumpPage(tester, j);
       await beats(tester, 25);
 
-      await tester.tap(find.byKey(listenLearning));
+      await tester.tap(find.byKey(learningRow));
       await beats(tester);
 
       expect(
@@ -216,9 +211,6 @@ void main() {
               .value,
           closeTo(0.4, 0.001));
       expect(find.byKey(const Key('listen-in-language-stop')), findsOneWidget);
-      expect(find.byKey(const Key('learning-language-change')), findsNothing);
-      expect(find.byTooltip('Making it in Spanish: translating, 40%'),
-          findsOneWidget);
 
       held[episode]!.complete();
       for (var i = 0; i < 150 && controller.current == null; i++) {
@@ -227,22 +219,16 @@ void main() {
       await beats(tester, 25);
 
       expect(controller.current?.title, 'Aurora season (Spanish)');
+      expect(wordsOf(tester, play), 'Play in Spanish');
       expect(
-          tester
-              .widget<Text>(find.byKey(const Key('listen-in-language-line')))
-              .data,
-          'Spanish is ready. The voice is machine made.');
-      expect(find.byTooltip('Play in Spanish'), findsOneWidget);
-      // The translation the job made is there to read at once.
-      expect(
-          tester
-              .widget<ButtonStyleButton>(find.byKey(readLearning))
-              .onPressed,
-          isNotNull);
+          tester.widget<Text>(find.byKey(const Key('page-play-caption'))).data,
+          'Spanish, made on this phone');
+      expect(find.byKey(const Key('listen-in-language-stop')), findsNothing);
+      expect(find.byKey(const Key('lang-es')), findsOneWidget);
     });
   });
 
-  testWidgets('Stop under the group stops the job', (tester) async {
+  testWidgets('Stop stops the job', (tester) async {
     await tester.runAsync(() async {
       await db.deviceSettingsDao.write(learningLanguageKey, 'es');
       held[episode] = Completer<void>();
@@ -250,7 +236,7 @@ void main() {
       await j.ready;
       await pumpPage(tester, j);
       await beats(tester, 25);
-      await tester.tap(find.byKey(listenLearning));
+      await tester.tap(find.byKey(learningRow));
       await beats(tester);
 
       await tester.tap(find.byKey(const Key('listen-in-language-stop')));
@@ -258,91 +244,84 @@ void main() {
       await beats(tester, 25);
 
       expect(find.byKey(const Key('listen-in-language-stop')), findsNothing);
-      expect(find.byTooltip('Listen in Spanish'), findsOneWidget);
       expect(controller.current, isNull);
     });
   });
 
-  testWidgets('Change keeps its place, and both learning-language choices '
-      'follow it', (tester) async {
+  testWidgets('Change learning language is in the ⋮, and the row follows '
+      'it', (tester) async {
     await db.deviceSettingsDao.write(learningLanguageKey, 'es');
     await pumpPage(tester, jobs());
     await tester.pumpAndSettle();
 
+    await openMenu(tester);
     await tester.tap(find.byKey(const Key('learning-language-change')));
     await tester.pumpAndSettle();
     expect(find.text('Which language are you learning?'), findsOneWidget);
     await tester.tap(find.byKey(const Key('learning-language-fr')));
     await tester.pumpAndSettle();
 
-    expect(wordsOf(tester, listenLearning), 'Listen / French');
-    expect(wordsOf(tester, readLearning), 'Read / French');
+    expect(wordsOf(tester, learningRow),
+        'French / Not made yet. Tap to make the French audio');
     expect(await db.deviceSettingsDao.read(learningLanguageKey), 'fr');
   });
 
-  // Board-0128: with one language offered, Change hid, and with it the
-  // list and its note on why the others are missing.
-  testWidgets('Change shows even when only one language is offered, and '
-      'opens the list', (tester) async {
+  // Board-0128: with one language offered, Change still opens the list
+  // and its note on why the others are missing.
+  testWidgets('Change is offered even when only one language is', (tester) async {
     await db.deviceSettingsDao.write(learningLanguageKey, 'es');
     await pumpPage(tester, jobs(can: const ['es']));
     await tester.pumpAndSettle();
 
-    final change = find.byKey(const Key('learning-language-change'));
-    expect(change, findsOneWidget);
-    expect(tester.getSize(change).height, greaterThanOrEqualTo(48));
-    await tester.tap(change);
+    await openMenu(tester);
+    await tester.tap(find.byKey(const Key('learning-language-change')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('learning-language-dialog')), findsOneWidget);
     expect(find.byKey(const Key('learning-language-es')), findsOneWidget);
   });
 
-  testWidgets('with no learning language yet the second column says so, '
-      'and its Listen asks which', (tester) async {
+  testWidgets('with no learning language yet the row says so, and a tap '
+      'asks which', (tester) async {
     await pumpPage(tester, jobs());
     await tester.pumpAndSettle();
 
-    expect(wordsOf(tester, listenLearning), 'Listen / Another language');
-    expect(wordsOf(tester, readLearning), 'Read / Another language');
+    expect(wordsOf(tester, learningRow),
+        'Another language / Choose a language to make this episode in');
+    await openMenu(tester);
     expect(find.byKey(const Key('learning-language-change')), findsNothing);
+    await tester.tapAt(Offset.zero);
+    await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(listenLearning));
+    await tester.tap(find.byKey(learningRow));
     await tester.pumpAndSettle();
     expect(find.text('Which language are you learning?'), findsOneWidget);
   });
 
-  testWidgets('Read in the learning language opens the translation when '
-      'there is one', (tester) async {
+  testWidgets('a Spanish text with no audio: its row chooses it, and Read '
+      'opens the translation', (tester) async {
     await db.deviceSettingsDao.write(learningLanguageKey, 'es');
     await transcript();
     await translation('es');
     await pumpPage(tester, jobs());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(readLearning));
+    expect(wordsOf(tester, learningRow),
+        'Spanish / Text only. Tap to make the Spanish audio');
+    await tester.tap(find.byKey(learningRow));
     await tester.pumpAndSettle();
-
-    expect(find.byType(ReaderScreen), findsOneWidget);
     expect((await db.spineDao.workById(episode))!.readLang, 'es');
-  });
+    expect(
+        tester.widget<Text>(find.byKey(const Key('page-play-caption'))).data,
+        'There is no Spanish audio here, so Play is the original, in '
+        'English.');
 
-  testWidgets('with no transcript yet, Read in the learning language is '
-      'off and says what makes it', (tester) async {
-    await db.deviceSettingsDao.write(learningLanguageKey, 'es');
-    await pumpPage(tester, jobs());
+    await tester.tap(find.byKey(read));
     await tester.pumpAndSettle();
-
-    expect(
-        tester.widget<ButtonStyleButton>(find.byKey(readLearning)).onPressed,
-        isNull);
-    expect(
-        find.text('Read in Spanish: A translation needs a transcript first. '
-            'Listen in Spanish makes both.'),
-        findsOneWidget);
+    expect(find.byType(ReaderScreen), findsOneWidget);
   });
 
-  testWidgets('Listen in the original plays the episode itself, even after '
-      'a translation was the last thing read', (tester) async {
+  testWidgets('Play plays the episode itself while a language with no '
+      'audio is chosen, and says so', (tester) async {
     await db.deviceSettingsDao.write(learningLanguageKey, 'es');
     await transcript();
     await translation('de');
@@ -350,7 +329,11 @@ void main() {
     await pumpPage(tester, jobs());
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(listenOriginal));
+    expect(
+        tester.widget<Text>(find.byKey(const Key('page-play-caption'))).data,
+        'There is no German audio here, so Play is the original, in '
+        'English.');
+    await tester.tap(find.byKey(play));
     await tester.pumpAndSettle();
 
     expect(find.byType(ReaderScreen), findsNothing);
@@ -358,8 +341,8 @@ void main() {
     expect(player.loadedUrl, 'https://x.test/aurora.mp3');
   });
 
-  testWidgets('a translation in some other language keeps its door, under '
-      'This episode in other languages', (tester) async {
+  testWidgets('another language’s translation keeps its row, and Translate '
+      'that can’t run is one line, never a greyed button', (tester) async {
     await db.deviceSettingsDao.write(learningLanguageKey, 'es');
     await transcript();
     await translation('es');
@@ -369,40 +352,39 @@ void main() {
 
     expect(find.text('This episode in other languages'), findsOneWidget);
     expect(find.byKey(const Key('lang-de')), findsOneWidget);
-    // The learning language is in the group above, not here again.
     expect(find.byKey(const Key('lang-es')), findsNothing);
-    expect(find.byKey(const Key('lang-translate')), findsOneWidget);
+    expect(find.byKey(const Key('lang-translate')), findsNothing);
+    expect(find.byKey(const Key('lang-translate-why')), findsOneWidget);
   });
 
-  testWidgets('an episode that cannot be made in the learning language '
-      'keeps two ways in, and its languages below', (tester) async {
+  testWidgets('an episode that cannot be made in the learning language has '
+      'no row for it, and its languages below', (tester) async {
     await db.deviceSettingsDao.write(learningLanguageKey, 'es');
     await pumpPage(tester, jobs(can: const []));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(listenLearning), findsNothing);
-    expect(find.byKey(readLearning), findsNothing);
-    expect(wordsOf(tester, listenOriginal), 'Listen');
+    expect(find.byKey(learningRow), findsNothing);
+    expect(wordsOf(tester, play), 'Play');
     expect(find.text('This episode in other languages'), findsOneWidget);
     expect(find.byKey(const Key('lang-original')), findsOneWidget);
   });
 
   for (final scale in [1.0, 2.0]) {
-    testWidgets('the four choices fit a 320dp phone at ${scale}x text',
-        (tester) async {
+    testWidgets('Play, Read and the learning row fit a 320dp phone at '
+        '${scale}x text', (tester) async {
       await db.deviceSettingsDao.write(learningLanguageKey, 'pt');
       await pumpPage(tester, jobs(can: const ['es', 'pt']),
           width: 320, scale: scale);
       await tester.pumpAndSettle();
 
       expect(tester.takeException(), isNull);
-      for (final k in [listenOriginal, listenLearning, readOriginal, readLearning]) {
+      for (final k in [play, read, learningRow]) {
+        await tester.ensureVisible(find.byKey(k));
         final r = tester.getRect(find.byKey(k));
         expect(r.left, greaterThanOrEqualTo(0));
         expect(r.right, lessThanOrEqualTo(320));
         expect(r.height, greaterThanOrEqualTo(48));
       }
-      expect(find.byKey(const Key('learning-language-change')), findsOneWidget);
     });
   }
 }

@@ -176,6 +176,23 @@ String noVoiceMessage(String lang,
       'off “Read the $name aloud too” in the menu.';
 }
 
+/// Any letter that is not a Latin one: a text in Cyrillic, Greek, CJK,
+/// Arabic and so on.
+final _notLatin = RegExp(r'(?=\p{L})\P{Script=Latin}', unicode: true);
+
+/// Whether [text] has letters the downloaded voice can't say (its
+/// character table is Latin only), so a text whose language nobody set
+/// must not go to it.
+bool hasNonLatinLetters(String text) => _notLatin.hasMatch(text);
+
+/// What to say when a text in another alphabet has no language set:
+/// nobody can choose its voice, and an English one reading it reads
+/// nothing.
+const unknownLanguageMessage =
+    'This text’s language isn’t set, so read aloud can’t choose a voice '
+    'for it. Set it with Language in the menu, and a voice for that '
+    'language reads it.';
+
 /// The Read aloud voices sheet: for each language this work reads in, the
 /// voices that can read it, the current one picked. [onPick] remembers a
 /// pick for that language.
@@ -191,6 +208,11 @@ class ReadAloudVoicesSheet extends StatefulWidget {
   /// leaving the downloaded voice missing from its lists unexplained.
   final bool systemVoiceOn;
 
+  /// Opens Android's text-to-speech settings, where a voice the phone
+  /// lacks is added (owner, 12 Nov: "I can't get a read-aloud Russian
+  /// voice"); false when the page wouldn't open. Null hides the button.
+  final Future<bool> Function()? onOpenSettings;
+
   const ReadAloudVoicesSheet({
     super.key,
     required this.langs,
@@ -199,6 +221,7 @@ class ReadAloudVoicesSheet extends StatefulWidget {
     required this.choices,
     required this.onPick,
     this.systemVoiceOn = false,
+    this.onOpenSettings,
   });
 
   @override
@@ -207,6 +230,9 @@ class ReadAloudVoicesSheet extends StatefulWidget {
 
 class _ReadAloudVoicesSheetState extends State<ReadAloudVoicesSheet> {
   late final Map<String, String> _choices = {...widget.choices};
+
+  /// The settings page didn't open: the sheet says where to look instead.
+  bool _settingsRefused = false;
 
   @override
   Widget build(BuildContext context) {
@@ -265,12 +291,40 @@ class _ReadAloudVoicesSheetState extends State<ReadAloudVoicesSheet> {
         child: Text(languageDisplayName(lang),
             style: theme.textTheme.labelLarge),
       ),
-      if (options.isEmpty)
+      if (options.isEmpty) ...[
         Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
           child: Text(noVoiceMessage(lang), key: Key('voice-$lang-none')),
-        )
-      else
+        ),
+        if (widget.onOpenSettings case final open? when !kIsWeb)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(8, 0, 16, 12),
+            child: _settingsRefused
+                ? Padding(
+                    padding: const EdgeInsets.only(left: 8),
+                    child: Text(
+                        'This phone’s settings wouldn’t open here. Look for '
+                        'Text-to-speech output in Android’s Settings, then '
+                        'open this list again.',
+                        key: Key('voice-$lang-settings-refused')),
+                  )
+                : Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: TextButton.icon(
+                      key: Key('voice-$lang-settings'),
+                      style: TextButton.styleFrom(
+                          minimumSize: const Size(48, 48)),
+                      icon: const Icon(Icons.settings_voice_outlined),
+                      label: const Text('Open text-to-speech settings'),
+                      onPressed: () async {
+                        if (!await open() && mounted) {
+                          setState(() => _settingsRefused = true);
+                        }
+                      },
+                    ),
+                  ),
+          ),
+      ] else
         RadioGroup<String>(
           groupValue: selectedVoiceId(lang, _choices, options),
           onChanged: (id) {

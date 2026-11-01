@@ -109,28 +109,34 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  Finder other() => find.byKey(Key('page-play-other-$episode'));
+  // The other way to play is in the page's ⋮ (board-0161: the page had
+  // too many buttons), as in every row's.
+  Future<Finder> other(WidgetTester tester, String value) async {
+    await tester.tap(find.byKey(const Key('work-page-menu')));
+    await tester.pumpAndSettle();
+    return find.byKey(Key('$value-$episode'));
+  }
 
-  testWidgets('set to Stream, the page offers Download, then play; it '
-      'downloads, shows how far where Listen is, then plays the file',
+  testWidgets('set to Stream, the page’s ⋮ offers Download, then play; it '
+      'downloads, shows how far where Play is, then plays the file',
       (tester) async {
     await pumpPage(tester);
-    expect(find.descendant(of: other(), matching: find.text('Download, then play')),
+    final item = await other(tester, 'download-play');
+    expect(find.descendant(of: item, matching: find.text('Download, then play')),
         findsOneWidget);
-    expect(tester.getSize(other()).height, greaterThanOrEqualTo(48));
+    expect(tester.getSize(item).height, greaterThanOrEqualTo(48));
 
-    await tester.tap(other());
+    await tester.tap(item);
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
     expect(fetcher.fetched, [url]);
     expect(fake.loadedUrl, isNull, reason: 'nothing streams meanwhile');
 
     fetcher.emitProgress(400, 1000);
     await tester.pump();
     expect(
-        find.descendant(
-            of: find.byKey(const Key('mode-listen')),
-            matching: find.text('Downloading, 40%')),
-        findsOneWidget);
+        tester.widget<Text>(find.byKey(const Key('page-play-caption'))).data,
+        'Downloading, 40%');
 
     await tester.runAsync(() async {
       fetcher.completeDownload();
@@ -140,14 +146,15 @@ void main() {
     expect(fake.loadedFilePath, services.audioFileFor(episode, url).path);
   });
 
-  testWidgets('set to Download first, the page offers Stream now, and it '
-      'streams at once', (tester) async {
+  testWidgets('set to Download first, the page’s ⋮ offers Stream now, and '
+      'it streams at once', (tester) async {
     downloadFirst = true;
     await pumpPage(tester);
-    expect(find.descendant(of: other(), matching: find.text('Stream now')),
+    final item = await other(tester, 'stream-now');
+    expect(find.descendant(of: item, matching: find.text('Stream now')),
         findsOneWidget);
 
-    await tester.tap(other());
+    await tester.tap(item);
     await tester.pumpAndSettle();
     expect(fake.loadedUrl, url);
     expect(fetcher.fetched, isEmpty);

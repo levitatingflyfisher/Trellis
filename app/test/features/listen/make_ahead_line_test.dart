@@ -115,7 +115,7 @@ void main() {
         voiceFor: (_, lang) async => (
           name: 'Test voice',
           voiceKind: VoiceKind.machine,
-          say: (String t) async =>
+          say: (String t, SpeechPace p) async =>
               SynthResult(samples: Float32List(100), sampleRate: 1000),
         ),
         audioFileFor: fileOf,
@@ -488,6 +488,12 @@ void main() {
       await j.makeAheadPass();
       await until(() => !made(j, a));
       expect(await onDisk(tapped), isTrue);
+      // Asked for, so kept (the Library holds it); made ahead, it passes
+      // through Latest like anything that arrives.
+      expect((await db.spineDao.workById((await spokenId(tapped))!))!
+          .persistence, 'work');
+      expect((await db.spineDao.workById((await spokenId(b))!))!
+          .persistence, 'ephemeron');
     });
   });
 

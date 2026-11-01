@@ -304,13 +304,100 @@ void main() {
       expect(tts.utterances, hasLength(1));
     });
 
-    testWidgets('the voices sheet says so too', (tester) async {
+    testWidgets('the voices sheet says so too, with a button to Android’s '
+        'text-to-speech settings (owner, 12 Nov: "I can’t get a read-aloud '
+        'Russian voice")', (tester) async {
       tts.installed = [enVoice];
       await pumpReader(tester);
       await openVoices(tester);
       expect(find.byKey(const Key('voice-ru-none')), findsOneWidget);
       expect(find.textContaining('No Russian voice'), findsOneWidget);
+      final button = find.byKey(const Key('voice-ru-settings'));
+      expect(button, findsOneWidget);
+      expect(tester.getSize(button).height, greaterThanOrEqualTo(48));
+      await tester.tap(button);
+      await tester.pumpAndSettle();
+      expect(tts.settingsOpened, 1);
     });
+
+    testWidgets('a phone whose settings won’t open says where to look',
+        (tester) async {
+      tts.installed = [enVoice];
+      tts.opensSettings = false;
+      await pumpReader(tester);
+      await openVoices(tester);
+      await tester.tap(find.byKey(const Key('voice-ru-settings')));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Look for Text-to-speech output'),
+          findsOneWidget);
+    });
+
+    testWidgets('a Russian voice the phone has is listed to pick, with no '
+        'settings button', (tester) async {
+      tts.installed = [enVoice, ruVoiceA];
+      await pumpReader(tester);
+      await openVoices(tester);
+      expect(find.byKey(const Key('voice-ru-none')), findsNothing);
+      expect(find.byKey(const Key('voice-ru-ru-ru-x-ruc-local')), findsOneWidget);
+      expect(find.byKey(const Key('voice-ru-settings')), findsNothing);
+    });
+
+    testWidgets('the message when read aloud stops carries the same door',
+        (tester) async {
+      tts.installed = [enVoice];
+      await db.spineDao.setTranslationOnly(workId, true);
+      await pumpReader(tester);
+      await readAloud(tester);
+      await tester.pump(const Duration(milliseconds: 500));
+      await tester.tap(find.byKey(const Key('read-aloud-message-settings')));
+      await tester.pumpAndSettle();
+      expect(tts.settingsOpened, 1);
+    });
+  });
+
+  // A Russian text whose language nobody set (a pasted text, a file:
+  // intake keeps none) went to the downloaded voice, whose letters are
+  // Latin only: it read nothing, or skipped every sentence. It now never
+  // gets letters it can't say, and the reader says to set the language,
+  // which hands the text to the phone's Russian voice.
+  testWidgets('a text in Cyrillic with no language set is not read by the '
+      'downloaded voice; read aloud asks for the language', (tester) async {
+    final id = await db.spineDao.insertWork(
+        profileId: profileId,
+        kind: 'note',
+        title: 'Заметка',
+        persistence: 'work',
+        firstSeenEpochDay: 100);
+    await db.spineDao.insertSegments(id, const [
+      (idx: 0, kind: 'prose', text: 'Привет. Как дела?'),
+    ]);
+    await pumpReader(tester, withSynthEngine: true, id: id);
+    await readAloud(tester);
+    await tester.pump();
+
+    expect(synthEngine.calls, isEmpty,
+        reason: 'the downloaded voice has no Cyrillic');
+    expect(tts.utterances, isEmpty,
+        reason: 'nor an unknown voice reading it');
+    expect(find.textContaining('language isn’t set'), findsOneWidget);
+    expect(find.text('Read aloud'), findsOneWidget);
+  });
+
+  testWidgets('an English text with no language set still reads on the '
+      'downloaded voice', (tester) async {
+    final id = await db.spineDao.insertWork(
+        profileId: profileId,
+        kind: 'note',
+        title: 'Note',
+        persistence: 'work',
+        firstSeenEpochDay: 100);
+    await db.spineDao.insertSegments(id, const [
+      (idx: 0, kind: 'prose', text: 'Hello there, café.'),
+    ]);
+    await pumpReader(tester, withSynthEngine: true, id: id);
+    await readAloud(tester);
+    await tester.pump();
+    expect(synthEngine.calls, isNotEmpty);
   });
 
   group('a voice that fails mid-run ends it with a plain message', () {

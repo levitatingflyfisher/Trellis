@@ -20,6 +20,7 @@ import '../models/models_screen.dart' show modelLabel;
 import '../player/player_controller.dart';
 import '../reader/reader_prefs.dart' show readAloudSystemVoicePrefix;
 import '../reader/speech/phone_voice.dart';
+import '../reader/speech/speech_engine.dart' show SpeechPace;
 import '../reader/speech/supertonic_voice_handle.dart'
     show supertonicSupportedLangs;
 import '../reader/translation/language_names.dart';
@@ -356,8 +357,8 @@ ListenChain deviceListenChain({
           return (
             name: phoneVoiceName(services.phoneVoices.engine),
             voiceKind: VoiceKind.machine,
-            say: (String text) => sayWithPhone(saver, text,
-                lang: lang, voice: plan!.phoneVoice, dir: dir),
+            say: (String text, SpeechPace pace) => sayWithPhone(saver, text,
+                lang: lang, voice: plan!.phoneVoice, dir: dir, pace: pace),
           );
         case SavedVoiceKind.downloaded:
           final spec = plan!.spec!;
@@ -368,7 +369,8 @@ ListenChain deviceListenChain({
             // The voice's plain name, for the episode's page.
             name: 'Supertonic',
             voiceKind: VoiceKind.machine,
-            say: (String text) => engine.synthesize(text, lang: lang),
+            say: (String text, SpeechPace pace) =>
+                engine.synthesize(text, lang: lang, pace: pace),
           );
       }
     },

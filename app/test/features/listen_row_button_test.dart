@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:openhearth_design/openhearth_design.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/listen/listen_chain.dart';
+import 'package:trellis/features/listen/listen_clearness.dart';
 import 'package:trellis/features/listen/spoken_episode.dart' show VoiceKind;
 import 'package:trellis/features/listen/listen_jobs.dart';
 import 'package:trellis/features/listen/listen_row_button.dart';
@@ -117,7 +118,7 @@ void main() {
         voiceFor: (_, lang) async => (
           name: 'Test voice',
           voiceKind: VoiceKind.machine,
-          say: (String t) async =>
+          say: (String t, SpeechPace p) async =>
               SynthResult(samples: Float32List(100), sampleRate: 1000),
         ),
         audioFileFor: testServices(dir).audioFileFor,
@@ -500,6 +501,75 @@ void main() {
 
         expect(controller.current?.id, made);
         expect(transcribed, 1);
+      });
+    });
+
+    testWidgets('made at another clearness than the one chosen now: the '
+        'tap says so and offers to play it as it is or make it again',
+        (tester) async {
+      await tester.runAsync(() async {
+        await db.deviceSettingsDao.write(learningLanguageKey, 'es');
+        final e = await episode('Harbour');
+        final c = chain();
+        final made = (await c.start(e.work, 'es'))!;
+        await writeListenClearness(db, ListenClearness.slow);
+        final j = jobs(over: c);
+        await j.ready;
+        await pumpRows(tester, j, [e]);
+
+        await tester.tap(button(e));
+        await until(tester,
+            () => find.byKey(const Key('listen-remake-dialog')).evaluate()
+                .isNotEmpty);
+        final dialog = find.byKey(const Key('listen-remake-dialog'));
+        expect(dialog, findsOneWidget);
+        expect(
+            find.descendant(
+                of: dialog,
+                matching: find.textContaining('was made at Natural')),
+            findsOneWidget);
+        expect(
+            find.descendant(
+                of: dialog, matching: find.textContaining('Slow and clear')),
+            findsOneWidget);
+        for (final key in ['listen-remake-play', 'listen-remake']) {
+          expect(tester.getSize(find.byKey(Key(key))).height,
+              greaterThanOrEqualTo(48),
+              reason: key);
+        }
+
+        await tester.tap(find.byKey(const Key('listen-remake')));
+        await until(tester,
+            () => controller.current != null && !j.offerFor(e.work, e.episode)!.busy);
+
+        expect(controller.current?.id, made,
+            reason: 'made again in place, and played when done');
+        expect((await db.feedsDao.episodeOf(made))!.clearness, 'slow');
+        expect(transcribed, 1, reason: 'only the voice runs again');
+      });
+    });
+
+    testWidgets('played as it is: nothing is made', (tester) async {
+      await tester.runAsync(() async {
+        await db.deviceSettingsDao.write(learningLanguageKey, 'es');
+        final e = await episode('Harbour');
+        final c = chain();
+        final made = (await c.start(e.work, 'es'))!;
+        await writeListenClearness(db, ListenClearness.clear);
+        final j = jobs(over: c);
+        await j.ready;
+        await pumpRows(tester, j, [e]);
+
+        await tester.tap(button(e));
+        await until(tester,
+            () => find.byKey(const Key('listen-remake-play')).evaluate()
+                .isNotEmpty);
+        await tester.tap(find.byKey(const Key('listen-remake-play')));
+        await until(tester, () => controller.current != null);
+
+        expect(controller.current?.id, made);
+        expect((await db.feedsDao.episodeOf(made))!.clearness, 'natural');
+        expect(j.offerFor(e.work, e.episode)!.busy, isFalse);
       });
     });
 

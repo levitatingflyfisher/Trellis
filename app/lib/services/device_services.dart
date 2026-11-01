@@ -63,6 +63,10 @@ abstract interface class TtsSpeaker {
   /// The voices installed on this device, or null when the platform
   /// can't list them (then only [speak]'s own refusal tells).
   Future<List<SystemVoice>?> voices();
+
+  /// Opens Android's text-to-speech settings, where a voice is added or
+  /// downloaded. False where there is no such page (the web, tests).
+  Future<bool> openSettings();
 }
 
 /// One installed platform voice, as the TTS engine names it.
@@ -237,6 +241,12 @@ class FlutterTtsSpeaker implements TtsSpeaker {
 
   @override
   Future<void> setRate(double r) async => (await _engine()).setSpeechRate(r);
+
+  /// Through the app's own channel (PhoneVoice.kt), the same door the
+  /// learning-language list opens.
+  @override
+  Future<bool> openSettings() async =>
+      !kIsWeb && await MethodChannelPhoneSpeechSaver().openSettings();
 }
 
 /// Silence for surfaces that never speak (detached services, plain widget
@@ -246,6 +256,8 @@ class NoopTtsSpeaker implements TtsSpeaker {
   Future<void> speak(String text, {String? lang, SystemVoice? voice}) async {}
   @override
   Future<List<SystemVoice>?> voices() async => null;
+  @override
+  Future<bool> openSettings() async => false;
   @override
   Future<void> stop() async {}
   @override

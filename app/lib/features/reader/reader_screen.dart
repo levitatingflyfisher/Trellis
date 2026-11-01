@@ -1422,6 +1422,15 @@ class _ReaderScreenState extends State<ReaderScreen>
       for (final u in units) ?baseLanguage(u.lang),
       if (_readsTranslation) ?target,
     };
+    // A text whose language nobody set, in letters the downloaded voice
+    // can't say (Cyrillic, CJK...): no voice can be chosen for it, and
+    // reading on would be silence or the wrong language's voice.
+    if (units.any((u) => u.lang == null && hasNonLatinLetters(u.text))) {
+      setState(() => _speaking = false);
+      _sessionGone();
+      _say(unknownLanguageMessage);
+      return;
+    }
     final synth = _synthEngineHolder;
     final neuralLangs = _neuralLangs;
     var plan = planReadAloud(
@@ -1447,13 +1456,15 @@ class _ReaderScreenState extends State<ReaderScreen>
       final missing =
           plan.missing.contains(target) ? target! : plan.missing.first;
       final original = baseLanguage(_sourceSpeechLang);
-      _say(noVoiceMessage(missing,
-          originalLang: missing == target &&
-                  _offersSpeakTranslation &&
-                  original != null &&
-                  !plan.missing.contains(original)
-              ? original
-              : null));
+      _say(
+          noVoiceMessage(missing,
+              originalLang: missing == target &&
+                      _offersSpeakTranslation &&
+                      original != null &&
+                      !plan.missing.contains(original)
+                  ? original
+                  : null),
+          voiceSettings: true);
       return;
     }
     _runOnSystemVoice = !plan.neural;
@@ -1467,11 +1478,23 @@ class _ReaderScreenState extends State<ReaderScreen>
     }
   }
 
-  void _say(String message) => ScaffoldMessenger.of(context)
-    ..hideCurrentSnackBar()
-    ..showSnackBar(SnackBar(
-        content: Text(message, key: const Key('read-aloud-message')),
-        duration: const Duration(seconds: 8)));
+  /// [voiceSettings]: the message is about a voice the phone lacks, so
+  /// it carries the door to Android's text-to-speech settings.
+  void _say(String message, {bool voiceSettings = false}) =>
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(SnackBar(
+            content: Text(message, key: const Key('read-aloud-message')),
+            // A convenience: the voices sheet has the same door, so the
+            // line may lapse with its eight seconds.
+            persist: false,
+            action: voiceSettings && !kIsWeb
+                ? SnackBarAction(
+                    key: const Key('read-aloud-message-settings'),
+                    label: 'Voice settings',
+                    onPressed: () => unawaited(_tts.openSettings()))
+                : null,
+            duration: const Duration(seconds: 8)));
 
   /// The phone voice's path: block by block from the cursor's, each
   /// [_blockUnits] unit in turn; each advance moves the cursor to the
@@ -1526,10 +1549,12 @@ class _ReaderScreenState extends State<ReaderScreen>
           if (!live()) return;
           await _stopSpeak();
           final missing = baseLanguage(e.lang) ?? e.lang;
-          _say(noVoiceMessage(missing,
-              internetVoice: _phoneVoices?.any(
-                      (v) => v.lang == missing && v.needsInternet) ??
-                  false));
+          _say(
+              noVoiceMessage(missing,
+                  internetVoice: _phoneVoices?.any(
+                          (v) => v.lang == missing && v.needsInternet) ??
+                      false),
+              voiceSettings: true);
           return;
         } on TtsSpeakException {
           if (!live()) return;
@@ -1879,7 +1904,8 @@ class _ReaderScreenState extends State<ReaderScreen>
           installed: installed,
           choices: _voiceChoices,
           onPick: _pickVoice,
-          systemVoiceOn: _synthEngineHolder != null && _preferSystemVoice),
+          systemVoiceOn: _synthEngineHolder != null && _preferSystemVoice,
+          onOpenSettings: _tts.openSettings),
     );
   }
 

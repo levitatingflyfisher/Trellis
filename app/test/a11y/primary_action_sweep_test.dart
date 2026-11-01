@@ -122,8 +122,19 @@ void main() {
     await runPrimaryActionSweep(tester, pumpScreen: () async {
       await app(tester, tab: 'Library');
       if (find.byType(WorkPage).evaluate().isEmpty) {
-        await tester
-            .tap(find.text('A Rather Longer Title Than Any Row Would Prefer'));
+        // At 3x the Library's head (its line, search and chips) scrolls
+        // with the rows, so the row may be below the fold.
+        final row =
+            find.text('A Rather Longer Title Than Any Row Would Prefer');
+        await tester.scrollUntilVisible(row, 200,
+            scrollable: find
+                .descendant(
+                    of: find.byType(LibraryScreen),
+                    matching: find.byType(Scrollable))
+                .first);
+        await tester.ensureVisible(row);
+        await tester.pumpAndSettle();
+        await tester.tap(row);
         await tester.pumpAndSettle();
       }
       expect(find.byType(WorkPage), findsOneWidget);

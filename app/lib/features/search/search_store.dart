@@ -142,7 +142,18 @@ class SearchStore {
   /// How many rows of each section [search] returns.
   final int pageSize;
 
-  SearchStore(this.db, {this.forceLike = false, this.pageSize = searchPageSize});
+  /// Only what the Library holds (anything kept, made episodes among
+  /// it): the Library's search bar is Latest's, kept to the Library.
+  /// No shows section there; Subscriptions finds shows.
+  final bool libraryOnly;
+
+  SearchStore(this.db,
+      {this.forceLike = false,
+      this.pageSize = searchPageSize,
+      this.libraryOnly = false});
+
+  /// The clause that keeps a query to the Library, after its WHERE.
+  String get _kept => libraryOnly ? " AND w.persistence <> 'ephemeron'" : '';
 
   /// The user's words as an FTS5 query: each word quoted, so nothing they
   /// type is read as syntax, and each one a prefix, so "tim machine"
@@ -215,7 +226,9 @@ class SearchStore {
   }
 
   Future<SearchResults> _search(int profileId, String query) async {
-    final shows = await showsMatching(profileId, query);
+    final shows = libraryOnly
+        ? const <Feed>[]
+        : await showsMatching(profileId, query);
     final titles = await _itemsPage(profileId, query, SearchTier.titles,
         offset: 0, limit: pageSize, withCount: true);
     final notes = await _itemsPage(profileId, query, SearchTier.notes,
@@ -245,24 +258,6 @@ class SearchStore {
       (await _saidPage(profileId, query,
               offset: offset, limit: limit, withCount: false))
           .rows;
-
-  /// Every Library work (anything kept) the words find, in any section:
-  /// the Library's filter, matched as every other search box matches.
-  Future<Set<int>> libraryMatches(int profileId, String query) async {
-    if (matchQuery(query) == null) return const {};
-    final any = _workFilter(query, null, await _useFts());
-    final rows = await db.customSelect('''
-      SELECT w.id AS id FROM ${any.from}
-      WHERE w.profile_id = ? AND w.persistence <> 'ephemeron' AND ${any.where}
-      UNION
-      ${await _saidWorksSql()}
-    ''', variables: [
-      Variable.withInt(profileId),
-      ...any.vars,
-      ...await _saidWorksVars(profileId, query),
-    ]).get();
-    return {for (final r in rows) r.read<int>('id')};
-  }
 
   /// Every word must appear in the show's name, matched as every other
   /// word is: through the index where there is one. All of them, in
@@ -352,7 +347,7 @@ class SearchStore {
     final rows = await db.customSelect('''
       SELECT w.id AS id${withCount ? ', COUNT(*) OVER () AS n' : ''}
       FROM ${f.from}
-      WHERE w.profile_id = ? AND ${f.where}
+      WHERE w.profile_id = ? AND ${f.where}$_kept
       ORDER BY $_recency DESC, w.id DESC
       LIMIT ? OFFSET ?
     ''', variables: [
@@ -408,14 +403,18 @@ class SearchStore {
     var count = 0;
     if (await _useFts()) {
       final match = matchQuery(query)!;
-      final rows = await db.customSelect(saidSql, variables: [
+      final rows = await db.customSelect(
+          libraryOnly ? _keptSaid(saidSql) : saidSql,
+          variables: [
         Variable.withString(match),
         Variable.withInt(profileId),
         Variable.withInt(limit),
         Variable.withInt(offset),
       ]).get();
       if (withCount && rows.isNotEmpty) {
-        count = (await db.customSelect(_saidCountSql, variables: [
+        count = (await db.customSelect(
+                libraryOnly ? _keptSaid(_saidCountSql) : _saidCountSql,
+                variables: [
           Variable.withString(match),
           Variable.withInt(profileId),
         ]).getSingle())
@@ -438,7 +437,7 @@ class SearchStore {
         JOIN alignments a ON a.work_id = s.work_id AND a.segment_idx = s.idx
         JOIN works w ON w.id = s.work_id
         LEFT JOIN episodes e ON e.work_id = w.id
-        WHERE w.profile_id = ? AND s.body LIKE ? ESCAPE '\\'
+        WHERE w.profile_id = ? AND s.body LIKE ? ESCAPE '\\'$_kept
         ORDER BY $_recency DESC, w.id DESC, s.idx
         LIMIT ? OFFSET ?
       ''', variables: [
@@ -469,27 +468,11 @@ class SearchStore {
     );
   }
 
-  /// The works with a transcript sentence the words find, as a SELECT of
-  /// `id` for [libraryMatches] (Library works only).
-  Future<String> _saidWorksSql() async => await _useFts()
-      ? '''SELECT DISTINCT a.work_id AS id FROM segments_fts
-        JOIN alignments a
-          ON a.work_id = segments_fts.rowid / $segmentRowidStride
-         AND a.segment_idx = segments_fts.rowid % $segmentRowidStride
-        JOIN works w ON w.id = a.work_id
-        WHERE segments_fts MATCH ? AND w.profile_id = ?
-          AND w.persistence <> 'ephemeron' '''
-      : '''SELECT DISTINCT s.work_id AS id FROM segments s
-        JOIN alignments a ON a.work_id = s.work_id AND a.segment_idx = s.idx
-        JOIN works w ON w.id = s.work_id
-        WHERE s.body LIKE ? ESCAPE '\\' AND w.profile_id = ?
-          AND w.persistence <> 'ephemeron' ''';
-
-  Future<List<Variable>> _saidWorksVars(int profileId, String query) async => [
-        Variable.withString(
-            await _useFts() ? matchQuery(query)! : _like(query.trim())),
-        Variable.withInt(profileId),
-      ];
+  /// [sql] (one of the transcript queries) kept to the Library.
+  static String _keptSaid(String sql) => sql.replaceFirst(
+      'WHERE segments_fts MATCH ? AND w.profile_id = ?',
+      "WHERE segments_fts MATCH ? AND w.profile_id = ? "
+          "AND w.persistence <> 'ephemeron'");
 
   static String _likeOf(String column) =>
       "$column LIKE ? ESCAPE '\\'"; // copy-typography: code

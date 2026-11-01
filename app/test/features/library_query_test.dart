@@ -43,32 +43,9 @@ void main() {
           readAtMs: readAtMs,
           archivedAtMs: null);
 
-  group('text search: the search engine\'s matches, by work id', () {
-    test('a work the engine matched passes', () {
-      final e = (work: work(title: 'Attention Sovereignty'), episode: null, feedTitle: null);
-      expect(
-          matchesLibraryQuery(e, const LibraryQuery(textSearch: 'sovereign'),
-              textMatches: {e.work.id}),
-          isTrue);
-    });
-
-    test('a work it did not match fails, whatever its title holds', () {
-      final e = (work: work(title: 'Attention Sovereignty'), episode: null, feedTitle: null);
-      expect(
-          matchesLibraryQuery(e, const LibraryQuery(textSearch: 'sovereignty'),
-              textMatches: const {}),
-          isFalse);
-    });
-
-    test('an unset search matches everything', () {
-      final e = (work: work(title: 'Anything'), episode: null, feedTitle: null);
-      expect(matchesLibraryQuery(e, const LibraryQuery()), isTrue);
-    });
-  });
-
   group('type — mapped from the real work kinds, "course" deliberately '
       'absent (courses are never spine works)', () {
-    test('book/article/episode(podcast)/note each map correctly', () {
+    test('book/article/note/audiobook/episode/made each map correctly', () {
       expect(
           matchesLibraryQuery((work: work(kind: 'book'), episode: null, feedTitle: null),
               const LibraryQuery(types: {LibraryItemType.book})),
@@ -80,8 +57,33 @@ void main() {
           isTrue);
       expect(
           matchesLibraryQuery((work: work(kind: 'episode'), episode: episode(), feedTitle: 'F'),
-              const LibraryQuery(types: {LibraryItemType.podcast})),
+              const LibraryQuery(types: {LibraryItemType.episode})),
           isTrue);
+      expect(
+          matchesLibraryQuery(
+              (work: work(kind: 'audiobook'), episode: null, feedTitle: null),
+              const LibraryQuery(types: {LibraryItemType.audiobook})),
+          isTrue);
+      final made = Episode(
+          workId: 2,
+          feedId: 1,
+          guid: 'spoken:1:es',
+          enclosureUrl: 'https://spoken.trellis.invalid/1-es.wav',
+          durationMs: null,
+          publishedAtMs: 1001,
+          readAtMs: null,
+          archivedAtMs: null);
+      expect(
+          matchesLibraryQuery(
+              (work: work(kind: 'episode'), episode: made, feedTitle: 'F'),
+              const LibraryQuery(types: {LibraryItemType.made})),
+          isTrue);
+      expect(
+          matchesLibraryQuery(
+              (work: work(kind: 'episode'), episode: made, feedTitle: 'F'),
+              const LibraryQuery(types: {LibraryItemType.episode})),
+          isFalse,
+          reason: 'a made episode is its own kind');
       expect(
           matchesLibraryQuery((work: work(kind: 'note'), episode: null, feedTitle: null),
               const LibraryQuery(types: {LibraryItemType.note})),
@@ -197,23 +199,31 @@ void main() {
   group('JSON round-trip — the saved-view persistence codec', () {
     test('every field survives encode/decode', () {
       const q = LibraryQuery(
-          textSearch: 'aurora',
-          types: {LibraryItemType.article, LibraryItemType.podcast},
+          types: {LibraryItemType.article, LibraryItemType.episode},
           feedId: 3,
           readState: ReadState.unread,
           pinned: true);
       final decoded = LibraryQuery.fromJson(q.toJson());
-      expect(decoded.textSearch, 'aurora');
-      expect(decoded.types, {LibraryItemType.article, LibraryItemType.podcast});
+      expect(decoded.types, {LibraryItemType.article, LibraryItemType.episode});
       expect(decoded.feedId, 3);
       expect(decoded.readState, ReadState.unread);
+      expect(decoded.pinned, true);
+    });
+
+    test('a view saved before the kinds were renamed keeps the rest and '
+        'drops the kind and words it no longer names', () {
+      final decoded = LibraryQuery.fromJson(const {
+        'textSearch': 'aurora',
+        'types': ['podcast', 'book'],
+        'pinned': true,
+      });
+      expect(decoded.types, {LibraryItemType.book});
       expect(decoded.pinned, true);
     });
 
     test('an empty query round-trips to an empty query', () {
       const q = LibraryQuery();
       final decoded = LibraryQuery.fromJson(q.toJson());
-      expect(decoded.textSearch, isNull);
       expect(decoded.types, isEmpty);
       expect(decoded.feedId, isNull);
       expect(decoded.readState, ReadState.any);
@@ -226,12 +236,7 @@ void main() {
       expect(const LibraryQuery().isEmpty, isTrue);
     });
 
-    test('a blank text search is still empty', () {
-      expect(const LibraryQuery(textSearch: '').isEmpty, isTrue);
-    });
-
     test('any single set field makes it non-empty', () {
-      expect(const LibraryQuery(textSearch: 'x').isEmpty, isFalse);
       expect(
           const LibraryQuery(types: {LibraryItemType.book}).isEmpty, isFalse);
       expect(const LibraryQuery(feedId: 1).isEmpty, isFalse);

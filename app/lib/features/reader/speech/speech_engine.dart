@@ -56,6 +56,29 @@ class SynthResult {
       sampleRate == 0 ? 0 : (samples.length / sampleRate * 1000).round();
 }
 
+/// How a voice is asked to speak a sentence it saves (the one tap's
+/// "How clearly the voice speaks"). [rate] scales the voice's own pace:
+/// 1.0 is as it speaks, 0.8 takes a quarter longer. [careful] asks the
+/// engine to spend more work on each sound where it has a way to; the
+/// phone's voice has none and ignores it.
+class SpeechPace {
+  final double rate;
+  final bool careful;
+  const SpeechPace({this.rate = 1.0, this.careful = false});
+
+  static const natural = SpeechPace();
+
+  @override
+  bool operator ==(Object other) =>
+      other is SpeechPace && other.rate == rate && other.careful == careful;
+
+  @override
+  int get hashCode => Object.hash(rate, careful);
+
+  @override
+  String toString() => 'SpeechPace($rate${careful ? ', careful' : ''})';
+}
+
 /// A neural engine that renders audio the app plays itself. [canPause] is
 /// always true — pause/resume is the player's job ([SpeechPlaybackPipeline]
 /// via `just_audio`), not the engine's.
@@ -63,7 +86,10 @@ abstract interface class SynthesisSpeechEngine implements SpeechEngine {
   @override
   bool get canPause => true;
 
-  Future<SynthResult> synthesize(String sentence, {String? lang});
+  /// [pace] is how a saved episode asks it to be said; an engine with no
+  /// way to vary something leaves that as it is.
+  Future<SynthResult> synthesize(String sentence,
+      {String? lang, SpeechPace pace = SpeechPace.natural});
 
   /// Releases native resources. Called on voice switch and on teardown —
   /// never mid-synthesis (the caller's responsibility to sequence).

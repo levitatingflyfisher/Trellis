@@ -361,6 +361,9 @@ class FakePhoneSpeechSaver implements PhoneSpeechSaver {
   final String? engine;
   final int rate;
   final said = <(String text, String lang, String? voice)>[];
+
+  /// The speech rate each sentence was asked at, in the order said.
+  final rates = <double>[];
   int settingsOpened = 0;
 
   /// A sentence containing this is refused by the engine.
@@ -373,16 +376,20 @@ class FakePhoneSpeechSaver implements PhoneSpeechSaver {
 
   @override
   Future<void> sayToFile(String text,
-      {required String lang, String? voice, required String path}) async {
+      {required String lang,
+      String? voice,
+      required String path,
+      double rate = 1.0}) async {
     if (!langs.contains(lang)) throw StateError('no $lang voice');
     if (refuse != null && text.contains(refuse!)) {
       throw StateError('refused');
     }
     said.add((text, lang, voice));
+    rates.add(rate);
     // A tenth of a second of sound for each character.
-    final samples = Float32List(text.length * rate ~/ 10)
+    final samples = Float32List(text.length * this.rate ~/ 10)
       ..fillRange(0, 10, 0.25);
-    File(path).writeAsBytesSync(wavBytes(samples, rate));
+    File(path).writeAsBytesSync(wavBytes(samples, this.rate));
   }
 
   @override

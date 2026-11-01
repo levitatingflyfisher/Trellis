@@ -212,16 +212,14 @@ void main() {
     await pumpApp(tester);
     await read('Latest', books: false);
 
-    await tester.tap(find.byKey(const Key('manage-feeds')));
-    await tester.pumpAndSettle();
+    await toTab(tester, 'Subscriptions');
     await read('Books shelf', feed: false);
     await tester.tap(find.text('Night Sky'));
     await tester.pumpAndSettle();
     await read('show page', books: false);
     await tester.pageBack();
     await tester.pumpAndSettle();
-    await tester.pageBack();
-    await tester.pumpAndSettle();
+    await toTab(tester, 'Latest');
 
     await tester.tap(find.byKey(const Key('river-search')));
     await tester.pumpAndSettle();
@@ -247,15 +245,11 @@ void main() {
     menus['book']!['work page'] = await pageMenuOf('Marsh notes, a book');
 
     const pageButtons = {
+      // Queue holds these two, and Download is its own control
+      // (board-0161); the other way to play is in the ⋮ like everywhere.
       'Play next',
       'Play last',
       'Download',
-      // The page has Listen, which does what Settings says, and a button
-      // for the other way; neither repeats in its ⋮.
-      'Stream now',
-      'Download, then play',
-      // Only an untranscribed episode's Translate… is the same act; aurora
-      // has a transcript, so its ⋮ keeps it.
     };
     expect(shared(menus['episode']!['Latest']!), contains('Transcribe again'),
         reason: 'aurora is transcribed, and every screen knows it');

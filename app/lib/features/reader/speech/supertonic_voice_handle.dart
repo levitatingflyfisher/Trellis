@@ -78,11 +78,28 @@ abstract interface class SupertonicVoiceHandle {
   /// [supertonicSupportedLangs]: [SupertonicSpeechEngine] checks that
   /// before a handle is ever opened, so a handle is never asked to
   /// refuse.
-  Future<SynthResult> generate(String text, {required String lang});
+  ///
+  /// [pace] is how it is said ([supertonicDurationSec] and
+  /// [supertonicDenoisingSteps]); Natural is the voice as it speaks.
+  Future<SynthResult> generate(String text,
+      {required String lang, SpeechPace pace = SpeechPace.natural});
 
   /// Releases every native ONNX session this handle opened.
   Future<void> dispose();
 }
+
+/// The denoising steps the voice takes on each sentence: 8 at its own
+/// pace (upstream's demo default), 12 when [SpeechPace.careful] asks for
+/// more work on each sound. Steps are the engine's own quality setting;
+/// more of them refine the sound further and cost time in proportion.
+int supertonicDenoisingSteps(SpeechPace pace) => pace.careful ? 12 : 8;
+
+/// How long a sentence the duration model predicts at [predictedSec]
+/// is rendered: divided by [SpeechPace.rate], as upstream's own speed
+/// setting divides it. A rate of 0.75 makes every sound a third longer;
+/// the pitch stays the voice's own.
+double supertonicDurationSec(double predictedSec, SpeechPace pace) =>
+    predictedSec / pace.rate;
 
 typedef SupertonicVoiceHandleFactory = Future<SupertonicVoiceHandle> Function(
     SupertonicVoiceFiles files);

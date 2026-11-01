@@ -26,6 +26,7 @@ import '../reader/translation/brain_translator.dart'
     show anthropicTranslationEngine;
 import '../reader/translation/language_names.dart';
 import '../transcribe/transcript_writer.dart' show encodeWordTimingBlob;
+import 'listen_clearness.dart';
 import 'spoken_guid.dart';
 import 'spoken_voice.dart';
 
@@ -71,7 +72,8 @@ Future<void> tagWav(File wav,
   }
 }
 
-/// The pause after a sentence, and the longer one after a paragraph.
+/// The pause after a sentence, and the longer one after a paragraph, at
+/// the Natural step ([ListenClearness]); a slower step asks for longer.
 const sentenceGapMs = 250;
 const segmentGapMs = 450;
 
@@ -96,7 +98,9 @@ class SpokenCancelled implements Exception {
 
 /// Says [sentences] in order with [synth] into one 16-bit mono WAV at
 /// [wav], written as it goes so an hour of speech is never held in
-/// memory. A sentence the voice cannot say is left out. Throws
+/// memory. A sentence the voice cannot say is left out. [sentenceGapMs]
+/// of silence follows each sentence, [segmentGapMs] the last of a
+/// paragraph; the times stored count them. Throws
 /// [SpokenCancelled] when [cancelled] turns true, and [StateError] when
 /// nothing could be said at all.
 Future<SpokenRender> renderSpoken({
@@ -105,6 +109,8 @@ Future<SpokenRender> renderSpoken({
   required File wav,
   void Function(int done, int total)? onProgress,
   bool Function()? cancelled,
+  int sentenceGapMs = sentenceGapMs,
+  int segmentGapMs = segmentGapMs,
 }) async {
   await wav.parent.create(recursive: true);
   final out = await wav.open(mode: FileMode.write);
@@ -225,6 +231,11 @@ Future<int?> spokenEpisodeOf(AppDatabase db, int originalId, String lang) async 
   return row?.workId;
 }
 
+/// How clearly the made episode [spokenId] was spoken; Natural for one
+/// made before that was stored.
+Future<ListenClearness> spokenClearnessOf(AppDatabase db, int spokenId) async =>
+    ListenClearness.parse((await db.feedsDao.episodeOf(spokenId))?.clearness);
+
 /// Every spoken translation into [lang] that has been made, as its
 /// original's work id to its own: what a whole list asks at once, in one
 /// query rather than one a row.
@@ -237,6 +248,8 @@ Future<Map<int, int>> spokenEpisodesIn(AppDatabase db, String lang) async {
   };
 }
 
+/// [kept]: the person asked for it (a tap), not make ahead.
+///
 /// Stores [render] as an episode of [original]'s show: its text is the
 /// translation, a segment for each of the original's, with the times the
 /// page lights by; its audio is [audio], moved to where the player looks
@@ -251,9 +264,11 @@ Future<int> storeSpokenEpisode({
   required String lang,
   required String voice,
   VoiceKind voiceKind = VoiceKind.machine,
+  ListenClearness clearness = ListenClearness.natural,
   required SpokenRender render,
   required File audio,
   required File Function(int workId, String url) audioFileFor,
+  bool kept = false,
 }) async {
   final ext = audio.path.substring(audio.path.lastIndexOf('.'));
   final url =
@@ -289,8 +304,8 @@ Future<int> storeSpokenEpisode({
     _ => 'translated on this device',
   };
   final about = [
-    'This is “${original.title}” in $language, spoken by '
-        '${spokenVoicePhrase(voiceKind)} ($voice).',
+    'This is “${original.title}” in $language, ${clearness.spokenPhrase} '
+        'by ${spokenVoicePhrase(voiceKind)} ($voice).',
     'The words were $where from a transcript made on this device, so both '
         'can be wrong in places.',
   ];
@@ -307,7 +322,9 @@ Future<int> storeSpokenEpisode({
       await (db.delete(db.workNotes)..where((n) => n.workId.equals(id))).go();
       await (db.update(db.episodes)..where((e) => e.workId.equals(id)))
           .write(EpisodesCompanion(
-              enclosureUrl: Value(url), voiceKind: Value(voiceKind.name)));
+              enclosureUrl: Value(url),
+              voiceKind: Value(voiceKind.name),
+              clearness: Value(clearness.name)));
       await (db.update(db.works)..where((w) => w.id.equals(id)))
           .write(WorksCompanion(sourceUrl: Value(url)));
     } else {
@@ -315,7 +332,12 @@ Future<int> storeSpokenEpisode({
           profileId: original.profileId,
           kind: 'episode',
           title: '${original.title} ($language)',
-          persistence: original.persistence,
+          // Asked for, it is kept: in the Library whether or not its
+          // original was (lead's ruling, 12 Nov: the Library is what you
+          // keep, made episodes among it). Made ahead by a show's switch,
+          // it arrives like any episode, and make ahead may take its
+          // room back.
+          persistence: kept ? 'work' : original.persistence,
           firstSeenEpochDay: epochDayUtcNow(),
           sourceUrl: url,
           lang: lang);
@@ -325,6 +347,7 @@ Future<int> storeSpokenEpisode({
           guid: spokenGuid(original.id, lang),
           enclosureUrl: url,
           voiceKind: voiceKind.name,
+          clearness: clearness.name,
           // Just after the original, so the two sit together in the show.
           publishedAtMs: episode.publishedAtMs + 1);
     }

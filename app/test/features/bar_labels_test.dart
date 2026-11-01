@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
+import 'package:trellis/features/library/library_screen.dart';
 import 'package:trellis/main.dart';
 
 import '../support/fake_player.dart';
@@ -84,13 +85,12 @@ void main() {
     await pumpAt(tester, const Size(360, 780), 1.3);
     await toTab(tester, 'Library');
     seen('Filter');
-    barHolds(tester, 'Library',
-        [('Filter', 'Filter'), ('Subscriptions', 'Subscriptions')]);
+    barHolds(tester, 'Library', [('Filter', 'Filter')]);
     await toTab(tester, 'Latest');
-    seen('Subscriptions');
-    // Latest has nothing to select here, so no ⋮ (board-0131); Queue,
-    // Courses and Settings have no rare actions of their own.
-    barHolds(tester, 'Latest', [('Subscriptions', 'Subscriptions')]);
+    // Subscriptions is a bottom-bar item now (owner, 12 Nov), and a long
+    // press selects, so Latest's bar holds no command; nor do Queue,
+    // Courses and Settings, which have no rare actions of their own.
+    barHolds(tester, 'Latest', []);
     await toTab(tester, 'Queue');
     barHolds(tester, 'Queue', []);
     await toTab(tester, 'Courses');
@@ -98,7 +98,18 @@ void main() {
     await toTab(tester, 'Settings');
     barHolds(tester, 'Settings', []);
     await toTab(tester, 'Library');
-    await tester.tap(find.text('A Rather Longer Title Than Any Bar Would Prefer'));
+    // At 3x the Library's head scrolls with its rows: the row may sit
+    // below the fold.
+    final row = find.text('A Rather Longer Title Than Any Bar Would Prefer');
+    await tester.scrollUntilVisible(row, 200,
+        scrollable: find
+            .descendant(
+                of: find.byType(LibraryScreen),
+                matching: find.byType(Scrollable))
+            .first);
+    await tester.ensureVisible(row);
+    await tester.pumpAndSettle();
+    await tester.tap(row);
     await tester.pumpAndSettle();
     // The work page's bar names its menu too.
     seen('More');
@@ -130,18 +141,33 @@ void main() {
   testWidgets('320 dp at 3.0x: the bars do not overflow and keep their '
       'titles whole', (tester) async {
     await pumpAt(tester, const Size(320, 640), 3.0);
-    for (final tab in ['Latest', 'Queue', 'Courses', 'Settings', 'Library']) {
+    for (final tab in [
+      'Subscriptions',
+      'Latest',
+      'Queue',
+      'Courses',
+      'Settings',
+      'Library',
+    ]) {
       await toTab(tester, tab);
       expect(tester.takeException(), isNull, reason: tab);
     }
     // The house floor: titles stay whole at 320 x 3.0, commands named.
     await toTab(tester, 'Library');
-    barHolds(tester, 'Library',
-        [('Filter', 'Filter'), ('Subscriptions', 'Subscriptions')]);
-    await toTab(tester, 'Latest');
-    barHolds(tester, 'Latest', [('Subscriptions', 'Subscriptions')]);
+    barHolds(tester, 'Library', [('Filter', 'Filter')]);
     await toTab(tester, 'Library');
-    await tester.tap(find.text('A Rather Longer Title Than Any Bar Would Prefer'));
+    // At 3x the Library's head scrolls with its rows: the row may sit
+    // below the fold.
+    final row = find.text('A Rather Longer Title Than Any Bar Would Prefer');
+    await tester.scrollUntilVisible(row, 200,
+        scrollable: find
+            .descendant(
+                of: find.byType(LibraryScreen),
+                matching: find.byType(Scrollable))
+            .first);
+    await tester.ensureVisible(row);
+    await tester.pumpAndSettle();
+    await tester.tap(row);
     await tester.pumpAndSettle();
     expect(tester.takeException(), isNull, reason: 'reader');
   });

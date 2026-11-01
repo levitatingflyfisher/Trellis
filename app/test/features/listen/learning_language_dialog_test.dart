@@ -153,8 +153,10 @@ void main() {
   test('the episode page says which episode it asks about, so the note '
       'about missing languages shows there too', () {
     final page = File('lib/features/works/work_page.dart').readAsStringSync();
-    final change = page.substring(page.indexOf("Key('learning-language-change')"));
-    final call = change.substring(0, change.indexOf('child:'));
+    // Change learning language is in the page's ⋮ (board-0161).
+    final change = page.substring(page.indexOf("case 'learning-language':"));
+    final call = change.substring(0, change.indexOf('return;'));
+    expect(call, contains('pickLanguage('));
     expect(call, contains('of: ('));
   });
 

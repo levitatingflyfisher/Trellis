@@ -165,7 +165,10 @@ void main() {
     expect(gate.hold, isNull, reason: 'the page below is in flight');
 
     // A filter change replaces the list; its footer asks for the next
-    // page and is turned away by the one still in flight.
+    // page and is turned away by the one still in flight. The chips
+    // scroll with the list, so back to the top for them first.
+    await tester.scrollUntilVisible(find.byKey(const Key('chip-text')), -300,
+        scrollable: list, maxScrolls: 400);
     await tester.tap(find.byKey(const Key('chip-text')));
     await tester.pump();
     await tester.pump();

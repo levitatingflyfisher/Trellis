@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/feeds/feeds_screen.dart';
+import 'package:trellis/features/feeds/subscribe_screen.dart';
 import 'package:trellis/features/reader/reader_screen.dart';
 import 'package:trellis/features/works/work_page.dart';
 import 'package:trellis/main.dart';
@@ -80,20 +81,22 @@ void main() {
     await tester.pumpAndSettle();
   }
 
-  testWidgets('Subscriptions opens inside Latest, under the bottom bar; '
-      'back pops within the tab', (tester) async {
+  testWidgets('Subscriptions is a tab: Follow opens inside it, under the '
+      'bottom bar; back pops within the tab', (tester) async {
     await seedProfile();
     await pumpApp(tester);
 
-    await tester.tap(find.byKey(const Key('manage-feeds')));
-    await tester.pumpAndSettle();
+    await toTab(tester, 'Subscriptions');
     expect(find.byType(FeedsScreen), findsOneWidget);
+    await tester.tap(find.text('Follow a feed'));
+    await tester.pumpAndSettle();
+    expect(find.byType(SubscribeScreen), findsOneWidget);
     expect(find.byType(NavigationBar), findsOneWidget,
         reason: 'a page pushed from a tab keeps the bottom bar');
 
     await back(tester);
-    expect(find.byType(FeedsScreen), findsNothing);
-    expect(appBarTitle('Latest'), findsOneWidget);
+    expect(find.byType(SubscribeScreen), findsNothing);
+    expect(appBarTitle('Subscriptions'), findsOneWidget);
     expect(find.byType(NavigationBar), findsOneWidget);
   });
 
@@ -102,22 +105,23 @@ void main() {
     await seedProfile();
     await pumpApp(tester);
 
-    await tester.tap(find.byKey(const Key('manage-feeds')));
+    await toTab(tester, 'Subscriptions');
+    await tester.tap(find.text('Follow a feed'));
     await tester.pumpAndSettle();
-    expect(find.byType(FeedsScreen), findsOneWidget);
+    expect(find.byType(SubscribeScreen), findsOneWidget);
 
-    // The Library is at its root: back there must not pop Latest's page
-    // out of sight.
+    // The Library is at its root: back there must not pop the
+    // Subscriptions tab's page out of sight.
     await toTab(tester, 'Library');
     expect(appBarTitle('Library'), findsOneWidget);
     await back(tester);
-    await toTab(tester, 'Latest');
-    expect(find.byType(FeedsScreen), findsOneWidget,
-        reason: 'Latest kept its page across the trip');
+    await toTab(tester, 'Subscriptions');
+    expect(find.byType(SubscribeScreen), findsOneWidget,
+        reason: 'Subscriptions kept its page across the trip');
 
-    await toTab(tester, 'Latest');
-    expect(find.byType(FeedsScreen), findsNothing);
-    expect(appBarTitle('Latest'), findsOneWidget);
+    await toTab(tester, 'Subscriptions');
+    expect(find.byType(SubscribeScreen), findsNothing);
+    expect(appBarTitle('Subscriptions'), findsOneWidget);
   });
 
   testWidgets('a Latest card opens its episode page inside the tab; Play '
@@ -228,19 +232,5 @@ void main() {
     await pumpApp(tester);
     await toTab(tester, 'Library');
     expect(find.text('Subscribe to a feed'), findsOneWidget);
-  });
-
-  testWidgets('Subscriptions is one tap from the Library too, inside the '
-      'tab', (tester) async {
-    await seedProfile();
-    await pumpApp(tester);
-    await toTab(tester, 'Library');
-
-    await tester.tap(find.byKey(const Key('library-subscriptions')));
-    await tester.pumpAndSettle();
-    expect(find.byType(FeedsScreen), findsOneWidget);
-    expect(find.byType(NavigationBar), findsOneWidget);
-    await back(tester);
-    expect(appBarTitle('Library'), findsOneWidget);
   });
 }

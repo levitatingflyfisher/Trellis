@@ -47,17 +47,28 @@ void main() {
   }
 
   List<String> barLabels(WidgetTester tester) => [
-    for (final d
-        in tester
-            .widget<NavigationBar>(find.byType(NavigationBar))
-            .destinations)
-      (d as NavigationDestination).label,
+    for (final d in tester.widgetList<NavigationDestination>(
+      find.descendant(
+        of: find.byType(NavigationBar),
+        matching: find.byType(NavigationDestination),
+      ),
+    ))
+      d.label,
   ];
 
-  const tabs = ['Latest', 'Queue', 'Library', 'Courses', 'Settings'];
+  // The owner's order (12 Nov): "Subscriptions, Latest, Queue, Library,
+  // Courses, and then settings".
+  const tabs = [
+    'Subscriptions',
+    'Latest',
+    'Queue',
+    'Library',
+    'Courses',
+    'Settings',
+  ];
 
-  testWidgets('the bottom bar has the same five items on every tab, and '
-      'Settings opens the Settings screen', (tester) async {
+  testWidgets('the bottom bar has the same six items on every tab, in the '
+      'owner’s order, and Settings opens the Settings screen', (tester) async {
     await pumpApp(tester);
     for (final tab in tabs) {
       await toTab(tester, tab);
@@ -68,6 +79,28 @@ void main() {
       find.descendant(of: find.byType(AppBar), matching: find.text('Settings')),
       findsOneWidget,
     );
+  });
+
+  testWidgets('Subscriptions is the first tab, a root with no back arrow; '
+      'Latest and the Library no longer carry its door', (tester) async {
+    await pumpApp(tester);
+    expect(
+      find.descendant(of: find.byType(AppBar), matching: find.text('Latest')),
+      findsOneWidget,
+      reason: 'the app still opens on Latest',
+    );
+    expect(find.byKey(const Key('manage-feeds')), findsNothing);
+    await toTab(tester, 'Library');
+    expect(find.byKey(const Key('library-subscriptions')), findsNothing);
+    await toTab(tester, 'Subscriptions');
+    expect(
+      find.descendant(
+        of: find.byType(AppBar),
+        matching: find.text('Subscriptions'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.byType(BackButton), findsNothing);
   });
 
   testWidgets('Settings holds every app-wide item, grouped, each with its '
@@ -101,12 +134,21 @@ void main() {
     );
   });
 
-  for (final width in [360.0, 320.0]) {
-    testWidgets('at ${width.toInt()} dp and large text (1.3, the bar’s own '
-        'cap) every label shows whole on one line', (tester) async {
+  // Six items share the width: at 360 dp each has 60, and at 320 dp 53.
+  // "Subscriptions" needs about 104 at the bar's 1.3x cap and 80 at 1.0,
+  // so it can't be whole at the bar's own size on any phone this narrow.
+  // It is drawn smaller, just enough to fit on one line, never cut and
+  // never an icon alone; every label that fits keeps the bar's size.
+  for (final (width, scale, fullSize) in [
+    (360.0, 1.3, ['Latest', 'Queue', 'Library']),
+    (320.0, 1.3, ['Latest', 'Queue']),
+    (412.0, 1.0, ['Latest', 'Queue', 'Library', 'Courses', 'Settings']),
+  ]) {
+    testWidgets('at ${width.toInt()} dp and text $scale every label shows '
+        'whole on one line; $fullSize keep the bar’s size', (tester) async {
       tester.view.physicalSize = Size(width, 700);
       tester.view.devicePixelRatio = 1.0;
-      tester.platformDispatcher.textScaleFactorTestValue = 1.3;
+      tester.platformDispatcher.textScaleFactorTestValue = scale;
       addTearDown(tester.view.reset);
       addTearDown(tester.platformDispatcher.clearAllTestValues);
       await pumpApp(tester);
@@ -122,6 +164,11 @@ void main() {
                 )
                 .last,
           );
+          if (tab == tabs.first) {
+            debugPrint('bar-fit ${width.toInt()} dp at $scale: $label '
+                'drawn at ${(paragraph.textScaler.scale(12) / 12).toStringAsFixed(2)}x '
+                'in ${paragraph.size.width.toStringAsFixed(1)} dp');
+          }
           // The width it needs unwrapped fits the width it was given:
           // one line, nothing cut.
           expect(
@@ -129,13 +176,24 @@ void main() {
             lessThanOrEqualTo(paragraph.size.width + 0.5),
             reason: '$label on $tab',
           );
-          expect(
-            paragraph.textScaler.scale(10),
-            closeTo(13, 0.01),
-            reason: 'the label is drawn at the large text size',
-          );
+          expect(paragraph.maxLines ?? 1, 1, reason: '$label on $tab');
+          if (fullSize.contains(label)) {
+            expect(
+              paragraph.textScaler.scale(10),
+              closeTo(10 * scale, 0.01),
+              reason: '$label is drawn at the bar’s own size',
+            );
+          }
         }
       }
+      expect(
+        find.descendant(
+          of: find.byType(NavigationBar),
+          matching: find.byType(Icon),
+        ),
+        findsNWidgets(tabs.length),
+        reason: 'one icon per item, each beside its words',
+      );
     });
   }
 

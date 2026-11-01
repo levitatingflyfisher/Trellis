@@ -76,8 +76,9 @@ docs/research/  The design panel's full output. Treat as provenance, not law.
 ## Words on screen
 
 Made-up coinages never reach the screen (operator ruling): the River is
-**Latest**, Up Next is the **Queue** (a tab: Latest · Queue · Library ·
-Courses · Settings), the follow list is **Subscriptions**, the day-grouped listening
+**Latest**, Up Next is the **Queue** (the tabs, in the owner's order:
+Subscriptions · Latest · Queue · Library · Courses · Settings), the follow
+list is **Subscriptions** (the first tab), the day-grouped listening
 record is **History** (its door is on the Queue bar), Echo is **What you've built**, the espalier wall is the
 **course map**, rungs are **steps**, sigma is **Focus spread**, Parafoveal
 is **Nearby words**. Real terms (RSVP, parafoveal preview, SM-2, FSRS) are

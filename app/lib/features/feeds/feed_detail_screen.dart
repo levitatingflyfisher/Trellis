@@ -236,22 +236,7 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
           : AppBar(
               title: Text(_feed.title.isEmpty ? _feed.url : _feed.title,
                   overflow: TextOverflow.ellipsis),
-              actions: [
-                if (episodes?.isNotEmpty ?? false)
-                  OhBarActions(children: [
-                    OhBarOverflow<String>(
-                      key: const Key('podcast-more'),
-                      onSelected: (_) => _selection.enter(),
-                      itemBuilder: (_) => const [
-                        PopupMenuItem(
-                          key: Key('podcast-select'),
-                          value: 'select',
-                          child: Text('Select'),
-                        ),
-                      ],
-                    ),
-                  ]),
-              ],
+              // No ⋮: a long press selects (owner, 12 Nov).
             ),
       body: CappedBody(child: _bulk.scope(child: switch (episodes) {
         null => const Center(child: CircularProgressIndicator()),

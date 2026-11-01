@@ -44,6 +44,7 @@ class SettingsScreen extends StatefulWidget {
     this.localMlAvailable = false,
     this.hasDownloadedVoice,
     this.listVoices,
+    this.openVoiceSettings,
     this.brainStore,
     this.onOpenModels,
     this.onOpenBackup,
@@ -71,6 +72,10 @@ class SettingsScreen extends StatefulWidget {
 
   /// The phone's installed voices, for Read aloud voices; null hides it.
   final Future<List<SystemVoice>?> Function()? listVoices;
+
+  /// Opens Android's text-to-speech settings, from the voices sheet
+  /// where a language has no voice. Null hides the button.
+  final Future<bool> Function()? openVoiceSettings;
   final BrainStore? brainStore;
   final VoidCallback? onOpenModels;
   final VoidCallback? onOpenBackup;
@@ -214,6 +219,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         installed: installed,
         choices: choices,
         systemVoiceOn: _downloadedVoice && systemVoice,
+        onOpenSettings: widget.openVoiceSettings,
         onPick: (lang, voiceId) {
           choices = {...choices, lang: voiceId};
           unawaited(
@@ -365,6 +371,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           : languageDisplayName(lang),
                     );
                   },
+                ),
+              if (jobs != null)
+                ListenableBuilder(
+                  listenable: jobs,
+                  builder: (context, _) => _door(
+                    const Key('listen-clearness-setting'),
+                    Icons.record_voice_over_outlined,
+                    'How clearly the voice speaks',
+                    () => unawaited(jobs.chooseClearness(context)),
+                    subtitle: jobs.clearness.label,
+                  ),
                 ),
               SwitchListTile(
                 key: const Key('scheduler-toggle'),

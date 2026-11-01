@@ -56,10 +56,15 @@ abstract interface class PhoneSpeechSaver {
   Future<PhoneVoices?> voices();
 
   /// Writes [text] said in [lang] to [path] as a WAV file, with the voice
-  /// named [voice] when it is given and still installed. Completes when
-  /// the file is whole; throws when the engine refused or failed.
+  /// named [voice] when it is given and still installed, at speech
+  /// [rate] (Android's: 1.0 is the voice's own pace, 0.5 half as fast).
+  /// Completes when the file is whole; throws when the engine refused or
+  /// failed.
   Future<void> sayToFile(String text,
-      {required String lang, String? voice, required String path});
+      {required String lang,
+      String? voice,
+      required String path,
+      double rate = 1.0});
 
   /// Opens Android's text-to-speech settings, where a voice is added.
   /// False when this phone has no such page.
@@ -129,14 +134,20 @@ String phoneVoiceName(String? engine) => engine == null || engine.isEmpty
 
 /// Says one sentence with the phone's voice and hands back its sound, as
 /// the downloaded voice does: through a WAV file in [dir] that is gone
-/// again when this returns.
+/// again when this returns. [pace]'s rate is the phone's speech rate;
+/// Android has no way to ask for more careful sounds, so
+/// [SpeechPace.careful] changes nothing here.
 Future<SynthResult> sayWithPhone(PhoneSpeechSaver saver, String text,
-    {required String lang, String? voice, required Directory dir}) async {
+    {required String lang,
+    String? voice,
+    required Directory dir,
+    SpeechPace pace = SpeechPace.natural}) async {
   await dir.create(recursive: true);
   final file = File('${dir.path}/phone-${DateTime.now().microsecondsSinceEpoch}'
       '-${_next++}.wav');
   try {
-    await saver.sayToFile(text, lang: lang, voice: voice, path: file.path);
+    await saver.sayToFile(text,
+        lang: lang, voice: voice, path: file.path, rate: pace.rate);
     final read = readWav(await file.readAsBytes());
     if (read == null) {
       throw StateError('the phone’s voice wrote audio this can’t read');
@@ -178,9 +189,17 @@ class MethodChannelPhoneSpeechSaver implements PhoneSpeechSaver {
 
   @override
   Future<void> sayToFile(String text,
-      {required String lang, String? voice, required String path}) async {
-    final ok = await _channel.invokeMethod<bool>('sayToFile',
-        {'text': text, 'lang': lang, 'voice': voice, 'path': path});
+      {required String lang,
+      String? voice,
+      required String path,
+      double rate = 1.0}) async {
+    final ok = await _channel.invokeMethod<bool>('sayToFile', {
+      'text': text,
+      'lang': lang,
+      'voice': voice,
+      'path': path,
+      'rate': rate,
+    });
     if (ok != true) throw StateError('the phone’s voice wrote nothing');
   }
 

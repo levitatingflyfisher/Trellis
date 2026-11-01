@@ -9,6 +9,7 @@ library;
 
 import 'package:flutter/widgets.dart';
 
+import 'listen_clearness.dart';
 import '../../db/database.dart';
 import '../../services/device_services.dart';
 import '../player/player_controller.dart';
@@ -36,6 +37,10 @@ class ListenJobs extends ChangeNotifier {
   String? get language => null;
   Future<void> refresh() async {}
   Future<void> refreshVoices() async {}
+  /// Nothing is spoken on the web, so the clearness setting is only shown.
+  ListenClearness get clearness => ListenClearness.natural;
+  Future<ListenClearness?> chooseClearness(BuildContext context) async =>
+      null;
   Future<void> resumeLine() async {}
   Future<void> stopAll() async {}
   ListenOffer? offerFor(Work work, Episode? episode, {String? feedLang}) =>

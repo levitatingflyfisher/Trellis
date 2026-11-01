@@ -24,7 +24,8 @@ class FakeSynthesisSpeechEngine implements SynthesisSpeechEngine {
   bool get canPause => true;
 
   @override
-  Future<SynthResult> synthesize(String sentence, {String? lang}) {
+  Future<SynthResult> synthesize(String sentence,
+      {String? lang, SpeechPace pace = SpeechPace.natural}) {
     calls.add(FakeSynthesisCall(sentence, lang));
     final c = Completer<SynthResult>();
     _completers.add(c);

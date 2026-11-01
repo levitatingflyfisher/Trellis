@@ -124,7 +124,7 @@ void main() {
           voiceFor: (_, lang) async => (
             name: 'Test voice',
             voiceKind: VoiceKind.machine,
-            say: (String t) async =>
+            say: (String t, SpeechPace p) async =>
                 SynthResult(samples: Float32List(100), sampleRate: 1000),
           ),
           audioFileFor: services.audioFileFor,
@@ -185,18 +185,23 @@ void main() {
         'German / Text only, no audio yet');
   });
 
-  testWidgets('tapping a language with audio goes to that episode and '
-      'plays it', (tester) async {
+  // Board-0161: the language list is the one switch for listening and
+  // reading; a row chooses, Play plays.
+  testWidgets('tapping a language with audio makes it Play’s: Play plays '
+      'that episode, from this page', (tester) async {
     final spanish = await madeIn('es');
     await pumpPage(tester, original, null);
 
     await tester.tap(find.byKey(const Key('lang-es')));
     await tester.pumpAndSettle();
+    expect(said(tester, const Key('mode-listen')), 'Play in Spanish');
+    await tester.tap(find.byKey(const Key('mode-listen')));
+    await tester.pumpAndSettle();
 
     expect(controller.current?.id, spanish);
     expect(
         tester.widget<Text>(find.byKey(const Key('work-page-title'))).data,
-        'Aurora season (es)');
+        'Aurora season');
   });
 
   testWidgets('a made episode’s page lists the original and its sisters, '
@@ -231,6 +236,10 @@ void main() {
       await pumpPage(tester, original, j);
 
       await tester.tap(find.byKey(const Key('lang-es')));
+      for (var i = 0; i < 10; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      await tester.tap(find.byKey(const Key('mode-read')));
       for (var i = 0; i < 20; i++) {
         await tester.pump(const Duration(milliseconds: 50));
       }
@@ -256,8 +265,8 @@ void main() {
     });
   });
 
-  testWidgets('reading the learning language when its audio is made says '
-      'the audio is its own episode, and plays it', (tester) async {
+  testWidgets('the learning language made: the page opens on it, and Read '
+      'says the audio is its own episode, and plays it', (tester) async {
     await db.deviceSettingsDao.write(learningLanguageKey, 'es');
     await translation(original, 'es', 'Hola.');
     final spanish = await madeIn('es');
@@ -265,7 +274,9 @@ void main() {
     await tester.runAsync(() => j.ready);
     await pumpPage(tester, original, j);
 
-    await tester.tap(find.byKey(const Key('read-in-language')));
+    // Made, so the page opens on Spanish: Read reads it.
+    expect(said(tester, const Key('mode-listen')), 'Play in Spanish');
+    await tester.tap(find.byKey(const Key('mode-read')));
     await tester.pumpAndSettle();
 
     expect(find.byType(ReaderScreen), findsOneWidget);

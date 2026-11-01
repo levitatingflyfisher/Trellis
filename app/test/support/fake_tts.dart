@@ -27,6 +27,17 @@ class FakeTtsSpeaker implements TtsSpeaker {
   /// How many times [voices] was asked.
   int voicesCalls = 0;
 
+  /// How many times Android's text-to-speech settings were asked for,
+  /// and whether this phone opens them.
+  int settingsOpened = 0;
+  bool opensSettings = true;
+
+  @override
+  Future<bool> openSettings() async {
+    settingsOpened++;
+    return opensSettings;
+  }
+
   @override
   Future<List<SystemVoice>?> voices() async {
     voicesCalls++;

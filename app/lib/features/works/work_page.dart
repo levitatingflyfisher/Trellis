@@ -2,15 +2,14 @@
 /// Every row's tap opens it (`WorkDoors.open`); a row's Play still plays
 /// at once and never comes here.
 ///
-/// No mode is primary: Listen, Read and (for video) Watch sit side by
-/// side at equal weight, and a mode that can't work says why instead of
-/// hiding. The page opens on the mode and language last used for this
-/// work, so coming back is one tap from where it was left.
-///
-/// An episode that can be made in the learning language shows four
-/// choices as one group instead: listen or read, in the original or in
-/// that language. Listening in it is the one tap, the same job as the
-/// second button on the episode's row.
+/// One obvious main action (board-0161, owner: "clicking an episode is
+/// insane when there are immediately 12 buttons"): Play for audio, Read
+/// for a text. Beside it at most three: Read, Queue and Download for an
+/// episode; Listen for a text. Below them the language list is the one
+/// switch for listening and reading together: Play plays the chosen
+/// language's made audio when it is on the phone, Read reads its text.
+/// Everything else is in the ⋮. No control is shown greyed out: where
+/// something is not offered, one plain line says why.
 library;
 
 export '../transcribe/job_cards.dart' show transcribeEstimate;
@@ -41,46 +40,6 @@ import 'remove_undo.dart';
 import 'work_menu.dart';
 import 'work_open.dart';
 import 'work_row.dart';
-
-enum WorkMode { listen, read, watch }
-
-/// The mode this work was last used in: the newest of the mode the page
-/// last opened it in ([Works.lastMode]), the reader's place (read, or
-/// speak, which is listening to a text) and the player's raw place. The
-/// page's own record covers the ways in that keep no place (the
-/// transcript, the show notes); the places cover use that never came
-/// through the page (a row's Play). With none, the kind's own mode:
-/// Listen for audio, Read for a text.
-WorkMode lastUsedMode({
-  required bool audio,
-  Work? work,
-  Position? position,
-  PlayerPosition? player,
-}) {
-  final candidates = <(int, WorkMode)>[
-    if (work?.lastMode case final mode? when work?.lastModeAtMs != null)
-      (
-        work!.lastModeAtMs!,
-        WorkMode.values.firstWhere(
-          (m) => m.name == mode,
-          orElse: () => audio ? WorkMode.listen : WorkMode.read,
-        ),
-      ),
-    if (position != null)
-      (
-        position.updatedAtMs,
-        position.lastModality == 'read' ? WorkMode.read : WorkMode.listen,
-      ),
-    if (player != null && player.tMs > 0) (player.updatedAtMs, WorkMode.listen),
-  ];
-  if (candidates.isEmpty) return audio ? WorkMode.listen : WorkMode.read;
-  // The first listed wins a tie: the page's record is the deliberate one.
-  var best = candidates.first;
-  for (final c in candidates.skip(1)) {
-    if (c.$1 > best.$1) best = c;
-  }
-  return best.$2;
-}
 
 /// A language the work can be read in: its original, or a translation
 /// that already exists for it.
@@ -140,7 +99,9 @@ class _WorkPageState extends State<WorkPage> {
   WorkNote? _notes;
   String? _opening; // a text work's first lines, as its description
   WorkRowFacts? _facts;
-  WorkMode? _mode;
+  /// The listener picked a language on this page (this visit): the
+  /// default no longer applies.
+  bool _languageChosenHere = false;
   List<WorkLanguage> _translations = const [];
   WorkLanguage _language = const WorkLanguage.original();
   List<CaptureRow> _captures = const [];
@@ -244,26 +205,6 @@ class _WorkPageState extends State<WorkPage> {
     return s != null && s.downloading ? s : null;
   }
 
-  /// What Play does with this episode when it isn't downloaded, as
-  /// Settings has it; null until read.
-  bool? _playsDownloadFirst;
-
-  /// The other way to play this episode, for this one play: shown on the
-  /// page beside Listen, which does what Settings says.
-  bool get _offersPlayChoice =>
-      _isAudio &&
-      !_isAudiobook &&
-      _language.isOriginal &&
-      _playsDownloadFirst != null &&
-      _downloading == null &&
-      (_episode == null ? false : _actions?.offersPlayChoice(_episode!) ?? false);
-
-  Future<void> _playOtherWay() async {
-    _remember(WorkMode.listen);
-    await _doors.play(_work, downloadFirst: !_playsDownloadFirst!);
-    await _load();
-  }
-
   @override
   void dispose() {
     _transcriptWrites?.cancel();
@@ -302,14 +243,6 @@ class _WorkPageState extends State<WorkPage> {
       // audio without the downloader, so its revision never moves.
       downloaded: _onDisk(episode),
     );
-    final position = await _db.spineDao.position(
-      profileId: profileId,
-      workId: id,
-    );
-    final player = await _db.feedsDao.playerPosition(
-      profileId: profileId,
-      workId: id,
-    );
     final sentenceLangs = await _db.spineDao.translationLangsOf(id);
     final layerLangs = await _db.spineDao.layerLangsOf(id, kind: 'mt');
     final translations = [
@@ -319,12 +252,11 @@ class _WorkPageState extends State<WorkPage> {
           WorkLanguage.translation(l, layer: true),
     ];
     final picked = work.readLang;
-    final language = translations.firstWhere(
+    var language = translations.firstWhere(
       (t) => t.tag == picked,
       orElse: () => const WorkLanguage.original(),
     );
     final captures = await _db.capturesDao.capturesOf(id);
-    final playsDownloadFirst = await _doors.player?.playsDownloadFirst();
     final stored = await loadWorkStorage(_db,
         services: _actions?.services, onlyWorkId: id);
     final versions = episode == null ||
@@ -335,6 +267,30 @@ class _WorkPageState extends State<WorkPage> {
             work: work,
             episode: episode,
             audioFileFor: _actions?.services?.audioFileFor);
+    // A made language with no stored text of its own: Play plays it, and
+    // Read reads the made episode's words.
+    if (picked != null &&
+        language.isOriginal &&
+        versions?.withAudio(_bare(picked)) != null) {
+      language = WorkLanguage.translation(picked);
+    }
+    // Play is in the learning language when that episode is made and its
+    // audio is here, unless a language was picked (owner, 12 Nov).
+    final learning = _jobs?.language;
+    if (picked == null &&
+        !_languageChosenHere &&
+        learning != null &&
+        versions != null &&
+        versions.original.id == work.id &&
+        versions.withAudio(learning) != null) {
+      language = WorkLanguage.translation(learning);
+      for (final t in translations) {
+        if (_bare(t.tag!) == learning) {
+          language = t;
+          if (!t.layer) break;
+        }
+      }
+    }
     String? opening;
     if (notes == null && isTextWork(work, episode)) {
       opening = await _openingOf(id);
@@ -347,16 +303,9 @@ class _WorkPageState extends State<WorkPage> {
       _notes = notes;
       _opening = opening;
       _facts = facts;
-      _mode = lastUsedMode(
-        audio: !isTextWork(work, episode),
-        work: work,
-        position: position,
-        player: player,
-      );
       _translations = translations;
       _language = language;
       _captures = captures;
-      _playsDownloadFirst = playsDownloadFirst;
       _stored = stored.isEmpty ? null : stored.single;
       _versions = versions;
       _loaded = true;
@@ -388,20 +337,6 @@ class _WorkPageState extends State<WorkPage> {
 
   // ───── modes ─────
 
-  /// Why Listen can't run here, or null when it can.
-  String? get _listenBlocked {
-    if (_isAudio) {
-      if (_doors.player == null) return 'Playing isn’t available here.';
-      if (!_language.isOriginal && !_transcribed) {
-        return 'A translation needs a transcript first.';
-      }
-      return null;
-    }
-    // A text is read aloud by the reader, which always has the system
-    // voice to fall back on.
-    return null;
-  }
-
   /// Why Read can't run here, or null when it can.
   String? get _readBlocked => _readBlockedIn(_language.isOriginal);
 
@@ -416,18 +351,7 @@ class _WorkPageState extends State<WorkPage> {
     return null;
   }
 
-  bool get _hasVideo => _facts?.video ?? false;
-
-  /// What the page opens on next time: every way in through it says so,
-  /// including the ones that keep no reading place. Not awaited: on the
-  /// upgrade launch the writer can be busy with an index or notes fill,
-  /// and Listen must not wait on it to start playing.
-  void _remember(WorkMode mode) => unawaited(_db.spineDao
-      .setLastMode(_work.id, mode.name, DateTime.now().millisecondsSinceEpoch)
-      .catchError((Object _) {}));
-
   Future<void> _listen() async {
-    _remember(WorkMode.listen);
     final work = _work;
     if (_isAudio && _language.isOriginal) {
       await _doors.play(work);
@@ -445,7 +369,16 @@ class _WorkPageState extends State<WorkPage> {
   }
 
   Future<void> _read() async {
-    _remember(WorkMode.read);
+    if (_madeChosen case final made?
+        when !_translations.any((t) => t.tag == _language.tag)) {
+      final work = await _db.spineDao.workById(made.workId);
+      final episode = await _db.feedsDao.episodeOf(made.workId);
+      if (work != null && mounted) {
+        await _doors.readFromRow(context, (work: work, episode: episode));
+      }
+      await _load();
+      return;
+    }
     if (_isAudio && !_transcribed) {
       await Navigator.of(context).push(
         MaterialPageRoute<void>(
@@ -558,13 +491,12 @@ class _WorkPageState extends State<WorkPage> {
 
   // ───── language ─────
 
-  /// Picking a language remembers it ([Works.readLang]); picking a
-  /// translation also opens Read in it, since reading it is what the tap
-  /// asks for. The original just becomes the choice.
-  Future<void> _pickLanguage(WorkLanguage l) async {
+  /// Picking a language remembers it ([Works.readLang]) and makes it the
+  /// language of both Play and Read (owner, 12 Nov: one language switch
+  /// for listening and reading). It opens nothing by itself.
+  Future<void> _choose(WorkLanguage l) async {
+    _languageChosenHere = true;
     await _chooseLanguage(l);
-    if (!mounted) return;
-    if (!l.isOriginal && _readBlocked == null) await _read();
   }
 
   Future<void> _chooseLanguage(WorkLanguage l) async {
@@ -598,11 +530,6 @@ class _WorkPageState extends State<WorkPage> {
 
   bool get _isKept => _work.persistence == 'work';
 
-  bool get _showsDownload =>
-      _episode?.enclosureUrl != null &&
-      (_actions?.canDownload ?? false) &&
-      !(_facts?.downloaded ?? false);
-
   Future<void> _keep() async {
     await RiverTriage(
       _db,
@@ -624,6 +551,13 @@ class _WorkPageState extends State<WorkPage> {
     switch (choice) {
       case 'remove' || 'remove-from-library':
         _remove();
+        return;
+      case 'keep':
+        await _keep();
+        return;
+      case 'learning-language':
+        await _jobs?.pickLanguage(context, _offer?.languages ?? const [],
+            of: (workLang: _work.lang, feedLang: _feed?.language));
         return;
     }
     if (_deletablePart(choice) case final part?) {
@@ -692,21 +626,29 @@ class _WorkPageState extends State<WorkPage> {
   }
 
   /// The values of the shared items this page shows as buttons, which its
-  /// ⋮ leaves out. Mirrors [_visibleActions] and the language row.
+  /// ⋮ leaves out. Mirrors [_actionsBlock].
   Set<String> get _shownAsButtons => {
-    if (_episode?.enclosureUrl != null) ...{'play-next', 'play-last'},
-    if (_showsDownload) 'download',
-    if (_offersPlayChoice) ...{'stream-now', 'download-play'},
-    if (_showsTranscribe) 'transcribe',
+    if (_offersQueue) ...{'play-next', 'play-last'},
+    if (_offersDownload && !(_facts?.downloaded ?? false)) 'download',
   };
-
-  bool get _showsTranscribe =>
-      _canTranscribe && !_transcribed && _episode?.archivedAtMs == null;
 
   List<PopupMenuEntry<String>> _menuItems() {
     final actions = _actions;
     final id = _work.id;
+    final offer = _offer;
     final extras = <PopupMenuEntry<String>>[
+      if (_episode != null && !_isKept)
+        PopupMenuItem(
+          key: Key('page-keep-$id'),
+          value: 'keep',
+          child: const Text('Keep'),
+        ),
+      if (offer != null && offer.lang != null && !offer.busy)
+        PopupMenuItem(
+          key: const Key('learning-language-change'),
+          value: 'learning-language',
+          child: const Text('Change learning language'),
+        ),
       for (final p in _deletableParts)
         PopupMenuItem(
           key: Key('${_partValue(p)}-$id'),
@@ -773,18 +715,19 @@ class _WorkPageState extends State<WorkPage> {
                       listenable: _jobs ?? const _Still(),
                       builder: (context, _) {
                         final offer = _offer;
+                        final languages = _languageSection(context, offer);
                         return Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: [
-                            _modes(context, offer),
-                            const SizedBox(height: 16),
-                            _languages(context, offer),
+                            _actionsBlock(context, offer),
+                            if (languages != null) ...[
+                              const SizedBox(height: 24),
+                              languages,
+                            ],
                           ],
                         );
                       },
                     ),
-                    const SizedBox(height: 8),
-                    _visibleActions(context),
                     const Divider(height: 32),
                     ..._body(context),
                   ],
@@ -872,221 +815,256 @@ class _WorkPageState extends State<WorkPage> {
     );
   }
 
-  Widget _modes(BuildContext context, ListenOffer? offer) {
-    final theme = Theme.of(context);
-    final four = offer != null;
-    // In the group of four the first column is always the original,
-    // whatever translation was last read.
-    final listenWhy = four
-        ? (_doors.player == null ? 'Playing isn’t available here.' : null)
-        : _listenBlocked;
-    final readWhy = four ? _readBlockedIn(true) : _readBlocked;
-    const watchWhy = 'Video plays as sound for now: Listen plays it.';
-    Widget choice({
-      required Key key,
-      required Widget icon,
-      required String label,
-      String? sub,
-      String? says,
-      bool selected = false,
-      required VoidCallback? onPressed,
-    }) {
-      final style = ButtonStyle(
-        minimumSize: const WidgetStatePropertyAll(Size.fromHeight(56)),
-        padding: const WidgetStatePropertyAll(
-          EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+  // ───── the page's actions (board-0161) ─────
+
+  /// The made episode Play plays: the chosen language's, when its audio
+  /// is on this phone and this is the original's page.
+  MadeVersion? get _madeChosen {
+    final v = _versions;
+    final tag = _language.tag;
+    if (v == null || !_isOriginal || tag == null) return null;
+    return v.withAudio(_bare(tag));
+  }
+
+  Future<void> _play() async {
+    if (_madeChosen case final made?) {
+      final work = await _db.spineDao.workById(made.workId);
+      if (work != null) await _doors.play(work);
+    } else {
+      await _doors.play(_work);
+    }
+    await _load();
+  }
+
+  bool get _offersQueue =>
+      _actions != null && _episode?.enclosureUrl != null && !_isAudiobook;
+
+  bool get _offersDownload =>
+      _episode?.enclosureUrl != null &&
+      !_isAudiobook &&
+      (_actions?.canDownload ?? false);
+
+  /// What Play plays, said under it in one line.
+  String? _playCaption() {
+    if (_downloading case final d?) return downloadingWords(d);
+    if (_isAudiobook) return null;
+    if (_madeChosen case final made?) {
+      return '${languageNameOf(made.lang)}, made on this phone';
+    }
+    final tag = _language.tag;
+    if (tag != null && _isOriginal) {
+      return 'There is no ${languageNameOf(tag)} audio here, so Play is the '
+          'original, in $_originalName.';
+    }
+    return _isOriginal || _versions == null
+        ? '$_originalName, the original'
+        : null;
+  }
+
+  /// One page-wide button: an icon above its word, at least 56 high.
+  Widget _button({
+    required Key key,
+    required IconData? icon,
+    Widget? iconWidget,
+    required String label,
+    required String tooltip,
+    required VoidCallback onPressed,
+    bool main = false,
+  }) {
+    final child = Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        iconWidget ?? Icon(icon),
+        const SizedBox(height: 4),
+        Text(label, maxLines: 1, softWrap: false),
+      ],
+    );
+    const style = ButtonStyle(
+      minimumSize: WidgetStatePropertyAll(Size(48, 56)),
+      padding: WidgetStatePropertyAll(
+          EdgeInsets.symmetric(horizontal: 8, vertical: 8)),
+    );
+    final button = main
+        ? FilledButton(
+            key: key, style: style, onPressed: onPressed, child: child)
+        : OutlinedButton(
+            key: key, style: style, onPressed: onPressed, child: child);
+    return Tooltip(message: tooltip, child: button);
+  }
+
+  /// Play next and Play last as one control.
+  Widget _queueButton() {
+    final id = _work.id;
+    return MenuAnchor(
+      menuChildren: [
+        MenuItemButton(
+          key: Key('page-play-next-$id'),
+          leadingIcon: const Icon(Icons.playlist_play),
+          onPressed: () => _menu('play-next'),
+          child: const Text('Play next'),
         ),
-      );
-      // Built inside the button, so the small line takes the button's
-      // own colour and reads on the filled one too.
-      Widget child = Builder(
-        builder: (context) => Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            icon,
-            const SizedBox(height: 2),
-            Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
-            if (sub != null)
-              Text(
-                sub,
-                maxLines: 2,
-                textAlign: TextAlign.center,
-                overflow: TextOverflow.ellipsis,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: DefaultTextStyle.of(context).style.color,
-                ),
-              ),
-          ],
+        MenuItemButton(
+          key: Key('page-play-last-$id'),
+          leadingIcon: const Icon(Icons.playlist_add),
+          onPressed: () => _menu('play-last'),
+          child: const Text('Play last'),
         ),
-      );
-      if (says != null) {
-        // One sentence for the whole button, which names the language.
-        child = Semantics(label: says, excludeSemantics: true, child: child);
-      }
-      final button = selected
-          ? FilledButton(
-              key: key,
-              style: style,
-              onPressed: onPressed,
-              child: child,
-            )
-          // Outlined, not tonal: one filled action per screen
-          // (1.5.9), and the others stay the same size, in reach.
-          : OutlinedButton(
-              key: key,
-              style: style,
-              onPressed: onPressed,
-              child: child,
-            );
-      return Expanded(
-        child: Semantics(
-          key: selected ? const Key('mode-selected') : null,
-          selected: selected,
-          button: true,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: says == null
-                ? button
-                : Tooltip(
-                    message: says,
-                    excludeFromSemantics: true,
-                    child: button,
-                  ),
-          ),
+      ],
+      builder: (context, controller, _) => _button(
+        key: Key('page-queue-$id'),
+        icon: Icons.queue_music_outlined,
+        label: 'Queue',
+        tooltip: 'Add to the Queue: play next or play last',
+        onPressed: () =>
+            controller.isOpen ? controller.close() : controller.open(),
+      ),
+    );
+  }
+
+  /// One download control: Download, Stop while it downloads, and
+  /// Downloaded, which offers to remove it.
+  Widget _downloadButton() {
+    final id = _work.id;
+    final key = Key('page-download-$id');
+    if (_downloading case final d?) {
+      return _button(
+        key: key,
+        icon: null,
+        iconWidget: SizedBox.square(
+          dimension: 24,
+          child: CircularProgressIndicator(
+              value: downloadFraction(d), strokeWidth: 2.5),
         ),
+        label: 'Stop',
+        tooltip: '${downloadingWords(d)}. Stop the download',
+        onPressed: () => _actions?.downloader?.cancel(id),
       );
     }
-
-    Widget mode(
-      WorkMode mode,
-      IconData icon,
-      String label,
-      String? why,
-      VoidCallback onPressed, {
-      String? sub,
-    }) => choice(
-      key: Key('mode-${mode.name}'),
-      icon: Icon(icon),
-      label: label,
-      sub: sub,
-      selected: _mode == mode,
-      onPressed: why == null ? onPressed : null,
+    if (_facts?.downloaded ?? false) {
+      return _button(
+        key: key,
+        // The title's markers already say it is downloaded; the button
+        // names what it does (a fresh reader took "Downloaded" for a
+        // status that did nothing).
+        icon: Icons.delete_outline,
+        label: 'Remove download',
+        tooltip: 'It is on this phone. Remove the download',
+        onPressed: () => _menu('remove-download'),
+      );
+    }
+    return _button(
+      key: key,
+      icon: Icons.download_outlined,
+      label: 'Download',
+      tooltip: 'Download it to this phone',
+      onPressed: () => _menu('download'),
     );
+  }
 
-    final original = four ? 'Original' : null;
-    final downloading = _downloading;
-    final listen = downloading == null
-        ? mode(
-            WorkMode.listen,
-            Icons.headphones_outlined,
-            'Listen',
-            listenWhy,
-            four ? () => _inOriginal(_listen) : _listen,
-            sub: original,
-          )
-        // A download under way shows where Play is (owner, 9 Nov).
-        : choice(
-            key: const Key('mode-listen'),
-            icon: SizedBox.square(
-              dimension: 24,
-              child: CircularProgressIndicator(
-                value: downloadFraction(downloading),
-                strokeWidth: 2.5,
-              ),
-            ),
-            label: 'Listen',
-            sub: downloadingWords(downloading),
-            selected: _mode == WorkMode.listen,
-            onPressed: listenWhy == null
-                ? (four ? () => _inOriginal(_listen) : _listen)
-                : null,
-          );
-    final read = mode(
-      WorkMode.read,
-      Icons.chrome_reader_mode_outlined,
-      'Read',
-      readWhy,
-      four ? () => _inOriginal(_read) : _read,
-      sub: original,
-    );
-    final watch = _hasVideo
-        ? mode(WorkMode.watch, Icons.movie_outlined, 'Watch', watchWhy, () {})
-        : null;
-
-    final learning = offer == null ? null : _learning(offer);
-    final reasons = [
-      if (listenWhy != null) 'Listen: $listenWhy',
-      if (readWhy != null) 'Read: $readWhy',
-      if (learning?.readWhy case final why?)
-        'Read in ${learning!.name}: $why',
-      if (_hasVideo) 'Watch: $watchWhy',
-      if (_isAudio && !_isAudiobook && !_transcribed && readWhy == null)
-        'No transcript yet: Read opens the show notes.',
-    ];
+  /// The main action, the few beside it, and a plain line for anything
+  /// not offered.
+  Widget _actionsBlock(BuildContext context, ListenOffer? offer) {
+    final theme = Theme.of(context);
+    final lines = <String>[];
+    Widget? main;
+    final beside = <(String, Widget)>[];
+    if (_isAudio) {
+      if (_doors.player == null) {
+        lines.add('Playing isn’t available here.');
+      } else {
+        final made = _madeChosen;
+        final downloading = _downloading;
+        main = _button(
+          key: const Key('mode-listen'),
+          main: true,
+          icon: Icons.play_arrow,
+          iconWidget: downloading == null
+              ? null
+              : SizedBox.square(
+                  dimension: 24,
+                  child: CircularProgressIndicator(
+                    value: downloadFraction(downloading),
+                    strokeWidth: 2.5,
+                    color: theme.colorScheme.onPrimary,
+                  ),
+                ),
+          label: made == null ? 'Play' : 'Play in ${languageNameOf(made.lang)}',
+          tooltip: made == null
+              ? 'Play this episode'
+              : 'Play the ${languageNameOf(made.lang)} audio',
+          onPressed: _play,
+        );
+      }
+      if (_readBlocked case final why?) {
+        lines.add(why);
+      } else {
+        beside.add(('Read', _button(
+          key: const Key('mode-read'),
+          icon: Icons.chrome_reader_mode_outlined,
+          label: 'Read',
+          tooltip: _language.isOriginal
+              ? 'Read it'
+              : 'Read it in ${languageNameOf(_language.tag)}',
+          onPressed: _read,
+        )));
+      }
+      if (_offersQueue) beside.add(('Queue', _queueButton()));
+      if (_offersDownload) {
+        beside.add((
+          (_facts?.downloaded ?? false) ? 'Remove download' : 'Download',
+          _downloadButton()
+        ));
+      }
+      if (_isAudio && !_isAudiobook && !_transcribed && _readBlocked == null) {
+        lines.add('No transcript yet: Read opens the show notes.');
+      }
+      if (_facts?.video ?? false) {
+        lines.add('Video plays as sound for now: Play plays it.');
+      }
+    } else {
+      main = _button(
+        key: const Key('mode-read'),
+        main: true,
+        icon: Icons.chrome_reader_mode_outlined,
+        label: 'Read',
+        tooltip: _language.isOriginal
+            ? 'Read it'
+            : 'Read it in ${languageNameOf(_language.tag)}',
+        onPressed: _read,
+      );
+      beside.add(('Listen', _button(
+        key: const Key('mode-listen'),
+        icon: Icons.headphones_outlined,
+        label: 'Listen',
+        tooltip: 'Read it aloud',
+        onPressed: _listen,
+      )));
+    }
+    final caption = _isAudio && main != null ? _playCaption() : null;
+    final muted = theme.textTheme.bodyMedium
+        ?.copyWith(color: theme.colorScheme.onSurfaceVariant);
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        if (offer == null || learning == null)
-          Row(children: [listen, read, ?watch])
-        else ...[
-          Row(
-            children: [
-              listen,
-              choice(
-                key: const Key('listen-in-language'),
-                icon: offer.making
-                    ? SizedBox(
-                        width: 24,
-                        height: 24,
-                        child: CircularProgressIndicator(
-                            value: offer.fraction, strokeWidth: 2.5),
-                      )
-                    : Icon(offer.waiting
-                        ? Icons.hourglass_empty
-                        : offer.ready
-                            ? Icons.play_circle
-                            : Icons.translate),
-                label: 'Listen',
-                sub: learning.sub,
-                says: offer.label,
-                onPressed: () => _jobs!.tap(context, _work, _episode!,
-                    feedLang: _feed?.language),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Row(
-            children: [
-              read,
-              choice(
-                key: const Key('read-in-language'),
-                icon: const Icon(Icons.chrome_reader_mode_outlined),
-                label: 'Read',
-                sub: learning.sub,
-                says: 'Read in ${learning.name}',
-                onPressed: learning.read,
-              ),
-            ],
-          ),
-          if (watch != null) ...[
-            const SizedBox(height: 8),
-            Row(children: [watch]),
-          ],
-          _learningStatus(theme, offer),
-        ],
-        if (_offersPlayChoice) _playChoice(),
-        for (final r in reasons)
+        ?main,
+        if (caption != null)
           Padding(
-            padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
-            child: Text(
-              r,
-              key: Key('mode-reason-${reasons.indexOf(r)}'),
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(caption,
+                key: const Key('page-play-caption'),
+                textAlign: TextAlign.center,
+                style: muted),
           ),
-        // A running transcription shows here, beside Read, not only on
+        if (beside.isNotEmpty) ...[
+          const SizedBox(height: 16),
+          _grid(context, beside),
+        ],
+        for (final (i, line) in lines.indexed)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(line, key: Key('mode-reason-$i'), style: muted),
+          ),
+        // A running transcription shows here, under Read, not only on
         // the main screen's strip.
         if (_actions?.transcriber case final t?)
           ListenableBuilder(
@@ -1101,95 +1079,67 @@ class _WorkPageState extends State<WorkPage> {
                       )
                     : const SizedBox.shrink(),
           ),
+        if (offer != null && (offer.busy || offer.failed))
+          _jobStatus(theme, offer),
       ],
     );
   }
 
-  /// Stream or download, said plainly (owner, 23 Oct): Listen does what
-  /// Settings says, and this plays it the other way, this once.
-  Widget _playChoice() {
-    final stream = _playsDownloadFirst!;
-    return Padding(
-      padding: const EdgeInsets.only(top: 4),
-      child: Align(
-        alignment: Alignment.centerLeft,
-        child: Tooltip(
-          message: stream
-              ? 'Play it now over the internet, without downloading it first'
-              : 'Download it to this phone, then play it',
-          child: TextButton.icon(
-            key: Key('page-play-other-${_work.id}'),
-            style: const ButtonStyle(
-              minimumSize: WidgetStatePropertyAll(Size(48, 48)),
-            ),
-            onPressed: _playOtherWay,
-            icon: Icon(stream ? Icons.wifi : Icons.download_outlined),
-            label: Text(stream ? 'Stream now' : 'Download, then play'),
-          ),
-        ),
-      ),
-    );
-  }
+  /// The buttons beside the main one, on one line of equal cells; where
+  /// their words can't all fit whole at this text size, one under
+  /// another at full width instead, never cut.
+  Widget _grid(BuildContext context, List<(String, Widget)> cells) =>
+      LayoutBuilder(builder: (context, constraints) {
+        const gap = 8.0;
+        final cell =
+            (constraints.maxWidth - gap * (cells.length - 1)) / cells.length;
+        final style = Theme.of(context).textTheme.labelLarge;
+        final scaler = MediaQuery.textScalerOf(context);
+        var widest = 0.0;
+        for (final (label, _) in cells) {
+          final painter = TextPainter(
+            text: TextSpan(text: label, style: style),
+            textDirection: Directionality.of(context),
+            textScaler: scaler,
+            maxLines: 1,
+          )..layout();
+          if (painter.width > widest) widest = painter.width;
+          painter.dispose();
+        }
+        // The button's own padding, 8 a side, and a point to spare.
+        if (widest + 17 > cell) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              for (final (i, (_, w)) in cells.indexed) ...[
+                if (i > 0) const SizedBox(height: gap),
+                w,
+              ],
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            for (final (i, (_, w)) in cells.indexed) ...[
+              if (i > 0) const SizedBox(width: gap),
+              Expanded(child: w),
+            ],
+          ],
+        );
+      });
 
-  /// The first column of the four: the original, whatever translation
-  /// was read last.
-  Future<void> _inOriginal(Future<void> Function() go) async {
-    if (!_language.isOriginal) {
-      await _chooseLanguage(const WorkLanguage.original());
-      if (!mounted) return;
-    }
-    await go();
-  }
-
-  /// The second column of the four: what it is called, and what Read in
-  /// it does. Reading the learning language opens its translation when
-  /// there is one, and otherwise the reader's Translate, which needs a
-  /// transcript.
-  ({String name, String sub, VoidCallback? read, String? readWhy}) _learning(
-    ListenOffer offer,
-  ) {
-    final lang = offer.lang;
-    final name = lang == null ? 'another language' : languageNameOf(lang);
-    final sub = lang == null ? 'Another language' : name;
-    final made = _translations.where((t) => t.tag == lang).toList()
-      // The reader's own sentence-by-sentence translation first.
-      ..sort((a, b) => (a.layer ? 1 : 0) - (b.layer ? 1 : 0));
-    if (made.isNotEmpty) {
-      return (
-        name: name,
-        sub: sub,
-        read: () => _pickLanguage(made.first),
-        readWhy: null,
-      );
-    }
-    if (_translate case final translate?) {
-      return (name: name, sub: sub, read: translate, readWhy: null);
-    }
-    final listenIt = lang == null ? 'Listen' : 'Listen in $name';
-    return (
-      name: name,
-      sub: sub,
-      read: null,
-      readWhy: !_transcribed
-          ? 'A translation needs a transcript first. $listenIt makes both.'
-          : _translateWaits ??
-              'This device can’t translate offline. $listenIt makes the '
-                'translation.',
-    );
-  }
-
-  /// Under the four: what the learning language's job is doing, with Stop
-  /// while it runs and Change for the language when it doesn't.
-  Widget _learningStatus(ThemeData theme, ListenOffer offer) {
+  /// What the learning language's job is doing, with Stop while it runs.
+  Widget _jobStatus(ThemeData theme, ListenOffer offer) {
     final id = _work.id;
     return Padding(
-      padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+      padding: const EdgeInsets.only(top: 8),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (offer.making)
             Padding(
-              padding: const EdgeInsets.only(bottom: 6),
+              padding: const EdgeInsets.only(bottom: 4),
               child: LinearProgressIndicator(
                 key: const Key('listen-in-language-progress'),
                 value: offer.fraction,
@@ -1214,17 +1164,6 @@ class _WorkPageState extends State<WorkPage> {
                   style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
                   onPressed: () => _jobs!.stop(id),
                   child: const Text('Stop'),
-                )
-              // Even with one language offered: the list's note says why
-              // the others are missing (board-0128).
-              else if (offer.lang != null)
-                TextButton(
-                  key: const Key('learning-language-change'),
-                  style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
-                  onPressed: () => _jobs!.pickLanguage(
-                      context, offer.languages,
-                      of: (workLang: _work.lang, feedLang: _feed?.language)),
-                  child: const Text('Change'),
                 ),
             ],
           ),
@@ -1233,78 +1172,115 @@ class _WorkPageState extends State<WorkPage> {
     );
   }
 
-  /// The languages the work can be read in. Beside the group of four it
-  /// holds only the others: the original and the learning language are
-  /// columns of that group, and are not offered twice.
-  Widget _languages(BuildContext context, ListenOffer? offer) {
-    if (_versions case final v?) return _versionsSection(context, offer, v);
-    final theme = Theme.of(context);
+  // ───── language: one switch for listening and reading ─────
+
+  Widget _langRow({
+    required Key key,
+    required String title,
+    required String status,
+    required IconData icon,
+    bool selected = false,
+    bool goes = false,
+    Widget? trailing,
+    required VoidCallback onTap,
+  }) =>
+      ListTile(
+        key: key,
+        contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+        minTileHeight: 56,
+        leading: Icon(icon),
+        title: Text(title),
+        subtitle: Text(status),
+        selected: selected,
+        trailing: trailing ??
+            (goes
+                ? const Icon(Icons.chevron_right)
+                : selected
+                    ? const Icon(Icons.check)
+                    : null),
+        onTap: onTap,
+      );
+
+  /// Translate, as a row where it can run; otherwise the line that says
+  /// why it can't (never a greyed button).
+  List<Widget> _translateRow(ThemeData theme) {
     final translate = _translate;
-    final four = offer != null;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(four ? 'Other languages' : 'Language',
-            style: theme.textTheme.titleSmall),
-        const SizedBox(height: 4),
-        Wrap(
-          spacing: 8,
-          runSpacing: 4,
-          children: [
-            // Buttons, not chips: a chip keeps one line and clips a long
-            // label at large text ("Original · Engli" at 320dp, 2x).
-            if (!four)
-              _LanguageButton(
-                key: const Key('lang-original'),
-                label: 'Original · $_originalName',
-                selected: _language.isOriginal,
-                onPressed: () => _pickLanguage(const WorkLanguage.original()),
-              ),
-            for (final t in _translations)
-              if (!four || t.tag != offer.lang)
-                _LanguageButton(
-                key: Key('lang-${t.tag}'),
-                label: languageNameOf(t.tag),
-                selected: _language == t,
-                onPressed: () => _pickLanguage(t),
-              ),
-            OutlinedButton.icon(
-              key: const Key('lang-translate'),
-              style: OutlinedButton.styleFrom(minimumSize: const Size(48, 48)),
-              icon: const Icon(Icons.translate),
-              label: const Text('Translate…'),
-              onPressed: translate,
-            ),
-          ],
+    if (translate != null) {
+      return [
+        _langRow(
+          key: const Key('lang-translate'),
+          title: 'Translate…',
+          status: 'Into another language',
+          icon: Icons.translate,
+          goes: true,
+          onTap: translate,
         ),
-        if (translate == null && !_isAudiobook)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text(
-              _isAudio && !_transcribed
-                  ? _canTranscribe
-                        ? 'Translating needs a transcript first.'
-                        : 'Translating needs a transcript, and this device '
-                              'can’t transcribe.'
-                  : _translateWaits ?? 'This device can’t translate offline.',
-              style: theme.textTheme.bodySmall,
-            ),
-          ),
+      ];
+    }
+    if (_isAudiobook) return const [];
+    return [
+      Padding(
+        key: const Key('lang-translate-why'),
+        padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
+        child: Text(
+          _isAudio && !_transcribed
+              ? _canTranscribe
+                    ? 'Translating needs a transcript first. Transcribe is '
+                          'in the menu at the top.'
+                    : 'Translating needs a transcript, and this device '
+                          'can’t transcribe.'
+              : _translateWaits ?? 'This device can’t translate offline.',
+          style: theme.textTheme.bodyMedium
+              ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
+        ),
+      ),
+    ];
+  }
+
+  Widget? _languageSection(BuildContext context, ListenOffer? offer) {
+    if (_isAudiobook) return null;
+    final theme = Theme.of(context);
+    final v = _versions;
+    final rows = v == null ? _textLanguageRows() : _versionRows(v, offer);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text(
+          v == null ? 'Language' : 'This episode in other languages',
+          style: theme.textTheme.titleSmall,
+        ),
+        const SizedBox(height: 4),
+        ...rows,
+        ..._translateRow(theme),
       ],
     );
   }
 
-  /// "This episode in other languages" (board-0130): the original and
-  /// every other language it has, one row each, saying whether that
-  /// language's audio is on this phone. It takes the place of the
-  /// Language section on an episode, so no language shows twice. A
-  /// language with audio goes to its episode and plays it; a text-only
-  /// one is read, as a translation always was; this episode's own row
-  /// chooses its own text.
-  Widget _versionsSection(
-      BuildContext context, ListenOffer? offer, EpisodeVersions v) {
-    final theme = Theme.of(context);
-    final translate = _translate;
+  List<Widget> _textLanguageRows() => [
+        _langRow(
+          key: const Key('lang-original'),
+          title: _originalName,
+          status: 'The original',
+          icon: Icons.chrome_reader_mode_outlined,
+          selected: _language.isOriginal,
+          onTap: () => _choose(const WorkLanguage.original()),
+        ),
+        for (final t in _translations)
+          _langRow(
+            key: Key('lang-${t.tag}'),
+            title: languageNameOf(t.tag),
+            status: t.layer ? 'Translation of the transcript' : 'Translation',
+            icon: Icons.translate,
+            selected: _language == t,
+            onTap: () => _choose(t),
+          ),
+      ];
+
+  /// The episode in each language it has (board-0130), one row each,
+  /// saying whether that language's audio is on this phone. On the
+  /// original's page a row chooses the language for Play and Read; on a
+  /// made episode's page the others are their own episodes, and go.
+  List<Widget> _versionRows(EpisodeVersions v, ListenOffer? offer) {
     final originalLang = v.original.lang ?? _feed?.language;
     final originalBare = originalLang == null ? null : _bare(originalLang);
     final texts = <String, WorkLanguage>{};
@@ -1313,183 +1289,115 @@ class _WorkPageState extends State<WorkPage> {
       final tag = _bare(t.tag!);
       if (!texts.containsKey(tag) || texts[tag]!.layer) texts[tag] = t;
     }
+    final learning = offer?.lang;
+    // The learning language, when its audio isn't here yet, is the row
+    // that makes it: the one tap, the same job as the row's second button.
+    final makes = offer != null &&
+        _isOriginal &&
+        (learning == null || v.withAudio(learning) == null);
     final langs = [
       for (final l in {...v.made.keys, ...texts.keys})
-        if (l != originalBare &&
-            // The group above holds the learning language's text.
-            !(offer != null && l == offer.lang && v.made[l] == null))
-          l,
+        if (l != originalBare && !(makes && l == learning)) l,
     ]..sort((a, b) => languageNameOf(a).compareTo(languageNameOf(b)));
-
-    Widget row({
-      required Key key,
-      required String lang,
-      required String status,
-      required bool audio,
-      bool selected = false,
-      bool goes = false,
-      required VoidCallback onTap,
-    }) =>
-        ListTile(
-          key: key,
-          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
-          leading: Icon(audio
-              ? Icons.headphones_outlined
-              : Icons.chrome_reader_mode_outlined),
-          title: Text(languageNameOf(lang)),
-          subtitle: Text(status),
-          selected: selected,
-          trailing: goes
-              ? const Icon(Icons.chevron_right)
-              : selected
-                  ? const Icon(Icons.check)
-                  : null,
-          onTap: onTap,
-        );
-
+    final chosen = _language.tag == null ? null : _bare(_language.tag!);
     final here = _isOriginal;
-    final rows = <Widget>[
-      row(
+    return [
+      _langRow(
         key: const Key('lang-original'),
-        lang: originalLang ?? '',
+        title: languageNameOf(originalLang),
         status: here ? 'This episode, the original' : 'The original',
-        audio: true,
+        icon: Icons.headphones_outlined,
         selected: here && _language.isOriginal,
         goes: !here,
         onTap: here
-            ? () => _pickLanguage(const WorkLanguage.original())
+            ? () => _choose(const WorkLanguage.original())
             : () => _openVersion(v.original.id, play: true),
       ),
       for (final l in langs)
         if (v.made[l] case final made? when made.workId == _work.id)
-          row(
+          _langRow(
             key: Key('lang-$l'),
-            lang: l,
+            title: languageNameOf(l),
             status: made.audio
                 ? 'This episode, its audio is on this phone'
                 : 'This episode, its audio was removed',
-            audio: made.audio,
-            selected: _language.isOriginal,
-            onTap: () => _pickLanguage(const WorkLanguage.original()),
+            icon: made.audio
+                ? Icons.headphones_outlined
+                : Icons.chrome_reader_mode_outlined,
+            selected: true,
+            onTap: () => _choose(const WorkLanguage.original()),
           )
-        else if (v.made[l] case final made? when made.audio)
-          row(
+        else if (!here && v.made[l] != null)
+          _langRow(
             key: Key('lang-$l'),
-            lang: l,
-            status: 'Audio on this phone',
-            audio: true,
+            title: languageNameOf(l),
+            status: v.made[l]!.audio
+                ? 'Audio on this phone'
+                : 'Text only, its audio was removed',
+            icon: Icons.headphones_outlined,
             goes: true,
-            onTap: () => _openVersion(made.workId, play: true),
-          )
-        else if (v.made[l] case final made?)
-          row(
-            key: Key('lang-$l'),
-            lang: l,
-            status: 'Text only, its audio was removed',
-            audio: false,
-            selected: texts[l] != null && _language == texts[l],
-            goes: texts[l] == null,
-            onTap: texts[l] != null
-                ? () => _pickLanguage(texts[l]!)
-                : () => _openVersion(made.workId, play: false),
+            onTap: () => _openVersion(v.made[l]!.workId,
+                play: v.made[l]!.audio),
           )
         else
-          row(
+          _langRow(
             key: Key('lang-$l'),
-            lang: l,
-            status: 'Text only, no audio yet',
-            audio: false,
-            selected: _language == texts[l],
-            onTap: () => _pickLanguage(texts[l]!),
+            title: languageNameOf(l),
+            status: switch (v.made[l]) {
+              (audio: true, lang: _, workId: _) => texts[l] == null
+                  ? 'Audio on this phone'
+                  : 'Audio on this phone, and its text',
+              (audio: false, lang: _, workId: _) =>
+                'Text only, its audio was removed',
+              null => 'Text only, no audio yet',
+            },
+            icon: v.made[l]?.audio ?? false
+                ? Icons.headphones_outlined
+                : Icons.chrome_reader_mode_outlined,
+            selected: chosen == l,
+            goes: texts[l] == null && !(v.made[l]?.audio ?? false),
+            onTap: texts[l] != null
+                ? () => _choose(texts[l]!)
+                : v.made[l]!.audio
+                    ? () => _choose(WorkLanguage.translation(l))
+                    : () => _openVersion(v.made[l]!.workId, play: false),
           ),
+      if (makes) _makeRow(offer, texts),
     ];
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text('This episode in other languages',
-            style: theme.textTheme.titleSmall),
-        ...rows,
-        const SizedBox(height: 4),
-        Align(
-          alignment: AlignmentDirectional.centerStart,
-          child: OutlinedButton.icon(
-            key: const Key('lang-translate'),
-            style: OutlinedButton.styleFrom(minimumSize: const Size(48, 48)),
-            icon: const Icon(Icons.translate),
-            label: const Text('Translate…'),
-            onPressed: translate,
-          ),
-        ),
-        if (translate == null)
-          Padding(
-            padding: const EdgeInsets.only(top: 4),
-            child: Text(
-              !_transcribed
-                  ? _canTranscribe
-                        ? 'Translating needs a transcript first.'
-                        : 'Translating needs a transcript, and this device '
-                              'can’t transcribe.'
-                  : _translateWaits ?? 'This device can’t translate offline.',
-              style: theme.textTheme.bodySmall,
-            ),
-          ),
-      ],
-    );
   }
 
-  Widget _visibleActions(BuildContext context) {
-    final actions = _actions;
-    final e = _episode;
-    final id = _work.id;
-    final audio = e != null && e.enclosureUrl != null;
-    final buttons = <Widget>[
-      if (audio && actions != null) ...[
-        OutlinedButton.icon(
-          key: Key('page-play-next-$id'),
-          onPressed: () => _menu('play-next'),
-          icon: const Icon(Icons.playlist_play),
-          label: const Text('Play next'),
-        ),
-        OutlinedButton.icon(
-          key: Key('page-play-last-$id'),
-          onPressed: () => _menu('play-last'),
-          icon: const Icon(Icons.playlist_add),
-          label: const Text('Play last'),
-        ),
-      ],
-      if (e != null && !_isKept)
-        OutlinedButton.icon(
-          key: Key('page-keep-$id'),
-          onPressed: _keep,
-          icon: const Icon(Icons.bookmark_add_outlined),
-          label: const Text('Keep'),
-        ),
-      if (_showsTranscribe)
-        OutlinedButton.icon(
-          key: Key('page-transcribe-$id'),
-          onPressed: _transcribe,
-          icon: const Icon(Icons.subtitles_outlined),
-          label: Text(_transcribeLabel),
-        ),
-      if (_showsDownload)
-        OutlinedButton.icon(
-          key: Key('page-download-$id'),
-          onPressed: () => _menu('download'),
-          icon: const Icon(Icons.download_outlined),
-          label: const Text('Download'),
-        ),
-    ];
-    if (buttons.isEmpty) return const SizedBox.shrink();
-    return Wrap(
-      spacing: 8,
-      runSpacing: 0,
-      children: [
-        for (final b in buttons)
-          ConstrainedBox(
-            constraints: const BoxConstraints(minHeight: 48),
-            child: b,
-          ),
-      ],
+  /// The learning language, not made yet: a tap chooses it (its text, if
+  /// any, for Read) and makes its audio, which plays when it is ready.
+  Widget _makeRow(ListenOffer offer, Map<String, WorkLanguage> texts) {
+    final lang = offer.lang;
+    final name = lang == null ? null : languageNameOf(lang);
+    final text = lang == null ? null : texts[lang];
+    return _langRow(
+      key: const Key('listen-in-language'),
+      title: name ?? 'Another language',
+      status: offer.busy || offer.failed
+          ? offer.line
+          : name == null
+              ? 'Choose a language to make this episode in'
+              : text == null
+                  ? 'Not made yet. Tap to make the $name audio'
+                  : 'Text only. Tap to make the $name audio',
+      icon: Icons.translate,
+      selected: text != null && _language == text,
+      trailing: offer.making
+          ? SizedBox.square(
+              dimension: 24,
+              child: CircularProgressIndicator(
+                  value: offer.fraction, strokeWidth: 2.5),
+            )
+          : offer.waiting
+              ? const Icon(Icons.hourglass_empty)
+              : null,
+      onTap: () async {
+        if (text != null) await _choose(text);
+        if (!mounted) return;
+        await _jobs!.tap(context, _work, _episode!, feedLang: _feed?.language);
+      },
     );
   }
 
@@ -1565,42 +1473,6 @@ class _Still implements Listenable {
   void addListener(VoidCallback listener) {}
   @override
   void removeListener(VoidCallback listener) {}
-}
-
-/// One language in the language row: filled and ticked when chosen. The
-/// label wraps rather than clips.
-class _LanguageButton extends StatelessWidget {
-  final String label;
-  final bool selected;
-  final VoidCallback onPressed;
-  const _LanguageButton({
-    super.key,
-    required this.label,
-    required this.selected,
-    required this.onPressed,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final style = ButtonStyle(
-      minimumSize: const WidgetStatePropertyAll(Size(48, 48)),
-      padding: const WidgetStatePropertyAll(
-        EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-      ),
-    );
-    final text = Text(label, softWrap: true);
-    return Semantics(
-      selected: selected,
-      child: selected
-          ? FilledButton.tonalIcon(
-              style: style,
-              onPressed: onPressed,
-              icon: const Icon(Icons.check),
-              label: text,
-            )
-          : OutlinedButton(style: style, onPressed: onPressed, child: text),
-    );
-  }
 }
 
 /// The notes on their own, for Read on an episode with no transcript:

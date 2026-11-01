@@ -1144,18 +1144,23 @@ void main() {
     Finder tab(String label) => find.descendant(
         of: find.byType(NavigationBar), matching: find.text(label));
 
-    testWidgets('the tabs read Latest, Queue, Library, Courses, Settings, '
-        'and the app opens on Latest', (tester) async {
+    testWidgets('the tabs read Subscriptions, Latest, Queue, Library, '
+        'Courses, Settings, and the app opens on Latest', (tester) async {
       await seedProfile();
       await pumpApp(tester, ScriptedFetcher((u, h) => textResponse(_rssOne)));
 
       final labels = tester
-          .widget<NavigationBar>(find.byType(NavigationBar))
-          .destinations
-          .cast<NavigationDestination>()
+          .widgetList<NavigationDestination>(find.byType(NavigationDestination))
           .map((d) => d.label)
           .toList();
-      expect(labels, ['Latest', 'Queue', 'Library', 'Courses', 'Settings']);
+      expect(labels, [
+        'Subscriptions',
+        'Latest',
+        'Queue',
+        'Library',
+        'Courses',
+        'Settings',
+      ]);
       expect(
           find.descendant(
               of: find.byType(AppBar), matching: find.text('Latest')),
@@ -1235,7 +1240,8 @@ void main() {
       expect(
           tester.widget<NavigationBar>(find.byType(NavigationBar))
               .selectedIndex,
-          1);
+          2,
+          reason: 'Queue is the third item, after Subscriptions and Latest');
     });
   });
 }

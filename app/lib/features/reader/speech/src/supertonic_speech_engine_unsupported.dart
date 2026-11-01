@@ -24,7 +24,8 @@ class SupertonicSpeechEngine implements SynthesisSpeechEngine {
   bool get canPause => true;
 
   @override
-  Future<SynthResult> synthesize(String sentence, {String? lang}) =>
+  Future<SynthResult> synthesize(String sentence,
+          {String? lang, SpeechPace pace = SpeechPace.natural}) =>
       throw UnsupportedError('unreachable: the constructor refuses');
 
   @override

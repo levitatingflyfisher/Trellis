@@ -413,8 +413,8 @@ void main() {
       expect((await store.showsMatching(profileId, 'pod')), hasLength(30));
     });
 
-    test('Library matches are kept works the words find in any section, '
-        'and nothing unkept', () async {
+    test('the Library\'s search finds kept works in any section, and '
+        'nothing unkept, and no shows', () async {
       final kept = await episode('Kept charity');
       await db.spineDao.promoteWork(kept);
       await episode('Unkept charity');
@@ -423,10 +423,17 @@ void main() {
       await db.spineDao.promoteWork(noted);
       final saidBook = await book('Plain');
       await transcribe(saidBook, ['A charity drive.']);
-      final mine = await store.libraryMatches(profileId, 'charities');
-      expect(mine, {kept, noted, saidBook});
-      expect(await SearchStore(db, forceLike: true)
-          .libraryMatches(profileId, 'charity'), {kept, noted, saidBook});
+      await db.feedsDao.insertFeed(
+          profileId: profileId, url: 'https://ch.test', title: 'Charity hour');
+      for (final like in [false, true]) {
+        final r = await SearchStore(db, forceLike: like, libraryOnly: true)
+            .search(profileId, like ? 'charity' : 'charities');
+        expect({for (final i in r.items) i.work.id}, {kept, noted},
+            reason: like ? 'LIKE' : 'index');
+        expect({for (final h in r.said) h.item.work.id}, {saidBook},
+            reason: like ? 'LIKE' : 'index');
+        expect(r.showSection.count, 0);
+      }
     });
   });
 

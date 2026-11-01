@@ -315,10 +315,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
         appBar: _selection.active
             ? _bulk.bar(context)
             : AppBar(
+                // No ⋮: a long press selects (owner, 12 Nov).
                 title: const Text('History'),
-                actions: [
-                  OhBarActions(children: [_selectMenu(_selection)]),
-                ],
               ),
         body: CappedBody(
             child: _bulk.scope(
@@ -326,18 +324,6 @@ class _HistoryScreenState extends State<HistoryScreen> {
                     doors: widget.doors, selection: _selection))),
       );
 }
-
-/// The bar's worded way into selection, for anyone who can't long-press.
-Widget _selectMenu(EpisodeSelection selection) => OhBarOverflow<String>(
-      key: const Key('select-more'),
-      onSelected: (_) => selection.enter(),
-      itemBuilder: (_) => const [
-        PopupMenuItem(
-            key: Key('select-episodes'),
-            value: 'select',
-            child: Text('Select')),
-      ],
-    );
 
 class SearchScreen extends StatefulWidget {
   final SearchDoors doors;
@@ -351,12 +337,18 @@ class SearchScreen extends StatefulWidget {
   /// Words typed elsewhere (the Subscriptions filter) to search at once.
   final String? initialQuery;
 
+  /// The Library's search: the same screen as Latest's, kept to what the
+  /// Library holds (owner, 12 Nov: the Library's search "didn't seem to
+  /// work", Latest's "works great").
+  final bool libraryOnly;
+
   const SearchScreen(
       {super.key,
       required this.doors,
       this.debounce = const Duration(milliseconds: 300),
       this.store,
-      this.initialQuery});
+      this.initialQuery,
+      this.libraryOnly = false});
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
@@ -364,8 +356,8 @@ class SearchScreen extends StatefulWidget {
 
 class _SearchScreenState extends State<SearchScreen> {
   final _field = TextEditingController();
-  late final SearchStore _store =
-      widget.store ?? SearchStore(widget.doors.db);
+  late final SearchStore _store = widget.store ??
+      SearchStore(widget.doors.db, libraryOnly: widget.libraryOnly);
   Timer? _timer;
 
   /// The words the rows answer, and the words in the box now. They differ
@@ -572,7 +564,6 @@ class _SearchScreenState extends State<SearchScreen> {
     return Scaffold(
       bottomSheet: OhUndoBar(controller: _undo),
       appBar: _selection.active ? _bulk.bar(context) : AppBar(
-        actions: [OhBarActions(children: [_selectMenu(_selection)])],
         title: TextField(
           key: const Key('search-field'),
           controller: _field,
@@ -621,6 +612,17 @@ class _SearchScreenState extends State<SearchScreen> {
   }
 
   Widget _body() {
+    if (_typed.isEmpty && widget.libraryOnly) {
+      // History is what played anywhere; the Library's search says what
+      // it looks through instead.
+      return Padding(
+        key: const Key('search-library-hint'),
+        padding: const EdgeInsets.all(24),
+        child: Text('Search what you keep: titles, show names, notes and '
+            'what was said.',
+            style: Theme.of(context).textTheme.bodyLarge),
+      );
+    }
     if (_typed.isEmpty) {
       // Before anything is typed, history is the likeliest place the
       // thing they are after already is. Never once something is.
@@ -656,8 +658,11 @@ class _SearchScreenState extends State<SearchScreen> {
       return Padding(
         key: const Key('search-nothing'),
         padding: const EdgeInsets.all(24),
-        child: Text('Nothing matches “$_query”. Search looks in titles, '
-            'show names, show notes and transcripts.'),
+        child: Text(widget.libraryOnly
+            ? 'Nothing you keep matches “$_query”. Search looks in titles, '
+                'show names, show notes and transcripts.'
+            : 'Nothing matches “$_query”. Search looks in titles, '
+                'show names, show notes and transcripts.'),
       );
     }
     final list = ListView(

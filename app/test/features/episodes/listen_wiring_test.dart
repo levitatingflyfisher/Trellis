@@ -118,7 +118,7 @@ void main() {
         voiceFor: (_, lang) async => (
           name: 'Test voice',
           voiceKind: VoiceKind.machine,
-          say: (String t) async =>
+          say: (String t, SpeechPace p) async =>
               SynthResult(samples: Float32List(100), sampleRate: 1000),
         ),
         audioFileFor: testServices(dir).audioFileFor,

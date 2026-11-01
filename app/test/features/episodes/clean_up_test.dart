@@ -200,14 +200,11 @@ void main() {
       expect(find.byType(FeedDetailScreen), findsOneWidget);
     });
 
-    testWidgets('Select in the bar works without a long-press, and Select '
-        'all takes every row', (tester) async {
+    testWidgets('a long press starts selection, and Select all takes every '
+        'row', (tester) async {
       await pumpPage(tester);
-      await tester.tap(find.byKey(const Key('podcast-more')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('podcast-select')));
-      await tester.pumpAndSettle();
-      expect(bar('Select episodes'), findsOneWidget);
+      await longPress(tester, 'Echo');
+      expect(bar('1 selected'), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('selection-all')));
       await tester.pumpAndSettle();
@@ -557,14 +554,12 @@ void main() {
       expect(find.text('Mark everything older as played'), findsNothing);
     });
 
-    testWidgets('Select from More, select all, filter changes keep only '
-        'rows on screen', (tester) async {
+    testWidgets('a long press, select all, filter changes keep only rows '
+        'on screen', (tester) async {
       await pumpLatest(tester);
-      await tester.tap(find.byKey(const Key('river-more')));
+      await tester.longPress(find.text('Newest'));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('river-select')));
-      await tester.pumpAndSettle();
-      expect(bar('Select episodes'), findsOneWidget);
+      expect(bar('1 selected'), findsOneWidget);
 
       await tester.tap(find.byKey(const Key('selection-all')));
       await tester.pumpAndSettle();
@@ -619,11 +614,7 @@ void main() {
       await tester.pumpWidget(
           MaterialApp(home: HistoryScreen(doors: doors())));
       await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('select-more')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.byKey(const Key('select-episodes')));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('Heard comet'));
+      await tester.longPress(find.text('Heard comet'));
       await tester.pumpAndSettle();
       expect(bar('1 selected'), findsOneWidget);
       await tester.tap(find.byKey(const Key('bulk-mark-played')));

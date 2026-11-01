@@ -39,8 +39,6 @@ class LibraryFilterSheet extends StatefulWidget {
 }
 
 class _LibraryFilterSheetState extends State<LibraryFilterSheet> {
-  late final TextEditingController _searchController;
-  late Set<LibraryItemType> _types;
   late ReadState _readState;
   late bool _pinnedOnly;
   int? _feedId;
@@ -49,19 +47,10 @@ class _LibraryFilterSheetState extends State<LibraryFilterSheet> {
   @override
   void initState() {
     super.initState();
-    _searchController =
-        TextEditingController(text: widget.initial.textSearch ?? '');
-    _types = {...widget.initial.types};
     _readState = widget.initial.readState;
     _pinnedOnly = widget.initial.pinned == true;
     _feedId = widget.initial.feedId;
     _load();
-  }
-
-  @override
-  void dispose() {
-    _searchController.dispose();
-    super.dispose();
   }
 
   Future<void> _load() async {
@@ -71,10 +60,7 @@ class _LibraryFilterSheetState extends State<LibraryFilterSheet> {
   }
 
   LibraryQuery get _currentQuery {
-    final search = _searchController.text.trim();
     return LibraryQuery(
-        textSearch: search.isEmpty ? null : search,
-        types: _types,
         feedId: _feedId,
         readState: _readState,
         pinned: _pinnedOnly ? true : null);
@@ -84,8 +70,6 @@ class _LibraryFilterSheetState extends State<LibraryFilterSheet> {
 
   void _clearAll() {
     setState(() {
-      _searchController.clear();
-      _types = {};
       _readState = ReadState.any;
       _pinnedOnly = false;
       _feedId = null;
@@ -126,38 +110,6 @@ class _LibraryFilterSheetState extends State<LibraryFilterSheet> {
                 ],
               ),
               const SizedBox(height: 8),
-              TextField(
-                key: const Key('filter-search'),
-                controller: _searchController,
-                decoration: const InputDecoration(
-                    hintText: 'Titles, shows, notes, what was said',
-                    prefixIcon: Icon(Icons.search)),
-                onChanged: (_) => _emit(),
-              ),
-              const SizedBox(height: 24),
-              Text('Type', style: theme.textTheme.bodyLarge),
-              const SizedBox(height: 8),
-              Wrap(
-                spacing: 8,
-                runSpacing: 8,
-                children: [
-                  for (final t in LibraryItemType.values)
-                    FilterChip(
-                      key: Key('filter-type-${t.name}'),
-                      label: Text(_typeLabel(t)),
-                      selected: _types.contains(t),
-                      onSelected: (selected) => setState(() {
-                        if (selected) {
-                          _types.add(t);
-                        } else {
-                          _types.remove(t);
-                        }
-                        _emit();
-                      }),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 24),
               Text('Read state', style: theme.textTheme.bodyLarge),
               const SizedBox(height: 8),
               Wrap(
@@ -237,13 +189,6 @@ class _LibraryFilterSheetState extends State<LibraryFilterSheet> {
       ),
     );
   }
-
-  String _typeLabel(LibraryItemType t) => switch (t) {
-        LibraryItemType.book => 'Book',
-        LibraryItemType.article => 'Article',
-        LibraryItemType.podcast => 'Podcast',
-        LibraryItemType.note => 'Note',
-      };
 
   String _readStateLabel(ReadState rs) => switch (rs) {
         ReadState.any => 'Any',

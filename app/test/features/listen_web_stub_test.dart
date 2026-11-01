@@ -90,6 +90,8 @@ void main() {
       'class MakeAheadLine',
       'makeAheadPass()',
       'refreshVoices()',
+      'get clearness',
+      'chooseClearness(',
       'aheadOfferFor(',
       'setMakeAhead(',
     ]) {

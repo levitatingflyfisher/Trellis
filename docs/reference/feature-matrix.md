@@ -56,7 +56,7 @@ land, entries gain a `✅ shipped` mark; until then this is the plan of record.
 - Latest (the donors' river; "River" was retired as a coined word, and "Inbox" by the naming ruling of ADR-0019): reverse-chronological by publish date only, unread/audio/text filters, read tracking. A permanent archive (ADR-0019, superseding ADR-0003 law 2): nothing decays and nothing is hidden by age; schema v27 un-hid whatever the retired 30-day sweep had hidden, and restoring an older backup does the same. Rows the old sweep had already deleted are gone from the database; a feed that still lists them re-adds them on refresh. Read 60 rows at a time by keyset, with the next page fetched as the list nears its end; a row action re-reads that row, a bulk change re-reads only what is loaded, and a publish-time index keeps the first page fast on a 20k-episode archive. A quiet "New since you last looked" line marks rows published since the profile's previous visit (a cold start or a return from the background, not a tab switch: Latest keeps its pages and place across tabs); no count, no badge. Campaign 5 (ADR-0011) added the triage verbs Keep and Let it pass (in the overflow menu; every row has one; text/article rows had none before), both undoable to the exact prior state; no new "Kept" filter chip exists, by law — kept things live in the library.
 - Episode rows you can tell apart (ADR-0016 step 1): one shared row for Latest and the podcast page. Played rows fade (title in the muted text colour, artwork dimmed; a test pins 4.5:1 contrast in light and dark), a half-heard episode shows a thin bar and "23 min left", every row that knows its length shows it (`itunes:duration` is now parsed at ingest, and the player's measured length still overwrites it), and small worded markers say New, Downloaded, In Queue and Transcript. Per-episode artwork (`itunes:image` on the item) is fetched at ingest for the newest 20 distinct images that differ from the show's, named by URL so a shared image downloads once; older rows fall back to the show's art. "Played" is a recorded fact (`episodes.finished_at_ms`, schema v23): set when playback ends or enters its last 30 s, or by Mark played; Mark unplayed clears it and the saved position. Mark played never promotes the work (ADR-0003 law 2). **Not built**: the Video marker exists but the parser still drops non-audio enclosures, so it never shows. Auto-download landed with ADR-0018; see the Auto-download row.
 - The podcast page (ADR-0016 step 1): a show's own episodes as a place to listen from. Rows play, download (through the one consent dialog) and queue; newest or oldest first, remembered per show; "Play from here" puts this episode and the unplayed ones after it, in the order shown, at the front of the Queue and plays it; "Add unplayed to Queue" appends the rest; "Podcast settings" opens the show's settings. The failing-feed reason and the RFC 5005 "Fetch older episodes" footer stay. The Queue advances on its own only through what the listener put there (and, with "keep finished episodes" on, now moves past the episode that just ended instead of replaying it).
-- Library: pin/delete, progress bars. Corrected: this row previously also claimed "debounced search, sorts, ... rename, ... source lines, feed tiles" — none of that existed; `LibraryScreen` had no search, sort, or filter of any kind, and no rename action, before Campaign 5. What Campaign 5 (ADR-0011) actually built: instant (not debounced) title search, a filter model (type/feed/read-state/pinned, any combination) with saveable, reorderable, deletable named views shown as chips. Sort controls, rename, and per-row feed/source display are still not built — not removed by this campaign, never present.
+- Library: pin/delete, progress bars. Corrected: this row previously also claimed "debounced search, sorts, ... rename, ... source lines, feed tiles" — none of that existed; `LibraryScreen` had no search, sort, or filter of any kind, and no rename action, before Campaign 5. What Campaign 5 (ADR-0011) actually built: instant (not debounced) title search, a filter model (type/feed/read-state/pinned, any combination) with saveable, reorderable, deletable named views shown as chips. Sort controls, rename, and per-row feed/source display are still not built — not removed by this campaign, never present. Changed (board-0161, owner 12 Nov: "what is library if 'latest' has all, text, and audio?" and "library filter search didn't seem to work"): Latest is what arrives from your shows, newest first; the Library is what you keep. A plain line under each title says so. The Library's chips are its own kinds, one tap each and only those it holds: Books, Articles, Texts (pasted or imported), Audiobooks, Episodes (kept as they came) and Made episodes; they wrap, so none sits off a narrow screen. A made episode the person asked for is kept, so it is in the Library; one made ahead by a show's switch arrives like any episode and make ahead may take its room back. Made episodes made before 1.6.x's change keep their old state (Keep puts one in the Library). Search: the words went into a field inside the Filter sheet, which covered the list they filtered, so nothing on screen answered them (`features/library_search_test.dart` reproduces it). The Library now has Latest's own search bar and search screen, the same code (`SearchScreen`, `SearchStore`), kept to what the Library holds, with no shows section; the Filter sheet keeps read state, pinned and show, and Saved views. A saved view from before keeps its other parts and drops its words and any kind it no longer names. The line, the search bar and the chips scroll with the rows on both screens, so a short screen at large text keeps room for the list (`features/library_kinds_test.dart`, `db/search_store_test.dart`).
 - Text intake has no bulk/folder-import door — corrected (Campaign 7): this
   row previously claimed "Bulk multi-file + true folder import on native
   (file_picker directory mode)" for text works. No such door was ever built:
@@ -239,9 +239,10 @@ separately for that reason. Statuses follow the same convention as above.
   same on every list and survives leaving the list. A finished episode
   plays by itself only when the app is in front and nothing else is
   playing; otherwise the app says it is ready and the button plays it.
-  The episode's page shows the four choices as one group (listen or
-  read, original or the learning language), with the progress, Stop and
-  Change under them. Proven through tests with stand-in engines
+  On the episode's page the learning language is a row of its language
+  list that makes it (the four choices became one Play, one Read and
+  that list in board-0161), with the progress and Stop under Play;
+  Change learning language is in the page's ⋮. Proven through tests with stand-in engines
   (`listen_row_button_test.dart`, `listen_wiring_test.dart`,
   `work_page_four_choices_test.dart`); **not yet run on a real phone**.
   **Not built**: making picked shows ahead of time.
@@ -267,12 +268,51 @@ separately for that reason. Statuses follow the same convention as above.
   the list and its note can always be reached
   (`learning_language_setting_test.dart`,
   `work_page_four_choices_test.dart`). Not on the web.
-- **Episodes on this phone** (boards 0127, 0129, 0131). Latest has a
-  chip "On this phone" beside All, Text and Audio. It shows only the
+- **How clearly the voice speaks** (the founding request's follow-up:
+  "choose how much they enunciate"). Settings › Learning has a row under
+  Learning language with four steps, Natural by default. Each step slows
+  the voice, lengthens the pause written after each sentence and each
+  paragraph, and on the downloaded voice asks for more denoising steps:
+
+  | Step | Pace | Pause after a sentence / a paragraph | Downloaded voice steps |
+  |---|---|---|---|
+  | Natural | 1.0 (the voice's own) | 250 / 450 ms | 8 |
+  | Clear | 0.9 | 500 / 800 ms | 12 |
+  | Slow and clear | 0.75 | 800 / 1200 ms | 12 |
+  | Very slow | 0.6 | 1200 / 1800 ms | 12 |
+
+  The downloaded voice (Supertonic) divides the length its duration
+  model predicts by the pace, as upstream's own speed setting does. The
+  phone's voice takes the pace as Android's speech rate, set on every
+  sentence; Android has no setting for more careful sounds. The pauses
+  are silence Trellis writes itself, so the stored sentence times count
+  them and the page still lights the right word. The step applies to
+  episodes made after it is chosen, by a tap and by make ahead alike;
+  the episode stores it (`episodes.clearness`, schema v35) and its page
+  names it ("spoken slowly and clearly by a machine-made voice"). A tap
+  on an episode made at another step asks whether to play it as it is
+  or make it again; the old audio plays until the new one is ready
+  (`listen_clearness_test.dart`, `listen_clearness_setting_test.dart`,
+  `listen_chain_test.dart`, `listen_row_button_test.dart`,
+  `phone_voice_pace_test.dart`, `supertonic_speech_engine_test.dart`).
+  **Not heard on a phone**: nobody has listened to any step yet, and
+  whether 12 denoising steps sound cleaner than 8 is upstream's claim,
+  not ours. **Not built**: the casual end of the request ("totally
+  colloquial street speech"). Neither voice can sound more casual than it
+  does; that would take a casual translation and a voice trained on
+  casual speech. A word-by-word step is not built either: saying each
+  word alone would lose the sentence's tune and multiply the work. Not
+  on the web.
+- **Episodes on this phone** (boards 0127, 0129, 0131, 0161). Latest has
+  a chip "Downloads" (the owner's word) beside All, Text and Audio. The
+  chips wrap onto a second line rather than scroll sideways, so it is on
+  screen at 320 dp and large text; at the end of a sideways row it sat
+  off the edge of a narrow phone, where the owner never found it. It
+  shows only the
   episodes whose audio is on the phone, made episodes in any language
   included, biggest first, each with its size; the total is at the top.
   Each row has a button to remove that episode's audio, and the app's
-  own selection (long-press, or Select in the ⋮) removes several at
+  own selection (long-press) removes several at
   once, with Remove audio first in the bar. One plain confirm says how
   much space comes back. Removing audio keeps the episode, its
   transcript, your place and your study cards, and the decoded copy left
@@ -294,11 +334,12 @@ separately for that reason. Statuses follow the same convention as above.
   language, one row each, saying whether that language's audio is on the
   phone ("Audio on this phone", "Text only, no audio yet", "Text only,
   its audio was removed"). It replaces the Language section on an
-  episode, so no language shows twice; beside the group of four, the
-  learning language's text stays in the group and is listed only when it
-  has a made episode. Tapping a language with audio goes to that
-  episode's page and plays it; the original is one tap away from a made
-  episode the same way. A text-only language is read, as before. Reading
+  episode, so no language shows twice. Since board-0161 it is the one
+  language switch for listening and reading on the original's page: a
+  row chooses its language, Play then plays that language's made audio
+  when it is on the phone and Read reads its text; the learning language
+  not yet made is the row that makes it. On a made episode's page the
+  others are their own episodes, and a row goes to one. Reading
   a translation says at the top of the reader whether that language has
   audio: "This is the Spanish text. There is no Spanish audio yet." with
   Make the Spanish audio (the one tap, in that language, where this
@@ -306,6 +347,25 @@ separately for that reason. Statuses follow the same convention as above.
   with Play the Spanish audio (`features/works/episode_versions_test.dart`,
   `work_page_four_choices_test.dart`). Books and articles keep their
   Language section.
+- ✅ shipped: **The episode's page, one main action** (board-0161, owner
+  12 Nov: "clicking an episode is insane when there are immediately 12
+  buttons", "all formatted CRAZILY"). Play is the one filled button, full
+  width: in the learning language when that episode is made and its
+  audio is here, else the original, with one line under it saying which
+  (or how far a download has got). Beside it, on one grid line of equal
+  cells, three: Read, Queue (Play next and Play last as one) and one
+  download control (Download, Stop while it runs, Downloaded, which
+  offers to remove it); where their words can't fit whole at the text
+  size, they stack at full width instead. A text's page has Read as its
+  main action and Listen beside it. Below is the language list (above).
+  Keep, Transcribe, Stream now or Download, then play, Change learning
+  language and the deletes are in the ⋮. No control is shown greyed out:
+  where something is not offered, one plain line says why (Translate
+  without a transcript, Read on an audiobook). Counted the owner's way
+  (buttons, greyed ones too, tappable rows and the ⋮) for an untouched
+  episode being learnt in Spanish: 14 before, 7 after. Held at 320, 360
+  and 412 dp, at 1.0, 1.3 and 2.0 text
+  (`features/works/work_page_layout_test.dart`).
 - ✅ shipped (1.5.3) — **A visible Play in the reader.** One button where
   the thumb rests (a floating button in Scroll and Lines; beside RSVP's
   own Play in RSVP): Listen / Pause for a work with aligned audio, and
@@ -552,7 +612,8 @@ otherwise.
   32; `features/reader_translation_modes_test.dart`,
   `db/translation_view_db_test.dart`).
 - ✅ shipped: **Pages open inside their tab**, so the bottom bar stays;
-  + Add and Subscriptions in the Library (`features/tab_navigation_test.dart`).
+  + Add in the Library, and Subscriptions is a tab of its own
+  (`features/tab_navigation_test.dart`).
 - ✅ shipped: **Storage by item**: Remove download, Delete transcript and
   Delete translation on the work page (`models/storage_by_item_test.dart`,
   `db/work_storage_db_test.dart`).
@@ -608,6 +669,23 @@ otherwise.
   voice too, not the downloaded one; on the web a picked browser voice is
   not applied (the browser answers nothing), so the first voice for the
   language reads.
+- ✅ shipped: **A Russian read-aloud voice can be found** (board-0161,
+  owner 12 Nov: "I can't get a read-aloud Russian voice"). Three causes,
+  each fixed with a test. (1) A text whose language nobody set (a pasted
+  text, an imported file: intake keeps none) went to the downloaded
+  voice, whose letters are Latin only, so Russian was read as nothing;
+  such a text in another alphabet is now refused with a plain line to
+  set its language, after which that language's voice reads it. (2)
+  Settings › Read aloud voices listed only the languages of works and
+  shows, so a Russian translation of an English episode left Russian
+  off the list; translations' languages are listed now. (3) A phone
+  with no Russian voice downloaded lists none (Android marks such voices
+  "not installed"), and the sheet only said so: it now has "Open
+  text-to-speech settings", and the message when read aloud stops has
+  "Voice settings", both through the app's own door to Android's
+  settings (`features/reader_speak_translation_test.dart`,
+  `db/langs_in_use_test.dart`). Whether the owner's phone has a Russian
+  voice downloaded is a device check.
 - ✅ shipped: **Translation downloads are less than half the size.** The
   six oldest pairs take Xenova’s int8 decoder after a parity check (about
   249 → 116 MB a pair). A pair already on the phone reads “Update
@@ -773,19 +851,25 @@ Paths are under `app/test/` unless they say otherwise.
   worded More menu; the reader names its current mode as a word.
 - ✅ shipped: **Settings on the bottom bar, and one rule for ⋮**
   (board-0131/0132; owner: the three dots hid different things on
-  different screens). The bottom bar is always Latest, Queue, Library,
-  Courses, Settings, with plain labels that fit whole at 320 dp and the
-  bar's 1.3x text cap. Settings gathers every app-wide setting and door:
+  different screens). The bottom bar is always Subscriptions, Latest,
+  Queue, Library, Courses, Settings, in the owner's order (12 Nov), and
+  the app opens on Latest. Every label is a plain word, whole on one
+  line; six share the width, so a label that can't fit at the bar's own
+  size is drawn smaller, just enough to fit. "Subscriptions" needs about
+  104 dp at the bar's 1.3x text cap and 80 at 1.0, against 60 a slot on a
+  360 dp phone: there it is drawn at 0.74x, and at 0.85x on a 412 dp
+  phone at normal text. Settings gathers every app-wide setting and door:
   Theme; Reading (Reading style, Read aloud voices for every language the
   reader meets, Use the system voice, Read citations aloud); Listening
   (Wi-Fi and data, Trim silence & even out volume by default, Headphone
-  buttons); Learning (Learning language, FSRS scheduling, Thinking);
+  buttons); Learning (Learning language, How clearly the voice speaks,
+  FSRS scheduling, Thinking);
   Storage and backup (Models & storage, Backup & migrate, Jobs); This
   reader (Switch reader, What you've built); About (version, Open-source
-  licences). A top bar's ⋮ holds only that screen's own actions: Select
-  first where the screen lists things, then the screen's own rare
-  actions. A screen with none has no ⋮ (Queue, Library, Courses,
-  Settings). The reader, which hides the bottom bar, ends its ⋮ with
+  licences). A top bar's ⋮ holds only that screen's own rare actions.
+  Select is in none: a long press selects (owner, 12 Nov). A screen with
+  none has no ⋮ (Latest, Queue, Library, Courses, Settings, a show's
+  page, History, Search). The reader, which hides the bottom bar, ends its ⋮ with
   Reading settings, the same rows as Settings' Reading group. A row's ⋮
   starts with the work's shared items in one order, then the list's own
   (`features/settings/menu_rule_test.dart`,

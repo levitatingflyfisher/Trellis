@@ -94,6 +94,34 @@ void main() {
       expect(wav.lengthSync() - 44, render.durationMs * 2);
     });
 
+    test('the pauses asked for are the silences written, and the times '
+        'the page lights words by count them exactly', () async {
+      final wav = File('${dir.path}/out.wav');
+      final render = await renderSpoken(
+          sentences: const [
+            (seg: 0, text: 'Hola a todos.'),
+            (seg: 0, text: 'Buenos días.'),
+            (seg: 1, text: 'Adiós.'),
+          ],
+          synth: synth,
+          wav: wav,
+          sentenceGapMs: 1200,
+          segmentGapMs: 1800);
+
+      expect([for (final s in render.sentences) (s.startMs, s.endMs)], [
+        (0, 1300),
+        (2500, 3700),
+        (5500, 6100),
+      ]);
+      expect(wav.lengthSync() - 44, 6100 * 2);
+      // The silence is really there, between the two sounds.
+      final data = ByteData.sublistView(wav.readAsBytesSync(), 44);
+      for (final ms in [1300, 1800, 2499]) {
+        expect(data.getInt16(ms * 2, Endian.little), 0, reason: '$ms ms');
+      }
+      expect(data.getInt16(2500 * 2, Endian.little), isNot(0));
+    });
+
     test('progress is reported, and a cancel stops it and leaves no file',
         () async {
       final wav = File('${dir.path}/out.wav');
@@ -186,7 +214,8 @@ void main() {
           (seg: 0, text: 'Buenos días.'),
           (seg: 3, text: 'Adiós.'),
         ],
-        String lang = 'es'}) async {
+        String lang = 'es',
+        bool kept = false}) async {
       final services = testServices(dir);
       final wav = File('${dir.path}/render.wav');
       final render =
@@ -198,6 +227,7 @@ void main() {
           voice: 'Supertonic M1',
           render: render,
           audio: wav,
+          kept: kept,
           audioFileFor: services.audioFileFor);
     }
 
@@ -218,6 +248,16 @@ void main() {
       expect(file.path, endsWith('.wav'));
       expect(await spokenEpisodeOf(db, original.id, 'es'), id);
       expect(await spokenEpisodeOf(db, original.id, 'ru'), isNull);
+    });
+
+    // Lead's ruling (12 Nov): the Library is what you keep, made episodes
+    // among them; making one is as deliberate as Keep.
+    test('a made episode asked for is kept, so it is in the Library, though '
+        'its original was only passing through Latest', () async {
+      final id = await store(kept: true);
+      expect((await db.spineDao.workById(id))!.persistence, 'work');
+      final library = await db.libraryDao.libraryQueryEntriesOf(profileId);
+      expect([for (final e in library) e.work.id], [id]);
     });
 
     test('its text is the translation, a paragraph for each of the '

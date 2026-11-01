@@ -412,6 +412,12 @@ class Episodes extends Table {
   /// before the kind was stored, when every voice was a machine voice.
   TextColumn get voiceKind => text().nullable()();
 
+  /// How clearly a made episode was spoken (How clearly the voice
+  /// speaks): a `ListenClearness` name. Null for every episode Trellis
+  /// did not make, and for one made before the step was stored, when
+  /// every one was spoken at the voice's own pace (Natural).
+  TextColumn get clearness => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {workId};
 }
@@ -1481,13 +1487,21 @@ class ProfilesDao extends DatabaseAccessor<AppDatabase>
 class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
   SpineDao(super.db);
 
-  /// Every language a work of [profileId]'s, or a show it follows, names:
-  /// the languages Settings offers a read-aloud voice for.
+  /// Every language a work of [profileId]'s, a show it follows, or a
+  /// translation it holds names: the languages Settings offers a
+  /// read-aloud voice for.
   Future<Set<String>> langsInUse(int profileId) async {
     final rows = await customSelect(
       'SELECT lang AS l FROM works WHERE profile_id = ?1 AND lang IS NOT NULL '
       'UNION SELECT language AS l FROM feeds '
-      'WHERE profile_id = ?1 AND language IS NOT NULL',
+      'WHERE profile_id = ?1 AND language IS NOT NULL '
+      // A translation is a language the reader meets too: a Russian
+      // translation of an English episode names no Russian work or show.
+      'UNION SELECT t.lang AS l FROM translation_sentences t '
+      'JOIN works w ON w.id = t.work_id WHERE w.profile_id = ?1 '
+      "UNION SELECT y.lang AS l FROM layers y "
+      "JOIN works w ON w.id = y.work_id WHERE w.profile_id = ?1 "
+      "AND y.kind = 'mt'",
       variables: [Variable.withInt(profileId)],
     ).get();
     return {for (final r in rows) r.read<String>('l')};
@@ -3286,6 +3300,7 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
     required int publishedAtMs,
     String? sourceLabel,
     String? voiceKind,
+    String? clearness,
   }) => into(episodes).insert(
     EpisodesCompanion.insert(
       workId: Value(workId),
@@ -3297,6 +3312,7 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
       publishedAtMs: publishedAtMs,
       sourceLabel: Value(sourceLabel),
       voiceKind: Value(voiceKind),
+      clearness: Value(clearness),
     ),
   );
 
@@ -4133,7 +4149,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 34;
+  int get schemaVersion => 35;
   // There is no v14: it was reserved for the reader-depth campaign, which
   // landed as v18 after three sibling campaigns merged ahead of it, so the
   // guard chain skips from 13 to 15. Version gaps are harmless — an
@@ -4556,6 +4572,13 @@ class AppDatabase extends _$AppDatabase {
           if (from < 34) {
             // Pictures on cards.
             await m.createTable(cardImages);
+          }
+          if (from >= 2 && from < 35) {
+            // How clearly a made episode was spoken. Guarded like every
+            // episodes column (the from < 2 block creates the table).
+            await transaction(() async {
+              await m.addColumn(episodes, episodes.clearness);
+            });
           }
         },
         beforeOpen: (details) async {

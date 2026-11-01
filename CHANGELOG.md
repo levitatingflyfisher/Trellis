@@ -7,6 +7,16 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.6.11 — 2026-11-12
+
+- **A calmer episode page.** One big Play (in the language you are learning when that episode is made), with Read, Queue and Download beside it. “This episode in other languages” is the one place to switch language for listening and reading. Everything else is in the ⋮, and nothing is shown greyed out.
+- **The bottom bar, in your order:** Subscriptions, Latest, Queue, Library, Courses, Settings. Subscriptions left the tops of Latest and the Library.
+- **Select left the menus**: a long press selects.
+- **Downloads** is a chip on Latest that always shows, even on a narrow phone.
+- **What Latest and Library are for**, in one line each: what arrives from your shows, and what you keep. The Library filters by its own kinds, and its search is now the same search as Latest’s.
+- **Read aloud in Russian**: a text whose language is unset no longer goes to a voice that cannot read its letters, Russian translations count when listing voices, and where the phone has no Russian voice the voices sheet has a button to Android’s voice settings.
+- **How clearly the voice speaks**, in Settings › Learning: Natural, Clear, Slow and clear, or Very slow. Made episodes are spoken at that pace with longer pauses, and the highlighted words still follow the voice.
+
 ## 1.6.10 — 2026-11-12
 
 - **Pictures on cards.** Add a picture to any card you make or edit; it shows above the question, with no network. Backups carry the pictures, and the Anki export adds them to the card. PNG, JPEG, GIF or WebP, up to 3 MB.

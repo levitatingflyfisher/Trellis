@@ -13,6 +13,7 @@ import 'package:trellis/features/search/search_store.dart';
 import 'package:trellis/features/search/share_item.dart';
 import 'package:trellis/main.dart';
 
+import '../support/tabs.dart';
 import '../support/fake_player.dart';
 import '../support/pick_reader.dart';
 import '../support/scripted_fetcher.dart';
@@ -487,11 +488,7 @@ void main() {
     // the Queue bar, visible, not in Latest's menu.
     testWidgets('History on the Queue bar opens history', (tester) async {
       await pumpApp(tester);
-      await tester.tap(find.byKey(const Key('river-more')));
-      await tester.pumpAndSettle();
       expect(find.byKey(const Key('river-open-history')), findsNothing);
-      await tester.tapAt(Offset.zero);
-      await tester.pumpAndSettle();
 
       await tester.tap(find.descendant(
           of: find.byType(NavigationBar), matching: find.text('Queue')));
@@ -505,8 +502,7 @@ void main() {
     testWidgets('Subscriptions finds its own shows, and hands the words on '
         'to search everything', (tester) async {
       await pumpApp(tester);
-      await tester.tap(find.byKey(const Key('manage-feeds')));
-      await tester.pumpAndSettle();
+      await toTab(tester, 'Subscriptions');
       await tester.enterText(find.byKey(const Key('feeds-find')), 'comet');
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('feeds-search-all')));

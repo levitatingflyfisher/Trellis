@@ -26,6 +26,7 @@ import '../reader/translation/translation_route.dart'
     show pivotLanguage, resolveSourceLanguage;
 import '../transcribe/foreground_gate.dart';
 import '../transcribe/transcript_so_far.dart';
+import 'listen_clearness.dart';
 import 'spoken_episode.dart';
 
 enum ListenStage { transcribing, translating, speaking, ready, failed }
@@ -70,11 +71,12 @@ class ListenState {
 }
 
 /// A voice whose speech can be saved: its name for the episode's page,
-/// and the call that says one sentence.
+/// and the call that says one sentence at a pace (How clearly the voice
+/// speaks).
 typedef SavedVoice = ({
   String name,
   VoiceKind voiceKind,
-  Future<SynthResult> Function(String text) say,
+  Future<SynthResult> Function(String text, SpeechPace pace) say,
 });
 
 /// What an episode is taken to be spoken in, for choosing a translator:
@@ -203,13 +205,14 @@ class ListenChain extends ChangeNotifier {
   /// Runs what is still missing for [work] in [lang] and returns the
   /// spoken episode's id, or null when it failed (see [stateOf]) or was
   /// cancelled. A call while one is under way for the same work joins it.
-  Future<int?> start(Work work, String lang) =>
-      _running[work.id] ??= _run(work, lang).whenComplete(() {
+  /// [kept]: asked for by the person, so the made episode is kept.
+  Future<int?> start(Work work, String lang, {bool kept = false}) =>
+      _running[work.id] ??= _run(work, lang, kept).whenComplete(() {
         _running.remove(work.id);
         _cancelled.remove(work.id);
       });
 
-  Future<int?> _run(Work work, String lang) async {
+  Future<int?> _run(Work work, String lang, bool kept) async {
     void check() {
       if (_cancelled.contains(work.id)) throw const _Cancelled();
     }
@@ -225,8 +228,13 @@ class ListenChain extends ChangeNotifier {
     }
 
     try {
+      // How clearly the voice speaks, as chosen in Settings now: a tap
+      // and make ahead alike.
+      final clearness = await readListenClearness(db);
       final made = await madeEpisodeOf(work.id, lang);
-      if (made != null) {
+      // One made at another step is made again in place: the line only
+      // holds it when the listener asked for that (the one tap's offer).
+      if (made != null && await spokenClearnessOf(db, made) == clearness) {
         _set(work.id,
             ListenState(ListenStage.ready, lang: lang, spokenWorkId: made));
         return made;
@@ -313,7 +321,9 @@ class ListenChain extends ChangeNotifier {
       final wav = File('${tempDir.path}/${work.id}-$lang.wav');
       final render = await renderSpoken(
           sentences: sentences,
-          synth: voice.say,
+          synth: (text) => voice.say(text, clearness.pace),
+          sentenceGapMs: clearness.sentenceGapMs,
+          segmentGapMs: clearness.segmentGapMs,
           wav: wav,
           cancelled: () => _cancelled.contains(work.id),
           onProgress: (done, total) => beat(ListenState(
@@ -335,8 +345,10 @@ class ListenChain extends ChangeNotifier {
           lang: lang,
           voice: voice.name,
           voiceKind: voice.voiceKind,
+          clearness: clearness,
           render: render,
           audio: audio,
+          kept: kept,
           audioFileFor: audioFileFor);
       _set(work.id,
           ListenState(ListenStage.ready, lang: lang, spokenWorkId: id));

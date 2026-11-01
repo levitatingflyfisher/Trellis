@@ -12,6 +12,7 @@ import 'package:trellis/features/reader/speech/speech_engine.dart';
 /// `package:flutter_onnxruntime` or a platform channel.
 class _FakeVoiceHandle implements SupertonicVoiceHandle {
   final List<({String text, String lang})> calls = [];
+  final List<SpeechPace> paces = [];
   bool disposed = false;
 
   /// Lets a test hold a call open until it chooses to resolve it — the
@@ -26,8 +27,10 @@ class _FakeVoiceHandle implements SupertonicVoiceHandle {
   int _inFlight = 0;
 
   @override
-  Future<SynthResult> generate(String text, {required String lang}) async {
+  Future<SynthResult> generate(String text,
+      {required String lang, SpeechPace pace = SpeechPace.natural}) async {
     calls.add((text: text, lang: lang));
+    paces.add(pace);
     _inFlight++;
     if (_inFlight > maxConcurrent) maxConcurrent = _inFlight;
     try {
@@ -102,6 +105,34 @@ void main() {
     expect(handle.calls, [(text: 'Hello there.', lang: 'en')]);
     expect(result.sampleRate, 44100);
     expect(result.samples.length, 160);
+  });
+
+  test('a pace asked for reaches the voice; none asked for is Natural '
+      '(how clearly a made episode is spoken)', () async {
+    final handle = _FakeVoiceHandle();
+    final engine =
+        SupertonicSpeechEngine(files: files, openHandle: (_) async => handle);
+
+    await engine.synthesize('Uno.', lang: 'es');
+    await engine.synthesize('Dos.',
+        lang: 'es', pace: const SpeechPace(rate: 0.75, careful: true));
+
+    expect(handle.paces, [
+      SpeechPace.natural,
+      const SpeechPace(rate: 0.75, careful: true),
+    ]);
+  });
+
+  test('the pace stretches the length the duration model predicts, as '
+      'upstream’s speed setting does, and careful asks for more '
+      'denoising steps', () {
+    expect(supertonicDurationSec(2.0, SpeechPace.natural), 2.0);
+    expect(supertonicDurationSec(2.0, const SpeechPace(rate: 0.8)), 2.5);
+    expect(supertonicDurationSec(1.2, const SpeechPace(rate: 0.6)),
+        closeTo(2.0, 1e-9));
+    expect(supertonicDenoisingSteps(SpeechPace.natural), 8);
+    expect(supertonicDenoisingSteps(const SpeechPace(rate: 0.9, careful: true)),
+        12);
   });
 
   test('Spanish now renders through the SAME voice (ADR-0008 "Babel" Phase '

@@ -162,14 +162,16 @@ void main() {
     await tester.tap(tabLabel('Latest'));
     await tester.pumpAndSettle(); // river list + filter chips
 
-    // At 2x the chips row scrolls; bring the far chip on-stage first.
-    await tester.ensureVisible(find.byKey(const Key('chip-audio')));
-    await tester.pumpAndSettle();
+    // The chips wrap at 2x, so every one is on screen as it is.
     await tester.tap(find.byKey(const Key('chip-audio')));
     await tester.pumpAndSettle();
     expect(find.byKey(Key('play-$episodeWorkId')), findsOneWidget,
         reason: 'the audio filter keeps the episode visible');
 
+    // Two rows of chips at 2x push the list down: bring the row's Play
+    // into view before tapping it.
+    await tester.ensureVisible(find.byKey(Key('play-$episodeWorkId')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(Key('play-$episodeWorkId')));
     await tester.pumpAndSettle(); // mini player bar with the long title
     player.emitDuration(const Duration(minutes: 45));
@@ -177,8 +179,7 @@ void main() {
     await tester.pump();
     expect(find.byKey(const Key('mini-player')), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('manage-feeds')));
-    await tester.pumpAndSettle(); // feeds screen, long feed title row
+    await toTab(tester, 'Subscriptions'); // feeds screen, long feed title row
 
     await tester.tap(find.text('Follow'));
     await tester.pumpAndSettle(); // subscribe screen
@@ -187,8 +188,6 @@ void main() {
     await tester.pump();
 
     await tester.tap(find.byType(BackButton)); // subscribe → feeds
-    await tester.pumpAndSettle();
-    await tester.tap(find.byType(BackButton)); // feeds → river
     await tester.pumpAndSettle();
 
     await tester.tap(tabLabel('Library'));

@@ -38,6 +38,7 @@ import '../player/headset_keys.dart';
 import '../player/headset_keys_sheet.dart';
 import '../player/mini_player_bar.dart';
 import '../player/mini_player_host.dart';
+import 'bar_label_fit.dart';
 import '../player/play_fetch.dart';
 import '../player/player_controller.dart';
 import '../player/queue_screen.dart';
@@ -49,7 +50,8 @@ import '../study/courses_screen.dart';
 import '../transcribe/transcribe_coordinator.dart';
 import '../works/work_open.dart';
 
-/// One reader's shell: Latest, Queue, Library, Courses and Settings tabs
+/// One reader's shell: Subscriptions, Latest, Queue, Library, Courses and
+/// Settings tabs
 /// over a single persistent mini-player bar. The player, the feeds repository and the
 /// transcription coordinator live here so playback and running jobs
 /// survive tab switches — and reopening the app finds its resumable job
@@ -104,17 +106,23 @@ class HomeShell extends StatefulWidget {
 }
 
 class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
-  static const _queueTab = 1;
-  static const _libraryTab = 2;
-  static const _coursesTab = 3;
+  /// The owner's order (12 Nov): "Subscriptions, Latest, Queue, Library,
+  /// Courses, and then settings". Subscriptions sits bottom left, where
+  /// the shows you follow are always one tap away, and leaves the tops of
+  /// Latest and the Library.
+  static const _subscriptionsTab = 0;
+  static const _latestTab = 1;
+  static const _queueTab = 2;
+  static const _libraryTab = 3;
+  static const _coursesTab = 4;
 
   /// Settings, always on the bottom bar (board-0132): every app-wide
   /// setting and door is there, and none hides in a tab's ⋮.
-  static const _tabCount = 5;
+  static const _tabCount = 6;
 
-  /// Latest first, and where a reader lands: what arrived is the usual
-  /// reason to open a podcast app.
-  int _tab = 0;
+  /// Where a reader lands: Latest, since what arrived is the usual reason
+  /// to open a podcast app.
+  int _tab = _latestTab;
 
   /// One Navigator per tab (1.5.8, user: "like AntennaPod, the bottom nav
   /// bar almost never goes away"): a page opened from a tab opens inside
@@ -128,7 +136,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 
   /// Tabs are built on first visit and then kept, so their pages survive
   /// a trip elsewhere; launch still builds only Latest.
-  final Set<int> _builtTabs = {0};
+  final Set<int> _builtTabs = {_latestTab};
 
   /// Bumped when a tab other than Latest is revisited at its root, so its
   /// screen reads its data again, as it did when tabs were built per
@@ -155,7 +163,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 
   void _goToTab(int tab) {
     setState(() {
-      if (tab != 0 &&
+      if (tab != _latestTab &&
           _builtTabs.contains(tab) &&
           !(_tabNavigator(tab)?.canPop() ?? false)) {
         _tabEpochs[tab]++;
@@ -330,7 +338,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         // Shared before: the work it made opens, and nothing is added.
         unawaited(_openSharedWork(outcome.workId));
       case ShareSaved():
-        _goToTab(outcome.inLatest ? 0 : _libraryTab);
+        _goToTab(outcome.inLatest ? _latestTab : _libraryTab);
         if (outcome.inLatest) setState(() => _latestChanges++);
         final where = outcome.inLatest ? 'Latest' : 'your Library';
         final what = outcome.count > 1 ? '${outcome.count} items' : '';
@@ -495,7 +503,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
           case SubscribeSuccess(title: final title):
             await _shareIntake.dropLink(offer);
             if (!mounted) return;
-            _goToTab(0);
+            _goToTab(_latestTab);
             setState(() => _latestChanges++);
             _toast('Following ${title.isEmpty ? offer.name : title}.');
           case AlreadySubscribed(title: final title):
@@ -669,15 +677,15 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     unawaited(_pushPage<void>(screen));
   }
 
-  /// Asked by Models & storage: Latest, with its On this phone chip on.
+  /// Asked by Models & storage: Latest, with its Downloads chip on.
   /// The page that asked closes, so Back does not return to it on a tab
   /// that is no longer in view.
   int _onPhoneAsks = 0;
 
   void _showEpisodesOnPhone() {
     _popTabToRoot(_tab);
-    if (_tab != 0) _goToTab(0);
-    _popTabToRoot(0);
+    if (_tab != _latestTab) _goToTab(_latestTab);
+    _popTabToRoot(_latestTab);
     setState(() => _onPhoneAsks++);
   }
 
@@ -843,25 +851,21 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         ),
       ));
 
-  /// Subscriptions, from the Library's bar (Latest opens its own): inside
-  /// the tab. Latest reads again after, since a follow or an unfollow
-  /// changes it.
-  Future<void> _openSubscriptions(BuildContext context) async {
-    await Navigator.of(context).push<void>(MaterialPageRoute(
-        builder: (_) => FeedsScreen(
-              db: widget.db,
-              repository: _repository,
-              profile: widget.profile,
-              feedCheck: _feedCheckOffered,
-              localMlAvailable: widget.services.localMlAvailable,
-              playerController: _player,
-              downloadCoordinator: _downloadCoordinator,
-              dspCoordinator: _dspCoordinator,
-              readerDoors: _readerDoors,
-              transcriber: _coordinator,
-            )));
-    if (mounted) setState(() => _latestChanges++);
-  }
+  /// The Subscriptions tab's root: the shows this reader follows. Latest
+  /// reads again when its tab comes back into view, so a follow or an
+  /// unfollow here shows there.
+  Widget _subscriptions() => FeedsScreen(
+        db: widget.db,
+        repository: _repository,
+        profile: widget.profile,
+        feedCheck: _feedCheckOffered,
+        localMlAvailable: widget.services.localMlAvailable,
+        playerController: _player,
+        downloadCoordinator: _downloadCoordinator,
+        dspCoordinator: _dspCoordinator,
+        readerDoors: _readerDoors,
+        transcriber: _coordinator,
+      );
 
   /// The + Add sheet's "Subscribe to a feed": the same screen Latest's
   /// empty state opens, inside the tab it was opened from.
@@ -909,8 +913,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
 
   /// A tab's root screen.
   Widget _tabRoot(int tab) => switch (tab) {
-        0 => RiverScreen(
-            active: _tab == 0,
+        _subscriptionsTab => _subscriptions(),
+        _latestTab => RiverScreen(
+            active: _tab == _latestTab,
             changes: _latestChanges,
             onPhoneAsks: _onPhoneAsks,
             onOpenWork: (id) => unawaited(_refetchOnOpen(id)),
@@ -940,7 +945,6 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
             db: widget.db,
             profile: widget.profile,
             onSubscribe: _subscribe,
-            onOpenSubscriptions: _openSubscriptions,
             fetcher: widget.fetcher,
             tts: widget.services.tts,
             lane: widget.services.webFetchLane,
@@ -970,6 +974,9 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                 : null,
             listVoices: widget.services.localMlAvailable
                 ? widget.services.tts.voices
+                : null,
+            openVoiceSettings: widget.services.localMlAvailable
+                ? widget.services.tts.openSettings
                 : null,
             onOpenModels: _openModels,
             onOpenBackup: _openBackup,
@@ -1031,47 +1038,70 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
             )
           else
             _miniPlayerBar(),
-          // Five plain labels, always (owner: plain labels, never icons
-          // alone). The bar draws its labels at up to 1.3x; at 320 dp that
-          // leaves 64 dp for "Settings", which needs 65 with the theme's
-          // 0.2 letter spacing and 63 with none. So the bar's labels set
-          // none, and every label stays whole on one line.
+          // Six plain labels, always (owner: plain labels, never icons
+          // alone). The bar draws its labels at up to 1.3x; the bar's
+          // labels set no letter spacing, and settings_tab_test.dart
+          // holds every label whole on one line at 360 and 320 dp.
           Theme(
             data: _barTheme(Theme.of(context)),
             child: NavigationBar(
             selectedIndex: _tab,
             onDestinationSelected: _selectTab,
-            destinations: const [
+            destinations: [
+              // The industry's word for the shows you follow.
+              WholeBarLabel(
+                label: 'Subscriptions',
+                child: NavigationDestination(
+                  icon: const Icon(Icons.rss_feed_outlined),
+                  selectedIcon: const Icon(Icons.rss_feed),
+                  label: 'Subscriptions',
+                ),
+              ),
               // "Latest", the industry's word, not the coined "River"
               // (operator naming ruling): every item from every followed
               // feed, newest first, kept for good (ADR-0019); keeping one
               // puts it in the Library.
-              NavigationDestination(
-                icon: Icon(Icons.dynamic_feed_outlined),
-                selectedIcon: Icon(Icons.dynamic_feed),
+              WholeBarLabel(
                 label: 'Latest',
+                child: NavigationDestination(
+                  icon: const Icon(Icons.dynamic_feed_outlined),
+                  selectedIcon: const Icon(Icons.dynamic_feed),
+                  label: 'Latest',
+                ),
               ),
               // "Queue", not the coined "Up Next": what plays after this,
               // in the order the listener chose.
-              NavigationDestination(
-                icon: Icon(Icons.queue_music_outlined),
-                selectedIcon: Icon(Icons.queue_music),
+              WholeBarLabel(
                 label: 'Queue',
+                child: NavigationDestination(
+                  icon: const Icon(Icons.queue_music_outlined),
+                  selectedIcon: const Icon(Icons.queue_music),
+                  label: 'Queue',
+                ),
               ),
-              NavigationDestination(
-                icon: Icon(Icons.local_library_outlined),
-                selectedIcon: Icon(Icons.local_library),
+              WholeBarLabel(
                 label: 'Library',
+                child: NavigationDestination(
+                  icon: const Icon(Icons.local_library_outlined),
+                  selectedIcon: const Icon(Icons.local_library),
+                  label: 'Library',
+                ),
               ),
-              NavigationDestination(
-                icon: Icon(Icons.school_outlined),
-                selectedIcon: Icon(Icons.school),
+              WholeBarLabel(
                 label: 'Courses',
+                child: NavigationDestination(
+                  icon: const Icon(Icons.school_outlined),
+                  selectedIcon: const Icon(Icons.school),
+                  label: 'Courses',
+                ),
               ),
-              NavigationDestination(
-                icon: Icon(Icons.settings_outlined),
-                selectedIcon: Icon(Icons.settings),
+              WholeBarLabel(
                 label: 'Settings',
+                child: NavigationDestination(
+                  icon: const Icon(Icons.settings_outlined),
+                  selectedIcon: const Icon(Icons.settings),
+                  label: 'Settings',
+                ),
               ),
             ],
           ),
@@ -1082,8 +1112,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   }
 }
 
-/// The bottom bar's theme: its labels without letter spacing, so all
-/// five fit whole at 320 dp and the bar's 1.3x text cap.
+/// The bottom bar's theme: its labels without letter spacing, so as many
+/// as can fit whole at their full size do (see [WholeBarLabel]).
 ThemeData _barTheme(ThemeData theme) => theme.copyWith(
     textTheme: theme.textTheme.copyWith(
         labelMedium: theme.textTheme.labelMedium?.copyWith(letterSpacing: 0)));

@@ -15,7 +15,6 @@ import '../feeds/episode_download_coordinator.dart';
 import '../jobs/jobs_screen.dart' show downloadStatus;
 import '../feeds/feeds_repository.dart';
 import '../feeds/feed_detail_screen.dart';
-import '../feeds/feeds_screen.dart';
 import '../feeds/subscribe_screen.dart';
 import '../player/player_controller.dart';
 import '../../services/device_services.dart'
@@ -31,6 +30,7 @@ import '../transcribe/job_cards.dart';
 import '../transcribe/transcribe_coordinator.dart';
 import 'river_triage.dart';
 import '../shared/capped_body.dart';
+import '../shared/purpose_line.dart';
 import '../storage/on_phone.dart';
 
 /// The River (ADR-0003 law 1): ONE reverse-chronological list across every
@@ -530,26 +530,6 @@ class _RiverScreenState extends State<RiverScreen>
       actions: _actions,
       readerDoors: _readerDoors);
 
-  Future<void> _manageFeeds() async {
-    await Navigator.of(context).push<void>(
-      MaterialPageRoute(
-        builder: (_) => FeedsScreen(
-          db: widget.db,
-          repository: widget.repository,
-          profile: widget.profile,
-          feedCheck: widget.feedCheck,
-          localMlAvailable: widget.localMlAvailable,
-          playerController: widget.playerController,
-          downloadCoordinator: widget.downloadCoordinator,
-          dspCoordinator: widget.dspCoordinator,
-          readerDoors: _readerDoors,
-          transcriber: widget.coordinator,
-        ),
-      ),
-    );
-    await _reloadLoaded();
-  }
-
   Future<void> _openSearch() async {
     await Navigator.of(context).push<void>(MaterialPageRoute(
         builder: (_) => SearchScreen(doors: _searchDoors)));
@@ -650,106 +630,79 @@ class _RiverScreenState extends State<RiverScreen>
       bottomSheet: OhUndoBar(controller: _undo),
       appBar: _selection.active ? _bulk.bar(context) : AppBar(
         title: const Text('Latest'),
-        actions: [
-          OhBarActions(children: [
-            OhBarAction(
-              key: const Key('manage-feeds'),
-              icon: Icons.rss_feed,
-              // The industry's word for the shows you follow, and the
-              // title of the screen it opens.
-              label: 'Subscriptions',
-              onPressed: _manageFeeds,
-            ),
-            // Latest's own: Select. App-wide things are in Settings
-            // (board-0131); with nothing to select there is no ⋮.
-            if (_entries?.isNotEmpty ?? false)
-              OhBarOverflow<String>(
-                key: const Key('river-more'),
-                onSelected: (_) => _selection.enter(),
-                itemBuilder: (_) => const [
-                  PopupMenuItem(
-                    key: Key('river-select'),
-                    value: 'select',
-                    child: Text('Select'),
-                  ),
-                ],
-              ),
-          ]),
-        ],
+        // No ⋮ and no Subscriptions here: a long press selects, and
+        // Subscriptions is the first item of the bottom bar (owner,
+        // 12 Nov).
       ),
       body: CappedBody(child: _bulk.scope(child: switch (entries) {
         null => const Center(child: CircularProgressIndicator()),
         // An empty filter keeps its chips, so the way back is there.
-        [] when !_onPhone => Column(
-          children: [
-            SearchEntry(
-                key: const Key('river-search'), onPressed: _openSearch),
-            TranscribeJobLines(
-                coordinator: widget.coordinator,
-                onOpenJobs: widget.onOpenJobs),
-            Expanded(
-              child: RefreshIndicator(
-                onRefresh: _refresh,
-                child: ListView(
-                  physics: const AlwaysScrollableScrollPhysics(),
-                  children: [
-                    Padding(
-                      padding: const EdgeInsets.only(top: 48),
-                      child: _EmptyRiver(onFollow: _followFeed),
-                    ),
-                  ],
+        [] when !_onPhone => RefreshIndicator(
+            onRefresh: _refresh,
+            child: ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              children: [
+                ..._listHead(chips: false),
+                Padding(
+                  padding: const EdgeInsets.only(top: 48),
+                  child: _EmptyRiver(onFollow: _followFeed),
                 ),
-              ),
+              ],
             ),
-          ],
-        ),
+          ),
         _ => _riverList(),
       })),
     );
   }
+
+  /// What sits above the rows: it scrolls with them, so a short screen
+  /// at large text still has room for the list.
+  List<Widget> _listHead({bool chips = true, List<RiverEntry>? visible}) => [
+        // Lead's ruling (12 Nov): Latest is what arrives, the Library is
+        // what you keep.
+        const PurposeLine('What arrives from your shows, newest first.',
+            textKey: Key('latest-purpose')),
+        SearchEntry(key: const Key('river-search'), onPressed: _openSearch),
+        TranscribeJobLines(
+            coordinator: widget.coordinator, onOpenJobs: widget.onOpenJobs),
+        if (chips) _filterChips(),
+        if (_onPhone && visible != null) _onPhoneHeader(visible),
+      ];
 
   Widget _riverList() {
     // Once per build: the filter rebuilds a list of every item, and the
     // builder used to ask for it again for every row it laid out.
     final visible = _visible;
     _selection.universe = _entriesOf(visible);
-    return Column(
-      children: [
-        SearchEntry(
-            key: const Key('river-search'), onPressed: _openSearch),
-        TranscribeJobLines(
-                coordinator: widget.coordinator,
-                onOpenJobs: widget.onOpenJobs),
-        _filterChips(),
-        if (_onPhone) _onPhoneHeader(visible),
-        Expanded(
-          child: RefreshIndicator(
-            onRefresh: _refresh,
-            child: ListView.builder(
-              physics: const AlwaysScrollableScrollPhysics(),
-              itemCount: visible.length + (_hasMore ? 1 : 0),
-              itemBuilder: (_, i) => i < visible.length
-                  ? (_newLineAbove(visible, i)
-                      ? Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const _NewSinceLine(),
-                            _itemTile(visible, i),
-                          ],
-                        )
-                      : _itemTile(visible, i))
-                  // A new list or a longer one is a new slot, so it asks
-                  // again once it is built.
-                  : _moreFailed
-                      ? _MoreFailed(
-                          onRetry: () => setState(() => _moreFailed = false))
-                      : _MoreBelow(
-                          key: ValueKey((_generation, visible.length)),
-                          onShown: _loadMore),
-            ),
-          ),
-        ),
-      ],
+    final head = _listHead(visible: visible);
+    return RefreshIndicator(
+      onRefresh: _refresh,
+      child: ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(),
+        itemCount: head.length + visible.length + (_hasMore ? 1 : 0),
+        itemBuilder: (_, at) {
+          if (at < head.length) return head[at];
+          final i = at - head.length;
+          if (i < visible.length) {
+            return _newLineAbove(visible, i)
+                ? Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const _NewSinceLine(),
+                      _itemTile(visible, i),
+                    ],
+                  )
+                : _itemTile(visible, i);
+          }
+          // A new list or a longer one is a new slot, so it asks again
+          // once it is built.
+          return _moreFailed
+              ? _MoreFailed(onRetry: () => setState(() => _moreFailed = false))
+              : _MoreBelow(
+                  key: ValueKey((_generation, visible.length)),
+                  onShown: _loadMore);
+        },
+      ),
     );
   }
 
@@ -779,46 +732,50 @@ class _RiverScreenState extends State<RiverScreen>
     );
   }
 
+  /// The chips wrap rather than scroll sideways: on a narrow phone the
+  /// last one sat off the edge, and the owner never found Downloads
+  /// there (12 Nov).
   Widget _filterChips() {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
+    return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
-      child: Row(
-        children: [
-          ChoiceChip(
-            key: const Key('chip-all'),
-            label: const Text('All'),
-            selected: _filter == _RiverFilter.all,
-            onSelected: (_) => _setFilter(_RiverFilter.all),
-          ),
-          const SizedBox(width: 8),
-          ChoiceChip(
-            key: const Key('chip-text'),
-            label: const Text('Text'),
-            selected: _filter == _RiverFilter.text,
-            onSelected: (_) => _setFilter(_RiverFilter.text),
-          ),
-          const SizedBox(width: 8),
-          ChoiceChip(
-            key: const Key('chip-audio'),
-            label: const Text('Audio'),
-            selected: _filter == _RiverFilter.audio,
-            onSelected: (_) => _setFilter(_RiverFilter.audio),
-          ),
-          if (_offersOnPhone) ...[
-            const SizedBox(width: 8),
-            Tooltip(
-              message: 'Only episodes whose audio is on this phone',
-              child: ChoiceChip(
-                key: const Key('chip-on-phone'),
-                avatar: const Icon(Icons.phone_android, size: 18),
-                label: const Text('On this phone'),
-                selected: _onPhone,
-                onSelected: (_) => _setFilter(_RiverFilter.onPhone),
-              ),
+      child: Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          children: [
+            ChoiceChip(
+              key: const Key('chip-all'),
+              label: const Text('All'),
+              selected: _filter == _RiverFilter.all,
+              onSelected: (_) => _setFilter(_RiverFilter.all),
             ),
+            ChoiceChip(
+              key: const Key('chip-text'),
+              label: const Text('Text'),
+              selected: _filter == _RiverFilter.text,
+              onSelected: (_) => _setFilter(_RiverFilter.text),
+            ),
+            ChoiceChip(
+              key: const Key('chip-audio'),
+              label: const Text('Audio'),
+              selected: _filter == _RiverFilter.audio,
+              onSelected: (_) => _setFilter(_RiverFilter.audio),
+            ),
+            if (_offersOnPhone)
+              Tooltip(
+                message: 'Only episodes whose audio is on this phone',
+                // The owner's word for them.
+                child: ChoiceChip(
+                  key: const Key('chip-on-phone'),
+                  avatar: const Icon(Icons.download_done, size: 18),
+                  label: const Text('Downloads'),
+                  selected: _onPhone,
+                  onSelected: (_) => _setFilter(_RiverFilter.onPhone),
+                ),
+              ),
           ],
-        ],
+        ),
       ),
     );
   }

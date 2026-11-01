@@ -2,7 +2,6 @@ import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart' hide Alignment;
-import 'package:trellis/features/search/search_store.dart';
 import 'package:trellis/main.dart';
 import '../support/pick_reader.dart';
 import '../support/tabs.dart';
@@ -54,20 +53,18 @@ void main() {
     await tester.tap(find.byKey(const Key('open-filter')));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('filter-search')), findsOneWidget);
+    expect(find.byKey(const Key('filter-pinned-only')), findsOneWidget);
   });
 
   testWidgets(
-      'toggling a type chip narrows the library list immediately — no '
-      'Apply step', (tester) async {
+      'a kind chip, on the Library itself, narrows the list in one tap',
+      (tester) async {
     final profileId = await seedProfile();
     await seedWork(profileId: profileId, kind: 'book', title: 'A book');
     await seedWork(profileId: profileId, kind: 'article', title: 'An article');
     await pumpApp(tester);
 
-    await tester.tap(find.byKey(const Key('open-filter')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('filter-type-book')));
+    await tester.tap(find.byKey(const Key('library-kind-book')));
     await tester.pump();
 
     expect(find.text('A book'), findsOneWidget);
@@ -91,80 +88,17 @@ void main() {
     expect(find.text('Not pinned'), findsNothing);
   });
 
-  testWidgets('search narrows by title, case-insensitively, live',
-      (tester) async {
-    final profileId = await seedProfile();
-    await seedWork(profileId: profileId, kind: 'book', title: 'Aurora season');
-    await seedWork(profileId: profileId, kind: 'book', title: 'Perseid peak');
-    await pumpApp(tester);
-
-    await tester.tap(find.byKey(const Key('open-filter')));
-    await tester.pumpAndSettle();
-    await tester.enterText(find.byKey(const Key('filter-search')), 'aurora');
-    await tester.pump(const Duration(milliseconds: 350));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Aurora season'), findsOneWidget);
-    expect(find.text('Perseid peak'), findsNothing);
-  });
-
-  testWidgets('search is the same engine as Latest\'s, kept to the Library: '
-      'a word in a kept episode\'s notes finds it, in another form',
-      (tester) async {
-    final profileId = await seedProfile();
-    final feed = await db.feedsDao.insertFeed(
-        profileId: profileId, url: 'https://c.test/f', title: 'Coastal');
-    Future<int> episode(String title, {required bool kept}) async {
-      final id = await db.spineDao.insertWork(
-          profileId: profileId,
-          kind: 'episode',
-          title: title,
-          persistence: kept ? 'work' : 'ephemeron',
-          firstSeenEpochDay: 100);
-      await db.feedsDao.insertEpisode(
-          workId: id,
-          feedId: feed,
-          guid: title,
-          enclosureUrl: 'https://c.test/$title.mp3',
-          publishedAtMs: 1);
-      await db.feedsDao.fillNotes(id,
-          html: '<p>lighthouses</p>', plain: 'All about lighthouses.');
-      return id;
-    }
-
-    await episode('Kept one', kept: true);
-    await episode('Passing one', kept: false);
-    await seedWork(profileId: profileId, kind: 'book', title: 'Perseid peak');
-    final everywhere = await SearchStore(db).search(profileId, 'lighthouse');
-    expect({for (final i in everywhere.items) i.work.title},
-        {'Kept one', 'Passing one'});
-    await pumpApp(tester);
-
-    await tester.tap(find.byKey(const Key('open-filter')));
-    await tester.pumpAndSettle();
-    await tester.enterText(
-        find.byKey(const Key('filter-search')), 'lighthouse');
-    await tester.pump(const Duration(milliseconds: 350));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('filter-sheet-done')));
-    await tester.pumpAndSettle();
-
-    expect(find.text('Kept one'), findsOneWidget);
-    expect(find.text('Passing one'), findsNothing,
-        reason: 'the Library holds only what was kept');
-    expect(find.text('Perseid peak'), findsNothing);
-  });
-
   testWidgets('"Clear all" inside the sheet resets every control live',
       (tester) async {
     final profileId = await seedProfile();
-    await seedWork(profileId: profileId, kind: 'book', title: 'A book');
+    await seedWork(
+        profileId: profileId, kind: 'book', title: 'A book', pinned: true);
     await seedWork(profileId: profileId, kind: 'article', title: 'An article');
     await pumpApp(tester);
 
     await tester.tap(find.byKey(const Key('open-filter')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('filter-type-book')));
+    await tester.tap(find.byKey(const Key('filter-pinned-only')));
     await tester.pump();
     expect(find.text('An article'), findsNothing);
 
@@ -178,13 +112,14 @@ void main() {
       "the AppBar icon toggles to a one-tap clear once a filter is live, "
       'even after the sheet is dismissed', (tester) async {
     final profileId = await seedProfile();
-    await seedWork(profileId: profileId, kind: 'book', title: 'A book');
+    await seedWork(
+        profileId: profileId, kind: 'book', title: 'A book', pinned: true);
     await seedWork(profileId: profileId, kind: 'article', title: 'An article');
     await pumpApp(tester);
 
     await tester.tap(find.byKey(const Key('open-filter')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('filter-type-book')));
+    await tester.tap(find.byKey(const Key('filter-pinned-only')));
     await tester.pump();
     await tester.tap(find.byKey(const Key('filter-sheet-done')));
     await tester.pumpAndSettle();
@@ -206,10 +141,10 @@ void main() {
     await seedWork(profileId: profileId, kind: 'article', title: 'An article');
     await pumpApp(tester);
 
+    await tester.tap(find.byKey(const Key('library-kind-book')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('open-filter')));
     await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('filter-type-book')));
-    await tester.pump();
     await tester.tap(find.byKey(const Key('open-saved-views')));
     await tester.pumpAndSettle();
 
@@ -223,8 +158,8 @@ void main() {
     expect(find.text('An article'), findsNothing);
     expect(find.byKey(const Key('saved-view-Books only')), findsOneWidget);
 
-    // The AppBar icon toggles to a one-tap clear while a filter is active.
-    await tester.tap(find.byKey(const Key('open-filter')));
+    // All shows every kind again.
+    await tester.tap(find.byKey(const Key('library-kind-all')));
     await tester.pumpAndSettle();
     expect(find.text('An article'), findsOneWidget);
     expect(find.text('A book'), findsOneWidget);

@@ -279,12 +279,6 @@ Future<SupertonicVoiceHandle> _openRealVoiceHandle(
   );
 }
 
-/// The number of flow-matching denoising steps — a fixed engine constant
-/// in v1 (upstream's own demo default is 8, exposed there as a UI
-/// slider; Trellis has no such control surface yet, so 8 ships as the
-/// one honest default rather than an invented knob).
-const _totalDenoisingSteps = 8;
-
 class _RealSupertonicVoiceHandle implements SupertonicVoiceHandle {
   final OrtSession dpSession;
   final OrtSession textEncSession;
@@ -314,7 +308,9 @@ class _RealSupertonicVoiceHandle implements SupertonicVoiceHandle {
   });
 
   @override
-  Future<SynthResult> generate(String text, {required String lang}) async {
+  Future<SynthResult> generate(String text,
+      {required String lang, SpeechPace pace = SpeechPace.natural}) async {
+    final steps = supertonicDenoisingSteps(pace);
     final processed = _preprocessText(text, lang);
     final runes = processed.runes.toList();
     final len = runes.length;
@@ -334,11 +330,10 @@ class _RealSupertonicVoiceHandle implements SupertonicVoiceHandle {
         .map((e) => (e as num).toDouble())
         .toList();
     await _disposeAll(dpResult.values);
-    // Upstream's speed knob (its demo divides this duration by a
-    // user-set factor, default 1.05) is deliberately not ported: Trellis
-    // has no reading-speed control surface, so the voice renders at
-    // exactly the duration the predictor asked for.
-    final totalDurationSec = durOnnx.first;
+    // Upstream's speed setting divides this duration by a factor (its
+    // demo's default is 1.05). Trellis divides by the pace a saved
+    // episode asks for (1.0 at Natural: exactly what the predictor said).
+    final totalDurationSec = supertonicDurationSec(durOnnx.first, pace);
 
     final textEncResult = await textEncSession.run({
       'text_ids': textIdsTensor,
@@ -369,9 +364,9 @@ class _RealSupertonicVoiceHandle implements SupertonicVoiceHandle {
     final latentShape = [1, latentDimTotal, latentLen];
     final latentMaskTensor = await OrtValue.fromList(latentMask, [1, 1, latentLen]);
     final totalStepTensor =
-        await OrtValue.fromList(Float32List.fromList([_totalDenoisingSteps.toDouble()]), [1]);
+        await OrtValue.fromList(Float32List.fromList([steps.toDouble()]), [1]);
 
-    for (var step = 0; step < _totalDenoisingSteps; step++) {
+    for (var step = 0; step < steps; step++) {
       final noisyLatentTensor = await OrtValue.fromList(noisyLatent, latentShape);
       final currentStepTensor =
           await OrtValue.fromList(Float32List.fromList([step.toDouble()]), [1]);
@@ -472,7 +467,8 @@ class SupertonicSpeechEngine implements SynthesisSpeechEngine {
   bool get canPause => true;
 
   @override
-  Future<SynthResult> synthesize(String sentence, {String? lang}) {
+  Future<SynthResult> synthesize(String sentence,
+      {String? lang, SpeechPace pace = SpeechPace.natural}) {
     // A region tag names the same voice language (`en-US` is `en`).
     final base = lang?.trim().toLowerCase().split(RegExp('[-_]')).first;
     final resolvedLang = base == null || base.isEmpty ? 'en' : base;
@@ -483,7 +479,7 @@ class SupertonicSpeechEngine implements SynthesisSpeechEngine {
 
     final result = _generationQueue.then((_) async {
       final handle = await (_handleFuture ??= _open());
-      return handle.generate(sentence, lang: resolvedLang);
+      return handle.generate(sentence, lang: resolvedLang, pace: pace);
     });
     // Chain the NEXT call after this one settles either way — a failed
     // synthesis must not wedge every call queued behind it.

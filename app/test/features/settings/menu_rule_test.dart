@@ -17,8 +17,8 @@ import '../../support/tabs.dart';
 /// hiding different things on different screens"):
 ///
 ///  * app-wide things live in Settings, on the bottom bar, and in no ⋮;
-///  * a top bar's ⋮ holds only that screen's own actions: Select first
-///    where the screen lists things, then the screen's own rare actions;
+///  * a top bar's ⋮ holds only that screen's own rare actions; Select is
+///    in none, since a long press selects (owner, 12 Nov);
 ///    the reader, which hides the bottom bar, ends its ⋮ with Reading
 ///    settings;
 ///  * a screen with none of its own has no ⋮ at all.
@@ -117,33 +117,44 @@ void main() {
     }
   }
 
-  testWidgets('the tabs’ ⋮: Latest holds Select, and Queue, Library, '
-      'Courses and Settings have none', (tester) async {
+  testWidgets('no tab has a ⋮: long press selects, so Select is in no '
+      'menu (owner, 12 Nov)', (tester) async {
     await pumpApp(tester);
-    final latest = await menu(tester, find.byKey(const Key('river-more')));
-    expect(latest, ['Select']);
+    expect(topMenu(), findsNothing, reason: 'Latest');
+    expect(find.text('Select'), findsNothing);
     for (final tab in ['Queue', 'Library', 'Courses', 'Settings']) {
       await toTab(tester, tab);
       expect(topMenu(), findsNothing, reason: tab);
     }
   });
 
-  testWidgets('pages under the tabs: Subscriptions holds its OPML items, a '
-      'show’s page and History hold Select', (tester) async {
+  testWidgets('pages under the tabs: Subscriptions holds its OPML items; a '
+      'show’s page and History have no ⋮, and a long press still selects',
+      (tester) async {
     await pumpApp(tester);
-    await tester.tap(find.byKey(const Key('manage-feeds')));
-    await tester.pumpAndSettle();
+    await toTab(tester, 'Subscriptions');
     final subscriptions = await menu(tester, topMenu());
     expect(subscriptions, ['Import OPML', 'Export OPML']);
 
     await tester.tap(find.text('Night Sky'));
     await tester.pumpAndSettle();
-    expect(await menu(tester, topMenu()), ['Select']);
+    expect(topMenu(), findsNothing, reason: 'a show’s page');
+    await tester.longPress(find.text('Aurora season'));
+    await tester.pumpAndSettle();
+    expect(find.text('1 selected'), findsOneWidget);
+  });
 
+  testWidgets('History and Search have no ⋮', (tester) async {
+    await pumpApp(tester);
     await toTab(tester, 'Queue');
     await tester.tap(find.byKey(const Key('queue-history')));
     await tester.pumpAndSettle();
-    expect(await menu(tester, topMenu()), ['Select']);
+    expect(topMenu(), findsNothing, reason: 'History');
+
+    await toTab(tester, 'Latest');
+    await tester.tap(find.byKey(const Key('river-search')));
+    await tester.pumpAndSettle();
+    expect(topMenu(), findsNothing, reason: 'Search');
   });
 
   testWidgets('an episode’s page holds only that episode’s items',

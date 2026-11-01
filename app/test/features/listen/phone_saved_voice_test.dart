@@ -7,6 +7,7 @@ import 'package:trellis/features/listen/listen_device.dart';
 import 'package:trellis/features/listen/saved_voice.dart';
 import 'package:trellis/features/reader/reader_prefs.dart';
 import 'package:trellis/features/reader/speech/phone_voice.dart';
+import 'package:trellis/features/reader/speech/speech_engine.dart';
 import 'package:trellis/features/transcribe/transcribe_coordinator.dart';
 import 'package:trellis/services/device_services.dart' show SystemVoice;
 
@@ -142,7 +143,7 @@ void main() {
       final voice = (await chain.voiceFor(work, 'ru'))!;
       expect(voice.name,
           'the phone’s own voice, Speech Services by Google');
-      final said = await voice.say('Привет.');
+      final said = await voice.say('Привет.', SpeechPace.natural);
       expect(p.saver.said, [('Привет.', 'ru', null)]);
       expect(said.sampleRate, 24000);
       expect(said.samples.length, 'Привет.'.length * 2400);
@@ -182,8 +183,21 @@ void main() {
           services: services,
           transcriber: TranscribeCoordinator(db: db, services: services));
       final voice = (await chain.voiceFor(work, 'es'))!;
-      await voice.say('Hola.');
+      await voice.say('Hola.', SpeechPace.natural);
       expect(p.saver.said, [('Hola.', 'es', 'es-x-local')]);
+    });
+
+    test('the pace a made episode asks for is the rate the phone says each '
+        'sentence at', () async {
+      final p = phone(['ru']);
+      final services = testServices(dir, phoneVoices: p.cache);
+      final chain = deviceListenChain(
+          db: db,
+          services: services,
+          transcriber: TranscribeCoordinator(db: db, services: services));
+      final voice = (await chain.voiceFor(work, 'ru'))!;
+      await voice.say('Привет.', const SpeechPace(rate: 0.75, careful: true));
+      expect(p.saver.rates, [0.75]);
     });
 
     Future<List<String>> downloads(PhoneVoiceCache cache, String lang) async {

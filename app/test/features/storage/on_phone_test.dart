@@ -120,10 +120,10 @@ void main() {
 
     final chip = find.byKey(const Key('chip-on-phone'));
     expect(chip, findsOneWidget);
-    expect(find.descendant(of: chip, matching: find.text('On this phone')),
+    // The owner's word (12 Nov: "I don't see a place to see
+    // 'downloads'").
+    expect(find.descendant(of: chip, matching: find.text('Downloads')),
         findsOneWidget);
-    expect(tester.getRect(chip).top,
-        tester.getRect(find.byKey(const Key('chip-audio'))).top);
 
     await onPhone(tester);
 
@@ -146,6 +146,28 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(Key('latest-row-$comet')), findsOneWidget);
   });
+
+  // The owner never saw the chip: it sat at the end of a sideways row,
+  // off the edge of a narrow phone. The row wraps, so it is on screen.
+  for (final (width, scale) in [(320.0, 1.3), (360.0, 1.3), (412.0, 1.0)]) {
+    testWidgets('at ${width.toInt()} dp and text $scale the Downloads chip '
+        'is wholly on screen, without scrolling', (tester) async {
+      tester.view.physicalSize = Size(width, 800);
+      tester.view.devicePixelRatio = 1.0;
+      tester.platformDispatcher.textScaleFactorTestValue = scale;
+      addTearDown(tester.view.reset);
+      addTearDown(tester.platformDispatcher.clearAllTestValues);
+      await seed();
+      await pumpApp(tester);
+
+      final rect = tester.getRect(find.byKey(const Key('chip-on-phone')));
+      expect(rect.left, greaterThanOrEqualTo(0));
+      expect(rect.right, lessThanOrEqualTo(width));
+      expect(find.byKey(const Key('chip-on-phone')).hitTestable(),
+          findsOneWidget);
+      expect(tester.takeException(), isNull);
+    });
+  }
 
   testWidgets('one episode’s audio goes after a plain confirm; the episode '
       'and its transcript stay', (tester) async {

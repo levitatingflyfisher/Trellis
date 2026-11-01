@@ -24,11 +24,13 @@ import '../works/work_menu.dart';
 import '../works/work_open.dart';
 import '../works/remove_undo.dart';
 import '../works/work_row.dart';
-import '../search/search_store.dart';
+import '../search/search_entry.dart';
+import '../search/search_screen.dart';
 import 'library_filter_screen.dart';
 import 'library_filter_sheet.dart';
 import 'library_query.dart';
 import '../shared/capped_body.dart';
+import '../shared/purpose_line.dart';
 
 typedef _Entry = ({Work work, Episode? episode, String? feedTitle});
 
@@ -48,10 +50,6 @@ class LibraryScreen extends StatefulWidget {
   /// The + Add sheet's "Subscribe to a feed": the shell's subscribe
   /// screen, opened from this tab. Null hides the entry.
   final Future<void> Function(BuildContext)? onSubscribe;
-
-  /// The shows this reader follows, opened inside this tab (Latest has
-  /// the same door). Null hides it.
-  final Future<void> Function(BuildContext)? onOpenSubscriptions;
 
   /// The HTTP seam for "From the web" intake. Optional so existing call
   /// sites keep compiling; when the shell does not pass one, the real
@@ -124,7 +122,6 @@ class LibraryScreen extends StatefulWidget {
       required this.db,
       required this.profile,
       this.onSubscribe,
-      this.onOpenSubscriptions,
       this.fetcher,
       this.tts,
       this.lane = WebFetchLane.direct,
@@ -146,52 +143,20 @@ class _LibraryScreenState extends State<LibraryScreen> {
   List<_Entry>? _entries;
   LibraryQuery? _activeQuery;
 
-  /// What the search engine found for the filter's words, and the words
-  /// it answers; the last answer stands while a new one is pending.
-  Set<int>? _textMatches;
-  String _textAnswered = '';
-  bool _textPending = false;
-  Timer? _textTimer;
-  int _textGeneration = 0;
+  /// The kind chip picked (null: All). Apart from [_activeQuery], the
+  /// Filter sheet's read state, pin and show: a chip is one tap, in
+  /// sight, and the bar's Clear filter leaves it be.
+  LibraryItemType? _kind;
 
-  /// Every filter change comes through here, so the words reach the
-  /// search engine (debounced, as Latest's box is).
-  void _setQuery(LibraryQuery? q) {
-    setState(() => _activeQuery = q == null || q.isEmpty ? null : q);
-    _textTimer?.cancel();
-    final words = _activeQuery?.textSearch?.trim() ?? '';
-    if (words.isEmpty) {
-      setState(() => _textPending = false);
-      return;
-    }
-    if (words == _textAnswered && !_textPending) return;
-    setState(() => _textPending = true);
-    _textTimer =
-        Timer(const Duration(milliseconds: 300), () => _searchText(words));
-  }
+  void _setQuery(LibraryQuery? q) =>
+      setState(() => _activeQuery = q == null || q.isEmpty ? null : q);
 
-  Future<void> _searchText(String words) async {
-    final gen = ++_textGeneration;
-    try {
-      final found = await SearchStore(widget.db)
-          .libraryMatches(widget.profile.id, words);
-      if (!mounted || gen != _textGeneration) return;
-      setState(() {
-        _textMatches = found;
-        _textAnswered = words;
-        _textPending = false;
-      });
-    } catch (_) {
-      if (!mounted || gen != _textGeneration) return;
-      setState(() => _textPending = false);
-    }
-  }
-
-  @override
-  void dispose() {
-    _textTimer?.cancel();
-    super.dispose();
-  }
+  /// What the list shows: the chip and the sheet together.
+  LibraryQuery get _effectiveQuery => LibraryQuery(
+      types: {?_kind},
+      feedId: _activeQuery?.feedId,
+      readState: _activeQuery?.readState ?? ReadState.any,
+      pinned: _activeQuery?.pinned);
 
   /// Works removed but still on offer to Undo (the fleet's delete ruling:
   /// a deliberate delete doesn't ask, and its Undo never times out). They
@@ -238,9 +203,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
       _rowState = rowState;
       _savedViews = savedViews;
     });
-    // What was kept or removed may have changed what the words find.
-    final words = _activeQuery?.textSearch?.trim() ?? '';
-    if (words.isNotEmpty) await _searchText(words);
   }
 
   /// The filtered view of [_entries] — pure, re-evaluated on every build
@@ -255,14 +217,26 @@ class _LibraryScreenState extends State<LibraryScreen> {
 
   List<_Entry> get _visibleEntries {
     final entries = _liveEntries ?? const [];
-    final query = _activeQuery;
-    if (query == null) return entries;
+    final query = _effectiveQuery;
+    if (query.isEmpty) return entries;
     return [
       for (final e in entries)
         if (matchesLibraryQuery(
-            (work: e.work, episode: e.episode, feedTitle: e.feedTitle), query,
-            textMatches: _textMatches))
+            (work: e.work, episode: e.episode, feedTitle: e.feedTitle), query))
           e
+    ];
+  }
+
+  /// The kinds this Library holds, in the chips' order: a chip that could
+  /// only ever show nothing is not offered.
+  List<LibraryItemType> get _kindsHeld {
+    final held = {
+      for (final e in _liveEntries ?? const <_Entry>[])
+        ?libraryKindOf(e.work, e.episode),
+    };
+    return [
+      for (final k in LibraryItemType.values)
+        if (held.contains(k)) k,
     ];
   }
 
@@ -296,18 +270,24 @@ class _LibraryScreenState extends State<LibraryScreen> {
             builder: (_) => LibraryFilterScreen(
                 db: widget.db,
                 profileId: widget.profile.id,
-                currentQuery: _activeQuery ?? const LibraryQuery())));
+                currentQuery: _effectiveQuery)));
     if (!mounted) return;
-    if (result != null) {
-      _setQuery(result);
-    }
+    if (result != null) _applyQuery(result);
     await _load(); // a view may have been created/deleted/reordered too
   }
 
-  void _applySavedView(SavedViewRow v) {
-    final query = LibraryQuery.fromJson(
-        jsonDecode(v.queryJson) as Map<String, Object?>);
-    _setQuery(query);
+  void _applySavedView(SavedViewRow v) => _applyQuery(LibraryQuery.fromJson(
+      jsonDecode(v.queryJson) as Map<String, Object?>));
+
+  /// A whole query (a saved view): its one kind to the chips, the rest to
+  /// the sheet's filter.
+  void _applyQuery(LibraryQuery query) {
+    setState(() =>
+        _kind = query.types.length == 1 ? query.types.single : null);
+    _setQuery(LibraryQuery(
+        feedId: query.feedId,
+        readState: query.readState,
+        pinned: query.pinned));
   }
 
   Future<void> _pasteText() async {
@@ -533,13 +513,6 @@ class _LibraryScreenState extends State<LibraryScreen> {
               label: hasFilter ? 'Clear filter' : 'Filter',
               onPressed: _openFilter,
             ),
-            if (widget.onOpenSubscriptions case final open?)
-              OhBarAction(
-                key: const Key('library-subscriptions'),
-                icon: Icons.rss_feed,
-                label: 'Subscriptions',
-                onPressed: () => open(context),
-              ),
             // No ⋮: the Library has no rare actions of its own, and
             // app-wide things are in Settings (board-0131).
           ]),
@@ -552,30 +525,87 @@ class _LibraryScreenState extends State<LibraryScreen> {
               onPressed: _addSheet,
               icon: const Icon(Icons.add),
               label: const Text('Add')),
-      body: CappedBody(child: switch (entries) {
-        null => const Center(child: CircularProgressIndicator()),
-        [] => _EmptyState(
-            onSubscribe: widget.onSubscribe != null ? _subscribe : null,
-            onPaste: _pasteText,
-            onFile: _importFile,
-            onWeb: _fromWeb,
-            onGutenberg: _fromGutenberg,
-            onAudiobook:
-                widget.onImportAudiobook != null ? _importAudiobook : null),
-        _ => Column(
-            children: [
-              if (_savedViews.isNotEmpty) _savedViewChips(),
-              SizedBox(
-                height: 3,
-                child: _textPending
-                    ? const LinearProgressIndicator(
-                        key: Key('library-search-pending'), minHeight: 3)
-                    : null,
+      body: CappedBody(
+        child: switch (entries) {
+          null => const Center(child: CircularProgressIndicator()),
+          [] => _EmptyState(
+              header: _purpose,
+              onSubscribe: widget.onSubscribe != null ? _subscribe : null,
+              onPaste: _pasteText,
+              onFile: _importFile,
+              onWeb: _fromWeb,
+              onGutenberg: _fromGutenberg,
+              onAudiobook:
+                  widget.onImportAudiobook != null ? _importAudiobook : null),
+          _ => _libraryList(_visibleEntries),
+        },
+      ),
+    );
+  }
+
+  /// One plain line under the title (lead's ruling, 12 Nov): Latest is
+  /// what arrives, the Library is what you keep.
+  static const _purpose = PurposeLine(
+      'What you keep: books, articles, texts, and episodes you kept or '
+      'made.',
+      textKey: Key('library-purpose'));
+
+  /// What sits above the rows. It scrolls with them, so a short screen
+  /// at large text still has room for the list.
+  List<Widget> get _listHead => [
+        _purpose,
+        // Latest's own search bar and search screen, kept to the Library
+        // (owner, 12 Nov).
+        KeyedSubtree(
+          key: const Key('library-search'),
+          child: SearchEntry(onPressed: _openSearch),
+        ),
+        _kindChips(),
+        if (_savedViews.isNotEmpty) _savedViewChips(),
+      ];
+
+  Future<void> _openSearch() async {
+    await Navigator.of(context).push<void>(MaterialPageRoute(
+        builder: (_) => SearchScreen(
+            libraryOnly: true,
+            doors: SearchDoors(
+                db: widget.db,
+                profile: widget.profile,
+                actions: _actions,
+                readerDoors: _readerDoors))));
+    if (mounted) await _load();
+  }
+
+  /// The Library's own kinds (lead's ruling, 12 Nov), one tap each, only
+  /// those it holds. They wrap rather than scroll sideways, so none sits
+  /// off the edge of a narrow phone.
+  Widget _kindChips() {
+    final kinds = _kindsHeld;
+    if (kinds.length < 2) return const SizedBox.shrink();
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+      child: Align(
+        alignment: AlignmentDirectional.centerStart,
+        child: Wrap(
+          spacing: 8,
+          runSpacing: 4,
+          children: [
+            ChoiceChip(
+              key: const Key('library-kind-all'),
+              label: const Text('All'),
+              selected: _kind == null,
+              onSelected: (_) => setState(() => _kind = null),
+            ),
+            for (final k in kinds)
+              ChoiceChip(
+                key: Key('library-kind-${k.name}'),
+                label: Text(libraryKindLabel(k)),
+                selected: _kind == k,
+                onSelected: (_) => setState(() => _kind = k),
               ),
-              Expanded(child: _libraryList(_visibleEntries)),
-            ],
-          ),
-      }),
+          ],
+        ),
+      ),
     );
   }
 
@@ -603,21 +633,21 @@ class _LibraryScreenState extends State<LibraryScreen> {
   }
 
   Widget _libraryList(List<_Entry> visible) {
-    if (visible.isEmpty) {
-      // A real filter that matched nothing is a different state from an
-      // empty library — the intake invitation would be misleading here.
-      return const Center(
-        child: Padding(
-          padding: EdgeInsets.all(24),
-          child: Text('Nothing matches this filter.',
-              textAlign: TextAlign.center),
-        ),
-      );
-    }
+    final head = _listHead;
+    // A real filter that matched nothing is a different state from an
+    // empty library — the intake invitation would be misleading here.
+    const nothing = Padding(
+      padding: EdgeInsets.all(24),
+      child: Text('Nothing matches this filter.', textAlign: TextAlign.center),
+    );
     return ListView.builder(
       padding: const EdgeInsets.only(bottom: 88),
-      itemCount: visible.length,
-      itemBuilder: (_, i) => _workTile(visible[i]),
+      itemCount: head.length + (visible.isEmpty ? 1 : visible.length),
+      itemBuilder: (_, i) => i < head.length
+          ? head[i]
+          : visible.isEmpty
+              ? nothing
+              : _workTile(visible[i - head.length]),
     );
   }
 
@@ -679,6 +709,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
 }
 
 class _EmptyState extends StatelessWidget {
+  /// What sits under the title on every state of the Library.
+  final Widget header;
   final VoidCallback? onSubscribe;
   final VoidCallback onPaste;
   final VoidCallback onFile;
@@ -686,7 +718,8 @@ class _EmptyState extends StatelessWidget {
   final VoidCallback onGutenberg;
   final VoidCallback? onAudiobook;
   const _EmptyState(
-      {this.onSubscribe,
+      {required this.header,
+      this.onSubscribe,
       required this.onPaste,
       required this.onFile,
       required this.onWeb,
@@ -695,6 +728,13 @@ class _EmptyState extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+      header,
+      Expanded(child: _invitation(context)),
+    ]);
+  }
+
+  Widget _invitation(BuildContext context) {
     return Center(
       child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),

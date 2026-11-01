@@ -57,10 +57,12 @@ object PhoneVoice {
                     val lang = call.argument<String>("lang")
                     val voice = call.argument<String>("voice")
                     val path = call.argument<String>("path")
+                    // How clearly the voice speaks: 1.0 is its own pace.
+                    val rate = call.argument<Double>("rate") ?: 1.0
                     if (text == null || lang == null || path == null) {
                         result.error("arguments", "text, lang and path are needed", null)
                     } else {
-                        withEngine(result) { say(it, text, lang, voice, path, result) }
+                        withEngine(result) { say(it, text, lang, voice, path, rate, result) }
                     }
                 }
                 "openSettings" -> result.success(openSettings())
@@ -175,11 +177,16 @@ object PhoneVoice {
         lang: String,
         name: String?,
         path: String,
+        rate: Double,
         result: MethodChannel.Result,
     ) {
         val voice = pick(engine, lang, name)
             ?: return result.error("no-voice", "No $lang voice is installed", null)
         engine.voice = voice
+        // Set on every sentence: this engine is the app's own (Read aloud
+        // has another), and a rate left from one episode must not carry
+        // into the next. Android's rate scales the voice's own pace.
+        engine.setSpeechRate(rate.toFloat().coerceIn(0.3f, 2.0f))
         val file = File(path)
         file.parentFile?.mkdirs()
         val id = "trellis-" + UUID.randomUUID()

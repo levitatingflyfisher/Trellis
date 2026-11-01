@@ -7,23 +7,44 @@
 /// "course" is deliberately absent from [LibraryItemType]: courses
 /// (`Courses` table) are never spine works — `worksOf` cannot return one —
 /// so a "course" filter option would be a dead control that structurally
-/// matches zero rows (ADR-0011). The four types below are exactly the
-/// `Work.kind` values this app actually produces.
+/// matches zero rows (ADR-0011).
 library;
 
 import '../../db/database.dart' hide Alignment;
+import '../listen/spoken_guid.dart';
 
-enum LibraryItemType { book, article, podcast, note }
+/// The kinds the Library holds, in the order its chips show them
+/// (owner, 12 Nov: "what is library if 'latest' has all, text, and
+/// audio?"). Lead's ruling: the Library is what you keep, so its chips are
+/// the kinds of thing kept. A pasted or imported text is stored as a
+/// `note`, and shown as a Text. A made episode is an episode of its show
+/// with a spoken guid, told apart from one kept as it came.
+enum LibraryItemType { book, article, note, audiobook, episode, made }
 
-/// [LibraryItemType.podcast] maps to the `episode` kind — the label the
-/// rest of the app already uses for feed audio items is "podcast", not
-/// "episode" (see the feed settings screen's "Playback speed for this
-/// podcast").
-LibraryItemType? libraryItemTypeOfKind(String kind) => switch (kind) {
+/// The chip's word for [t].
+String libraryKindLabel(LibraryItemType t) => switch (t) {
+      LibraryItemType.book => 'Books',
+      LibraryItemType.article => 'Articles',
+      LibraryItemType.note => 'Texts',
+      LibraryItemType.audiobook => 'Audiobooks',
+      LibraryItemType.episode => 'Episodes',
+      LibraryItemType.made => 'Made episodes',
+    };
+
+/// The kind [entry] is, as the Library's chips sort it; null for a kind
+/// the Library never shows.
+LibraryItemType? libraryKindOf(Work work, Episode? episode) =>
+    switch (work.kind) {
       'book' => LibraryItemType.book,
       'article' => LibraryItemType.article,
-      'episode' => LibraryItemType.podcast,
       'note' => LibraryItemType.note,
+      'audiobook' => LibraryItemType.audiobook,
+      // A kept episode outlives its unfollowed show's episode row.
+      'episode' when episode == null => LibraryItemType.episode,
+      // A feed's text post is an article too.
+      'episode' when episode!.enclosureUrl == null => LibraryItemType.article,
+      'episode' when isSpokenGuid(episode!.guid) => LibraryItemType.made,
+      'episode' => LibraryItemType.episode,
       _ => null,
     };
 
@@ -36,12 +57,6 @@ enum ReadState { any, unread, read }
 typedef LibraryQueryEntry = ({Work work, Episode? episode, String? feedTitle});
 
 class LibraryQuery {
-  /// Words for the search engine (1.5.4), matched as every search box
-  /// matches them: titles, show names, show notes and transcripts. The
-  /// screen asks the engine and hands its matches to
-  /// [matchesLibraryQuery]. Null/empty matches everything.
-  final String? textSearch;
-
   /// Empty matches every kind.
   final Set<LibraryItemType> types;
 
@@ -61,7 +76,6 @@ class LibraryQuery {
   final bool? pinned;
 
   const LibraryQuery({
-    this.textSearch,
     this.types = const {},
     this.feedId,
     this.readState = ReadState.any,
@@ -74,27 +88,28 @@ class LibraryQuery {
   /// library's filter icon doesn't offer to "clear" a no-op and Apply/Save
   /// without touching any control doesn't leave a phantom active state.
   bool get isEmpty =>
-      (textSearch == null || textSearch!.isEmpty) &&
       types.isEmpty &&
       feedId == null &&
       readState == ReadState.any &&
       pinned == null;
 
   Map<String, Object?> toJson() => {
-        if (textSearch != null && textSearch!.isNotEmpty)
-          'textSearch': textSearch,
         if (types.isNotEmpty) 'types': [for (final t in types) t.name],
         if (feedId != null) 'feedId': feedId,
         if (readState != ReadState.any) 'readState': readState.name,
         if (pinned != null) 'pinned': pinned,
       };
 
+  /// A view saved before a kind was renamed keeps its other parts and
+  /// drops the kind it no longer names (and its words, which the search
+  /// bar holds now): one household's views, quicker to save again than to
+  /// carry a translation table for.
   factory LibraryQuery.fromJson(Map<String, Object?> json) => LibraryQuery(
-        textSearch: json['textSearch'] as String?,
         types: {
           for (final t
               in (json['types'] as List?)?.cast<String>() ?? const <String>[])
-            LibraryItemType.values.byName(t)
+            for (final k in LibraryItemType.values)
+              if (k.name == t) k
         },
         feedId: (json['feedId'] as num?)?.toInt(),
         readState: json['readState'] == null
@@ -104,26 +119,14 @@ class LibraryQuery {
       );
 }
 
-/// [textMatches] is the work ids the search engine found for
-/// [LibraryQuery.textSearch]; null (not asked yet) matches nothing while
-/// there are words to match.
-bool matchesLibraryQuery(LibraryQueryEntry entry, LibraryQuery query,
-    {Set<int>? textMatches}) {
+bool matchesLibraryQuery(LibraryQueryEntry entry, LibraryQuery query) {
   final work = entry.work;
   final episode = entry.episode;
 
-  final search = query.textSearch?.trim();
-  if (search != null &&
-      search.isNotEmpty &&
-      !(textMatches?.contains(work.id) ?? false)) {
-    return false;
-  }
-
   if (query.types.isNotEmpty) {
-    final type = libraryItemTypeOfKind(work.kind);
+    final type = libraryKindOf(work, episode);
     if (type == null || !query.types.contains(type)) return false;
   }
-
   if (query.feedId != null) {
     if (episode == null || episode.feedId != query.feedId) return false;
   }

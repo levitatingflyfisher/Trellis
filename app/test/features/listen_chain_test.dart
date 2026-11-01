@@ -8,6 +8,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jobs_core/jobs_core.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/listen/listen_chain.dart';
+import 'package:trellis/features/listen/listen_clearness.dart';
 import 'package:trellis/features/listen/spoken_episode.dart';
 import 'package:trellis/features/reader/speech/speech_engine.dart';
 
@@ -25,6 +26,7 @@ void main() {
   late bool transcribeWorks;
   late String? translateFails;
   late bool hasVoice;
+  late List<SpeechPace> paces;
 
   Future<SynthResult> synth(String text) async => SynthResult(
       samples: Float32List(text.length * 100), sampleRate: 1000);
@@ -95,8 +97,10 @@ void main() {
           return null;
         },
         voiceFor: (_, lang) async => hasVoice
-            ? (name: voiceName, voiceKind: voiceKind, say: (String t) {
+            ? (name: voiceName, voiceKind: voiceKind,
+                say: (String t, SpeechPace pace) {
                 ran.add('say $t');
+                paces.add(pace);
                 return synth(t);
               })
             : null,
@@ -129,6 +133,7 @@ void main() {
     transcribeWorks = true;
     translateFails = null;
     hasVoice = true;
+    paces = [];
   });
   tearDown(() async {
     await db.close();
@@ -191,6 +196,58 @@ void main() {
     expect(again, first);
     expect(ran, ['say Hola.', 'say ¿Cómo estás?', 'say Adiós.']);
     expect(file.existsSync(), isTrue);
+  });
+
+  test('the step chosen for how clearly the voice speaks is how every '
+      'sentence is said, the pause written after it, and what the episode '
+      'stores and says', () async {
+    await writeListenClearness(db, ListenClearness.slow);
+
+    final id = await chain().start(work, 'es');
+
+    expect(paces, List.filled(3, ListenClearness.slow.pace));
+    final ep = (await db.feedsDao.episodeOf(id!))!;
+    expect(ep.clearness, 'slow');
+    // A tenth of a second of sound a character: 'Hola.' 500 ms, then the
+    // slow step's 800 ms pause, '¿Cómo estás?' 1200 ms, then its 1200 ms
+    // pause after a paragraph, then 'Adiós.'.
+    final rows = await db.spineDao.alignmentsOf(id);
+    expect(rows.first.tStartMs, 0);
+    expect(rows.last.tStartMs, 500 + 800 + 1200 + 1200,
+        reason: 'the slow step’s pauses are in the stored times');
+    final about = (await db.feedsDao.notesOf(id))!.plain;
+    expect(about,
+        contains('spoken slowly and clearly by a machine-made voice (Test '
+            'voice)'));
+  });
+
+  test('made at another step: the tap makes it again in place at the step '
+      'chosen now; at the same step nothing runs again', () async {
+    final first = await chain().start(work, 'es');
+    expect((await db.feedsDao.episodeOf(first!))!.clearness, 'natural');
+    ran.clear();
+
+    await writeListenClearness(db, ListenClearness.verySlow);
+    final again = await chain().start(work, 'es');
+
+    expect(again, first, reason: 'replaced in place, not a second copy');
+    expect(ran, ['say Hola.', 'say ¿Cómo estás?', 'say Adiós.']);
+    expect((await db.feedsDao.episodeOf(first))!.clearness, 'verySlow');
+
+    ran.clear();
+    expect(await chain().start(work, 'es'), first);
+    expect(ran, isEmpty);
+  });
+
+  test('an episode made before the step was stored counts as Natural',
+      () async {
+    final first = await chain().start(work, 'es');
+    await (db.update(db.episodes)..where((e) => e.workId.equals(first!)))
+        .write(const EpisodesCompanion(clearness: Value(null)));
+    ran.clear();
+
+    expect(await chain().start(work, 'es'), first);
+    expect(ran, isEmpty);
   });
 
   test('a stage whose result is already there is skipped', () async {
