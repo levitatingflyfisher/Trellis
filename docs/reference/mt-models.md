@@ -806,6 +806,7 @@ written in X.
 | en->ja via `opus-mt-en-jap`, ja->en | Japanese is ElanMT-BT (above). |
 | Non-English pairs (da-de, es-fr, gem-gem, gmw-gmw, he-ar and others) | Hub and spoke: English on one end of every pair. |
 | en->ko, en->pl | Still no clean single-language ONNX export. en-mul has `>>kor<<` and `>>pol<<` but pl scores 22.7 and ko is not on the card. |
+| en->ko (`Helsinki-NLP/opus-mt-tc-big-en-ko`, CC-BY-4.0, commit `ae8606b7`) | Converted by Trellis on 2026-11-12 (two int8 graphs, 280 MB) and run for real: gibberish ("Where is the train station?" gave "1:26 인기 있는 well 대"). The upstream PyTorch model in Hugging Face's own runner gives the same output, so the fault is upstream, not the conversion. The original MarianNMT model has separate source and target vocabularies ("sepvoc"); the Hugging Face copy kept one 32,001-piece vocabulary that is mostly Korean (24,349 Hangul pieces), so common English words ("train", "coffee", "children") are unknown tokens. Not registered. A fix would convert the original MarianNMT release with both vocabularies, and teach the app a separate source vocabulary. |
 
 **Licenses.** All upstream Helsinki-NLP cards for the pinned models say
 apache-2.0, except tc-big-en-tr, which says cc-by-4.0, as does its

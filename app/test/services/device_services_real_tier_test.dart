@@ -24,14 +24,23 @@ void main() {
     expect(routes.map((r) => r.target), contains('ru'));
   });
 
-  /// Lays every pinned file down at its exact size, which is what
-  /// DiskModelStore.isDownloaded checks. Sparse, so 263 MB costs nothing.
+  /// Lays every pinned file down at its exact size, and the note that the
+  /// voice uses each shared file, which is what DiskModelStore.isDownloaded
+  /// checks. Sparse, so hundreds of MB cost nothing.
   void fakeDownload(DeviceServices services, ModelSpec spec) {
+    final ownDir =
+        File(services.modelStore.pathOf(spec, spec.files.firstWhere(
+                (f) => !f.shared)))
+            .parent;
     for (final f in spec.files) {
       final file = File(services.modelStore.pathOf(spec, f))
         ..createSync(recursive: true);
       final raf = file.openSync(mode: FileMode.write)..truncateSync(f.bytes);
       raf.closeSync();
+      if (f.shared) {
+        File('${ownDir.path}/.uses.${Uri.parse(f.url).pathSegments.last}')
+            .createSync(recursive: true);
+      }
     }
   }
 
@@ -39,7 +48,7 @@ void main() {
   // was never picked and read-aloud stayed on the system voice.
   test('the real wiring uses a downloaded neural voice', () async {
     final services = DeviceServices.real(dir);
-    final voice = services.registry.byId('supertonic-en-m1')!;
+    final voice = services.registry.byId('pocket-en')!;
     expect(await services.resolveSpeechEngine(lang: 'en'), isNull);
     fakeDownload(services, voice);
     expect(await services.resolveSpeechEngine(lang: 'en'), isNotNull);
@@ -48,7 +57,7 @@ void main() {
 
   test('a region tag still finds the English voice', () async {
     final services = DeviceServices.real(dir);
-    fakeDownload(services, services.registry.byId('supertonic-en-m1')!);
+    fakeDownload(services, services.registry.byId('pocket-en')!);
     expect(await services.resolveSpeechEngine(lang: 'en-US'), isNotNull);
   });
 }

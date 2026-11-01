@@ -14,28 +14,20 @@ land, entries gain a `✅ shipped` mark; until then this is the plan of record.
 - RSVP classic mode: ORP red pivot, guide ticks, punctuation dwell, long-word shrink (both donors merged into one reader core)
 - Nearby words (the donors' Parafoveal/ticker mode) with Gaussian fade + a Focus spread slider (the donor's sigma), shown as a labelled chip under Words mode; the mode, speed, nearby words and spread are remembered per reader
 - Scroll mode: windowed rendering, past-word dimming, inline figures, tap-to-seek
-- Speak mode: sentence-unit architecture ✅ shipped (ADR-0006) — system TTS
-  at T0 (0-byte, every platform) now ticks sentence-by-sentence instead of
-  whole-paragraph (the fix for Chrome's long-utterance stall). One
-  downloadable Supertonic voice (English, MIT engine, OpenRAIL-M weights,
-  Android — ADR-0007 replaced the original sherpa-onnx/Piper rung so the
-  APK stays MIT-clean) joined the models door with a verified license, and
-  the gapless synthesis-ahead pipeline (reusing the podcast player's own
-  audio queue) IS threaded into the reader's actual speak loop — a real
-  fork on engine type, a settings escape to pin the system voice on
-  purpose (Use the system voice, in Reading settings), generation fencing across both paths — proven end to end
-  through fakes (`reader_speak_synthesis_test.dart`). Not yet proven on a
-  real device: the ONNX Runtime sessions actually opening and producing
-  audible PCM. (1.5.8: the voice registers at T1, the tier the app runs
-  at, so a downloaded voice is actually used: `registry_test.dart`,
-  `device_services_real_tier_test.dart`. 1.5.9: heard in a release build
-  on an x86_64 emulator, with an episode loaded; an arm64 phone is still
-  a release check. See ADR-0007’s last section.) No UI for pause (the engine/pipeline support it; the existing
-  speak-toggle is binary and a third state would be new surface, declined
-  this pass). NOT planned to ship at all in v1: word highlight (no engine
-  exposes word timing — sentence-exact is the permanent contract, not a
-  placeholder), a multilingual voice, and Kokoro — recorded, not built, in
-  ADR-0006.
+- Speak mode: sentence by sentence (ADR-0006), through the phone's own
+  voice or Trellis's own downloaded voices (ADR-0022, 1.6.14): one per
+  language, whatever the phone has. Pocket TTS (Kyutai, CC-BY-4.0)
+  speaks German, English, Spanish, French, Italian, Dutch and
+  Portuguese; Kokoro v1.1-zh speaks Chinese. One engine
+  (`DownloadedVoices`) hands each sentence to the voice for its
+  language, so one run can use several. Each voice was heard through
+  the app's own engine on an Android emulator and checked by Whisper
+  (word error within 1.5 times Kyutai's own PyTorch; Chinese matches
+  the desktop). Not yet heard on the owner's phone before release.
+  Supertonic 2 (OpenRAIL-M) is retired. Korean and Russian have no clean
+  phone-sized voice yet (board-0211, with the owner). No word highlight:
+  no engine gives word timing, so sentence-exact is the contract. No UI
+  for pause.
 - Playback engine: WPM 100-1500, pacing multipliers, wake lock (wakelock_plus), session recording
 - All seek surfaces: tap zones, swipes, swipe-up extract, arrow keys, scrub, transport buttons
 - Sentinel segments (tables/code/figures pause + show modal + always-skip pref)
@@ -151,16 +143,10 @@ land, entries gain a `✅ shipped` mark; until then this is the plan of record.
 - Web-surface local ML at v1.0: NO in-browser Whisper/translation/Kokoro at launch — browser users get the full T0 app + BYOK cloud LLM + SpeechSynthesis system TTS; the transformers.js-v4 interop tier (whisper-tiny int8 ~41MB, WASM/WebGPU) is Phase 6. Until then a browser-only user cannot transcribe locally, which the donor could do (slowly, unreliably, English-only).
 - Translation: v1's whisper-transcript mechanism is unchanged (X->EN only, timestamp-projected onto the transcript's segments) — a prior version of this entry claimed a Brain-routed LLM-translation mechanism (a local model / stove / BYOK); that was never built and the claim was wrong (caught auditing ADR-0008, corrected there). ADR-0008 "Babel" shipped a SECOND mechanism, en->es only; Campaign 8 "Babel widens" (ADR-0014) generalized it to any registered pair. Shipped pairs: en<->de, en<->ru (both directions, verified excellent), zh->en (verified excellent), en->zh (verified usable but demoted — see below). Evaluated and NOT shipped: en<->pt (no clean-licensed ONNX conversion clears the trust ladder), en<->jap (pure `<pad>`-token collapse at decode step one; incoherent even past that — Japanese needs a Brain, not the offline floor). Three things remain genuinely unverified or deliberately withheld, not just "not built": (1) the ONNX Runtime sessions — Marian's AND Supertonic's — have never opened on a real device, only proven against faked session boundaries and, for Marian specifically, against the real models in Python; (2) Supertonic speaking Spanish (or any of the five languages `supertonicSupportedLangs` architecturally claims) is UNTESTED, not confirmed — nobody has heard the result, and de/ru/zh route through the system voice entirely regardless, since Supertonic's own coverage never reached them; (3) `opus-mt-en-zh` (English->Chinese) is registered nowhere — a golden-test render of the scroll-mode display showed the translated Chinese text as tofu boxes (the app's bundled fonts carry no CJK glyphs, and a measured 8.3MB single-region font subset doesn't fit the remaining APK size budget), so the pair is withheld until either is fixed; `opus-mt-zh-en` (English output) is unaffected. A `BrainTranslator` rung (chunked Brain requests, strict JSON parsing, per-sentence fail-closed) is built and fully tested but has zero call sites in the live app — no tier ladder, consent routing, or UI picker reaches it yet (ADR-0014 Phase 5). NLLB's 200-language long tail remains unavailable. The UI names the translating model so quality expectations stay honest. Superseded in part by 1.5.5: en->zh, en->ar and en->hi are now registered, relying on Android's system fonts for display, which nobody has seen on a device. pt ships through en-ROMANCE with `>>pt<<`, and ja->en through a newer `ja` model, quality unchecked. Still missing: en->ja, en->ko, en->pl (no trusted ONNX export). Gap (1) above is narrower since 1.5.7 and 1.5.9: release builds keep ONNX Runtime’s Java classes (`android_keep_classes_test.dart`), and in 1.5.9 a release build on an x86_64 emulator ran both a Marian pair (en→ru) and the Supertonic voice; an arm64 phone is a release check (ADR-0020).
 - Voice-clone read-aloud: the donor's 4 SpeechT5/CMU-ARCTIC preset voice
-  identities do not carry over — v1's Supertonic voice is one English
-  voice, not a clone gallery (ADR-0007). Whole-doc synthesize+cache,
-  multilingual voices, and measured throughput are unbuilt/unmeasured
-  (ADR-0006 ships the sentence-level pipeline; per-work caching is
-  unstarted; ADR-0007 notes widening to the model's other four covered
-  languages is a registry-only change once another voice is reviewed).
-- Kokoro voice picker: unbuilt. ADR-0006 records Kokoro (a ~686MB fp32
-  bundle) as the quality rung above the starter voice, deliberately
-  deferred — the donor's ~54-voice Python-path claim never applied to the
-  ONNX path either (28 English voices is the real ceiling there).
+  identities do not carry over. Trellis clones no voice (ADR-0022): each
+  language has one ready voice from a source with a clean licence.
+  Kokoro's Japanese and English voices are a later job (Japanese needs a
+  word splitter with readings ported to Dart).
 - PDF intake on web: native-only in v1 (pdfium); web PDF waits for a pdf.js interop pass. Web folder (webkitdirectory) import: multi-file picker only.
 - diagramMermaid: parsed and displayed as description + source block; true diagram rendering (offline mermaid in a native WebView) is roadmap — the donor parsed it and rendered nothing, so this is parity-plus-honesty, not regression.
 - Stove household tier on the web surface: impossible today (stove server has no CORS; https PWA cannot fetch http LAN — packet finding); household brain is native-only until the server grows CORS + a serving-context answer.
@@ -285,8 +271,12 @@ separately for that reason. Statuses follow the same convention as above.
   | Slow and clear | 0.75 | 800 / 1200 ms | 12 |
   | Very slow | 0.6 | 1200 / 1800 ms | 12 |
 
-  The downloaded voice (Supertonic) divides the length its duration
-  model predicts by the pace, as upstream's own speed setting does. The
+  Kokoro (Chinese) speaks slower by the pace. Pocket TTS (the other
+  seven downloaded voices) has no speed input: its words keep their own
+  pace, and a slower step adds a pause after each sentence in proportion
+  to it (at most 2 s), so the help promises a slower episode overall, not
+  slower words. A careful step gives Pocket TTS four flow steps instead
+  of one. The
   phone's voice takes the pace as Android's speech rate, set on every
   sentence; Android has no setting for more careful sounds. The pauses
   are silence Trellis writes itself, so the stored sentence times count

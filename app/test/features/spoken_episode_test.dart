@@ -225,7 +225,7 @@ void main() {
           db: db,
           original: original,
           lang: lang,
-          voice: 'Supertonic M1',
+          voice: 'Pocket TTS',
           render: render,
           audio: wav,
           kept: kept,
@@ -294,7 +294,7 @@ void main() {
 
       final notes = (await db.feedsDao.notesOf(id))!;
       expect(notes.plain, contains('machine-made voice'));
-      expect(notes.plain, contains('Supertonic M1'));
+      expect(notes.plain, contains('Pocket TTS'));
       expect(notes.plain, contains('Harbour episode'));
     });
 

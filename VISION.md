@@ -47,7 +47,7 @@ app is glad when you put it down.
 |---|---|---|
 | T0 | any browser / bare APK | full reader, feeds, study engine, parcels — zero models |
 | T1 | cheap phone + one 40MB download | multilingual Whisper-tiny, checkpointed, screen-off |
-| T2 | good phone / any desktop | Whisper-base/small, Supertonic/Kokoro TTS, local LLM |
+| T2 | good phone / any desktop | Whisper-base/small, Pocket TTS/Kokoro voices, local LLM |
 | T3 | the household's desktop | the stove: big models the family already owns, over LAN |
 
 Compute travels *down* the ladder as **cuttings** (`.ohparcel`): a desktop
@@ -91,7 +91,7 @@ below says how far today is from that.
 | Brain + distillation + discourse study | ✅ BYOK cloud tier wired end to end; local/stove tiers are honest refusals, not engines |
 | Backup/migration, .apkg, storage panel, course map, dashboard+PIN | ✅ |
 | Opens into the task; remembers the reader and how they read | ✅ every launch lands on Latest, what arrived being the usual reason to open the app (a fresh install's empty Latest points at adding a podcast and at Subscriptions); a first launch has no name to type; a cold launch reopens the last reader; mode, speed and nearby words come back on the next open (tests pin each) |
-| Neural TTS (Supertonic/Kokoro) | ◐ ADR-0006 shipped the sentence-unit spine everywhere (the paragraph-at-a-time stall is fixed on the zero-byte system rung, every platform); ADR-0007 replaced the sherpa-onnx/Piper rung with Supertonic (MIT, no phonemizer — the APK stays MIT-clean, unlike the rung it replaced) — one voice (English, OpenRAIL-M weights on the user's own download) through the models door; the gapless synthesis-ahead pipeline IS threaded into the speak loop (real fork, settings escape, generation fencing) and proven end to end through fakes — not yet proven on a real device (the ONNX Runtime sessions actually opening, actual audio). Kokoro and a web tier stay roadmap |
+| Neural TTS (Pocket TTS/Kokoro) | ◐ Trellis's own voices, one per language, downloaded inside the app (ADR-0022, 1.6.14): Pocket TTS for German, English, Spanish, French, Italian, Dutch and Portuguese; Kokoro for Chinese. Each passed a Whisper check on an emulator through the app's own engine; nobody has heard them on the owner's phone before the release. Supertonic (ADR-0007) is retired. Korean and Russian have no clean phone-sized voice yet; no web tier |
 | On-device translation | ✅ 25 pairs with English on one end, each pinned by hash; any other pair goes by way of English (ADR-0008, ADR-0014, ADR-0020) |
 | Listen in the language you are learning, in one tap | ◐ one tap transcribes, translates, speaks and saves the episode as an audio file that plays like any other, labelled as a machine-made voice. The tap is the second button on an episode's row in every list, beside Play, and it is also on the episode's page: the button shows how far the making is and plays the episode when it is ready, and one episode is made at a time while the others wait their turn. It makes Spanish, French, Portuguese and English, 4 of the 12 languages Trellis translates into. Proven through tests with stand-in engines; nobody has yet heard the result on a real phone. Not on the web tier. Not built: the other 8 languages, making picked shows ahead of time, the host's own voice |
 | Cuttings (.ohparcel), web ML tier, FSRS | ✗ roadmap (P6) |

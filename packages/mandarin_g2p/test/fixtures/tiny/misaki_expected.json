@@ -1,0 +1,5203 @@
+{
+ "items": [
+  {
+   "id": "line-2",
+   "text": "我不去。",
+   "cn2an": "我不去。",
+   "punct_mapped": "我不去.",
+   "en_zh_split": [
+    [
+     "",
+     "我不去."
+    ]
+   ],
+   "segments": [
+    {
+     "zh": "我不去.",
+     "words": [
+      {
+       "word": "我",
+       "initials": [
+        ""
+       ],
+       "finals": [
+        "uo3"
+       ],
+       "tag": "nr",
+       "finals_sandhi": [
+        "uo3"
+       ],
+       "initials_erhua": [
+        ""
+       ],
+       "finals_erhua": [
+        "uo3"
+       ]
+      },
+      {
+       "word": "不去",
+       "initials": [
+        "b",
+        "q"
+       ],
+       "finals": [
+        "u4",
+        "v4"
+       ],
+       "tag": "a",
+       "finals_sandhi": [
+        "u2",
+        "v4"
+       ],
+       "initials_erhua": [
+        "b",
+        "q"
+       ],
+       "finals_erhua": [
+        "u2",
+        "v4"
+       ]
+      }
+     ],
+     "posseg": [
+      [
+       "我",
+       "nr"
+      ],
+      [
+       "不",
+       "a"
+      ],
+      [
+       "去",
+       "a"
+      ],
+      [
+       ".",
+       "m"
+      ]
+     ],
+     "pre_merge_steps": [
+      [
+       "_merge_bu",
+       [
+        [
+         "我",
+         "nr"
+        ],
+        [
+         "不去",
+         "a"
+        ],
+        [
+         ".",
+         "m"
+        ]
+       ]
+      ],
+      [
+       "_merge_yi",
+       [
+        [
+         "我",
+         "nr"
+        ],
+        [
+         "不去",
+         "a"
+        ],
+        [
+         ".",
+         "m"
+        ]
+       ]
+      ],
+      [
+       "_merge_reduplication",
+       [
+        [
+         "我",
+         "nr"
+        ],
+        [
+         "不去",
+         "a"
+        ],
+        [
+         ".",
+         "m"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones",
+       [
+        [
+         "我",
+         "nr"
+        ],
+        [
+         "不去",
+         "a"
+        ],
+        [
+         ".",
+         "m"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones_2",
+       [
+        [
+         "我",
+         "nr"
+        ],
+        [
+         "不去",
+         "a"
+        ],
+        [
+         ".",
+         "m"
+        ]
+       ]
+      ],
+      [
+       "_merge_er",
+       [
+        [
+         "我",
+         "nr"
+        ],
+        [
+         "不去",
+         "a"
+        ],
+        [
+         ".",
+         "m"
+        ]
+       ]
+      ]
+     ],
+     "phonemes": "我3/ㄅㄨ2ㄑㄩ4."
+    }
+   ],
+   "phonemes": "我3/ㄅㄨ2ㄑㄩ4.",
+   "len_ps": 10,
+   "style_row": 9,
+   "input_ids": [
+    0,
+    168,
+    169,
+    7,
+    30,
+    134,
+    172,
+    91,
+    137,
+    173,
+    4,
+    0
+   ]
+  },
+  {
+   "id": "line-3",
+   "text": "看一看",
+   "cn2an": "看一看",
+   "punct_mapped": "看一看",
+   "en_zh_split": [
+    [
+     "",
+     "看一看"
+    ]
+   ],
+   "segments": [
+    {
+     "zh": "看一看",
+     "words": [
+      {
+       "word": "看",
+       "initials": [
+        "k"
+       ],
+       "finals": [
+        "an4"
+       ],
+       "tag": "nr",
+       "finals_sandhi": [
+        "an4"
+       ],
+       "initials_erhua": [
+        "k"
+       ],
+       "finals_erhua": [
+        "an4"
+       ]
+      },
+      {
+       "word": "一看",
+       "initials": [
+        "",
+        "k"
+       ],
+       "finals": [
+        "i1",
+        "an4"
+       ],
+       "tag": "a",
+       "finals_sandhi": [
+        "i2",
+        "an4"
+       ],
+       "initials_erhua": [
+        "",
+        "k"
+       ],
+       "finals_erhua": [
+        "i2",
+        "an4"
+       ]
+      }
+     ],
+     "posseg": [
+      [
+       "看",
+       "nr"
+      ],
+      [
+       "一",
+       "a"
+      ],
+      [
+       "看",
+       "a"
+      ]
+     ],
+     "pre_merge_steps": [
+      [
+       "_merge_bu",
+       [
+        [
+         "看",
+         "nr"
+        ],
+        [
+         "一",
+         "a"
+        ],
+        [
+         "看",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_yi",
+       [
+        [
+         "看",
+         "nr"
+        ],
+        [
+         "一看",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_reduplication",
+       [
+        [
+         "看",
+         "nr"
+        ],
+        [
+         "一看",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones",
+       [
+        [
+         "看",
+         "nr"
+        ],
+        [
+         "一看",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones_2",
+       [
+        [
+         "看",
+         "nr"
+        ],
+        [
+         "一看",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_er",
+       [
+        [
+         "看",
+         "nr"
+        ],
+        [
+         "一看",
+         "a"
+        ]
+       ]
+      ]
+     ],
+     "phonemes": "ㄎㄢ4/ㄧ2ㄎㄢ4"
+    }
+   ],
+   "phonemes": "ㄎㄢ4/ㄧ2ㄎㄢ4",
+   "len_ps": 9,
+   "style_row": 8,
+   "input_ids": [
+    0,
+    84,
+    117,
+    173,
+    7,
+    127,
+    172,
+    84,
+    117,
+    173,
+    0
+   ]
+  },
+  {
+   "id": "line-4",
+   "text": "一天",
+   "cn2an": "一天",
+   "punct_mapped": "一天",
+   "en_zh_split": [
+    [
+     "",
+     "一天"
+    ]
+   ],
+   "segments": [
+    {
+     "zh": "一天",
+     "words": [
+      {
+       "word": "一天",
+       "initials": [
+        "",
+        "t"
+       ],
+       "finals": [
+        "i1",
+        "ian1"
+       ],
+       "tag": "nr",
+       "finals_sandhi": [
+        "i4",
+        "ian1"
+       ],
+       "initials_erhua": [
+        "",
+        "t"
+       ],
+       "finals_erhua": [
+        "i4",
+        "ian1"
+       ]
+      }
+     ],
+     "posseg": [
+      [
+       "一",
+       "nr"
+      ],
+      [
+       "天",
+       "a"
+      ]
+     ],
+     "pre_merge_steps": [
+      [
+       "_merge_bu",
+       [
+        [
+         "一",
+         "nr"
+        ],
+        [
+         "天",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_yi",
+       [
+        [
+         "一天",
+         "nr"
+        ]
+       ]
+      ],
+      [
+       "_merge_reduplication",
+       [
+        [
+         "一天",
+         "nr"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones",
+       [
+        [
+         "一天",
+         "nr"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones_2",
+       [
+        [
+         "一天",
+         "nr"
+        ]
+       ]
+      ],
+      [
+       "_merge_er",
+       [
+        [
+         "一天",
+         "nr"
+        ]
+       ]
+      ]
+     ],
+     "phonemes": "ㄧ4ㄊ言1"
+    }
+   ],
+   "phonemes": "ㄧ4ㄊ言1",
+   "len_ps": 5,
+   "style_row": 4,
+   "input_ids": [
+    0,
+    127,
+    173,
+    49,
+    146,
+    171,
+    0
+   ]
+  },
+  {
+   "id": "line-5",
+   "text": "第一次",
+   "cn2an": "第一次",
+   "punct_mapped": "第一次",
+   "en_zh_split": [
+    [
+     "",
+     "第一次"
+    ]
+   ],
+   "segments": [
+    {
+     "zh": "第一次",
+     "words": [
+      {
+       "word": "第一",
+       "initials": [
+        "d",
+        ""
+       ],
+       "finals": [
+        "i4",
+        "i1"
+       ],
+       "tag": "m",
+       "finals_sandhi": [
+        "i4",
+        "i1"
+       ],
+       "initials_erhua": [
+        "d",
+        ""
+       ],
+       "finals_erhua": [
+        "i4",
+        "i1"
+       ]
+      },
+      {
+       "word": "次",
+       "initials": [
+        "c"
+       ],
+       "finals": [
+        "ii4"
+       ],
+       "tag": "q",
+       "finals_sandhi": [
+        "ii4"
+       ],
+       "initials_erhua": [
+        "c"
+       ],
+       "finals_erhua": [
+        "ii4"
+       ]
+      }
+     ],
+     "posseg": [
+      [
+       "第一",
+       "m"
+      ],
+      [
+       "次",
+       "q"
+      ]
+     ],
+     "pre_merge_steps": [
+      [
+       "_merge_bu",
+       [
+        [
+         "第一",
+         "m"
+        ],
+        [
+         "次",
+         "q"
+        ]
+       ]
+      ],
+      [
+       "_merge_yi",
+       [
+        [
+         "第一",
+         "m"
+        ],
+        [
+         "次",
+         "q"
+        ]
+       ]
+      ],
+      [
+       "_merge_reduplication",
+       [
+        [
+         "第一",
+         "m"
+        ],
+        [
+         "次",
+         "q"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones",
+       [
+        [
+         "第一",
+         "m"
+        ],
+        [
+         "次",
+         "q"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones_2",
+       [
+        [
+         "第一",
+         "m"
+        ],
+        [
+         "次",
+         "q"
+        ]
+       ]
+      ],
+      [
+       "_merge_er",
+       [
+        [
+         "第一",
+         "m"
+        ],
+        [
+         "次",
+         "q"
+        ]
+       ]
+      ]
+     ],
+     "phonemes": "ㄉㄧ4ㄧ1/ㄘㄭ4"
+    }
+   ],
+   "phonemes": "ㄉㄧ4ㄧ1/ㄘㄭ4",
+   "len_ps": 9,
+   "style_row": 8,
+   "input_ids": [
+    0,
+    40,
+    127,
+    173,
+    127,
+    171,
+    7,
+    97,
+    141,
+    173,
+    0
+   ]
+  },
+  {
+   "id": "line-6",
+   "text": "你好，世界！",
+   "cn2an": "你好，世界！",
+   "punct_mapped": "你好, 世界!",
+   "en_zh_split": [
+    [
+     "",
+     "你好, 世界!"
+    ]
+   ],
+   "segments": [
+    {
+     "zh": "你好, 世界!",
+     "words": [
+      {
+       "word": "你好",
+       "initials": [
+        "n",
+        "h"
+       ],
+       "finals": [
+        "i3",
+        "ao3"
+       ],
+       "tag": "l",
+       "finals_sandhi": [
+        "i2",
+        "ao3"
+       ],
+       "initials_erhua": [
+        "n",
+        "h"
+       ],
+       "finals_erhua": [
+        "i2",
+        "ao3"
+       ]
+      },
+      {
+       "word": "世界",
+       "initials": [
+        "sh",
+        "j"
+       ],
+       "finals": [
+        "iii4",
+        "ie4"
+       ],
+       "tag": "n",
+       "finals_sandhi": [
+        "iii4",
+        "ie4"
+       ],
+       "initials_erhua": [
+        "sh",
+        "j"
+       ],
+       "finals_erhua": [
+        "iii4",
+        "ie4"
+       ]
+      }
+     ],
+     "posseg": [
+      [
+       "你好",
+       "l"
+      ],
+      [
+       ",",
+       "x"
+      ],
+      [
+       " ",
+       "x"
+      ],
+      [
+       "世界",
+       "n"
+      ],
+      [
+       "!",
+       "x"
+      ]
+     ],
+     "pre_merge_steps": [
+      [
+       "_merge_bu",
+       [
+        [
+         "你好",
+         "l"
+        ],
+        [
+         ",",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         "世界",
+         "n"
+        ],
+        [
+         "!",
+         "x"
+        ]
+       ]
+      ],
+      [
+       "_merge_yi",
+       [
+        [
+         "你好",
+         "l"
+        ],
+        [
+         ",",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         "世界",
+         "n"
+        ],
+        [
+         "!",
+         "x"
+        ]
+       ]
+      ],
+      [
+       "_merge_reduplication",
+       [
+        [
+         "你好",
+         "l"
+        ],
+        [
+         ",",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         "世界",
+         "n"
+        ],
+        [
+         "!",
+         "x"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones",
+       [
+        [
+         "你好",
+         "l"
+        ],
+        [
+         ",",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         "世界",
+         "n"
+        ],
+        [
+         "!",
+         "x"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones_2",
+       [
+        [
+         "你好",
+         "l"
+        ],
+        [
+         ",",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         "世界",
+         "n"
+        ],
+        [
+         "!",
+         "x"
+        ]
+       ]
+      ],
+      [
+       "_merge_er",
+       [
+        [
+         "你好",
+         "l"
+        ],
+        [
+         ",",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         "世界",
+         "n"
+        ],
+        [
+         "!",
+         "x"
+        ]
+       ]
+      ]
+     ],
+     "phonemes": "ㄋㄧ2ㄏㄠ3, ㄕ十4ㄐㄝ4!"
+    }
+   ],
+   "phonemes": "ㄋㄧ2ㄏㄠ3, ㄕ十4ㄐㄝ4!",
+   "len_ps": 15,
+   "style_row": 14,
+   "input_ids": [
+    0,
+    73,
+    127,
+    172,
+    88,
+    108,
+    169,
+    3,
+    16,
+    95,
+    144,
+    173,
+    89,
+    105,
+    173,
+    5,
+    0
+   ]
+  },
+  {
+   "id": "line-7",
+   "text": "我很好",
+   "cn2an": "我很好",
+   "punct_mapped": "我很好",
+   "en_zh_split": [
+    [
+     "",
+     "我很好"
+    ]
+   ],
+   "segments": [
+    {
+     "zh": "我很好",
+     "words": [
+      {
+       "word": "我很好",
+       "initials": [
+        "",
+        "h",
+        "h"
+       ],
+       "finals": [
+        "uo3",
+        "en3",
+        "ao3"
+       ],
+       "tag": "nr",
+       "finals_sandhi": [
+        "uo3",
+        "en2",
+        "ao3"
+       ],
+       "initials_erhua": [
+        "",
+        "h",
+        "h"
+       ],
+       "finals_erhua": [
+        "uo3",
+        "en2",
+        "ao3"
+       ]
+      }
+     ],
+     "posseg": [
+      [
+       "我",
+       "nr"
+      ],
+      [
+       "很",
+       "a"
+      ],
+      [
+       "好",
+       "a"
+      ]
+     ],
+     "pre_merge_steps": [
+      [
+       "_merge_bu",
+       [
+        [
+         "我",
+         "nr"
+        ],
+        [
+         "很",
+         "a"
+        ],
+        [
+         "好",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_yi",
+       [
+        [
+         "我",
+         "nr"
+        ],
+        [
+         "很",
+         "a"
+        ],
+        [
+         "好",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_reduplication",
+       [
+        [
+         "我",
+         "nr"
+        ],
+        [
+         "很",
+         "a"
+        ],
+        [
+         "好",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones",
+       [
+        [
+         "我很",
+         "nr"
+        ],
+        [
+         "好",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones_2",
+       [
+        [
+         "我很好",
+         "nr"
+        ]
+       ]
+      ],
+      [
+       "_merge_er",
+       [
+        [
+         "我很好",
+         "nr"
+        ]
+       ]
+      ]
+     ],
+     "phonemes": "我3ㄏㄣ2ㄏㄠ3"
+    }
+   ],
+   "phonemes": "我3ㄏㄣ2ㄏㄠ3",
+   "len_ps": 8,
+   "style_row": 7,
+   "input_ids": [
+    0,
+    168,
+    169,
+    88,
+    121,
+    172,
+    88,
+    108,
+    169,
+    0
+   ]
+  },
+  {
+   "id": "line-8",
+   "text": "奶奶来了",
+   "cn2an": "奶奶来了",
+   "punct_mapped": "奶奶来了",
+   "en_zh_split": [
+    [
+     "",
+     "奶奶来了"
+    ]
+   ],
+   "segments": [
+    {
+     "zh": "奶奶来了",
+     "words": [
+      {
+       "word": "奶奶",
+       "initials": [
+        "n",
+        "n"
+       ],
+       "finals": [
+        "ai3",
+        "ai3"
+       ],
+       "tag": "n",
+       "finals_sandhi": [
+        "ai3",
+        "ai5"
+       ],
+       "initials_erhua": [
+        "n",
+        "n"
+       ],
+       "finals_erhua": [
+        "ai3",
+        "ai5"
+       ]
+      },
+      {
+       "word": "来",
+       "initials": [
+        "l"
+       ],
+       "finals": [
+        "ai2"
+       ],
+       "tag": "nr",
+       "finals_sandhi": [
+        "ai2"
+       ],
+       "initials_erhua": [
+        "l"
+       ],
+       "finals_erhua": [
+        "ai2"
+       ]
+      },
+      {
+       "word": "了",
+       "initials": [
+        "l"
+       ],
+       "finals": [
+        "e5"
+       ],
+       "tag": "a",
+       "finals_sandhi": [
+        "e5"
+       ],
+       "initials_erhua": [
+        "l"
+       ],
+       "finals_erhua": [
+        "e5"
+       ]
+      }
+     ],
+     "posseg": [
+      [
+       "奶奶",
+       "n"
+      ],
+      [
+       "来",
+       "nr"
+      ],
+      [
+       "了",
+       "a"
+      ]
+     ],
+     "pre_merge_steps": [
+      [
+       "_merge_bu",
+       [
+        [
+         "奶奶",
+         "n"
+        ],
+        [
+         "来",
+         "nr"
+        ],
+        [
+         "了",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_yi",
+       [
+        [
+         "奶奶",
+         "n"
+        ],
+        [
+         "来",
+         "nr"
+        ],
+        [
+         "了",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_reduplication",
+       [
+        [
+         "奶奶",
+         "n"
+        ],
+        [
+         "来",
+         "nr"
+        ],
+        [
+         "了",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones",
+       [
+        [
+         "奶奶",
+         "n"
+        ],
+        [
+         "来",
+         "nr"
+        ],
+        [
+         "了",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones_2",
+       [
+        [
+         "奶奶",
+         "n"
+        ],
+        [
+         "来",
+         "nr"
+        ],
+        [
+         "了",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_er",
+       [
+        [
+         "奶奶",
+         "n"
+        ],
+        [
+         "来",
+         "nr"
+        ],
+        [
+         "了",
+         "a"
+        ]
+       ]
+      ]
+     ],
+     "phonemes": "ㄋㄞ3ㄋㄞ5/ㄌㄞ2/ㄌㄜ5"
+    }
+   ],
+   "phonemes": "ㄋㄞ3ㄋㄞ5/ㄌㄞ2/ㄌㄜ5",
+   "len_ps": 14,
+   "style_row": 13,
+   "input_ids": [
+    0,
+    73,
+    106,
+    169,
+    73,
+    106,
+    170,
+    7,
+    74,
+    106,
+    172,
+    7,
+    74,
+    140,
+    170,
+    0
+   ]
+  },
+  {
+   "id": "line-9",
+   "text": "小院儿",
+   "cn2an": "小院儿",
+   "punct_mapped": "小院儿",
+   "en_zh_split": [
+    [
+     "",
+     "小院儿"
+    ]
+   ],
+   "segments": [
+    {
+     "zh": "小院儿",
+     "words": [
+      {
+       "word": "小院儿",
+       "initials": [
+        "x",
+        "",
+        ""
+       ],
+       "finals": [
+        "iao3",
+        "van4",
+        "er5"
+       ],
+       "tag": "n",
+       "finals_sandhi": [
+        "iao3",
+        "van4",
+        "er5"
+       ],
+       "initials_erhua": [
+        "x",
+        ""
+       ],
+       "finals_erhua": [
+        "iao3",
+        "vanR4"
+       ]
+      }
+     ],
+     "posseg": [
+      [
+       "小院",
+       "n"
+      ],
+      [
+       "儿",
+       "n"
+      ]
+     ],
+     "pre_merge_steps": [
+      [
+       "_merge_bu",
+       [
+        [
+         "小院",
+         "n"
+        ],
+        [
+         "儿",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_yi",
+       [
+        [
+         "小院",
+         "n"
+        ],
+        [
+         "儿",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_reduplication",
+       [
+        [
+         "小院",
+         "n"
+        ],
+        [
+         "儿",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones",
+       [
+        [
+         "小院",
+         "n"
+        ],
+        [
+         "儿",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones_2",
+       [
+        [
+         "小院",
+         "n"
+        ],
+        [
+         "儿",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_er",
+       [
+        [
+         "小院儿",
+         "n"
+        ]
+       ]
+      ]
+     ],
+     "phonemes": "ㄒ要3元R4"
+    }
+   ],
+   "phonemes": "ㄒ要3元R4",
+   "len_ps": 6,
+   "style_row": 5,
+   "input_ids": [
+    0,
+    93,
+    150,
+    169,
+    175,
+    34,
+    173,
+    0
+   ]
+  },
+  {
+   "id": "line-10",
+   "text": "女儿",
+   "cn2an": "女儿",
+   "punct_mapped": "女儿",
+   "en_zh_split": [
+    [
+     "",
+     "女儿"
+    ]
+   ],
+   "segments": [
+    {
+     "zh": "女儿",
+     "words": [
+      {
+       "word": "女儿",
+       "initials": [
+        "n",
+        ""
+       ],
+       "finals": [
+        "v3",
+        "er2"
+       ],
+       "tag": "n",
+       "finals_sandhi": [
+        "v3",
+        "er2"
+       ],
+       "initials_erhua": [
+        "n",
+        ""
+       ],
+       "finals_erhua": [
+        "v3",
+        "er2"
+       ]
+      }
+     ],
+     "posseg": [
+      [
+       "女儿",
+       "n"
+      ]
+     ],
+     "pre_merge_steps": [
+      [
+       "_merge_bu",
+       [
+        [
+         "女儿",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_yi",
+       [
+        [
+         "女儿",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_reduplication",
+       [
+        [
+         "女儿",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones",
+       [
+        [
+         "女儿",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones_2",
+       [
+        [
+         "女儿",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_er",
+       [
+        [
+         "女儿",
+         "n"
+        ]
+       ]
+      ]
+     ],
+     "phonemes": "ㄋㄩ3ㄦ2"
+    }
+   ],
+   "phonemes": "ㄋㄩ3ㄦ2",
+   "len_ps": 5,
+   "style_row": 4,
+   "input_ids": [
+    0,
+    73,
+    137,
+    169,
+    85,
+    172,
+    0
+   ]
+  },
+  {
+   "id": "line-11",
+   "text": "哪儿",
+   "cn2an": "哪儿",
+   "punct_mapped": "哪儿",
+   "en_zh_split": [
+    [
+     "",
+     "哪儿"
+    ]
+   ],
+   "segments": [
+    {
+     "zh": "哪儿",
+     "words": [
+      {
+       "word": "哪儿",
+       "initials": [
+        "n",
+        ""
+       ],
+       "finals": [
+        "a3",
+        "er2"
+       ],
+       "tag": "r",
+       "finals_sandhi": [
+        "a3",
+        "er2"
+       ],
+       "initials_erhua": [
+        "n"
+       ],
+       "finals_erhua": [
+        "aR3"
+       ]
+      }
+     ],
+     "posseg": [
+      [
+       "哪儿",
+       "r"
+      ]
+     ],
+     "pre_merge_steps": [
+      [
+       "_merge_bu",
+       [
+        [
+         "哪儿",
+         "r"
+        ]
+       ]
+      ],
+      [
+       "_merge_yi",
+       [
+        [
+         "哪儿",
+         "r"
+        ]
+       ]
+      ],
+      [
+       "_merge_reduplication",
+       [
+        [
+         "哪儿",
+         "r"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones",
+       [
+        [
+         "哪儿",
+         "r"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones_2",
+       [
+        [
+         "哪儿",
+         "r"
+        ]
+       ]
+      ],
+      [
+       "_merge_er",
+       [
+        [
+         "哪儿",
+         "r"
+        ]
+       ]
+      ]
+     ],
+     "phonemes": "ㄋㄚR3"
+    }
+   ],
+   "phonemes": "ㄋㄚR3",
+   "len_ps": 4,
+   "style_row": 3,
+   "input_ids": [
+    0,
+    73,
+    100,
+    34,
+    169,
+    0
+   ]
+  },
+  {
+   "id": "line-12",
+   "text": "东西",
+   "cn2an": "东西",
+   "punct_mapped": "东西",
+   "en_zh_split": [
+    [
+     "",
+     "东西"
+    ]
+   ],
+   "segments": [
+    {
+     "zh": "东西",
+     "words": [
+      {
+       "word": "东西",
+       "initials": [
+        "d",
+        "x"
+       ],
+       "finals": [
+        "ong1",
+        "i1"
+       ],
+       "tag": "n",
+       "finals_sandhi": [
+        "ong1",
+        "i5"
+       ],
+       "initials_erhua": [
+        "d",
+        "x"
+       ],
+       "finals_erhua": [
+        "ong1",
+        "i5"
+       ]
+      }
+     ],
+     "posseg": [
+      [
+       "东西",
+       "n"
+      ]
+     ],
+     "pre_merge_steps": [
+      [
+       "_merge_bu",
+       [
+        [
+         "东西",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_yi",
+       [
+        [
+         "东西",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_reduplication",
+       [
+        [
+         "东西",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones",
+       [
+        [
+         "东西",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones_2",
+       [
+        [
+         "东西",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_er",
+       [
+        [
+         "东西",
+         "n"
+        ]
+       ]
+      ]
+     ],
+     "phonemes": "ㄉ中1ㄒㄧ5"
+    }
+   ],
+   "phonemes": "ㄉ中1ㄒㄧ5",
+   "len_ps": 6,
+   "style_row": 5,
+   "input_ids": [
+    0,
+    40,
+    155,
+    171,
+    93,
+    127,
+    170,
+    0
+   ]
+  },
+  {
+   "id": "line-13",
+   "text": "ABC你好",
+   "cn2an": "ABC你好",
+   "punct_mapped": "ABC你好",
+   "en_zh_split": [
+    [
+     "ABC",
+     ""
+    ],
+    [
+     "",
+     "你好"
+    ]
+   ],
+   "segments": [
+    {
+     "zh": "你好",
+     "words": [
+      {
+       "word": "你好",
+       "initials": [
+        "n",
+        "h"
+       ],
+       "finals": [
+        "i3",
+        "ao3"
+       ],
+       "tag": "l",
+       "finals_sandhi": [
+        "i2",
+        "ao3"
+       ],
+       "initials_erhua": [
+        "n",
+        "h"
+       ],
+       "finals_erhua": [
+        "i2",
+        "ao3"
+       ]
+      }
+     ],
+     "posseg": [
+      [
+       "你好",
+       "l"
+      ]
+     ],
+     "pre_merge_steps": [
+      [
+       "_merge_bu",
+       [
+        [
+         "你好",
+         "l"
+        ]
+       ]
+      ],
+      [
+       "_merge_yi",
+       [
+        [
+         "你好",
+         "l"
+        ]
+       ]
+      ],
+      [
+       "_merge_reduplication",
+       [
+        [
+         "你好",
+         "l"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones",
+       [
+        [
+         "你好",
+         "l"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones_2",
+       [
+        [
+         "你好",
+         "l"
+        ]
+       ]
+      ],
+      [
+       "_merge_er",
+       [
+        [
+         "你好",
+         "l"
+        ]
+       ]
+      ]
+     ],
+     "phonemes": "ㄋㄧ2ㄏㄠ3"
+    }
+   ],
+   "phonemes": "❓ ㄋㄧ2ㄏㄠ3",
+   "len_ps": 8,
+   "style_row": 7,
+   "input_ids": [
+    0,
+    16,
+    73,
+    127,
+    172,
+    88,
+    108,
+    169,
+    0
+   ]
+  },
+  {
+   "id": "line-14",
+   "text": "三个人",
+   "cn2an": "三个人",
+   "punct_mapped": "三个人",
+   "en_zh_split": [
+    [
+     "",
+     "三个人"
+    ]
+   ],
+   "segments": [
+    {
+     "zh": "三个人",
+     "words": [
+      {
+       "word": "三",
+       "initials": [
+        "s"
+       ],
+       "finals": [
+        "an1"
+       ],
+       "tag": "nr",
+       "finals_sandhi": [
+        "an1"
+       ],
+       "initials_erhua": [
+        "s"
+       ],
+       "finals_erhua": [
+        "an1"
+       ]
+      },
+      {
+       "word": "个",
+       "initials": [
+        "g"
+       ],
+       "finals": [
+        "e4"
+       ],
+       "tag": "a",
+       "finals_sandhi": [
+        "e5"
+       ],
+       "initials_erhua": [
+        "g"
+       ],
+       "finals_erhua": [
+        "e5"
+       ]
+      },
+      {
+       "word": "人",
+       "initials": [
+        "r"
+       ],
+       "finals": [
+        "en2"
+       ],
+       "tag": "a",
+       "finals_sandhi": [
+        "en2"
+       ],
+       "initials_erhua": [
+        "r"
+       ],
+       "finals_erhua": [
+        "en2"
+       ]
+      }
+     ],
+     "posseg": [
+      [
+       "三",
+       "nr"
+      ],
+      [
+       "个",
+       "a"
+      ],
+      [
+       "人",
+       "a"
+      ]
+     ],
+     "pre_merge_steps": [
+      [
+       "_merge_bu",
+       [
+        [
+         "三",
+         "nr"
+        ],
+        [
+         "个",
+         "a"
+        ],
+        [
+         "人",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_yi",
+       [
+        [
+         "三",
+         "nr"
+        ],
+        [
+         "个",
+         "a"
+        ],
+        [
+         "人",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_reduplication",
+       [
+        [
+         "三",
+         "nr"
+        ],
+        [
+         "个",
+         "a"
+        ],
+        [
+         "人",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones",
+       [
+        [
+         "三",
+         "nr"
+        ],
+        [
+         "个",
+         "a"
+        ],
+        [
+         "人",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones_2",
+       [
+        [
+         "三",
+         "nr"
+        ],
+        [
+         "个",
+         "a"
+        ],
+        [
+         "人",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_er",
+       [
+        [
+         "三",
+         "nr"
+        ],
+        [
+         "个",
+         "a"
+        ],
+        [
+         "人",
+         "a"
+        ]
+       ]
+      ]
+     ],
+     "phonemes": "ㄙㄢ1/ㄍㄜ5/ㄖㄣ2"
+    }
+   ],
+   "phonemes": "ㄙㄢ1/ㄍㄜ5/ㄖㄣ2",
+   "len_ps": 11,
+   "style_row": 10,
+   "input_ids": [
+    0,
+    98,
+    117,
+    171,
+    7,
+    79,
+    140,
+    170,
+    7,
+    126,
+    121,
+    172,
+    0
+   ]
+  },
+  {
+   "id": "line-15",
+   "text": "123个",
+   "cn2an": "一百二十三个",
+   "punct_mapped": "一百二十三个",
+   "en_zh_split": [
+    [
+     "",
+     "一百二十三个"
+    ]
+   ],
+   "segments": [
+    {
+     "zh": "一百二十三个",
+     "words": [
+      {
+       "word": "一百",
+       "initials": [
+        "",
+        "b"
+       ],
+       "finals": [
+        "i1",
+        "ai3"
+       ],
+       "tag": "nr",
+       "finals_sandhi": [
+        "i1",
+        "ai3"
+       ],
+       "initials_erhua": [
+        "",
+        "b"
+       ],
+       "finals_erhua": [
+        "i1",
+        "ai3"
+       ]
+      },
+      {
+       "word": "二",
+       "initials": [
+        ""
+       ],
+       "finals": [
+        "er4"
+       ],
+       "tag": "a",
+       "finals_sandhi": [
+        "er4"
+       ],
+       "initials_erhua": [
+        ""
+       ],
+       "finals_erhua": [
+        "er4"
+       ]
+      },
+      {
+       "word": "十",
+       "initials": [
+        "sh"
+       ],
+       "finals": [
+        "iii2"
+       ],
+       "tag": "a",
+       "finals_sandhi": [
+        "iii2"
+       ],
+       "initials_erhua": [
+        "sh"
+       ],
+       "finals_erhua": [
+        "iii2"
+       ]
+      },
+      {
+       "word": "三",
+       "initials": [
+        "s"
+       ],
+       "finals": [
+        "an1"
+       ],
+       "tag": "a",
+       "finals_sandhi": [
+        "an1"
+       ],
+       "initials_erhua": [
+        "s"
+       ],
+       "finals_erhua": [
+        "an1"
+       ]
+      },
+      {
+       "word": "个",
+       "initials": [
+        "g"
+       ],
+       "finals": [
+        "e4"
+       ],
+       "tag": "a",
+       "finals_sandhi": [
+        "e5"
+       ],
+       "initials_erhua": [
+        "g"
+       ],
+       "finals_erhua": [
+        "e5"
+       ]
+      }
+     ],
+     "posseg": [
+      [
+       "一",
+       "nr"
+      ],
+      [
+       "百",
+       "a"
+      ],
+      [
+       "二",
+       "a"
+      ],
+      [
+       "十",
+       "a"
+      ],
+      [
+       "三",
+       "a"
+      ],
+      [
+       "个",
+       "a"
+      ]
+     ],
+     "pre_merge_steps": [
+      [
+       "_merge_bu",
+       [
+        [
+         "一",
+         "nr"
+        ],
+        [
+         "百",
+         "a"
+        ],
+        [
+         "二",
+         "a"
+        ],
+        [
+         "十",
+         "a"
+        ],
+        [
+         "三",
+         "a"
+        ],
+        [
+         "个",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_yi",
+       [
+        [
+         "一百",
+         "nr"
+        ],
+        [
+         "二",
+         "a"
+        ],
+        [
+         "十",
+         "a"
+        ],
+        [
+         "三",
+         "a"
+        ],
+        [
+         "个",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_reduplication",
+       [
+        [
+         "一百",
+         "nr"
+        ],
+        [
+         "二",
+         "a"
+        ],
+        [
+         "十",
+         "a"
+        ],
+        [
+         "三",
+         "a"
+        ],
+        [
+         "个",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones",
+       [
+        [
+         "一百",
+         "nr"
+        ],
+        [
+         "二",
+         "a"
+        ],
+        [
+         "十",
+         "a"
+        ],
+        [
+         "三",
+         "a"
+        ],
+        [
+         "个",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones_2",
+       [
+        [
+         "一百",
+         "nr"
+        ],
+        [
+         "二",
+         "a"
+        ],
+        [
+         "十",
+         "a"
+        ],
+        [
+         "三",
+         "a"
+        ],
+        [
+         "个",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_er",
+       [
+        [
+         "一百",
+         "nr"
+        ],
+        [
+         "二",
+         "a"
+        ],
+        [
+         "十",
+         "a"
+        ],
+        [
+         "三",
+         "a"
+        ],
+        [
+         "个",
+         "a"
+        ]
+       ]
+      ]
+     ],
+     "phonemes": "ㄧ1ㄅㄞ3/ㄦ4/ㄕ十2/ㄙㄢ1/ㄍㄜ5"
+    }
+   ],
+   "phonemes": "ㄧ1ㄅㄞ3/ㄦ4/ㄕ十2/ㄙㄢ1/ㄍㄜ5",
+   "len_ps": 20,
+   "style_row": 19,
+   "input_ids": [
+    0,
+    127,
+    171,
+    30,
+    106,
+    169,
+    7,
+    85,
+    173,
+    7,
+    95,
+    144,
+    172,
+    7,
+    98,
+    117,
+    171,
+    7,
+    79,
+    140,
+    170,
+    0
+   ]
+  },
+  {
+   "id": "line-16",
+   "text": "他们说：“好！”",
+   "cn2an": "他们说：“好！”",
+   "punct_mapped": "他们说: “好! ”",
+   "en_zh_split": [
+    [
+     "",
+     "他们说: “好! ”"
+    ]
+   ],
+   "segments": [
+    {
+     "zh": "他们说: “好! ”",
+     "words": [
+      {
+       "word": "他们",
+       "initials": [
+        "t",
+        "m"
+       ],
+       "finals": [
+        "a1",
+        "en5"
+       ],
+       "tag": "r",
+       "finals_sandhi": [
+        "a1",
+        "en5"
+       ],
+       "initials_erhua": [
+        "t",
+        "m"
+       ],
+       "finals_erhua": [
+        "a1",
+        "en5"
+       ]
+      },
+      {
+       "word": "说",
+       "initials": [
+        "sh"
+       ],
+       "finals": [
+        "uo1"
+       ],
+       "tag": "v",
+       "finals_sandhi": [
+        "uo1"
+       ],
+       "initials_erhua": [
+        "sh"
+       ],
+       "finals_erhua": [
+        "uo1"
+       ]
+      },
+      {
+       "word": "好",
+       "initials": [
+        "h"
+       ],
+       "finals": [
+        "ao3"
+       ],
+       "tag": "a",
+       "finals_sandhi": [
+        "ao3"
+       ],
+       "initials_erhua": [
+        "h"
+       ],
+       "finals_erhua": [
+        "ao3"
+       ]
+      }
+     ],
+     "posseg": [
+      [
+       "他们",
+       "r"
+      ],
+      [
+       "说",
+       "v"
+      ],
+      [
+       ":",
+       "x"
+      ],
+      [
+       " ",
+       "x"
+      ],
+      [
+       "“",
+       "x"
+      ],
+      [
+       "好",
+       "a"
+      ],
+      [
+       "!",
+       "x"
+      ],
+      [
+       " ",
+       "x"
+      ],
+      [
+       "”",
+       "x"
+      ]
+     ],
+     "pre_merge_steps": [
+      [
+       "_merge_bu",
+       [
+        [
+         "他们",
+         "r"
+        ],
+        [
+         "说",
+         "v"
+        ],
+        [
+         ":",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         "“",
+         "x"
+        ],
+        [
+         "好",
+         "a"
+        ],
+        [
+         "!",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         "”",
+         "x"
+        ]
+       ]
+      ],
+      [
+       "_merge_yi",
+       [
+        [
+         "他们",
+         "r"
+        ],
+        [
+         "说",
+         "v"
+        ],
+        [
+         ":",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         "“",
+         "x"
+        ],
+        [
+         "好",
+         "a"
+        ],
+        [
+         "!",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         "”",
+         "x"
+        ]
+       ]
+      ],
+      [
+       "_merge_reduplication",
+       [
+        [
+         "他们",
+         "r"
+        ],
+        [
+         "说",
+         "v"
+        ],
+        [
+         ":",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         "“",
+         "x"
+        ],
+        [
+         "好",
+         "a"
+        ],
+        [
+         "!",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         "”",
+         "x"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones",
+       [
+        [
+         "他们",
+         "r"
+        ],
+        [
+         "说",
+         "v"
+        ],
+        [
+         ":",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         "“",
+         "x"
+        ],
+        [
+         "好",
+         "a"
+        ],
+        [
+         "!",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         "”",
+         "x"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones_2",
+       [
+        [
+         "他们",
+         "r"
+        ],
+        [
+         "说",
+         "v"
+        ],
+        [
+         ":",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         "“",
+         "x"
+        ],
+        [
+         "好",
+         "a"
+        ],
+        [
+         "!",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         "”",
+         "x"
+        ]
+       ]
+      ],
+      [
+       "_merge_er",
+       [
+        [
+         "他们",
+         "r"
+        ],
+        [
+         "说",
+         "v"
+        ],
+        [
+         ":",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         "“",
+         "x"
+        ],
+        [
+         "好",
+         "a"
+        ],
+        [
+         "!",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         "”",
+         "x"
+        ]
+       ]
+      ]
+     ],
+     "phonemes": "ㄊㄚ1ㄇㄣ5/ㄕ我1: “ㄏㄠ3! ”"
+    }
+   ],
+   "phonemes": "ㄊㄚ1ㄇㄣ5/ㄕ我1: “ㄏㄠ3! ”",
+   "len_ps": 19,
+   "style_row": 18,
+   "input_ids": [
+    0,
+    49,
+    100,
+    171,
+    37,
+    121,
+    170,
+    7,
+    95,
+    168,
+    171,
+    2,
+    16,
+    14,
+    88,
+    108,
+    169,
+    5,
+    16,
+    15,
+    0
+   ]
+  },
+  {
+   "id": "line-17",
+   "text": "不怕",
+   "cn2an": "不怕",
+   "punct_mapped": "不怕",
+   "en_zh_split": [
+    [
+     "",
+     "不怕"
+    ]
+   ],
+   "segments": [
+    {
+     "zh": "不怕",
+     "words": [
+      {
+       "word": "不怕",
+       "initials": [
+        "b",
+        "p"
+       ],
+       "finals": [
+        "u4",
+        "a4"
+       ],
+       "tag": "a",
+       "finals_sandhi": [
+        "u2",
+        "a4"
+       ],
+       "initials_erhua": [
+        "b",
+        "p"
+       ],
+       "finals_erhua": [
+        "u2",
+        "a4"
+       ]
+      }
+     ],
+     "posseg": [
+      [
+       "不",
+       "nr"
+      ],
+      [
+       "怕",
+       "a"
+      ]
+     ],
+     "pre_merge_steps": [
+      [
+       "_merge_bu",
+       [
+        [
+         "不怕",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_yi",
+       [
+        [
+         "不怕",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_reduplication",
+       [
+        [
+         "不怕",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones",
+       [
+        [
+         "不怕",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones_2",
+       [
+        [
+         "不怕",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_er",
+       [
+        [
+         "不怕",
+         "a"
+        ]
+       ]
+      ]
+     ],
+     "phonemes": "ㄅㄨ2ㄆㄚ4"
+    }
+   ],
+   "phonemes": "ㄅㄨ2ㄆㄚ4",
+   "len_ps": 6,
+   "style_row": 5,
+   "input_ids": [
+    0,
+    30,
+    134,
+    172,
+    32,
+    100,
+    173,
+    0
+   ]
+  },
+  {
+   "id": "line-18",
+   "text": "桌上",
+   "cn2an": "桌上",
+   "punct_mapped": "桌上",
+   "en_zh_split": [
+    [
+     "",
+     "桌上"
+    ]
+   ],
+   "segments": [
+    {
+     "zh": "桌上",
+     "words": [
+      {
+       "word": "桌上",
+       "initials": [
+        "zh",
+        "sh"
+       ],
+       "finals": [
+        "uo1",
+        "ang4"
+       ],
+       "tag": "s",
+       "finals_sandhi": [
+        "uo1",
+        "ang5"
+       ],
+       "initials_erhua": [
+        "zh",
+        "sh"
+       ],
+       "finals_erhua": [
+        "uo1",
+        "ang5"
+       ]
+      }
+     ],
+     "posseg": [
+      [
+       "桌上",
+       "s"
+      ]
+     ],
+     "pre_merge_steps": [
+      [
+       "_merge_bu",
+       [
+        [
+         "桌上",
+         "s"
+        ]
+       ]
+      ],
+      [
+       "_merge_yi",
+       [
+        [
+         "桌上",
+         "s"
+        ]
+       ]
+      ],
+      [
+       "_merge_reduplication",
+       [
+        [
+         "桌上",
+         "s"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones",
+       [
+        [
+         "桌上",
+         "s"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones_2",
+       [
+        [
+         "桌上",
+         "s"
+        ]
+       ]
+      ],
+      [
+       "_merge_er",
+       [
+        [
+         "桌上",
+         "s"
+        ]
+       ]
+      ]
+     ],
+     "phonemes": "ㄓ我1ㄕㄤ5"
+    }
+   ],
+   "phonemes": "ㄓ我1ㄕㄤ5",
+   "len_ps": 6,
+   "style_row": 5,
+   "input_ids": [
+    0,
+    23,
+    168,
+    171,
+    95,
+    122,
+    170,
+    0
+   ]
+  },
+  {
+   "id": "line-19",
+   "text": "起来",
+   "cn2an": "起来",
+   "punct_mapped": "起来",
+   "en_zh_split": [
+    [
+     "",
+     "起来"
+    ]
+   ],
+   "segments": [
+    {
+     "zh": "起来",
+     "words": [
+      {
+       "word": "起来",
+       "initials": [
+        "q",
+        "l"
+       ],
+       "finals": [
+        "i3",
+        "ai2"
+       ],
+       "tag": "v",
+       "finals_sandhi": [
+        "i3",
+        "ai5"
+       ],
+       "initials_erhua": [
+        "q",
+        "l"
+       ],
+       "finals_erhua": [
+        "i3",
+        "ai5"
+       ]
+      }
+     ],
+     "posseg": [
+      [
+       "起来",
+       "v"
+      ]
+     ],
+     "pre_merge_steps": [
+      [
+       "_merge_bu",
+       [
+        [
+         "起来",
+         "v"
+        ]
+       ]
+      ],
+      [
+       "_merge_yi",
+       [
+        [
+         "起来",
+         "v"
+        ]
+       ]
+      ],
+      [
+       "_merge_reduplication",
+       [
+        [
+         "起来",
+         "v"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones",
+       [
+        [
+         "起来",
+         "v"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones_2",
+       [
+        [
+         "起来",
+         "v"
+        ]
+       ]
+      ],
+      [
+       "_merge_er",
+       [
+        [
+         "起来",
+         "v"
+        ]
+       ]
+      ]
+     ],
+     "phonemes": "ㄑㄧ3ㄌㄞ5"
+    }
+   ],
+   "phonemes": "ㄑㄧ3ㄌㄞ5",
+   "len_ps": 6,
+   "style_row": 5,
+   "input_ids": [
+    0,
+    91,
+    127,
+    169,
+    74,
+    106,
+    170,
+    0
+   ]
+  },
+  {
+   "id": "line-20",
+   "text": "老虎",
+   "cn2an": "老虎",
+   "punct_mapped": "老虎",
+   "en_zh_split": [
+    [
+     "",
+     "老虎"
+    ]
+   ],
+   "segments": [
+    {
+     "zh": "老虎",
+     "words": [
+      {
+       "word": "老虎",
+       "initials": [
+        "l",
+        "h"
+       ],
+       "finals": [
+        "ao3",
+        "u3"
+       ],
+       "tag": "n",
+       "finals_sandhi": [
+        "ao2",
+        "u3"
+       ],
+       "initials_erhua": [
+        "l",
+        "h"
+       ],
+       "finals_erhua": [
+        "ao2",
+        "u3"
+       ]
+      }
+     ],
+     "posseg": [
+      [
+       "老虎",
+       "n"
+      ]
+     ],
+     "pre_merge_steps": [
+      [
+       "_merge_bu",
+       [
+        [
+         "老虎",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_yi",
+       [
+        [
+         "老虎",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_reduplication",
+       [
+        [
+         "老虎",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones",
+       [
+        [
+         "老虎",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones_2",
+       [
+        [
+         "老虎",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_er",
+       [
+        [
+         "老虎",
+         "n"
+        ]
+       ]
+      ]
+     ],
+     "phonemes": "ㄌㄠ2ㄏㄨ3"
+    }
+   ],
+   "phonemes": "ㄌㄠ2ㄏㄨ3",
+   "len_ps": 6,
+   "style_row": 5,
+   "input_ids": [
+    0,
+    74,
+    108,
+    172,
+    88,
+    134,
+    169,
+    0
+   ]
+  },
+  {
+   "id": "line-21",
+   "text": "纸老虎",
+   "cn2an": "纸老虎",
+   "punct_mapped": "纸老虎",
+   "en_zh_split": [
+    [
+     "",
+     "纸老虎"
+    ]
+   ],
+   "segments": [
+    {
+     "zh": "纸老虎",
+     "words": [
+      {
+       "word": "纸老虎",
+       "initials": [
+        "zh",
+        "l",
+        "h"
+       ],
+       "finals": [
+        "iii3",
+        "ao3",
+        "u3"
+       ],
+       "tag": "n",
+       "finals_sandhi": [
+        "iii3",
+        "ao2",
+        "u3"
+       ],
+       "initials_erhua": [
+        "zh",
+        "l",
+        "h"
+       ],
+       "finals_erhua": [
+        "iii3",
+        "ao2",
+        "u3"
+       ]
+      }
+     ],
+     "posseg": [
+      [
+       "纸",
+       "n"
+      ],
+      [
+       "老虎",
+       "n"
+      ]
+     ],
+     "pre_merge_steps": [
+      [
+       "_merge_bu",
+       [
+        [
+         "纸",
+         "n"
+        ],
+        [
+         "老虎",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_yi",
+       [
+        [
+         "纸",
+         "n"
+        ],
+        [
+         "老虎",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_reduplication",
+       [
+        [
+         "纸",
+         "n"
+        ],
+        [
+         "老虎",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones",
+       [
+        [
+         "纸老虎",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones_2",
+       [
+        [
+         "纸老虎",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_er",
+       [
+        [
+         "纸老虎",
+         "n"
+        ]
+       ]
+      ]
+     ],
+     "phonemes": "ㄓ十3ㄌㄠ2ㄏㄨ3"
+    }
+   ],
+   "phonemes": "ㄓ十3ㄌㄠ2ㄏㄨ3",
+   "len_ps": 9,
+   "style_row": 8,
+   "input_ids": [
+    0,
+    23,
+    144,
+    169,
+    74,
+    108,
+    172,
+    88,
+    134,
+    169,
+    0
+   ]
+  },
+  {
+   "id": "line-22",
+   "text": "展览馆",
+   "cn2an": "展览馆",
+   "punct_mapped": "展览馆",
+   "en_zh_split": [
+    [
+     "",
+     "展览馆"
+    ]
+   ],
+   "segments": [
+    {
+     "zh": "展览馆",
+     "words": [
+      {
+       "word": "展览馆",
+       "initials": [
+        "zh",
+        "l",
+        "g"
+       ],
+       "finals": [
+        "an3",
+        "an3",
+        "uan3"
+       ],
+       "tag": "n",
+       "finals_sandhi": [
+        "an2",
+        "an2",
+        "uan3"
+       ],
+       "initials_erhua": [
+        "zh",
+        "l",
+        "g"
+       ],
+       "finals_erhua": [
+        "an2",
+        "an2",
+        "uan3"
+       ]
+      }
+     ],
+     "posseg": [
+      [
+       "展览馆",
+       "n"
+      ]
+     ],
+     "pre_merge_steps": [
+      [
+       "_merge_bu",
+       [
+        [
+         "展览馆",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_yi",
+       [
+        [
+         "展览馆",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_reduplication",
+       [
+        [
+         "展览馆",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones",
+       [
+        [
+         "展览馆",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones_2",
+       [
+        [
+         "展览馆",
+         "n"
+        ]
+       ]
+      ],
+      [
+       "_merge_er",
+       [
+        [
+         "展览馆",
+         "n"
+        ]
+       ]
+      ]
+     ],
+     "phonemes": "ㄓㄢ2ㄌㄢ2ㄍ万3"
+    }
+   ],
+   "phonemes": "ㄓㄢ2ㄌㄢ2ㄍ万3",
+   "len_ps": 9,
+   "style_row": 8,
+   "input_ids": [
+    0,
+    23,
+    117,
+    172,
+    74,
+    117,
+    172,
+    79,
+    161,
+    169,
+    0
+   ]
+  },
+  {
+   "id": "line-23",
+   "text": "嗯",
+   "cn2an": "嗯",
+   "punct_mapped": "嗯",
+   "en_zh_split": [
+    [
+     "",
+     "嗯"
+    ]
+   ],
+   "segments": [
+    {
+     "zh": "嗯",
+     "words": [
+      {
+       "word": "嗯",
+       "initials": [
+        ""
+       ],
+       "finals": [
+        "n2"
+       ],
+       "tag": "y",
+       "finals_sandhi": [
+        "n2"
+       ],
+       "initials_erhua": [
+        ""
+       ],
+       "finals_erhua": [
+        "n2"
+       ]
+      }
+     ],
+     "posseg": [
+      [
+       "嗯",
+       "y"
+      ]
+     ],
+     "pre_merge_steps": [
+      [
+       "_merge_bu",
+       [
+        [
+         "嗯",
+         "y"
+        ]
+       ]
+      ],
+      [
+       "_merge_yi",
+       [
+        [
+         "嗯",
+         "y"
+        ]
+       ]
+      ],
+      [
+       "_merge_reduplication",
+       [
+        [
+         "嗯",
+         "y"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones",
+       [
+        [
+         "嗯",
+         "y"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones_2",
+       [
+        [
+         "嗯",
+         "y"
+        ]
+       ]
+      ],
+      [
+       "_merge_er",
+       [
+        [
+         "嗯",
+         "y"
+        ]
+       ]
+      ]
+     ],
+     "phonemes": "ㄋ2"
+    }
+   ],
+   "phonemes": "ㄋ2",
+   "len_ps": 2,
+   "style_row": 1,
+   "input_ids": [
+    0,
+    73,
+    172,
+    0
+   ]
+  },
+  {
+   "id": "line-24",
+   "text": "看不懂",
+   "cn2an": "看不懂",
+   "punct_mapped": "看不懂",
+   "en_zh_split": [
+    [
+     "",
+     "看不懂"
+    ]
+   ],
+   "segments": [
+    {
+     "zh": "看不懂",
+     "words": [
+      {
+       "word": "看",
+       "initials": [
+        "k"
+       ],
+       "finals": [
+        "an4"
+       ],
+       "tag": "nr",
+       "finals_sandhi": [
+        "an4"
+       ],
+       "initials_erhua": [
+        "k"
+       ],
+       "finals_erhua": [
+        "an4"
+       ]
+      },
+      {
+       "word": "不懂",
+       "initials": [
+        "b",
+        "d"
+       ],
+       "finals": [
+        "u4",
+        "ong3"
+       ],
+       "tag": "a",
+       "finals_sandhi": [
+        "u4",
+        "ong3"
+       ],
+       "initials_erhua": [
+        "b",
+        "d"
+       ],
+       "finals_erhua": [
+        "u4",
+        "ong3"
+       ]
+      }
+     ],
+     "posseg": [
+      [
+       "看",
+       "nr"
+      ],
+      [
+       "不",
+       "a"
+      ],
+      [
+       "懂",
+       "a"
+      ]
+     ],
+     "pre_merge_steps": [
+      [
+       "_merge_bu",
+       [
+        [
+         "看",
+         "nr"
+        ],
+        [
+         "不懂",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_yi",
+       [
+        [
+         "看",
+         "nr"
+        ],
+        [
+         "不懂",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_reduplication",
+       [
+        [
+         "看",
+         "nr"
+        ],
+        [
+         "不懂",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones",
+       [
+        [
+         "看",
+         "nr"
+        ],
+        [
+         "不懂",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones_2",
+       [
+        [
+         "看",
+         "nr"
+        ],
+        [
+         "不懂",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_er",
+       [
+        [
+         "看",
+         "nr"
+        ],
+        [
+         "不懂",
+         "a"
+        ]
+       ]
+      ]
+     ],
+     "phonemes": "ㄎㄢ4/ㄅㄨ4ㄉ中3"
+    }
+   ],
+   "phonemes": "ㄎㄢ4/ㄅㄨ4ㄉ中3",
+   "len_ps": 10,
+   "style_row": 9,
+   "input_ids": [
+    0,
+    84,
+    117,
+    173,
+    7,
+    30,
+    134,
+    173,
+    40,
+    155,
+    169,
+    0
+   ]
+  },
+  {
+   "id": "line-25",
+   "text": "你好 ABC 好",
+   "cn2an": "你好 ABC 好",
+   "punct_mapped": "你好 ABC 好",
+   "en_zh_split": [
+    [
+     "",
+     "你好"
+    ],
+    [
+     "ABC",
+     ""
+    ],
+    [
+     "",
+     "好"
+    ]
+   ],
+   "segments": [
+    {
+     "zh": "你好",
+     "words": [
+      {
+       "word": "你好",
+       "initials": [
+        "n",
+        "h"
+       ],
+       "finals": [
+        "i3",
+        "ao3"
+       ],
+       "tag": "l",
+       "finals_sandhi": [
+        "i2",
+        "ao3"
+       ],
+       "initials_erhua": [
+        "n",
+        "h"
+       ],
+       "finals_erhua": [
+        "i2",
+        "ao3"
+       ]
+      }
+     ],
+     "posseg": [
+      [
+       "你好",
+       "l"
+      ]
+     ],
+     "pre_merge_steps": [
+      [
+       "_merge_bu",
+       [
+        [
+         "你好",
+         "l"
+        ]
+       ]
+      ],
+      [
+       "_merge_yi",
+       [
+        [
+         "你好",
+         "l"
+        ]
+       ]
+      ],
+      [
+       "_merge_reduplication",
+       [
+        [
+         "你好",
+         "l"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones",
+       [
+        [
+         "你好",
+         "l"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones_2",
+       [
+        [
+         "你好",
+         "l"
+        ]
+       ]
+      ],
+      [
+       "_merge_er",
+       [
+        [
+         "你好",
+         "l"
+        ]
+       ]
+      ]
+     ],
+     "phonemes": "ㄋㄧ2ㄏㄠ3"
+    },
+    {
+     "zh": "好",
+     "words": [
+      {
+       "word": "好",
+       "initials": [
+        "h"
+       ],
+       "finals": [
+        "ao3"
+       ],
+       "tag": "a",
+       "finals_sandhi": [
+        "ao3"
+       ],
+       "initials_erhua": [
+        "h"
+       ],
+       "finals_erhua": [
+        "ao3"
+       ]
+      }
+     ],
+     "posseg": [
+      [
+       "好",
+       "a"
+      ]
+     ],
+     "pre_merge_steps": [
+      [
+       "_merge_bu",
+       [
+        [
+         "好",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_yi",
+       [
+        [
+         "好",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_reduplication",
+       [
+        [
+         "好",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones",
+       [
+        [
+         "好",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones_2",
+       [
+        [
+         "好",
+         "a"
+        ]
+       ]
+      ],
+      [
+       "_merge_er",
+       [
+        [
+         "好",
+         "a"
+        ]
+       ]
+      ]
+     ],
+     "phonemes": "ㄏㄠ3"
+    }
+   ],
+   "phonemes": "ㄋㄧ2ㄏㄠ3 ❓ ㄏㄠ3",
+   "len_ps": 12,
+   "style_row": 11,
+   "input_ids": [
+    0,
+    73,
+    127,
+    172,
+    88,
+    108,
+    169,
+    16,
+    16,
+    88,
+    108,
+    169,
+    0
+   ]
+  },
+  {
+   "id": "line-26",
+   "text": "（你好）《世界》",
+   "cn2an": "（你好）《世界》",
+   "punct_mapped": "(你好)  “世界”",
+   "en_zh_split": [
+    [
+     "",
+     "(你好)  “世界”"
+    ]
+   ],
+   "segments": [
+    {
+     "zh": "(你好)  “世界”",
+     "words": [
+      {
+       "word": "你好",
+       "initials": [
+        "n",
+        "h"
+       ],
+       "finals": [
+        "i3",
+        "ao3"
+       ],
+       "tag": "l",
+       "finals_sandhi": [
+        "i2",
+        "ao3"
+       ],
+       "initials_erhua": [
+        "n",
+        "h"
+       ],
+       "finals_erhua": [
+        "i2",
+        "ao3"
+       ]
+      },
+      {
+       "word": "世界",
+       "initials": [
+        "sh",
+        "j"
+       ],
+       "finals": [
+        "iii4",
+        "ie4"
+       ],
+       "tag": "n",
+       "finals_sandhi": [
+        "iii4",
+        "ie4"
+       ],
+       "initials_erhua": [
+        "sh",
+        "j"
+       ],
+       "finals_erhua": [
+        "iii4",
+        "ie4"
+       ]
+      }
+     ],
+     "posseg": [
+      [
+       "(",
+       "x"
+      ],
+      [
+       "你好",
+       "l"
+      ],
+      [
+       ")",
+       "x"
+      ],
+      [
+       " ",
+       "x"
+      ],
+      [
+       " ",
+       "x"
+      ],
+      [
+       "“",
+       "x"
+      ],
+      [
+       "世界",
+       "n"
+      ],
+      [
+       "”",
+       "x"
+      ]
+     ],
+     "pre_merge_steps": [
+      [
+       "_merge_bu",
+       [
+        [
+         "(",
+         "x"
+        ],
+        [
+         "你好",
+         "l"
+        ],
+        [
+         ")",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         "“",
+         "x"
+        ],
+        [
+         "世界",
+         "n"
+        ],
+        [
+         "”",
+         "x"
+        ]
+       ]
+      ],
+      [
+       "_merge_yi",
+       [
+        [
+         "(",
+         "x"
+        ],
+        [
+         "你好",
+         "l"
+        ],
+        [
+         ")",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         "“",
+         "x"
+        ],
+        [
+         "世界",
+         "n"
+        ],
+        [
+         "”",
+         "x"
+        ]
+       ]
+      ],
+      [
+       "_merge_reduplication",
+       [
+        [
+         "(",
+         "x"
+        ],
+        [
+         "你好",
+         "l"
+        ],
+        [
+         ")",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         "“",
+         "x"
+        ],
+        [
+         "世界",
+         "n"
+        ],
+        [
+         "”",
+         "x"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones",
+       [
+        [
+         "(",
+         "x"
+        ],
+        [
+         "你好",
+         "l"
+        ],
+        [
+         ")",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         "“",
+         "x"
+        ],
+        [
+         "世界",
+         "n"
+        ],
+        [
+         "”",
+         "x"
+        ]
+       ]
+      ],
+      [
+       "_merge_continuous_three_tones_2",
+       [
+        [
+         "(",
+         "x"
+        ],
+        [
+         "你好",
+         "l"
+        ],
+        [
+         ")",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         "“",
+         "x"
+        ],
+        [
+         "世界",
+         "n"
+        ],
+        [
+         "”",
+         "x"
+        ]
+       ]
+      ],
+      [
+       "_merge_er",
+       [
+        [
+         "(",
+         "x"
+        ],
+        [
+         "你好",
+         "l"
+        ],
+        [
+         ")",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         " ",
+         "x"
+        ],
+        [
+         "“",
+         "x"
+        ],
+        [
+         "世界",
+         "n"
+        ],
+        [
+         "”",
+         "x"
+        ]
+       ]
+      ]
+     ],
+     "phonemes": "(ㄋㄧ2ㄏㄠ3)  “ㄕ十4ㄐㄝ4”"
+    }
+   ],
+   "phonemes": "(ㄋㄧ2ㄏㄠ3)  “ㄕ十4ㄐㄝ4”",
+   "len_ps": 18,
+   "style_row": 17,
+   "input_ids": [
+    0,
+    12,
+    73,
+    127,
+    172,
+    88,
+    108,
+    169,
+    13,
+    16,
+    16,
+    14,
+    95,
+    144,
+    173,
+    89,
+    105,
+    173,
+    15,
+    0
+   ]
+  },
+  {
+   "id": "line-27",
+   "text": "2019年3月5日",
+   "error": "IndexError"
+  }
+ ],
+ "direct": {
+  "modified_tone": [
+   [
+    "不怕",
+    "v",
+    [
+     "u4",
+     "a4"
+    ],
+    [
+     "u2",
+     "a4"
+    ]
+   ],
+   [
+    "看不懂",
+    "v",
+    [
+     "an4",
+     "u4",
+     "ong3"
+    ],
+    [
+     "an4",
+     "u5",
+     "ong3"
+    ]
+   ],
+   [
+    "一天",
+    "m",
+    [
+     "i1",
+     "ian1"
+    ],
+    [
+     "i4",
+     "ian1"
+    ]
+   ],
+   [
+    "一个",
+    "m",
+    [
+     "i1",
+     "e4"
+    ],
+    [
+     "i2",
+     "e5"
+    ]
+   ],
+   [
+    "第一",
+    "m",
+    [
+     "i4",
+     "i1"
+    ],
+    [
+     "i4",
+     "i1"
+    ]
+   ],
+   [
+    "看一看",
+    "v",
+    [
+     "an4",
+     "i1",
+     "an4"
+    ],
+    [
+     "an4",
+     "i5",
+     "an4"
+    ]
+   ],
+   [
+    "一二三",
+    "m",
+    [
+     "i1",
+     "er4",
+     "an1"
+    ],
+    [
+     "i1",
+     "er4",
+     "an1"
+    ]
+   ],
+   [
+    "奶奶",
+    "n",
+    [
+     "ai3",
+     "ai3"
+    ],
+    [
+     "ai3",
+     "ai5"
+    ]
+   ],
+   [
+    "东西",
+    "n",
+    [
+     "ong1",
+     "i1"
+    ],
+    [
+     "ong1",
+     "i5"
+    ]
+   ],
+   [
+    "你好",
+    "l",
+    [
+     "i3",
+     "ao3"
+    ],
+    [
+     "i2",
+     "ao3"
+    ]
+   ],
+   [
+    "展览馆",
+    "n",
+    [
+     "an3",
+     "an3",
+     "uan3"
+    ],
+    [
+     "an2",
+     "an2",
+     "uan3"
+    ]
+   ],
+   [
+    "纸老虎",
+    "n",
+    [
+     "iii3",
+     "ao3",
+     "u3"
+    ],
+    [
+     "iii3",
+     "ao2",
+     "u3"
+    ]
+   ],
+   [
+    "桌上",
+    "s",
+    [
+     "uo1",
+     "ang4"
+    ],
+    [
+     "uo1",
+     "ang5"
+    ]
+   ],
+   [
+    "起来",
+    "v",
+    [
+     "i3",
+     "ai2"
+    ],
+    [
+     "i3",
+     "ai5"
+    ]
+   ],
+   [
+    "三个",
+    "m",
+    [
+     "an1",
+     "e4"
+    ],
+    [
+     "an1",
+     "e5"
+    ]
+   ],
+   [
+    "他们",
+    "r",
+    [
+     "a1",
+     "en5"
+    ],
+    [
+     "a1",
+     "en5"
+    ]
+   ],
+   [
+    "我的",
+    "uj",
+    [
+     "uo3",
+     "e5"
+    ],
+    [
+     "uo3",
+     "e5"
+    ]
+   ],
+   [
+    "好吧",
+    "y",
+    [
+     "ao3",
+     "a5"
+    ],
+    [
+     "ao3",
+     "a5"
+    ]
+   ],
+   [
+    "了",
+    "ul",
+    [
+     "e5"
+    ],
+    [
+     "e5"
+    ]
+   ],
+   [
+    "很好好",
+    "d",
+    [
+     "en3",
+     "ao3",
+     "ao3"
+    ],
+    [
+     "en3",
+     "ao2",
+     "ao3"
+    ]
+   ],
+   [
+    "你好你好",
+    "l",
+    [
+     "i3",
+     "ao3",
+     "i3",
+     "ao3"
+    ],
+    [
+     "i2",
+     "ao3",
+     "i2",
+     "ao3"
+    ]
+   ]
+  ],
+  "erhua": [
+   [
+    [
+     "x",
+     "y"
+    ],
+    [
+     "iao3",
+     "van4"
+    ],
+    "小院",
+    "n",
+    [
+     [
+      "x",
+      "y"
+     ],
+     [
+      "iao3",
+      "van4"
+     ]
+    ]
+   ],
+   [
+    [
+     "x",
+     "y",
+     ""
+    ],
+    [
+     "iao3",
+     "van4",
+     "er2"
+    ],
+    "小院儿",
+    "n",
+    [
+     [
+      "x",
+      "y"
+     ],
+     [
+      "iao3",
+      "vanR4"
+     ]
+    ]
+   ],
+   [
+    [
+     "n",
+     ""
+    ],
+    [
+     "v3",
+     "er2"
+    ],
+    "女儿",
+    "n",
+    [
+     [
+      "n",
+      ""
+     ],
+     [
+      "v3",
+      "er2"
+     ]
+    ]
+   ],
+   [
+    [
+     "n",
+     ""
+    ],
+    [
+     "a3",
+     "er2"
+    ],
+    "哪儿",
+    "r",
+    [
+     [
+      "n"
+     ],
+     [
+      "aR3"
+     ]
+    ]
+   ],
+   [
+    [
+     "n",
+     ""
+    ],
+    [
+     "a3",
+     "er1"
+    ],
+    "哪儿",
+    "r",
+    [
+     [
+      "n"
+     ],
+     [
+      "aR3"
+     ]
+    ]
+   ],
+   [
+    [
+     "h",
+     ""
+    ],
+    [
+     "ua1",
+     "er2"
+    ],
+    "花儿",
+    "n",
+    [
+     [
+      "h",
+      ""
+     ],
+     [
+      "ua1",
+      "er2"
+     ]
+    ]
+   ],
+   [
+    [
+     "n",
+     ""
+    ],
+    [
+     "a3",
+     "er2"
+    ],
+    "哪儿",
+    "nr",
+    [
+     [
+      "n",
+      ""
+     ],
+     [
+      "a3",
+      "er2"
+     ]
+    ]
+   ],
+   [
+    [
+     "",
+     "h",
+     ""
+    ],
+    [
+     "i4",
+     "uei4",
+     "er5"
+    ],
+    "一会儿",
+    "m",
+    [
+     [
+      "",
+      "h"
+     ],
+     [
+      "i4",
+      "ueiR4"
+     ]
+    ]
+   ],
+   [
+    [
+     "g",
+     ""
+    ],
+    [
+     "e4",
+     "er2"
+    ],
+    "歌儿",
+    "n",
+    [
+     [
+      "g"
+     ],
+     [
+      "eR4"
+     ]
+    ]
+   ]
+  ],
+  "pre_merge": [
+   [
+    [
+     [
+      "我",
+      "r"
+     ],
+     [
+      "不",
+      "d"
+     ],
+     [
+      "去",
+      "v"
+     ]
+    ],
+    [
+     [
+      "我",
+      "r"
+     ],
+     [
+      "不去",
+      "v"
+     ]
+    ]
+   ],
+   [
+    [
+     [
+      "不",
+      "d"
+     ],
+     [
+      "，",
+      "x"
+     ]
+    ],
+    [
+     [
+      "不",
+      "d"
+     ],
+     [
+      "，",
+      "x"
+     ]
+    ]
+   ],
+   [
+    [
+     [
+      "看",
+      "v"
+     ],
+     [
+      "一",
+      "m"
+     ],
+     [
+      "看",
+      "v"
+     ]
+    ],
+    [
+     [
+      "看一看",
+      "v"
+     ]
+    ]
+   ],
+   [
+    [
+     [
+      "一",
+      "m"
+     ],
+     [
+      "天",
+      "q"
+     ]
+    ],
+    [
+     [
+      "一天",
+      "m"
+     ]
+    ]
+   ],
+   [
+    [
+     [
+      "奶",
+      "n"
+     ],
+     [
+      "奶",
+      "n"
+     ]
+    ],
+    [
+     [
+      "奶奶",
+      "n"
+     ]
+    ]
+   ],
+   [
+    [
+     [
+      "你",
+      "r"
+     ],
+     [
+      "好",
+      "a"
+     ]
+    ],
+    [
+     [
+      "你好",
+      "r"
+     ]
+    ]
+   ],
+   [
+    [
+     [
+      "我",
+      "r"
+     ],
+     [
+      "很",
+      "d"
+     ],
+     [
+      "好",
+      "a"
+     ]
+    ],
+    [
+     [
+      "我很好",
+      "r"
+     ]
+    ]
+   ],
+   [
+    [
+     [
+      "老虎",
+      "n"
+     ],
+     [
+      "好",
+      "a"
+     ]
+    ],
+    [
+     [
+      "老虎好",
+      "n"
+     ]
+    ]
+   ],
+   [
+    [
+     [
+      "小院",
+      "n"
+     ],
+     [
+      "儿",
+      "n"
+     ]
+    ],
+    [
+     [
+      "小院儿",
+      "n"
+     ]
+    ]
+   ],
+   [
+    [
+     [
+      "，",
+      "x"
+     ],
+     [
+      "儿",
+      "n"
+     ]
+    ],
+    [
+     [
+      "，",
+      "x"
+     ],
+     [
+      "儿",
+      "n"
+     ]
+    ]
+   ]
+  ],
+  "split_word": [
+   [
+    "你好",
+    [
+     "你好",
+     ""
+    ]
+   ],
+   [
+    "展览馆",
+    [
+     "展览",
+     "馆"
+    ]
+   ],
+   [
+    "纸老虎",
+    [
+     "纸",
+     "老虎"
+    ]
+   ],
+   [
+    "看不懂",
+    [
+     "看",
+     "不懂"
+    ]
+   ],
+   [
+    "东西",
+    [
+     "东西",
+     ""
+    ]
+   ]
+  ]
+ }
+}

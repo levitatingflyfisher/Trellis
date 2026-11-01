@@ -12,6 +12,7 @@
 library;
 
 import 'translation_catalog.dart';
+import 'voice_catalog.dart';
 
 /// What a model does. [dictionary] is data, not inference (Campaign 4
 /// Phase 3: a StarDict set) — it rides the same pinned-file/archive-
@@ -49,7 +50,16 @@ class ModelFile {
 
   final int bytes;
 
-  ModelFile({required this.url, required this.sha256, required this.bytes}) {
+  /// The same file serves several models (Pocket TTS's one Mimi decoder
+  /// for every language): the store keeps one copy for all of them,
+  /// named by the URL's last segment, which must then be unique to it.
+  final bool shared;
+
+  ModelFile(
+      {required this.url,
+      required this.sha256,
+      required this.bytes,
+      this.shared = false}) {
     if (url.isEmpty) throw ArgumentError('ModelFile: url must not be empty');
     if (bytes <= 0) throw ArgumentError('ModelFile: bytes must be positive');
     if (sha256.isNotEmpty && !_sha256Pattern.hasMatch(sha256)) {
@@ -92,37 +102,56 @@ class VoiceArchiveLayout {
   });
 }
 
-/// Which downloaded filename plays which role for a Supertonic voice
-/// (ADR-0007) — the "data, not code" surface for adding a voice, one
-/// level over from [VoiceArchiveLayout]: these files ship LOOSE, each
-/// downloaded and sha256-verified on its own under `<baseDir>/<id>/`
-/// (the existing per-file promotion law every plain [ModelSpec] already
-/// follows — the same one whisper's single file uses), so there is
-/// nothing to extract and no directory to promote. This layout exists
-/// only so the engine never has to guess which loose file is which.
-class SupertonicVoiceLayout {
-  final String durationPredictorFileName;
-  final String textEncoderFileName;
-  final String vectorEstimatorFileName;
-  final String vocoderFileName;
-  final String unicodeIndexerFileName;
-  final String ttsConfigFileName;
-  final String voiceStyleFileName;
+/// Which downloaded filename plays which role for a Pocket TTS voice
+/// (board-0211): Trellis's own export of Kyutai's weights, one language
+/// each, with Kyutai's ready voice state; the Mimi decoder is one file
+/// shared by every language ([ModelFile.shared]).
+class PocketVoiceLayout {
+  /// Kyutai's name for the language's weights (`german`, `french`...).
+  final String language;
+  final String textConditionerFileName;
+  final String mainFileName;
+  final String flowFileName;
+  final String mimiFileName;
+  final String tokenizerFileName;
+  final String voiceFileName;
 
-  const SupertonicVoiceLayout({
-    required this.durationPredictorFileName,
-    required this.textEncoderFileName,
-    required this.vectorEstimatorFileName,
-    required this.vocoderFileName,
-    required this.unicodeIndexerFileName,
-    required this.ttsConfigFileName,
-    required this.voiceStyleFileName,
+  /// Who the voice is and its licence, shown with it: the credit a
+  /// CC-BY voice asks for.
+  final String voiceCredit;
+
+  const PocketVoiceLayout({
+    required this.language,
+    required this.textConditionerFileName,
+    required this.mainFileName,
+    required this.flowFileName,
+    required this.mimiFileName,
+    required this.tokenizerFileName,
+    required this.voiceFileName,
+    required this.voiceCredit,
+  });
+}
+
+/// Which downloaded filename plays which role for a Kokoro voice
+/// (board-0211): the ONNX model, the voice's style rows, and the data
+/// its Chinese text front end reads, by role (`jiebaDict`,
+/// `finalsegHmm`, `possegHmm`, `pinyinSingle`, `pinyinPhrases`,
+/// `pinyinAux`, `misakiTables`). Every file ships loose.
+class KokoroVoiceLayout {
+  final String modelFileName;
+  final String voiceFileName;
+  final Map<String, String> frontEndFileNames;
+
+  const KokoroVoiceLayout({
+    required this.modelFileName,
+    required this.voiceFileName,
+    required this.frontEndFileNames,
   });
 }
 
 /// Which downloaded filename plays which role for a Marian (opus-mt)
 /// translation model (ADR-0008 "Babel") — the same "data, not code"
-/// precedent [SupertonicVoiceLayout] set: a new [ModelSpec] with a new
+/// rule the voice layouts follow: a new [ModelSpec] with a new
 /// [MarianModelLayout] is a complete translation pair, no engine change.
 /// Every file ships loose, each downloaded and sha256-verified on its
 /// own — nothing to extract. `target.spm` is deliberately absent: it
@@ -176,6 +205,10 @@ class DictionaryArchiveLayout {
   });
 }
 
+/// [tag]'s base language, lower case: `zh-CN` and `ZH_tw` are `zh`.
+String baseLangTag(String tag) =>
+    tag.trim().toLowerCase().split(RegExp('[-_]')).first;
+
 /// One model in the catalog.
 class ModelSpec {
   final String id;
@@ -214,12 +247,11 @@ class ModelSpec {
   /// existence IS completeness).
   final VoiceArchiveLayout? archiveLayout;
 
-  /// Non-null for a Supertonic voice (ADR-0007) whose files ship loose —
-  /// see [SupertonicVoiceLayout]. Mutually meaningful alongside
-  /// [archiveLayout] only in the sense that a real spec picks at most one
-  /// shape; nothing enforces that here, the same way nothing enforces it
-  /// for [archiveLayout] today.
-  final SupertonicVoiceLayout? supertonicLayout;
+  /// Non-null for a Kokoro voice (board-0211).
+  final KokoroVoiceLayout? kokoroLayout;
+
+  /// Non-null for a Pocket TTS voice (board-0211).
+  final PocketVoiceLayout? pocketLayout;
 
   /// Non-null for a Marian translation pair (ADR-0008) — see
   /// [MarianModelLayout].
@@ -248,7 +280,8 @@ class ModelSpec {
     Set<String>? langs,
     this.sourceLang,
     this.archiveLayout,
-    this.supertonicLayout,
+    this.kokoroLayout,
+    this.pocketLayout,
     this.marianLayout,
     this.dictionaryArchiveLayout,
     this.convertedFrom,
@@ -316,6 +349,29 @@ class ModelRegistry {
     }
     return best;
   }
+
+  /// The voice that speaks [lang] (a bare or region tag) at [tier]: the
+  /// tts spec whose [ModelSpec.langs] names it, one per language (owner,
+  /// 13 Nov, board-0211). Null when none does. Unlike [pickModel], a spec
+  /// that names no languages never matches: a voice must say what it
+  /// speaks.
+  ModelSpec? voiceFor(String lang, DeviceTier tier) {
+    final base = baseLangTag(lang);
+    if (base.isEmpty) return null;
+    for (final s in specs) {
+      if (s.task != ModelTask.tts) continue;
+      if (!tier.atLeast(s.minTier)) continue;
+      if (s.langs?.contains(base) ?? false) return s;
+    }
+    return null;
+  }
+
+  /// Every language some voice speaks at [tier].
+  Set<String> voiceLangs(DeviceTier tier) => {
+        for (final s in specs)
+          if (s.task == ModelTask.tts && tier.atLeast(s.minTier))
+            ...?s.langs,
+      };
 
   /// The (source, target) selection law for translation pairs (Campaign 8
   /// "Babel widens"): [pickModel]'s single `langHint` cannot disambiguate
@@ -436,97 +492,9 @@ class ModelRegistry {
           licenses: const ['MIT'],
           minTier: DeviceTier.t1,
         ),
-        // T1 TTS — the Supertonic rung's starter voice (ADR-0007): the
-        // official Supertone/supertonic-2 weights (v2: 66M params,
-        // en/ko/es/pt/fr — this entry claims only English, the one
-        // speaker embedding shipped and reviewed here), fp32 ONNX
-        // (~263MB). No official quantized build exists, and the one
-        // unofficial int8 repack found (csukuangfj2) carries no license
-        // at all and ships its support files (unicode indexer, voice
-        // embedding) in a binary format this engine's ported inference
-        // code cannot read — both disqualifying on their own; the ADR
-        // records the full accounting. Voice: M1 (the official Flutter
-        // example's own default). Verified 2026-08-14 by downloading
-        // every file directly and hashing it locally; full verbatim
-        // OpenRAIL-M text + fetch date: docs/reference/tts-voices.md.
-        //
-        // Needs NO phonemizer — the model consumes raw character indices
-        // (unicode_indexer.json below) — so there is nothing for a GPL
-        // dependency to hide in, unlike the sherpa/Piper rung this
-        // replaces. `licenses` carries exactly one name now: OpenRAIL-M
-        // for the weights: there is no second, engine-side license to
-        // co-list, because flutter_onnxruntime and Supertonic's engine
-        // code are both MIT — the APK stays MIT-clean end to end.
-        ModelSpec(
-          id: 'supertonic-en-m1',
-          task: ModelTask.tts,
-          files: [
-            ModelFile(
-              url:
-                  'https://huggingface.co/Supertone/supertonic-2/resolve/main/onnx/duration_predictor.onnx',
-              sha256:
-                  '6d556b3691165c364be91dc0bd894656b5949f5acd2750d8ec2f954010845011',
-              bytes: 1521526,
-            ),
-            ModelFile(
-              url:
-                  'https://huggingface.co/Supertone/supertonic-2/resolve/main/onnx/text_encoder.onnx',
-              sha256:
-                  'dd5f535ed629f7df86071043e15f541ce1b2ab7f1bdbce4c7892b307bca79fa3',
-              bytes: 27431318,
-            ),
-            ModelFile(
-              url:
-                  'https://huggingface.co/Supertone/supertonic-2/resolve/main/onnx/vector_estimator.onnx',
-              sha256:
-                  '105e9d66fd8756876b210a6b4aa03fc393b1eaca3a8dadcc8d9a3bc785c86a35',
-              bytes: 132471364,
-            ),
-            ModelFile(
-              url:
-                  'https://huggingface.co/Supertone/supertonic-2/resolve/main/onnx/vocoder.onnx',
-              sha256:
-                  '19bd51f47a186069c752403518a40f7ea4c647455056d2511f7249691ecddf7c',
-              bytes: 101405066,
-            ),
-            ModelFile(
-              url:
-                  'https://huggingface.co/Supertone/supertonic-2/resolve/main/onnx/unicode_indexer.json',
-              sha256:
-                  'b7662a73a0703f43b97c0f2e089f8e8325e26f5d841aca393b5a54c509c92df1',
-              bytes: 262196,
-            ),
-            ModelFile(
-              url:
-                  'https://huggingface.co/Supertone/supertonic-2/resolve/main/onnx/tts.json',
-              sha256:
-                  'ee531d9af9b80438a2ed703e22155ee6c83b12595ab22fd3bb6de94c7502fe96',
-              bytes: 8699,
-            ),
-            ModelFile(
-              url:
-                  'https://huggingface.co/Supertone/supertonic-2/resolve/main/voice_styles/M1.json',
-              sha256:
-                  'a04c823cbda6dd1c7de131ec68fea83bbb70d7f29d61623304eb871e3b83b5a1',
-              bytes: 420510,
-            ),
-          ],
-          licenses: const ['OpenRAIL-M'],
-          // t1, like the translation pairs (1.5.8): the app runs at t1
-          // with no tier probe, so at t2 the voice downloaded and was
-          // never picked. The user rules out gating options by device.
-          minTier: DeviceTier.t1,
-          langs: const {'en'},
-          supertonicLayout: const SupertonicVoiceLayout(
-            durationPredictorFileName: 'duration_predictor.onnx',
-            textEncoderFileName: 'text_encoder.onnx',
-            vectorEstimatorFileName: 'vector_estimator.onnx',
-            vocoderFileName: 'vocoder.onnx',
-            unicodeIndexerFileName: 'unicode_indexer.json',
-            ttsConfigFileName: 'tts.json',
-            voiceStyleFileName: 'M1.json',
-          ),
-        ),
+        // Trellis's own voices, one per language (board-0211;
+        // voice_catalog.dart holds the pins and the provenance).
+        ...voiceCatalog(),
         // T1 translation: every Marian pair, English on one end
         // (translation_catalog.dart holds the pins and the provenance).
         ...translationCatalog(),

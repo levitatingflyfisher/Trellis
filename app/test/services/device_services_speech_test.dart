@@ -16,7 +16,7 @@ void main() {
     if (dir.existsSync()) dir.deleteSync(recursive: true);
   });
 
-  ModelSpec voiceSpec() => ModelRegistry.starter().byId('supertonic-en-m1')!;
+  ModelSpec voiceSpec() => ModelRegistry.starter().byId('pocket-en')!;
 
   test('no voice downloaded means no engine — the caller falls back to the '
       'system voice', () async {
@@ -28,7 +28,7 @@ void main() {
   test('local ML unavailable (the web tier) refuses even if the store '
       'claims the voice is present', () async {
     final services = testServices(dir,
-        modelStore: FakeModelStore(downloadedIds: {'supertonic-en-m1'}),
+        modelStore: FakeModelStore(downloadedIds: {'pocket-en'}),
         localMlAvailable: false,
         tier: DeviceTier.t2);
     expect(await services.speechEngineFor(voiceSpec()), isNull);
@@ -37,7 +37,7 @@ void main() {
   test('a downloaded voice resolves a real, pausable synthesis engine',
       () async {
     final services = testServices(dir,
-        modelStore: FakeModelStore(downloadedIds: {'supertonic-en-m1'}),
+        modelStore: FakeModelStore(downloadedIds: {'pocket-en'}),
         tier: DeviceTier.t2);
     final engine = await services.speechEngineFor(voiceSpec());
     expect(engine, isNotNull);
@@ -49,12 +49,12 @@ void main() {
       'resolveSpeechEngine\'s pickModel already applies, one layer '
       'deeper', () async {
     final services = testServices(dir,
-        modelStore: FakeModelStore(downloadedIds: {'supertonic-en-m1'}),
+        modelStore: FakeModelStore(downloadedIds: {'pocket-en'}),
         tier: DeviceTier.t0);
     expect(await services.speechEngineFor(voiceSpec()), isNull);
   });
 
-  test('a spec with no supertonic layout is refused quietly, never a crash',
+  test('a spec with no voice layout is refused quietly, never a crash',
       () async {
     final services = testServices(dir,
         modelStore: FakeModelStore(downloadedIds: {'whisper-tiny-ggml'}),
@@ -68,7 +68,7 @@ void main() {
     test('picks the starter voice for English and resolves it once '
         'downloaded', () async {
       final services = testServices(dir,
-          modelStore: FakeModelStore(downloadedIds: {'supertonic-en-m1'}),
+          modelStore: FakeModelStore(downloadedIds: {'pocket-en'}),
           tier: DeviceTier.t2);
       final engine = await services.resolveSpeechEngine(lang: 'en');
       expect(engine, isNotNull);
@@ -78,7 +78,7 @@ void main() {
     test('at t1, the tier the app runs at, a downloaded voice resolves '
         '(1.5.8)', () async {
       final services = testServices(dir,
-          modelStore: FakeModelStore(downloadedIds: {'supertonic-en-m1'}),
+          modelStore: FakeModelStore(downloadedIds: {'pocket-en'}),
           tier: DeviceTier.t1);
       expect(await services.resolveSpeechEngine(lang: 'en'), isNotNull);
     });
@@ -86,7 +86,7 @@ void main() {
     test('below t1 the registry has nothing to pick — the system voice',
         () async {
       final services = testServices(dir,
-          modelStore: FakeModelStore(downloadedIds: {'supertonic-en-m1'}),
+          modelStore: FakeModelStore(downloadedIds: {'pocket-en'}),
           tier: DeviceTier.t0);
       expect(await services.resolveSpeechEngine(lang: 'en'), isNull);
     });
@@ -101,15 +101,48 @@ void main() {
     test('a language the starter catalog has no voice for resolves to '
         'null, never the wrong-language voice', () async {
       final services = testServices(dir,
-          modelStore: FakeModelStore(downloadedIds: {'supertonic-en-m1'}),
+          modelStore: FakeModelStore(downloadedIds: {'pocket-en'}),
           tier: DeviceTier.t2);
-      expect(await services.resolveSpeechEngine(lang: 'pt'), isNull);
+      expect(await services.resolveSpeechEngine(lang: 'ru'), isNull);
+    });
+
+    test('every downloaded voice comes back together, speaking each '
+        'language it names (board-0211)', () async {
+      final services = testServices(dir,
+          modelStore: FakeModelStore(
+              downloadedIds: {'pocket-en', 'pocket-es', 'pocket-pt'}),
+          tier: DeviceTier.t2);
+      final engine = await services.resolveSpeechEngine(lang: 'pt-BR');
+      expect(engine, isNotNull);
+      expect(engine!.speaks, {'en', 'es', 'pt'});
+      expect(await services.downloadedVoiceLangs(), {'en', 'es', 'pt'});
+    });
+
+    test('the Chinese voice, once downloaded, joins the others: each '
+        'language goes to its own voice', () async {
+      final services = testServices(dir,
+          modelStore: FakeModelStore(
+              downloadedIds: {'pocket-en', 'pocket-es', 'kokoro-zh-zf001'}),
+          tier: DeviceTier.t1);
+      expect(await services.downloadedVoiceLangs(), {'en', 'es', 'zh'});
+      final zh = await services.speechEngineFor(
+          ModelRegistry.starter().byId('kokoro-zh-zf001')!);
+      expect(zh, isNotNull);
+      expect(zh!.speaks, {'zh'});
+      expect((await services.resolveSpeechEngine(lang: 'zh-CN'))!.speaks,
+          contains('zh'));
+    });
+
+    test('nothing downloaded: no languages', () async {
+      final services =
+          testServices(dir, modelStore: FakeModelStore(), tier: DeviceTier.t2);
+      expect(await services.downloadedVoiceLangs(), isEmpty);
     });
 
     test('a null language hint still resolves the one voice on the '
         'catalog', () async {
       final services = testServices(dir,
-          modelStore: FakeModelStore(downloadedIds: {'supertonic-en-m1'}),
+          modelStore: FakeModelStore(downloadedIds: {'pocket-en'}),
           tier: DeviceTier.t2);
       expect(await services.resolveSpeechEngine(), isNotNull);
     });

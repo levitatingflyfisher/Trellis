@@ -21,8 +21,6 @@ import '../player/player_controller.dart';
 import '../reader/reader_prefs.dart' show readAloudSystemVoicePrefix;
 import '../reader/speech/phone_voice.dart';
 import '../reader/speech/speech_engine.dart' show SpeechPace;
-import '../reader/speech/supertonic_voice_handle.dart'
-    show supertonicSupportedLangs;
 import '../reader/translation/language_names.dart';
 import '../reader/translation/sentence_units.dart';
 import '../reader/translation/translation_job.dart';
@@ -31,6 +29,7 @@ import '../feeds/background/feed_check_platform.dart';
 import '../feeds/background/feed_check_settings.dart';
 import '../transcribe/transcribe_coordinator.dart';
 import '../transcribe/transcript_so_far.dart';
+import '../reader/speech/downloaded_voices.dart' show downloadedVoiceName;
 import 'listen_chain.dart';
 import 'language_abilities.dart';
 import 'listen_jobs.dart';
@@ -44,8 +43,7 @@ import 'make_ahead_jobs.dart';
 /// the phone has a voice of its own for.
 List<String> savableListenLanguages(DeviceServices services) => [
       ...{
-        for (final l in supertonicSupportedLangs)
-          if (_voiceSpec(services, l) != null) l,
+        ...services.registry.voiceLangs(services.tier),
         ...services.phoneVoices.langs,
       }
     ]..sort();
@@ -109,7 +107,7 @@ Future<List<LanguageAbilities>> deviceLanguageAbilities(
       .any((s) => s.task == ModelTask.asr && here.contains(s.id));
   final voiceHere = <String>{...services.phoneVoices.langs};
   final voiceToDownload = <String>{};
-  for (final l in supertonicSupportedLangs) {
+  for (final l in services.registry.voiceLangs(services.tier)) {
     final spec = _voiceSpec(services, l);
     if (spec == null) continue;
     (here.contains(spec.id) ? voiceHere : voiceToDownload).add(l);
@@ -179,11 +177,9 @@ String? listenMissingNoteFor(DeviceServices services,
       source: source);
 }
 
+/// Trellis's own voice for [lang], one per language (board-0211).
 ModelSpec? _voiceSpec(DeviceServices services, String lang) =>
-    services.registry.pickModel(ModelTask.tts, services.tier,
-        // One voice file speaks every language in its list, and is
-        // registered under English.
-        langHint: supertonicSupportedLangs.contains(lang) ? 'en' : lang);
+    services.registry.voiceFor(lang, services.tier);
 
 /// The voice that saves [work] in [lang], by [savedVoiceKind], with the
 /// choice made for [lang] in Read aloud's voices (by the work's profile);
@@ -197,8 +193,7 @@ Future<
       ModelSpec? download,
     })?> _savedVoicePlan(
     AppDatabase db, DeviceServices services, Work work, String lang) async {
-  final spec =
-      supertonicSupportedLangs.contains(lang) ? _voiceSpec(services, lang) : null;
+  final spec = _voiceSpec(services, lang);
   final phone = services.phoneVoices;
   final phoneSpeaks = phone.saver != null && phone.langs.contains(lang);
   String? choice;
@@ -417,7 +412,7 @@ ListenChain deviceListenChain({
           if (engine == null) return null;
           return (
             // The voice's plain name, for the episode's page.
-            name: 'Supertonic',
+            name: downloadedVoiceName(spec),
             voiceKind: VoiceKind.machine,
             say: (String text, SpeechPace pace) =>
                 engine.synthesize(text, lang: lang, pace: pace),

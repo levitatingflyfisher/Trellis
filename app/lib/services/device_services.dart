@@ -25,8 +25,12 @@ import '../features/backup/backup_custody.dart';
 import '../features/models/model_store.dart';
 import '../features/reader/speech/phone_voice.dart';
 import '../features/reader/speech/speech_engine.dart';
-import '../features/reader/speech/supertonic_engine.dart';
-import '../features/reader/speech/supertonic_voice_handle.dart';
+import '../features/reader/speech/downloaded_voices.dart';
+import '../features/reader/speech/kokoro/kokoro_engine.dart';
+import '../features/reader/speech/kokoro/kokoro_model.dart';
+import '../features/reader/speech/pocket/pocket_engine.dart';
+import '../features/reader/speech/pocket/pocket_model.dart';
+import '../features/reader/speech/pocket/pocket_text.dart';
 import '../features/reader/speech/speech_temp_files.dart';
 import '../features/dsp/dsp_encoder.dart';
 import '../features/dsp/dsp_ffmpeg_encoder.dart';
@@ -469,43 +473,50 @@ class DeviceServices {
   /// that could have one, names what's missing (ADR-0006).
   ///
   /// The engine is constructed but NOT resident yet —
-  /// [SupertonicSpeechEngine] opens its ONNX Runtime sessions lazily on
-  /// first `synthesize()` — so this call is cheap even when nothing ends
+  /// [PocketSpeechEngine] and [KokoroSpeechEngine] open their ONNX Runtime
+  /// sessions lazily on first `synthesize()` — so this call is cheap even when nothing ends
   /// up being spoken.
   Future<SynthesisSpeechEngine?> speechEngineFor(ModelSpec voiceSpec) async {
     if (!localMlAvailable) return null;
     if (!tier.atLeast(voiceSpec.minTier)) return null;
-    final layout = voiceSpec.supertonicLayout;
-    if (layout == null) return null; // a mis-registered spec; refuse quietly
     if (!await modelStore.isDownloaded(voiceSpec)) return null;
-    return SupertonicSpeechEngine(
-      files: SupertonicVoiceFiles(
-        durationPredictorPath: _pathForNamedFile(
-          voiceSpec,
-          layout.durationPredictorFileName,
-        ),
-        textEncoderPath: _pathForNamedFile(
-          voiceSpec,
-          layout.textEncoderFileName,
-        ),
-        vectorEstimatorPath: _pathForNamedFile(
-          voiceSpec,
-          layout.vectorEstimatorFileName,
-        ),
-        vocoderPath: _pathForNamedFile(voiceSpec, layout.vocoderFileName),
-        unicodeIndexerPath: _pathForNamedFile(
-          voiceSpec,
-          layout.unicodeIndexerFileName,
-        ),
-        ttsConfigPath: _pathForNamedFile(voiceSpec, layout.ttsConfigFileName),
-        voiceStylePath: _pathForNamedFile(voiceSpec, layout.voiceStyleFileName),
-      ),
-    );
+    final kokoro = voiceSpec.kokoroLayout;
+    if (kokoro != null) {
+      final modelPath = _pathForNamedFile(voiceSpec, kokoro.modelFileName);
+      final frontEnd = {
+        for (final e in kokoro.frontEndFileNames.entries)
+          e.key: _pathForNamedFile(voiceSpec, e.value),
+      };
+      return KokoroSpeechEngine(
+        voicePath: _pathForNamedFile(voiceSpec, kokoro.voiceFileName),
+        openModel: () => openKokoroModel(modelPath),
+        loadFrontEnd: () => loadKokoroFrontEnd(frontEnd),
+      );
+    }
+    final pocket = voiceSpec.pocketLayout;
+    final pocketLanguage =
+        PocketLanguage.byTag(voiceSpec.langs?.singleOrNull ?? '');
+    if (pocket != null && pocketLanguage != null) {
+      final files = PocketVoiceFiles(
+        textConditioner:
+            _pathForNamedFile(voiceSpec, pocket.textConditionerFileName),
+        main: _pathForNamedFile(voiceSpec, pocket.mainFileName),
+        flow: _pathForNamedFile(voiceSpec, pocket.flowFileName),
+        mimi: _pathForNamedFile(voiceSpec, pocket.mimiFileName),
+        tokenizer: _pathForNamedFile(voiceSpec, pocket.tokenizerFileName),
+        voice: _pathForNamedFile(voiceSpec, pocket.voiceFileName),
+      );
+      return PocketSpeechEngine(
+        language: pocketLanguage,
+        open: () => openPocketModel(files, pocketLanguage),
+      );
+    }
+    return null; // a mis-registered spec; refuse quietly
   }
 
   /// Resolves [fileName]'s on-disk path within [spec]'s own model
-  /// directory — every Supertonic file downloads and verifies on its
-  /// own (no archive to extract), so [ModelStore.pathOf] already knows
+  /// directory — every voice file downloads and verifies on its own
+  /// (no archive to extract), so [ModelStore.pathOf] already knows
   /// where it landed; this just finds WHICH registered [ModelFile] the
   /// layout's filename refers to.
   String _pathForNamedFile(ModelSpec spec, String fileName) {
@@ -546,18 +557,44 @@ class DeviceServices {
   SpeechTempFiles Function() get createSpeechTempFiles =>
       () => DiskSpeechTempFiles(dir: speechTempDir);
 
-  /// The ONE call a `ReaderScreen` closes over (ADR-0006): the registry's
-  /// selection law ([ModelRegistry.pickModel]) picks the best TTS voice for
-  /// [lang] at this device's [tier], then [speechEngineFor] applies the
-  /// download-honesty gate. Null either way means the system voice — this
-  /// never throws.
+  /// The ONE call a `ReaderScreen` closes over (ADR-0006): every voice
+  /// downloaded here, one per language (board-0211), behind one engine
+  /// ([DownloadedVoices]) that hands each sentence to the voice for its
+  /// language. Null when none is downloaded, or when [lang] is given and
+  /// no downloaded voice speaks it: the system voice then. Never throws.
   Future<SynthesisSpeechEngine?> resolveSpeechEngine({String? lang}) async {
-    // Voices are registered by base language: `en-US` is English.
-    final base = lang?.trim().toLowerCase().split(RegExp('[-_]')).first;
-    final spec = registry.pickModel(ModelTask.tts, tier,
-        langHint: base == null || base.isEmpty ? null : base);
-    if (spec == null) return null;
-    return speechEngineFor(spec);
+    final byLang = await _downloadedVoices();
+    if (byLang.isEmpty) return null;
+    if (lang != null && lang.trim().isNotEmpty) {
+      if (!byLang.containsKey(baseLangTag(lang))) return null;
+    }
+    return DownloadedVoices(
+      voiceByLang: {for (final e in byLang.entries) e.key: e.value.id},
+      open: (id) async {
+        final engine = await speechEngineFor(registry.byId(id)!);
+        if (engine == null) {
+          throw StateError('voice “$id” is no longer downloaded');
+        }
+        return engine;
+      },
+    );
+  }
+
+  /// The languages a downloaded voice speaks here; empty with none.
+  Future<Set<String>> downloadedVoiceLangs() async =>
+      (await _downloadedVoices()).keys.toSet();
+
+  /// Each language some downloaded, runnable voice speaks, with it.
+  Future<Map<String, ModelSpec>> _downloadedVoices() async {
+    if (!localMlAvailable) return const {};
+    final out = <String, ModelSpec>{};
+    for (final lang in registry.voiceLangs(tier)) {
+      final spec = registry.voiceFor(lang, tier);
+      if (spec == null) continue;
+      if (!await modelStore.isDownloaded(spec)) continue;
+      out[lang] = spec;
+    }
+    return out;
   }
 
   /// The Marian translator (ADR-0008 "Babel" Phase 3) for [modelSpec], if

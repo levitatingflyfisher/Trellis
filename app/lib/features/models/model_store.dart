@@ -155,8 +155,23 @@ class DiskModelStore implements ModelStore {
   String _fileName(ModelFile file) => Uri.parse(file.url).pathSegments.last;
 
   @override
-  String pathOf(ModelSpec spec, ModelFile file) =>
-      '${baseDir.path}/${spec.id}/${_fileName(file)}';
+  String pathOf(ModelSpec spec, ModelFile file) => file.shared
+      ? '${baseDir.path}/$_sharedDir/${_fileName(file)}'
+      : '${baseDir.path}/${spec.id}/${_fileName(file)}';
+
+  /// Where a file several models use is kept, once.
+  static const _sharedDir = 'shared';
+
+  /// The note in a model's own folder that it uses a shared file: a
+  /// shared file goes when the last note naming it does.
+  String _useNote(ModelSpec spec, ModelFile file) =>
+      '${baseDir.path}/${spec.id}/.uses.${_fileName(file)}';
+
+  Future<void> _noteUse(ModelSpec spec, ModelFile file) async {
+    final note = File(_useNote(spec, file));
+    await note.parent.create(recursive: true);
+    if (!note.existsSync()) await note.writeAsString('');
+  }
 
   @override
   String voiceDirOf(ModelSpec spec) => '${baseDir.path}/${spec.id}/voice';
@@ -181,6 +196,7 @@ class DiskModelStore implements ModelStore {
       // The exact pinned size, not mere existence — a truncated file is
       // not a model.
       if (!file.existsSync() || file.lengthSync() != f.bytes) return false;
+      if (f.shared && !File(_useNote(spec, f)).existsSync()) return false;
     }
     return true;
   }
@@ -298,6 +314,16 @@ class DiskModelStore implements ModelStore {
   Future<void> delete(ModelSpec spec) async {
     final dir = Directory('${baseDir.path}/${spec.id}');
     if (dir.existsSync()) await dir.delete(recursive: true);
+    // A shared file goes with the last model that noted it uses it.
+    for (final f in spec.files.where((f) => f.shared)) {
+      final note = '.uses.${_fileName(f)}';
+      final stillUsed = baseDir.existsSync() &&
+          baseDir.listSync(followLinks: false).whereType<Directory>().any(
+              (d) => File('${d.path}/$note').existsSync());
+      if (stillUsed) continue;
+      final file = File(pathOf(spec, f));
+      if (file.existsSync()) await file.delete();
+    }
   }
 
   @override
@@ -322,6 +348,7 @@ class DiskModelStore implements ModelStore {
           final finalFile = File(pathOf(spec, f));
           if (finalFile.existsSync() && finalFile.lengthSync() == f.bytes) {
             doneBytes += f.bytes; // already installed from an earlier run
+            if (f.shared) await _noteUse(spec, f);
             continue;
           }
           final part = File('${finalFile.path}.part');
@@ -365,6 +392,7 @@ class DiskModelStore implements ModelStore {
           if (outcome == TransferOutcome.cancelled) {
             return ModelInstallOutcome.cancelled;
           }
+          if (f.shared) await _noteUse(spec, f);
           doneBytes += f.bytes;
         }
         final layout = spec.archiveLayout;
@@ -408,9 +436,33 @@ class DiskModelStore implements ModelStore {
     var freed = 0;
     // Links are never followed or removed: only what the store itself
     // wrote under baseDir is a candidate.
+    final sharedPins = {
+      for (final s in registry.specs)
+        for (final f in s.files)
+          if (f.shared) _fileName(f): f.bytes,
+    };
     for (final entry in baseDir.listSync(followLinks: false)) {
       if (entry is! Directory) continue; // loose files here aren't ours
       final id = _baseName(entry.path);
+      if (id == _sharedDir) {
+        if (_inFlight.isNotEmpty) continue; // a download may be filling it
+        for (final child in entry.listSync(followLinks: false)) {
+          if (child is! File) continue;
+          final name = _baseName(child.path);
+          final base = name.endsWith('.part')
+              ? name.substring(0, name.length - '.part'.length)
+              : name.endsWith('.part.validator')
+                  ? name.substring(0, name.length - '.part.validator'.length)
+                  : name;
+          final pin = sharedPins[base];
+          final keep = pin != null &&
+              (name != base || child.lengthSync() == pin);
+          if (keep) continue;
+          freed += child.lengthSync();
+          await child.delete();
+        }
+        continue;
+      }
       if (_inFlight.containsKey(id)) continue;
       final spec = byId[id];
       if (spec == null) {
@@ -423,13 +475,21 @@ class DiskModelStore implements ModelStore {
       // Keyed by file name, not full path: listSync's spelling of a path
       // (a trailing slash on baseDir, say) need not match pathOf's, and a
       // mismatch would read every installed file as unlisted.
-      final pinned = {for (final f in spec.files) _fileName(f): f.bytes};
+      final pinned = {
+        for (final f in spec.files)
+          if (!f.shared) _fileName(f): f.bytes,
+      };
+      final notes = {
+        for (final f in spec.files)
+          if (f.shared) '.uses.${_fileName(f)}',
+      };
       for (final child in entry.listSync(followLinks: false)) {
         // Subdirectories are extracted voices/dictionaries or a staging
         // dir; only plain files are judged. A validator may already have
         // gone with its `.part`.
         if (child is! File || !child.existsSync()) continue;
         final path = _baseName(child.path);
+        if (notes.contains(path)) continue;
         final String? stale;
         if (path.endsWith('.part.validator')) {
           final part = path.substring(0, path.length - '.validator'.length);

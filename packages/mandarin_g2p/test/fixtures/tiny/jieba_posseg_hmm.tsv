@@ -1,0 +1,32 @@
+# tiny posseg tables for unit tests (Trellis, MIT)
+C	清	B,nr S,a B,nt
+C	华	E,nr E,nt S,nr
+C	小	B,nr S,a
+S	B,nr	-2.0
+S	E,nr	-3.14e+100
+S	S,a	-3.0
+S	B,nt	-2.0
+S	E,nt	-3.14e+100
+S	S,nr	-4.0
+S	M,nr	-3.14e+100
+S	S,x	-5.0
+T	B,nr	E,nr	-0.5
+T	B,nr	M,nr	-1.0
+T	M,nr	E,nr	-0.4
+T	B,nt	E,nt	-0.5
+T	E,nr	S,a	-1.0
+T	E,nr	B,nr	-1.5
+T	E,nt	S,a	-1.0
+T	S,a	B,nr	-1.0
+T	S,a	S,a	-2.0
+T	S,nr	S,a	-1.0
+E	B,nr	清	-3.0
+E	B,nt	清	-3.0
+E	E,nr	华	-2.0
+E	E,nt	华	-2.0
+E	S,a	清	-6.0
+E	S,nr	华	-5.0
+E	B,nr	小	-2.0
+E	S,a	小	-4.0
+E	M,nr	明	-3.0
+E	E,nr	明	-2.5

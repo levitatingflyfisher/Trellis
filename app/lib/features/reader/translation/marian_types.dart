@@ -1,6 +1,5 @@
 /// Shared types for the Marian rung (ADR-0008 "Babel") — deliberately
 /// free of both `package:flutter_onnxruntime` and any real ONNX session,
-/// mirroring the Supertonic rung's `supertonic_voice_handle.dart` split,
 /// so they compile identically on every platform and can sit in
 /// [MarianTranslator]'s constructor signature on BOTH sides of the
 /// conditional export (`marian_engine.dart`).
@@ -9,7 +8,7 @@ library;
 /// Which files make up one downloaded opus-mt model — resolved from the
 /// model store through the registry's [MarianModelLayout], never guessed.
 /// Every file ships loose under the model's own directory: no archive to
-/// extract, same as the Supertonic rung's files.
+/// extract, same as the voices' files.
 class MarianTranslatorFiles {
   final String encoderPath;
   final String decoderMergedPath;
@@ -90,7 +89,7 @@ abstract interface class MarianSessionRunner {
 }
 
 /// The open handle: tokenizer + vocabulary + the two sessions, ready to
-/// translate. Mirrors [SupertonicVoiceHandle]'s split — real session
+/// translate. Real session
 /// construction lives ONLY behind the real implementation's handle
 /// factory, never in [MarianTranslator]'s constructor, so a test can
 /// build the engine with a fake factory and never touch a platform

@@ -4,8 +4,8 @@
 /// past generation loop.
 ///
 /// Kept OFF the web build by the repo's established conditional-export
-/// trio (whisper_ffi's pattern, also the Supertonic rung's own
-/// precedent): a web ONNX tier is future work, not built this pass, so
+/// trio (whisper_ffi's pattern, also the voices' `pocket_model.dart` and
+/// `kokoro_model.dart`): a web ONNX tier is future work, not built this pass, so
 /// resolving the real branch on web would pull the native/plugin payload
 /// into a bundle that would never use it.
 library;

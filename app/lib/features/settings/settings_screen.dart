@@ -25,8 +25,6 @@ import '../listen/spoken_share.dart'
     show clonedVoiceShareAllowed, shareClonedVoiceAudioKey;
 import '../reader/reader_prefs.dart' show ReaderPrefs;
 import '../reader/speech/read_aloud_voices.dart';
-import '../reader/speech/supertonic_voice_handle.dart'
-    show supertonicSupportedLangs;
 import '../reader/translation/language_names.dart';
 import '../reader/translation/translation_route.dart' show baseLanguage;
 import '../shared/capped_body.dart';
@@ -42,7 +40,7 @@ class SettingsScreen extends StatefulWidget {
     this.actions,
     this.feedCheck,
     this.localMlAvailable = false,
-    this.hasDownloadedVoice,
+    this.downloadedVoiceLangs,
     this.listVoices,
     this.openVoiceSettings,
     this.brainStore,
@@ -66,9 +64,10 @@ class SettingsScreen extends StatefulWidget {
   final FeedCheckSettings? feedCheck;
   final bool localMlAvailable;
 
-  /// Whether a downloaded voice exists, so "Use the system voice" has
-  /// something to set aside.
-  final Future<bool> Function()? hasDownloadedVoice;
+  /// The languages Trellis's own downloaded voices speak here, so "Use
+  /// the system voice" has something to set aside, and the voices sheet
+  /// knows which languages they read.
+  final Future<Set<String>> Function()? downloadedVoiceLangs;
 
   /// The phone's installed voices, for Read aloud voices; null hides it.
   final Future<List<SystemVoice>?> Function()? listVoices;
@@ -88,7 +87,8 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  bool _downloadedVoice = false;
+  Set<String> _voiceLangs = const {};
+  bool get _downloadedVoice => _voiceLangs.isNotEmpty;
   bool _dspDefault = false;
   bool _shareClonedVoice = false;
   String _scheduler = 'fsrs';
@@ -104,14 +104,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final id = widget.profile.id;
     final dsp = await widget.db.profilesDao.dspGlobalDefault(id);
     final scheduler = await widget.db.profilesDao.scheduler(id);
-    final voice = await widget.hasDownloadedVoice?.call() ?? false;
+    final voiceLangs =
+        await widget.downloadedVoiceLangs?.call() ?? const <String>{};
     final shareCloned = await clonedVoiceShareAllowed(widget.db);
     if (!mounted) return;
     setState(() {
       _dspDefault = dsp;
       _shareClonedVoice = shareCloned;
       _scheduler = scheduler;
-      _downloadedVoice = voice;
+      _voiceLangs = voiceLangs;
       _loaded = true;
     });
   }
@@ -213,9 +214,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
       showDragHandle: true,
       builder: (_) => ReadAloudVoicesSheet(
         langs: langs,
-        neuralLangs: _downloadedVoice && !systemVoice
-            ? supertonicSupportedLangs
-            : const {},
+        neuralLangs: systemVoice ? const {} : _voiceLangs,
         installed: installed,
         choices: choices,
         systemVoiceOn: _downloadedVoice && systemVoice,

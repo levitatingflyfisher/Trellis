@@ -3,17 +3,20 @@
 /// ranging from totally colloquial street speech to as crisp and clean as
 /// possible to make it easy for a beginner to parse").
 ///
-/// What a saved voice can honestly vary, read from both engines:
-///  * its pace: the downloaded voice (Supertonic) stretches the length
-///    its duration model predicts for a sentence; the phone's voice takes
-///    Android's speech rate;
+/// What a saved voice can honestly vary, read from each engine:
+///  * how long a sentence takes ([SpeechPace.rate]): Kokoro (Chinese)
+///    speaks slower, and the phone's voice takes Android's speech rate.
+///    Pocket TTS (the other seven languages) has no speed input: its
+///    words keep their own pace and a pause in proportion follows each
+///    sentence instead (`pocketPauseSamples`). So the help lines promise
+///    a slower episode overall, never slower words;
 ///  * the pause after each sentence and each paragraph, which Trellis
 ///    writes itself between the sentences it saves;
-///  * on the downloaded voice only, more denoising steps per sentence:
+///  * on Pocket TTS only, more flow steps per frame (four instead of one):
 ///    the engine's own quality setting, more work on each sound.
 ///
-/// The street-speech end of the dial is not here: both engines read the
-/// words they are given in one register, and neither can make speech
+/// The street-speech end of the dial is not here: every engine reads the
+/// words they are given in one register, and none can make speech
 /// more casual. That would take other words (a colloquial translation)
 /// and a voice trained on casual speech; see the founding request page.
 library;
@@ -35,7 +38,7 @@ enum ListenClearness {
   ),
   clear(
     label: 'Clear',
-    help: 'A little slower, with a longer pause after each sentence.',
+    help: 'A little slower overall, with a longer pause after each sentence.',
     pace: SpeechPace(rate: 0.9, careful: true),
     sentenceGapMs: 500,
     segmentGapMs: 800,
@@ -43,7 +46,7 @@ enum ListenClearness {
   ),
   slow(
     label: 'Slow and clear',
-    help: 'Slower, with a long pause after each sentence.',
+    help: 'Slower overall, with a long pause after each sentence.',
     pace: SpeechPace(rate: 0.75, careful: true),
     sentenceGapMs: 800,
     segmentGapMs: 1200,
@@ -51,8 +54,8 @@ enum ListenClearness {
   ),
   verySlow(
     label: 'Very slow',
-    help: 'As slow as the voice still sounds whole, with the longest '
-        'pauses. For a first try at a language.',
+    help: 'The slowest, with the longest pauses. For a first try at a '
+        'language.',
     pace: SpeechPace(rate: 0.6, careful: true),
     sentenceGapMs: 1200,
     segmentGapMs: 1800,

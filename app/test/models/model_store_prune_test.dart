@@ -217,7 +217,8 @@ void main() {
     expect(await store.isDownloaded(spec), isTrue);
   });
 
-  test('extracted voice and dictionary directories are not pruned',
+  test('an installed voice, its shared file, and an extracted dictionary '
+      'are not pruned',
       () async {
     final registry = ModelRegistry.starter();
     final dict = registry.byId('wiktionary-en-en-stardict')!;
@@ -226,9 +227,15 @@ void main() {
         '${store.dictionaryDirOf(dict)}/'
         '${dict.dictionaryArchiveLayout!.ifoFileName}',
         50);
-    final voice = registry.byId('supertonic-en-m1')!;
+    // A Pocket TTS voice: its own files, plus the Mimi decoder every
+    // language shares, kept once with a note that this voice uses it.
+    final voice = registry.byId('pocket-en')!;
     for (final f in voice.files) {
       sized(store.pathOf(voice, f), f.bytes);
+      if (f.shared) {
+        sized('${base.path}/${voice.id}/'
+            '.uses.${Uri.parse(f.url).pathSegments.last}', 0);
+      }
     }
 
     expect(await store.pruneUnreferenced(registry), 0);

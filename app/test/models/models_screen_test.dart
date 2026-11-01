@@ -43,9 +43,14 @@ void main() {
       store: FakeModelStore(downloadedIds: {'whisper-tiny-ggml'}),
     );
 
+    // Translation pairs and Trellis's own voices fold into sections of
+    // their own (tested below).
     final listed = [
       for (final s in registry.specs)
-        if (s.task != ModelTask.translation) s,
+        if (s.task != ModelTask.translation &&
+            s.kokoroLayout == null &&
+            s.pocketLayout == null)
+          s,
     ];
     for (final spec in listed) {
       expect(find.text(modelLabel(spec.id)), findsOneWidget);
@@ -140,6 +145,30 @@ void main() {
       find.byKey(const Key('model-download-whisper-tiny-ggml')),
       findsOneWidget,
     );
+  });
+
+  testWidgets('Trellis’s own voices fold into one section, named by '
+      'language, with the credit their licences ask for', (tester) async {
+    await pump(tester,
+        store: FakeModelStore(downloadedIds: {'kokoro-zh-zf001'}));
+    expect(find.byKey(const Key('model-download-kokoro-zh-zf001')),
+        findsNothing, reason: 'folded until opened');
+    await tester.scrollUntilVisible(
+        find.byKey(const Key('models-voices')), 200);
+    await tester.tap(find.byKey(const Key('models-voices')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('voices-credit')), findsOneWidget);
+    expect(voicesCredit, contains('Kokoro-82M v1.1-zh by hexgrad'));
+    expect(voicesCredit, contains('Apache-2.0'));
+    expect(voicesCredit, contains('Pocket TTS by Kyutai, under CC-BY 4.0'));
+    expect(voicesCredit, contains('converted to ONNX by Trellis'));
+    expect(voicesCredit,
+        contains('releases/tag/models-voices-1, which is never deleted'));
+    expect(modelLabel('kokoro-zh-zf001'),
+        'Chinese voice: Kokoro, zf_001, offline');
+    final zh = find.text('Chinese voice: Kokoro, zf_001, offline');
+    await tester.scrollUntilVisible(zh, 200);
+    expect(zh, findsOneWidget);
   });
 
   testWidgets('translation pairs fold into one section that names each '

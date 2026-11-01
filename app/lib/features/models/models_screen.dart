@@ -45,7 +45,6 @@ const Map<String, String> kModelLabels = {
   'whisper-base-ggml': 'Whisper Base: speech to text, multilingual',
   'whisper-small-ggml': 'Whisper Small: speech to text, multilingual',
   'silero-vad': 'Silence filter: voice activity detection',
-  'supertonic-en-m1': 'Supertonic voice (English): read aloud, offline',
   'wiktionary-en-en-stardict': 'Wiktionary dictionary (English): word lookups, offline',
 };
 
@@ -58,8 +57,38 @@ final Map<String, String> _translationLabels = {
         '${languageDisplayName(s.langs!.single)} translation, offline',
 };
 
+/// Trellis's own voices (board-0211), named by language and engine; a
+/// Pocket TTS voice also names its speaker and licence, the credit a
+/// CC-BY voice asks for.
+final Map<String, String> _voiceLabels = {
+  for (final s in voiceCatalog())
+    if (s.langs case final langs? when langs.length == 1)
+      s.id: switch ((s.pocketLayout, s.kokoroLayout)) {
+        (final p?, _) => '${languageDisplayName(langs.single)} voice: '
+            'Pocket TTS, ${p.voiceCredit}, offline',
+        (_, final k?) => '${languageDisplayName(langs.single)} voice: '
+            'Kokoro, ${k.voiceFileName.replaceAll('.bin', '')}, offline',
+        _ => '${languageDisplayName(langs.single)} voice, offline',
+      },
+};
+
+bool _isOwnVoice(ModelSpec s) =>
+    s.pocketLayout != null || s.kokoroLayout != null;
+
 String modelLabel(String id) =>
-    kModelLabels[id] ?? _translationLabels[id] ?? id;
+    kModelLabels[id] ?? _translationLabels[id] ?? _voiceLabels[id] ?? id;
+
+/// The credit the voices' licences ask for, shown with them.
+const String voicesCredit =
+    'Voices: Pocket TTS by Kyutai, under CC-BY 4.0, converted to ONNX by '
+    'Trellis; each voice names its speaker and licence. Source: '
+    'https://huggingface.co/kyutai/pocket-tts-without-voice-cloning\n'
+    'Chinese: Kokoro-82M v1.1-zh by hexgrad, under Apache-2.0 '
+    '(https://huggingface.co/hexgrad/Kokoro-82M-v1.1-zh), reading text '
+    'with jieba and pypinyin (MIT) and misaki (Apache-2.0).\n'
+    'The files are kept at https://github.com/levitatingflyfisher/Trellis/'
+    'releases/tag/models-voices-1, which is never deleted. Every voice is '
+    'made by a machine, and Trellis says so wherever it is heard.';
 
 /// The credit the translation models' licences ask for, shown with them:
 /// OPUS-MT for every pair but two, and ElanMT-BT for Japanese to and
@@ -367,7 +396,8 @@ class _ModelsScreenState extends State<ModelsScreen> {
             ),
           ),
           for (final spec in widget.registry.specs)
-            if (spec.task != ModelTask.translation) _modelTile(spec),
+            if (spec.task != ModelTask.translation && !_isOwnVoice(spec))
+              _modelTile(spec),
           // Which whisper model transcribes (1.6.0): the listener's own
           // choice, where there is a device to run one and a place to
           // keep the choice.
@@ -376,6 +406,7 @@ class _ModelsScreenState extends State<ModelsScreen> {
                 db: widget.db!,
                 registry: widget.registry,
                 tier: widget.services!.tier),
+          if (_voiceSpecs.isNotEmpty) _voicesSection(),
           if (_translationSpecs.isNotEmpty) _translationSection(),
           if (widget.feedCheck case final feedCheck?)
             FeedCheckSection(settings: feedCheck),
@@ -659,6 +690,33 @@ class _ModelsScreenState extends State<ModelsScreen> {
           ],
         ),
       ),
+    );
+  }
+
+  List<ModelSpec> get _voiceSpecs =>
+      [for (final s in widget.registry.specs) if (_isOwnVoice(s)) s];
+
+  /// One folded section for Trellis's own voices, one per language: a
+  /// spoken episode or Read aloud downloads the one it needs.
+  Widget _voicesSection() {
+    final specs = _voiceSpecs;
+    final downloaded = specs.where((s) => _rows[s.id]?.downloaded ?? false);
+    final theme = Theme.of(context);
+    return ExpansionTile(
+      key: const Key('models-voices'),
+      title: const Text('Voices'),
+      subtitle: Text('${downloaded.length} of ${specs.length} downloaded. '
+          'A spoken episode downloads the voice it needs.'),
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
+          child: Text(voicesCredit,
+              key: const Key('voices-credit'),
+              style: theme.textTheme.bodySmall),
+        ),
+        for (final spec in specs) _modelTile(spec),
+        const SizedBox(height: 8),
+      ],
     );
   }
 

@@ -968,9 +968,8 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
             actions: _episodeActions,
             feedCheck: _feedCheckOffered,
             localMlAvailable: widget.services.localMlAvailable,
-            hasDownloadedVoice: widget.services.localMlAvailable
-                ? () async =>
-                    await widget.services.resolveSpeechEngine() != null
+            downloadedVoiceLangs: widget.services.localMlAvailable
+                ? widget.services.downloadedVoiceLangs
                 : null,
             listVoices: widget.services.localMlAvailable
                 ? widget.services.tts.voices

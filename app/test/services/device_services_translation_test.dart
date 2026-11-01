@@ -7,7 +7,7 @@ import '../support/fake_services.dart';
 
 /// DeviceServices.translatorFor and .translation (ADR-0008 "Babel"; 1.5.5):
 /// the same download-honesty gate `speechEngineFor` applies to the
-/// Supertonic voice, now for the Marian translator, plus the service that
+/// voices, now for the Marian translator, plus the service that
 /// plans routes and downloads over the real catalog.
 void main() {
   late Directory dir;
@@ -58,8 +58,8 @@ void main() {
     final translator = await services.translatorFor(translatorSpec());
     expect(translator, isNotNull);
     // Cheap to construct — no file is read, no session opened, until the
-    // first translate() call (mirrors SupertonicSpeechEngine's residency
-    // law: construct, never touch).
+    // first translate() call (the voices' residency law: construct,
+    // never touch).
   });
 
   group('translation — the service every reader is handed (1.5.5)', () {

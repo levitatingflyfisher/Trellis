@@ -1,8 +1,8 @@
 /// Which voice saves an episode's audio (board-0126).
 ///
-/// Two kinds can: the downloaded voice (Supertonic: English, Spanish,
-/// French, Portuguese), which sounds smoother, and the phone's own, which
-/// speaks every language the phone has a voice for. The listener's say is
+/// Two kinds can: Trellis's own downloaded voice for the language
+/// (Pocket TTS or Kokoro, ADR-0022), which sounds smoother, and the
+/// phone's own, which speaks every language the phone has a voice for. The listener's say is
 /// the voice they chose for the language in Read aloud's voices: one
 /// place to choose a voice, for hearing and for keeping alike. A phone
 /// voice chosen there (its default or a numbered one) saves with the

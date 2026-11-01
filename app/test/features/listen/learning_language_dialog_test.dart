@@ -88,7 +88,7 @@ void main() {
         .data!;
     expect(note, isNot(contains('Japanese')));
     expect(note, contains('no voice on this phone for'));
-    expect(note, contains('Italian'));
+    expect(note, contains('Hindi'));
   });
 
   testWidgets('a language with a translator and no voice is absent, named in '
@@ -99,21 +99,21 @@ void main() {
     await tester.runAsync(() => jobs.ready);
     await open(tester, jobs);
 
-    expect(find.byKey(const Key('learning-language-de')), findsNothing);
+    expect(find.byKey(const Key('learning-language-ja')), findsNothing);
     expect(
         tester
             .widget<Text>(find.byKey(const Key('learning-language-missing')))
             .data,
-        contains('German'));
+        contains('Japanese'));
     await tester.tap(find.byKey(const Key('learning-language-voice-settings')));
     await tester.pump();
     expect(saver.settingsOpened, 1);
 
-    // Back from Android's settings with a German voice installed.
-    saver.langs = {'ru', 'de'};
+    // Back from Android's settings with a Japanese voice installed.
+    saver.langs = {'ru', 'ja'};
     await tester.runAsync(jobs.refreshVoices);
     await tester.pumpAndSettle();
-    expect(find.byKey(const Key('learning-language-de')), findsOneWidget);
+    expect(find.byKey(const Key('learning-language-ja')), findsOneWidget);
   });
 
   testWidgets('nothing missing, nothing said', (tester) async {

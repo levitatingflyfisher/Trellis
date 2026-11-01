@@ -843,7 +843,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     // the menu control that lets a listener escape TO the system voice
     // must already know whether there's a neural voice to escape FROM
     // before the user ever presses speak-toggle. Resolution is cheap
-    // (SupertonicSpeechEngine opens its ONNX Runtime sessions lazily on
+    // (every downloaded voice opens its ONNX Runtime sessions lazily on
     // first use, ADR-0007).
     final preferSystemVoice =
         await widget.db.profilesDao.preferSystemVoice(widget.profileId);
@@ -1299,15 +1299,13 @@ class _ReaderScreenState extends State<ReaderScreen>
   String? get _sourceSpeechLang =>
       _activeLang ?? _sourceLang ?? _workLang ?? widget.work.lang;
 
-  /// What the downloaded voice reads (ADR-0006/0007): the language it
-  /// was resolved for in [_load], and those it speaks; nothing when there
-  /// is none or the listener set it aside. Russian, German and Chinese
-  /// are never in it: its character table has no Cyrillic or CJK
-  /// (docs/reference/tts-voices.md).
+  /// What the downloaded voices read (ADR-0006/0007, board-0211): each
+  /// language a voice downloaded here speaks; nothing when there is none
+  /// or the listener set them aside.
   Set<String> get _neuralLangs =>
       _synthEngineHolder == null || _preferSystemVoice
           ? const {}
-          : neuralLangsFor(baseLanguage(_workLang ?? widget.work.lang));
+          : _synthEngineHolder!.speaks;
 
   /// What Read aloud says for block [seg] of [_blocks], in order — the
   /// one authority both voices read from (1.5.9):

@@ -18,7 +18,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # of the product and file versions while build-number is used as the build suffix.
 # Build number >2003: the fusion supersedes the original Trellis
 # (versionCode 2003 era) and must install over it as an upgrade.
-version: 1.6.13+2035
+version: 1.6.14+2036
 
 environment:
   sdk: ^3.10.7
@@ -51,6 +51,8 @@ dependencies:
     path: ../packages/whisper_ffi
   stardict_core:
     path: ../packages/stardict_core
+  mandarin_g2p:
+    path: ../packages/mandarin_g2p
   # The fleet's one download engine (ResumableTransfer) — proposal-2 §9.
   domovoi:
     path: ../../DomovoiDiscernment
@@ -102,14 +104,11 @@ dependencies:
   # System TTS for the reader's speak mode — always behind the app's
   # TtsSpeaker seam; widget tests never touch the plugin.
   flutter_tts: ^4.2.0
-  # The Supertonic rung (ADR-0007): Supertone Inc.'s MIT engine, no
-  # phonemizer — the model consumes raw character indices, so there is
-  # nothing for a GPL dependency (espeak-ng) to hide in, the flaw that
-  # retired the sherpa rung. Android only for now — kept out of the web build by
-  # the app's own conditional-export trio
-  # (lib/features/reader/speech/src/supertonic_speech_engine.dart), the
-  # repo's established whisper_ffi pattern. >=1.5.1 for 16KB Android page
-  # support; the official Supertonic Flutter example pins ^1.6.0.
+  # ONNX Runtime for every model Trellis runs itself: the voices (Pocket
+  # TTS, Kokoro; ADR-0022) and the translators (ADR-0008). Kept out of the
+  # web build by each engine's conditional-export trio (pocket_model.dart,
+  # kokoro_model.dart, marian_engine.dart), the repo's whisper_ffi
+  # pattern. >=1.5.1 for 16KB Android page support.
   flutter_onnxruntime: ^1.8.3
   # Backup files travel as zip-free single blobs, but .apkg export is a
   # zip archive by format definition.

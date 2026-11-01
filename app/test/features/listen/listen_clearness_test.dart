@@ -6,8 +6,8 @@ import 'package:trellis/features/listen/listen_clearness.dart';
 /// The founding request's follow-up: "Bonus points if I can choose how
 /// much they enunciate … to as crisp and clean as possible to make it
 /// easy for a beginner to parse". What a saved voice can honestly vary is
-/// its pace, the pause after each sentence, and (the downloaded voice
-/// only) how much work goes into each sound. Each step asks for more of
+/// its pace, the pause after each sentence, and (Pocket TTS only) how
+/// much work goes into each sound. Each step asks for more of
 /// all three than the one before; Natural is exactly what was made
 /// before the setting existed.
 void main() {
@@ -45,8 +45,20 @@ void main() {
           reason: all[i].name);
       expect(all[i].pace.careful, isTrue, reason: all[i].name);
     }
-    // Slow enough to help, not so slow the voice falls apart.
+    // Slow enough to help, not so slow Kokoro's or the phone's stretched
+    // speech falls apart.
     expect(all.last.pace.rate, greaterThanOrEqualTo(0.5));
+  });
+
+  test('the help promises a slower episode, never slower words: Pocket '
+      'TTS has no speed input and slows by pausing after each sentence',
+      () {
+    for (final c in ListenClearness.values.skip(1)) {
+      expect(c.help, isNot(contains('sounds whole')), reason: c.name);
+    }
+    expect(ListenClearness.clear.help, contains('overall'));
+    expect(ListenClearness.slow.help, contains('overall'));
+    expect(ListenClearness.verySlow.help, contains('longest pauses'));
   });
 
   test('the saved episode names how it was spoken', () {

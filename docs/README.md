@@ -26,7 +26,7 @@
   the media-session gap, 0016 episodes you can tell apart, 0017 the
   fundamentals pass, 0018 background refresh, 0019 Latest is a permanent
   archive, 0020 translation runs on device, verified, 0021 make ahead,
-  for shows the person picks. (This list was
+  for shows the person picks, 0022 Trellis's own voices, one per language. (This list was
   stale by six entries before Campaign 9 caught it, and by four again
   before 1.5.9. Keep it current going forward rather than letting it
   drift again.)

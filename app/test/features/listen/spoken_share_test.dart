@@ -74,7 +74,7 @@ void main() {
         db: db,
         original: of,
         lang: 'es',
-        voice: 'Supertonic M1',
+        voice: 'Pocket TTS',
         voiceKind: kind,
         render: render,
         audio: wav,

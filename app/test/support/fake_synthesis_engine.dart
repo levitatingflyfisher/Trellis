@@ -17,8 +17,16 @@ class FakeSynthesisCall {
 
 class FakeSynthesisSpeechEngine implements SynthesisSpeechEngine {
   final List<FakeSynthesisCall> calls = [];
+  final List<SpeechPace> paces = [];
   final List<Completer<SynthResult>> _completers = [];
   bool disposed = false;
+
+  /// What it claims to speak: by default English, Spanish, French and
+  /// Portuguese, as if those four voices were downloaded.
+  @override
+  final Set<String> speaks;
+
+  FakeSynthesisSpeechEngine({this.speaks = const {'en', 'es', 'fr', 'pt'}});
 
   @override
   bool get canPause => true;
@@ -27,6 +35,7 @@ class FakeSynthesisSpeechEngine implements SynthesisSpeechEngine {
   Future<SynthResult> synthesize(String sentence,
       {String? lang, SpeechPace pace = SpeechPace.natural}) {
     calls.add(FakeSynthesisCall(sentence, lang));
+    paces.add(pace);
     final c = Completer<SynthResult>();
     _completers.add(c);
     return c.future;

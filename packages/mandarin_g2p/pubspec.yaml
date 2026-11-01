@@ -1,0 +1,11 @@
+name: mandarin_g2p
+description: >
+  Mandarin text to Kokoro v1.1-zh phonemes and token ids: a pure-Dart port
+  of misaki's Chinese front end (with jieba, pypinyin and cn2an), so the
+  model gets the ids it was trained with. No Flutter, no dart:io.
+version: 0.1.0
+publish_to: none
+environment:
+  sdk: ^3.5.0
+dev_dependencies:
+  test: ^1.25.0

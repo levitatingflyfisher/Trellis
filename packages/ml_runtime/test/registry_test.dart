@@ -99,42 +99,6 @@ void main() {
     });
   });
 
-  group('SupertonicVoiceLayout (TTS voices, ADR-0007)', () {
-    test(
-        'supertonicLayout is null by default — every existing spec shape '
-        'keeps compiling unchanged', () {
-      expect(
-          spec('plain', ModelTask.asr, DeviceTier.t1).supertonicLayout, isNull);
-    });
-
-    test(
-        'a Supertonic voice spec names which downloaded filename plays '
-        'which role — the "data, not code" surface for a voice whose '
-        'files ship loose (no archive to extract)', () {
-      const layout = SupertonicVoiceLayout(
-        durationPredictorFileName: 'duration_predictor.onnx',
-        textEncoderFileName: 'text_encoder.onnx',
-        vectorEstimatorFileName: 'vector_estimator.onnx',
-        vocoderFileName: 'vocoder.onnx',
-        unicodeIndexerFileName: 'unicode_indexer.json',
-        ttsConfigFileName: 'tts.json',
-        voiceStyleFileName: 'voice-style.json',
-      );
-      final voice = ModelSpec(
-        id: 'supertonic-example',
-        task: ModelTask.tts,
-        files: [
-          ModelFile.unverified(
-              url: 'https://example.test/duration_predictor.onnx', bytes: 1000),
-        ],
-        licenses: const ['OpenRAIL-M'],
-        minTier: DeviceTier.t2,
-        supertonicLayout: layout,
-      );
-      expect(voice.supertonicLayout, same(layout));
-    });
-  });
-
   group('ModelSpec', () {
     test('sizeBytes is the sum of its files — derived, never a second copy',
         () {
@@ -373,12 +337,181 @@ void main() {
     });
   });
 
+  group('voiceFor and voiceLangs — one voice per language (board-0211)', () {
+    final reg = ModelRegistry([
+      spec('pocket-de', ModelTask.tts, DeviceTier.t1, langs: {'de'}),
+      spec('kokoro-zh', ModelTask.tts, DeviceTier.t1, langs: {'zh'}),
+      spec('multi', ModelTask.tts, DeviceTier.t1, langs: {'es', 'fr'}),
+      spec('t3-voice', ModelTask.tts, DeviceTier.t3, langs: {'it'}),
+      spec('no-langs', ModelTask.tts, DeviceTier.t1),
+      spec('opus-mt-en-ko', ModelTask.translation, DeviceTier.t1,
+          langs: {'ko'}, sourceLang: 'en'),
+    ]);
+
+    test('a language has a voice only when a tts spec names it', () {
+      expect(reg.voiceFor('de', DeviceTier.t1)?.id, 'pocket-de');
+      expect(reg.voiceFor('fr', DeviceTier.t1)?.id, 'multi');
+      expect(reg.voiceFor('ko', DeviceTier.t1), isNull,
+          reason: 'a translator is not a voice');
+      expect(reg.voiceFor('ru', DeviceTier.t1), isNull,
+          reason: 'a spec with no langs claims no language');
+    });
+
+    test('a region tag names its base language', () {
+      expect(reg.voiceFor('zh-CN', DeviceTier.t1)?.id, 'kokoro-zh');
+      expect(reg.voiceFor('DE_at', DeviceTier.t1)?.id, 'pocket-de');
+      expect(reg.voiceFor('', DeviceTier.t1), isNull);
+    });
+
+    test('the tier gates a voice like any model', () {
+      expect(reg.voiceFor('it', DeviceTier.t1), isNull);
+      expect(reg.voiceFor('it', DeviceTier.t3)?.id, 't3-voice');
+    });
+
+    test('voiceLangs is every language some voice speaks at the tier', () {
+      expect(reg.voiceLangs(DeviceTier.t1), {'de', 'zh', 'es', 'fr'});
+      expect(reg.voiceLangs(DeviceTier.t3), contains('it'));
+    });
+  });
+
   group('the starter registry', () {
+    test('Chinese is spoken by Kokoro v1.1-zh, from files Trellis hosts '
+        'or pinned at an upstream revision (board-0211)', () {
+      final starter = ModelRegistry.starter();
+      final zh = starter.voiceFor('zh', DeviceTier.t1)!;
+      expect(zh.id, 'kokoro-zh-zf001');
+      expect(zh.langs, {'zh'});
+      expect(zh.licenses, containsAll(['Apache-2.0', 'MIT']));
+      final layout = zh.kokoroLayout!;
+      final names = zh.files.map((f) => Uri.parse(f.url).pathSegments.last);
+      expect(names, contains(layout.modelFileName));
+      expect(names, contains(layout.voiceFileName));
+      expect(layout.frontEndFileNames.keys, {
+        'jiebaDict', 'finalsegHmm', 'possegHmm', 'pinyinSingle',
+        'pinyinPhrases', 'pinyinAux', 'misakiTables',
+      });
+      expect(names, containsAll(layout.frontEndFileNames.values));
+      for (final f in zh.files) {
+        expect(f.sha256, hasLength(64), reason: f.url);
+        expect(
+            f.url.startsWith('https://github.com/levitatingflyfisher/Trellis/'
+                    'releases/download/models-voices-1/') ||
+                f.url.startsWith('https://huggingface.co/onnx-community/'
+                    'Kokoro-82M-v1.1-zh-ONNX/resolve/'
+                    '6cc0f0d2ebe369a68b0df87c2b65c1af8c0ac3e3/'),
+            isTrue,
+            reason: f.url);
+      }
+      expect(zh.files.firstWhere((f) => f.url.endsWith(layout.modelFileName)).sha256,
+          'a628ea5d6fbde96d1a85f691a6a00847829937f9e488021ba2c5359bc6ea08b5',
+          reason: 'thewh1teagle fp16: onnx-community fp16 returns NaN past '
+              '30 phonemes');
+    });
+
+    test('seven languages are spoken by Pocket TTS: its own files from '
+        'the Trellis release, one shared Mimi decoder, the tokenizer and '
+        'a clean-licensed voice from Kyutai\'s ungated repository at a '
+        'pinned revision (board-0211)', () {
+      final starter = ModelRegistry.starter();
+      const voices = {
+        'de': ('german', 'caro_davy', 'CC0'),
+        'en': ('english', 'bill_boerst', 'CC0'),
+        'es': ('spanish', 'lola', 'CC0'),
+        'fr': ('french', 'estelle', 'CC0'),
+        'it': ('italian', 'giovanni', 'CC0'),
+        'nl': ('dutch', 'daan', 'CC-BY-4.0'),
+        'pt': ('portuguese', 'mary', 'CC-BY-4.0'),
+      };
+      const kyutai = 'https://huggingface.co/kyutai/'
+          'pocket-tts-without-voice-cloning/resolve/'
+          'a7056f505a4a8ca72d8b5fb1440071d6f1a35739/languages/';
+      const release = 'https://github.com/levitatingflyfisher/Trellis/'
+          'releases/download/models-voices-1/';
+      ModelFile? mimi;
+      for (final MapEntry(key: tag, value: (language, voice, licence))
+          in voices.entries) {
+        final spec = starter.voiceFor(tag, DeviceTier.t1)!;
+        expect(spec.id, 'pocket-$tag');
+        expect(spec.langs, {tag});
+        expect(spec.licenses, contains('CC-BY-4.0'));
+        final layout = spec.pocketLayout!;
+        expect(layout.language, language);
+        expect(layout.voiceFileName, '$voice.safetensors');
+        expect(layout.voiceCredit, contains(licence));
+        final byName = {
+          for (final f in spec.files) Uri.parse(f.url).pathSegments.last: f
+        };
+        expect(byName.keys, hasLength(spec.files.length),
+            reason: 'file names are unique within a voice');
+        for (final name in [
+          layout.textConditionerFileName,
+          layout.mainFileName,
+          layout.flowFileName,
+          layout.mimiFileName,
+          layout.tokenizerFileName,
+          layout.voiceFileName,
+        ]) {
+          expect(byName[name], isNotNull, reason: '$tag $name');
+        }
+        expect(byName[layout.tokenizerFileName]!.url,
+            '$kyutai$language/tokenizer.json');
+        expect(byName[layout.voiceFileName]!.url,
+            '$kyutai$language/embeddings/$voice.safetensors');
+        for (final f in spec.files) {
+          expect(f.sha256, hasLength(64), reason: f.url);
+          expect(f.url.startsWith(release) || f.url.startsWith(kyutai),
+              isTrue,
+              reason: f.url);
+          expect(f.shared, f.url.endsWith('pocket-mimi_decoder.onnx'),
+              reason: 'only the decoder is shared: ${f.url}');
+        }
+        final m = byName[layout.mimiFileName]!;
+        if (mimi != null) {
+          expect((m.url, m.sha256, m.bytes),
+              (mimi.url, mimi.sha256, mimi.bytes),
+              reason: 'one decoder for every language');
+        }
+        mimi = m;
+      }
+    });
+
+    test('Supertonic is retired: every language it spoke passed the gate '
+        'with Pocket TTS (ADR-0022)', () {
+      final starter = ModelRegistry.starter();
+      expect(
+          starter.specs.where((s) => s.licenses.contains('OpenRAIL-M')),
+          isEmpty);
+      expect(starter.voiceLangs(DeviceTier.t1),
+          {'de', 'en', 'es', 'fr', 'it', 'nl', 'pt', 'zh'});
+    });
+
+    test('one voice per language: no two voices claim the same language '
+        '(owner, 13 Nov)', () {
+      final starter = ModelRegistry.starter();
+      final seen = <String, String>{};
+      for (final s in starter.specs.where((s) => s.task == ModelTask.tts)) {
+        expect(s.langs, isNotNull, reason: '${s.id} names its languages');
+        for (final l in s.langs!) {
+          expect(seen[l], isNull,
+              reason: '$l is claimed by both ${seen[l]} and ${s.id}');
+          seen[l] = s.id;
+        }
+      }
+    });
+
+    test('the downloaded voice names every language it speaks, so a '
+        'Spanish lookup finds it', () {
+      final starter = ModelRegistry.starter();
+      for (final l in ['en', 'es', 'fr', 'pt']) {
+        expect(starter.voiceFor(l, DeviceTier.t1), isNotNull, reason: l);
+      }
+    });
+
     final starter = ModelRegistry.starter();
 
     test(
         'carries the pinned v1 catalog: whisper tiny/base ggml, silero '
-        'vad, the supertonic starter voice, the Babel '
+        'vad, the English voice, the Babel '
         'starter translation pair, the Wiktionary StarDict dictionary',
         () {
       expect(
@@ -387,7 +520,7 @@ void main() {
           'whisper-tiny-ggml',
           'whisper-base-ggml',
           'silero-vad',
-          'supertonic-en-m1',
+          'pocket-en',
           'opus-mt-en-es',
           'wiktionary-en-en-stardict',
         ]),
@@ -450,26 +583,6 @@ void main() {
     });
 
     test(
-        'the starter voice carries its loose-file layout and its ONE '
-        'license — OpenRAIL-M, no engine license alongside it, because '
-        'there is no longer an engine license to list (ADR-0007)', () {
-      final voice = starter.byId('supertonic-en-m1')!;
-      expect(voice.task, ModelTask.tts);
-      expect(voice.minTier, DeviceTier.t1);
-      expect(voice.langs, {'en'});
-      expect(voice.licenses, ['OpenRAIL-M']);
-      final layout = voice.supertonicLayout;
-      expect(layout, isNotNull);
-      expect(layout!.durationPredictorFileName, 'duration_predictor.onnx');
-      expect(layout.textEncoderFileName, 'text_encoder.onnx');
-      expect(layout.vectorEstimatorFileName, 'vector_estimator.onnx');
-      expect(layout.vocoderFileName, 'vocoder.onnx');
-      expect(layout.unicodeIndexerFileName, 'unicode_indexer.json');
-      expect(layout.ttsConfigFileName, 'tts.json');
-      expect(layout.voiceStyleFileName, 'M1.json');
-    });
-
-    test(
         'the tier ladder matches the proposal-2 ML plan: T1 = tiny+vad, T2 = base',
         () {
       expect(starter.byId('whisper-tiny-ggml')!.minTier, DeviceTier.t1);
@@ -508,9 +621,9 @@ void main() {
 
     test('the neural voice is picked at t1, the tier the app runs at '
         '(1.5.8: at t2 it downloaded and never played)', () {
-      expect(starter.byId('supertonic-en-m1')!.minTier, DeviceTier.t1);
+      expect(starter.byId('pocket-en')!.minTier, DeviceTier.t1);
       expect(starter.pickModel(ModelTask.tts, DeviceTier.t1, langHint: 'en')?.id,
-          'supertonic-en-m1');
+          'pocket-en');
       // Lowering the voice must not move transcription off tiny.
       expect(starter.pickModel(ModelTask.asr, DeviceTier.t1)?.id,
           'whisper-tiny-ggml');
@@ -523,11 +636,10 @@ void main() {
       expect(starter.byId('whisper-base-ggml')!.sizeBytes,
           closeTo(77000000, 8000000));
       expect(starter.byId('silero-vad')!.sizeBytes, closeTo(2000000, 1000000));
-      // ~263MB fp32 (ADR-0007 Phase 0: no official quantized build exists,
-      // and the one unofficial int8 repack failed verification — see the
-      // ADR).
-      expect(starter.byId('supertonic-en-m1')!.sizeBytes,
-          closeTo(263000000, 5000000));
+      // ~151MB for a Pocket TTS language, the shared 41MB decoder
+      // counted in (ADR-0022: int8 flow transformer and flow net).
+      expect(starter.byId('pocket-en')!.sizeBytes,
+          closeTo(151000000, 5000000));
       // ~116MB since 1.5.9: onnx-community's encoder with Xenova's int8
       // merged decoder (60MB, down from onnx-community's 193MB, which
       // was barely quantised); parity-checked before the swap.
@@ -581,50 +693,6 @@ void main() {
             2327524,
           ),
         ],
-        // Verified 2026-08-14: downloaded every file directly from
-        // Supertone/supertonic-2 on Hugging Face and hashed it locally
-        // (docs/reference/tts-voices.md has the OpenRAIL-M license text,
-        // verbatim, with fetch date). File order here matches
-        // registration order below, not [SupertonicVoiceLayout] — that
-        // type names each file by role for the engine; this table just
-        // has to cover the same seven files.
-        'supertonic-en-m1': [
-          (
-            'https://huggingface.co/Supertone/supertonic-2/resolve/main/onnx/duration_predictor.onnx',
-            '6d556b3691165c364be91dc0bd894656b5949f5acd2750d8ec2f954010845011',
-            1521526,
-          ),
-          (
-            'https://huggingface.co/Supertone/supertonic-2/resolve/main/onnx/text_encoder.onnx',
-            'dd5f535ed629f7df86071043e15f541ce1b2ab7f1bdbce4c7892b307bca79fa3',
-            27431318,
-          ),
-          (
-            'https://huggingface.co/Supertone/supertonic-2/resolve/main/onnx/vector_estimator.onnx',
-            '105e9d66fd8756876b210a6b4aa03fc393b1eaca3a8dadcc8d9a3bc785c86a35',
-            132471364,
-          ),
-          (
-            'https://huggingface.co/Supertone/supertonic-2/resolve/main/onnx/vocoder.onnx',
-            '19bd51f47a186069c752403518a40f7ea4c647455056d2511f7249691ecddf7c',
-            101405066,
-          ),
-          (
-            'https://huggingface.co/Supertone/supertonic-2/resolve/main/onnx/unicode_indexer.json',
-            'b7662a73a0703f43b97c0f2e089f8e8325e26f5d841aca393b5a54c509c92df1',
-            262196,
-          ),
-          (
-            'https://huggingface.co/Supertone/supertonic-2/resolve/main/onnx/tts.json',
-            'ee531d9af9b80438a2ed703e22155ee6c83b12595ab22fd3bb6de94c7502fe96',
-            8699,
-          ),
-          (
-            'https://huggingface.co/Supertone/supertonic-2/resolve/main/voice_styles/M1.json',
-            'a04c823cbda6dd1c7de131ec68fea83bbb70d7f29d61623304eb871e3b83b5a1',
-            420510,
-          ),
-        ],
         // Campaign 4 Phase 3: verified 2026-08-15 by downloading directly
         // and hashing locally (docs/reference/dictionaries.md has the
         // dual CC-BY-SA/GFDL license text, verbatim, with fetch date and
@@ -641,8 +709,11 @@ void main() {
       // Translation pairs are pinned in translation_catalog.dart and
       // checked by their own group below: 25 pairs x 6 files would make
       // this double entry longer than the catalog it guards.
-      final nonTranslation =
-          starter.specs.where((s) => s.task != ModelTask.translation);
+      // Trellis's own voices are pinned in voice_catalog.dart and
+      // checked in their own tests, for the same reason.
+      final ownVoices = voiceCatalog().map((s) => s.id).toSet();
+      final nonTranslation = starter.specs.where((s) =>
+          s.task != ModelTask.translation && !ownVoices.contains(s.id));
       expect(nonTranslation.map((s) => s.id).toSet(), verified.keys.toSet(),
           reason: 'the starter catalog and the verified-pins table must '
               'cover exactly the same models');

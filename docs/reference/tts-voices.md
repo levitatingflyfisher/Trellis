@@ -1,12 +1,88 @@
-# TTS voices — the licensing record (ADR-0007, retired: ADR-0006)
+# TTS voices: the licensing record (ADR-0022; before it ADR-0007, ADR-0006)
 
 A downloadable voice is a data entry in `ml_runtime`'s `ModelRegistry`
-(`packages/ml_runtime/lib/src/registry.dart`, `ModelRegistry.starter()`), not
-code — adding a voice never touches the Supertonic engine. This file is the
-verbatim license record for every candidate considered, so the choice can be
-checked rather than trusted.
+(`packages/ml_runtime/lib/src/voice_catalog.dart`), not code. This file
+is the licence record for every voice shipped or considered, so the
+choice can be checked rather than trusted.
 
-## Starter voice: `supertonic-en-m1`
+## Trellis's own voices (ADR-0022, 1.6.14)
+
+One voice per language, downloaded inside the app (owner, board-0203,
+board-0211). Every file is pinned by sha256 and byte length. Trellis's
+own files are on the permanent release `models-voices-1`, with a
+NOTICE that carries the credits below and the licence texts.
+
+### Pocket TTS (Kyutai), seven languages
+
+- Weights: `kyutai/pocket-tts-without-voice-cloning`, CC-BY-4.0, at
+  revision `a7056f505a4a8ca72d8b5fb1440071d6f1a35739` (the one
+  pocket-tts 4.0.1 pins). The repository is ungated; nobody on Trellis's
+  side accepts a gate, and the voice-cloning encoder is not in it.
+- Changes Trellis made: exported to ONNX (text conditioner, flow
+  transformer, flow net, Mimi decoder); the flow transformer and flow
+  net quantized to int8 (dynamic, per channel, MatMul only); the text
+  conditioner's outputs renamed (`latent_mean`, `latent_std`). The
+  recipe is in the release's `recipe/` folder.
+- Per language: text conditioner 16.4 MB, flow transformer 76.1 MB,
+  flow net 10.1 MB, tokenizer 0.25 MB, voice 4 to 8 MB: about 108 MB.
+  The Mimi decoder (41.3 MB, fp32) is one file for every language,
+  downloaded once.
+- The tokenizer and the voice state come from Kyutai at the pinned
+  revision.
+
+| Language | Voice | Recording | Licence |
+|---|---|---|---|
+| German | caro_davy | LibriVox reader, via Voice-Zero (kyutai/tts-voices `voice-zero/`) | CC0 |
+| English | bill_boerst | LibriVox reader, via Voice-Zero | CC0 |
+| Spanish | lola | Common Voice clip `common_voice_es_19762977` | CC0 |
+| French | estelle | Kyutai's own recording (`unmute-prod-website/developpeuse-3.wav`) | CC0 |
+| Italian | giovanni | Common Voice clip `common_voice_it_36520747` | CC0 |
+| Dutch | daan | CML-TTS clip `cml_tts_nl_11290_9412_000030_0001` (openslr.org/146) | CC-BY-4.0 |
+| Portuguese | mary | VCTK speaker p333, University of Edinburgh | CC-BY-4.0 |
+
+Each recording's source is Kyutai's own voice list
+(`pocket_tts/utils/utils.py` in pocket-tts 4.0.1) and its licence is
+from the kyutai/tts-voices README, or the dataset's own licence (Common
+Voice CC0, CML-TTS and VCTK CC-BY-4.0).
+
+Excluded:
+- Expresso and EARS voices (CC-BY-NC).
+- `rafael`: a clip whose source names no licence.
+- `juergen`: kyutai/pocket-tts issue #190 points to a Mozilla Data
+  Collective page that states no licence. German uses caro_davy instead.
+
+How the voices were picked:
+- A whisper large-v3 check ran on 10 sentences per language, transcribing
+  Kyutai's PyTorch, our fp32 and int8 exports, and the app's engine on an
+  emulator.
+- Each language's int8 word error is within 1.5 times PyTorch's: 0% in
+  en, de and es; about 1% in fr, it and nl; 4.2% against 3.1% in pt.
+- In English and German most clean voices scored 0%. There the voice
+  whisper was most sure of was picked.
+- One word is about 1% of the set, so these picks separate the voices
+  only a little.
+
+### Kokoro-82M v1.1-zh (hexgrad), Chinese
+
+- Model: `thewh1teagle/kokoro-onnx` fp16 export (Apache-2.0), sha256
+  `a628ea5d6fbde96d1a85f691a6a00847829937f9e488021ba2c5359bc6ea08b5`,
+  kept on the release. onnx-community's fp16 file gave
+  NaN audio past 30 phonemes.
+- Voice: `zf_001` from `onnx-community/Kokoro-82M-v1.1-zh-ONNX` at
+  revision `6cc0f0d2ebe369a68b0df87c2b65c1af8c0ac3e3`.
+- Front end: jieba 0.42.1 (MIT), pypinyin 0.55.0 (MIT) and misaki's
+  tables (Apache-2.0), each converted once to plain text, with a header
+  naming its source. pypinyin-dict's `large_pinyin` is not used (partly
+  CC-BY-SA).
+- About 175 MB in all.
+
+## Retired: `supertonic-en-m1` (ADR-0007; retired in 1.6.14 by ADR-0022)
+
+Pocket TTS passed the gate in every language Supertonic spoke (en, es,
+fr, pt), so this voice left the registry. Its record stays below as
+history.
+
+### Starter voice: `supertonic-en-m1` (history)
 
 **Chosen (ADR-0007).** Supertonic v2 (`Supertone/supertonic-2` on Hugging
 Face), fp32 ONNX, voice style M1 — the official Flutter example's own

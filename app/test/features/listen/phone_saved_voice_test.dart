@@ -13,10 +13,10 @@ import 'package:trellis/services/device_services.dart' show SystemVoice;
 
 import '../../support/fake_services.dart';
 
-/// Which voice saves an episode's audio (board-0126). The downloaded
-/// voice (Supertonic) where it speaks the language and is on the device;
-/// else the phone's own voice for that language; else none. The listener
-/// can change it in the one place voices are already chosen: Read aloud's
+/// Which voice saves an episode's audio (board-0126). Trellis's own
+/// voice for the language (ADR-0022) where there is one and it is on the
+/// device; else the phone's own voice for that language; else none. The
+/// listener can change it in the one place voices are already chosen: Read aloud's
 /// voices, per language.
 void main() {
   group('the rule', () {
@@ -167,7 +167,8 @@ void main() {
           db: db,
           services: services,
           transcriber: TranscribeCoordinator(db: db, services: services));
-      expect(await chain.voiceFor(work, 'de'), isNull);
+      // Japanese: no voice of Trellis's own, and none on this phone.
+      expect(await chain.voiceFor(work, 'ja'), isNull);
     });
 
     test('the voice picked for the language in Read aloud is the one that '
@@ -215,17 +216,18 @@ void main() {
     test('saving with the phone’s voice fetches no voice: the consent lists '
         'only the translator', () async {
       final ru = await downloads(phone(['ru']).cache, 'ru');
-      expect(ru.where((l) => l.contains('Supertonic')), isEmpty);
+      expect(ru.where((l) => l.contains(' voice: ')), isEmpty);
       expect(ru.where((l) => l.startsWith('English to Russian translator')),
           hasLength(1));
       final es = await downloads(phone(['es']).cache, 'es');
-      expect(es.where((l) => l.contains('Supertonic')), isEmpty);
+      expect(es.where((l) => l.contains(' voice: ')), isEmpty);
     });
 
     test('with no phone voice for it, Spanish still fetches the downloaded '
         'voice, and says so first', () async {
       final es = await downloads(phone(const []).cache, 'es');
-      expect(es.where((l) => l.contains('Supertonic')), hasLength(1));
+      expect(es.where((l) => l.startsWith('Spanish voice: Pocket TTS')),
+          hasLength(1));
     });
   });
 }

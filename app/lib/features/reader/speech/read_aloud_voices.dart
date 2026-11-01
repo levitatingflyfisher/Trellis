@@ -2,10 +2,8 @@
 /// a podcast and translate it to Russian, but I can't get the Russian text
 /// to speech").
 ///
-/// Two kinds of voice: the downloaded one (Supertonic, ADR-0007: English,
-/// Spanish, French and Portuguese; its character table has no Cyrillic or
-/// CJK at all,
-/// docs/reference/tts-voices.md) and the phone's own (flutter_tts over
+/// Two kinds of voice: Trellis's own downloaded ones, one per language
+/// (board-0211; docs/reference/tts-voices.md) and the phone's own (flutter_tts over
 /// Android's text-to-speech engine, one or more voices per installed
 /// language). A run reads on ONE kind: the downloaded voice plays a
 /// gapless queue the app owns, the phone's voice is spoken a sentence at
@@ -24,7 +22,6 @@ import 'package:flutter/material.dart';
 import '../../../services/device_services.dart' show SystemVoice;
 import '../reader_prefs.dart';
 import '../translation/language_names.dart';
-import 'supertonic_voice_handle.dart' show supertonicSupportedLangs;
 
 /// One run's voices, decided before it starts.
 class ReadAloudVoicePlan {
@@ -43,11 +40,6 @@ class ReadAloudVoicePlan {
       this.systemVoices = const {},
       this.missing = const {}});
 }
-
-/// The languages a downloaded voice primed for a work in [workLang]
-/// reads: the one it was picked for, and those the voice itself speaks.
-Set<String> neuralLangsFor(String? workLang) =>
-    {?workLang, ...supertonicSupportedLangs};
 
 /// Whether the downloaded voice reads [lang] for this listener: it can
 /// ([neuralLangs], empty when there is no downloaded voice or it is set

@@ -47,6 +47,8 @@ class _StubSynthesisEngine implements SynthesisSpeechEngine {
   @override
   bool get canPause => true;
   @override
+  Set<String> get speaks => const {'en'};
+  @override
   Future<SynthResult> synthesize(String sentence,
           {String? lang, SpeechPace pace = SpeechPace.natural}) async =>
       SynthResult(samples: Float32List(0), sampleRate: 16000);

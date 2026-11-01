@@ -1,0 +1,10 @@
+# tiny pypinyin phrase table for unit tests (Trellis, MIT): word<TAB>syllables (comma alternatives)
+你好	nǐ hǎo
+大学	dà xué
+大学生	dà xué shēng
+不好	bù hǎo,hào
+女儿	nǚ ér
+哪儿	nǎ ér
+他们	tā men
+不怕	bù pà
+小院儿	xiǎo yuàn er

@@ -17,10 +17,10 @@ import '../support/fake_tts.dart';
 /// karaoke cursor law is unchanged; only what is heard differs. A
 /// sentence with no stored translation is read once, in English. This file keeps Spanish as its running example (the
 /// shipped, most-covered pair) and adds one German-specific group to cover
-/// the engine-selection fix Campaign 8 found: Supertonic's own language
-/// gate (`supertonicSupportedLangs`) does not cover German, so Speak-in-
-/// German must force the system voice even when a neural voice is primed
-/// and preferred.
+/// the engine-selection fix Campaign 8 found: when no downloaded voice
+/// speaks German (the engine's `speaks` leaves it out), Speak-in-German
+/// must force the system voice even when a neural voice is primed and
+/// preferred.
 void main() {
   late AppDatabase db;
   late FakeTtsSpeaker tts;
@@ -259,14 +259,14 @@ void main() {
     await db.spineDao.setShowTranslationLayer(workId, true);
   }
 
-  group('Campaign 8 "Babel widens": the Supertonic engine-gating fix', () {
-    // German — a language Supertonic's own `supertonicSupportedLangs` does
-    // not cover (verified, docs/reference/tts-voices.md).
+  group('Campaign 8 "Babel widens": the engine-gating fix', () {
+    // German, with no German voice downloaded: the fake engine speaks
+    // English, Spanish, French and Portuguese only.
     setUp(() => translateTo('de', 'Hallo.', 'Auf Wiedersehen.'));
 
     testWidgets('reading German forces the SYSTEM voice for the whole run '
         'even when a neural voice is primed and preferred — never reaches '
-        'Supertonic\'s own language gate at all', (tester) async {
+        'the engine\'s own language gate at all', (tester) async {
       await pumpReader(tester, withSynthEngine: true);
       await openOverflow(tester);
       expect(find.text('Read the German aloud too'), findsOneWidget);
@@ -280,9 +280,8 @@ void main() {
 
       // The system voice spoke — the neural engine's fake never saw a
       // single call, proving the engine-SELECTION happened before any
-      // per-utterance language tag could reach Supertonic's own gate
-      // (which would have thrown SupertonicUnsupportedLangException,
-      // uncaught, had this run reached it).
+      // per-utterance language tag could reach the engine's own gate
+      // (which would have thrown, uncaught, had this run reached it).
       expect(synthEngine.calls, isEmpty);
       expect(tts.utterances, [
         (text: 'Hello there.', lang: 'en'),
@@ -349,8 +348,7 @@ void main() {
     for (final (lang, first) in const [('ru', 'Привет.'), ('zh', '你好。')]) {
       testWidgets('$lang is gated the SAME way German is: reading it '
           'forces the system voice even with a neural voice primed and '
-          'preferred — its script is not in Supertonic\'s own '
-          '`supertonicSupportedLangs` ({en, es}, Phase 0)', (tester) async {
+          'preferred: no downloaded voice speaks it', (tester) async {
         await translateTo(lang, first, 'x');
         await pumpReader(tester, withSynthEngine: true);
 
@@ -362,9 +360,8 @@ void main() {
         expect(synthEngine.calls, isEmpty,
             reason: 'the neural engine fake never saw a call — engine '
                 'SELECTION happened before any per-utterance language tag '
-                'could reach Supertonic\'s own gate (which would have '
-                'thrown SupertonicUnsupportedLangException, uncaught, had '
-                'this run reached it)');
+                'could reach the engine\'s own gate (which would have '
+                'thrown, uncaught, had this run reached it)');
         expect(tts.utterances,
             [(text: 'Hello there.', lang: 'en'), (text: first, lang: lang)]);
       });
