@@ -80,7 +80,10 @@ object ShareInbox {
     fun receive(activity: Activity, intent: Intent?) {
         if (intent == null) return
         val action = intent.action
-        if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE) return
+        // A file opened with Trellis (VIEW, from a file manager or a chat
+        // app) is taken exactly as a shared one is.
+        if (action != Intent.ACTION_SEND && action != Intent.ACTION_SEND_MULTIPLE &&
+            action != Intent.ACTION_VIEW) return
         // Reopened from Recents, the old share intent comes back with it.
         if (intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY != 0) return
         val app = activity.applicationContext
@@ -120,7 +123,9 @@ object ShareInbox {
 
     @Suppress("DEPRECATION")
     private fun streamsOf(intent: Intent, action: String): List<Uri> =
-        if (action == Intent.ACTION_SEND_MULTIPLE) {
+        if (action == Intent.ACTION_VIEW) {
+            listOfNotNull(intent.data)
+        } else if (action == Intent.ACTION_SEND_MULTIPLE) {
             intent.getParcelableArrayListExtra<Uri>(Intent.EXTRA_STREAM) ?: emptyList()
         } else {
             listOfNotNull(intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM))

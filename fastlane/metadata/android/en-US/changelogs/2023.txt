@@ -1,0 +1,1 @@
+Markdown and text files open in Trellis: Import a file takes .md, .markdown and .txt, and Android offers Trellis under Open with. Headings become chapters and no markup is left. Transcription quality can be chosen (Fast, More accurate, Most accurate). Fixes: words repeated where two parts of a transcript meet, and "[BLANK_AUDIO]" appearing in transcripts.

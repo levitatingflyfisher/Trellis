@@ -110,6 +110,8 @@ final _link = RegExp(r'\s*(?:https?://|www\.)[^\s<>]+|\s*\bdoi:\s*10\.\d{4,9}/\S
     caseSensitive: false);
 final _linkTail = RegExp(r'[.,;:!?)\]”\x22’\x27]+$');
 
+final _bullet = RegExp(r'^\s*[•◦▪‣]\s+');
+final _emptyBrackets = RegExp(r'\s*(?:\(\s*\)|\[\s*\])');
 final _spaces = RegExp(r'\s{2,}');
 final _spaceBeforeStop = RegExp(r'\s+(?=[.,;:!?)])');
 final _sayable = RegExp(r'[\p{L}\d]', unicode: true);
@@ -128,8 +130,12 @@ String spokenText(String sentence) {
       .replaceAll(_raised, '')
       .replaceAll(_tightMark, '')
       .replaceAll(_tightNumber, '');
+  // A list item's mark (Markdown intake writes "• ") is not a word.
+  out = out.replaceFirst(_bullet, '');
   if (out == sentence) return sentence;
   out = out
+      // What held only a link is now empty: "(https://…)" leaves "()".
+      .replaceAll(_emptyBrackets, '')
       .replaceAll(_spaces, ' ')
       .replaceAll(_spaceBeforeStop, '')
       .trim();

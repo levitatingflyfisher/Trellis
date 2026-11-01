@@ -165,6 +165,25 @@ void main() {
     });
   });
 
+  group('what a Markdown file leaves behind', () {
+    test('a link’s address goes, brackets and all; its words are said',
+        () {
+      expect(spokenText('See the tide tables (https://example.org/tides) '
+          'first.'), 'See the tide tables first.');
+    });
+
+    test('a list item’s mark is not said', () {
+      expect(spokenText('• a warm hat'), 'a warm hat');
+      expect(spokenText('• See the tables (https://example.org/t).'),
+          'See the tables.');
+    });
+
+    test('a numbered item keeps its number', () {
+      const s = '2) Row out.';
+      expect(spokenText(s), s);
+    });
+  });
+
   test('a sentence that was only a citation says nothing', () {
     expect(spokenText('(Smith, 2019).'), '');
     expect(spokenText('[12]'), '');

@@ -16,3 +16,4 @@ export 'src/gutendex.dart';
 export 'src/m4b_chapters.dart';
 export 'src/notes_sanitizer.dart';
 export 'src/pdf_blocks.dart';
+export 'src/markdown_blocks.dart';

@@ -54,7 +54,7 @@ void main() {
   });
 
   test('the picker offers PDF beside EPUB, and says so', () {
-    expect(importableExtensions, ['epub', 'pdf']);
-    expect(importableKindsWords, 'EPUB or PDF');
+    expect(importableExtensions, containsAll(['epub', 'pdf']));
+    expect(importableKindsWords, contains('PDF'));
   });
 }

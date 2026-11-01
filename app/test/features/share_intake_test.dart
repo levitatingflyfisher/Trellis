@@ -375,6 +375,40 @@ void main() {
       expect(discarded, ['/cache/huge.txt']);
     });
 
+    test('a shared Markdown file is read as Markdown: its heading names '
+        'it, and no markup is left', () async {
+      files['/cache/tides.md'] =
+          '# Tide notes\n\nBring a **coat**.\n\n- rope\n- [charts](https://example.org/c)\n';
+      final saved = await intake().take(const SharedPayload(files: [
+        SharedFile(
+            path: '/cache/tides.md',
+            name: 'tides.md',
+            mimeType: 'application/octet-stream'),
+      ])) as ShareSaved;
+
+      expect(saved.inLatest, isTrue);
+      final entry = await onlyLatest();
+      expect(entry.work.title, 'Tide notes');
+      final segments = await db.spineDao.segmentsOf(entry.work.id);
+      expect([for (final s in segments) (s.kind, s.body)], [
+        ('heading', 'Tide notes'),
+        ('prose', 'Bring a coat.'),
+        ('prose', '• rope'),
+        ('prose', '• charts (https://example.org/c)'),
+      ]);
+      expect(discarded, ['/cache/tides.md']);
+    });
+
+    test('a Markdown file with no heading is still named by its first '
+        'line, as a shared text is', () async {
+      files['/cache/n.md'] = 'Buy rope today.\n\nAnd charts.';
+      await intake().take(const SharedPayload(files: [
+        SharedFile(path: '/cache/n.md', name: 'n.md', mimeType: 'text/markdown'),
+      ]));
+
+      expect((await onlyLatest()).work.title, 'Buy rope today.');
+    });
+
     test('an EPUB goes through the book import, into the Library', () async {
       final saved = await intake().take(const SharedPayload(files: [
         SharedFile(

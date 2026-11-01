@@ -22,7 +22,7 @@ import 'dart:io';
 import 'package:comms_core/comms_core.dart';
 import 'package:crypto/crypto.dart';
 import 'package:intake_core/intake_core.dart'
-    show extractArticle, naturalCompareAudiobookNames;
+    show extractArticle, naturalCompareAudiobookNames, parseMarkdown;
 
 import '../../db/database.dart';
 import '../models/format.dart';
@@ -31,6 +31,7 @@ import 'audiobook_import.dart';
 import 'audiobook_picker_gateway.dart' show audiobookExtensions;
 import 'epub_intake.dart';
 import 'paste_intake.dart' show storePastedText;
+import 'text_intake.dart';
 import 'pdf_intake.dart';
 import 'pdf_reader.dart';
 
@@ -695,7 +696,49 @@ class ShareIntake {
     if (text == null) {
       return const ShareRefused('That file is too large to read here.');
     }
+    if (isMarkdownName(f.name, mimeType: f.mimeType)) {
+      return _markdown(text, f.name, sourceApp);
+    }
     return _text(text, sourceApp);
+  }
+
+  /// A shared Markdown file (1.6.x), read as Markdown: its headings are
+  /// headings and no markup is left. Otherwise as [_text]: the same text
+  /// within a minute is one share, and it lands in Latest. Named by its
+  /// own heading or front matter; with neither, by its first line, as
+  /// any shared text is.
+  Future<ShareOutcome> _markdown(
+      String text, String name, String? sourceApp) async {
+    final nowMs = _nowMs;
+    final hash = sha256.convert(utf8.encode(text)).toString().substring(0, 16);
+    final again = await db.feedsDao.sharedTextSince(
+        profileId, hash, nowMs - _sameTextWindow.inMilliseconds);
+    if (again != null) {
+      return ShareSaved(again, inLatest: true, existing: true);
+    }
+    final doc = parseMarkdown(text);
+    final rows = markdownRows(doc);
+    if (rows.isEmpty) {
+      return const ShareRefused('There was nothing in that file to read.');
+    }
+    final id = await _intoLatest(
+      guid: 'text:$hash:$nowMs',
+      sourceApp: sourceApp,
+      store: () async {
+        final workId = await db.spineDao.insertWork(
+          profileId: profileId,
+          kind: 'note',
+          title: doc.title == 'Untitled'
+              ? sharedTitle(rows.first.text, nowMs)
+              : doc.title,
+          persistence: 'ephemeron',
+          firstSeenEpochDay: nowMs ~/ Duration.millisecondsPerDay,
+        );
+        await db.spineDao.insertSegments(workId, rows);
+        return workId;
+      },
+    );
+    return ShareSaved(id, inLatest: true);
   }
 
   Future<ShareOutcome> _htmlFile(SharedFile f, String? sourceApp) async {

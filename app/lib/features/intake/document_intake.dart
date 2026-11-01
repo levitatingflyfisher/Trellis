@@ -9,12 +9,21 @@ import '../../db/database.dart';
 import 'epub_intake.dart';
 import 'pdf_intake.dart';
 import 'pdf_reader.dart';
+import 'text_intake.dart';
 
 /// The file endings the picker offers. PDF only where PDFium can run.
-const importableExtensions = ['epub', if (pdfReadingAvailable) 'pdf'];
+const importableExtensions = [
+  'epub',
+  if (pdfReadingAvailable) 'pdf',
+  'md',
+  'markdown',
+  'txt',
+];
 
 /// The same, as the words under "Import a file".
-const importableKindsWords = pdfReadingAvailable ? 'EPUB or PDF' : 'EPUB';
+const importableKindsWords = pdfReadingAvailable
+    ? 'EPUB, PDF, Markdown or text'
+    : 'EPUB, Markdown or text';
 
 String _endingOf(String name) {
   final dot = name.lastIndexOf('.');
@@ -23,7 +32,8 @@ String _endingOf(String name) {
 
 /// Imports the file at [path] as what its [name] says it is, and returns
 /// the new work's id. Throws [FormatException] when it can't be read as
-/// that; a [PdfUnreadableException] or [EpubTooLargeException] carries
+/// that; a [PdfUnreadableException], [EpubTooLargeException] or
+/// [TextTooLargeException] carries
 /// words fit to show as they are. [readPdf] stands in for PDFium in
 /// tests.
 Future<int> importDocumentFile(
@@ -39,6 +49,9 @@ Future<int> importDocumentFile(
         path: path,
         sourceName: name,
         read: readPdf);
+  }
+  if (isTextFileName(name)) {
+    return importTextFile(db: db, profileId: profileId, path: path, name: name);
   }
   return importEpubFile(
       db: db, profileId: profileId, path: path, sourceName: name);
@@ -62,7 +75,11 @@ Future<int?> pickAndImportDocument(
     return importDocumentFile(
         db: db, profileId: profileId, path: path, name: file.name);
   }
-  // The web tier: a picked file has no path, and only EPUB is offered.
+  // The web tier: a picked file has no path, only its bytes.
+  if (isTextFileName(file.name)) {
+    return importTextBytes(
+        db: db, profileId: profileId, bytes: file.bytes!, name: file.name);
+  }
   return importEpubBytes(
       db: db, profileId: profileId, bytes: file.bytes!, sourceName: file.name);
 }

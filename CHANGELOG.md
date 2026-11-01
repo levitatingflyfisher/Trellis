@@ -7,6 +7,17 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.6.1 — 2026-11-10
+
+- **Markdown and text files open in Trellis.** “Import a file” in the Library takes .md, .markdown and .txt. A Markdown file’s headings become its chapters; a link keeps its words and its address; each list item is its own line; each table row reads as one sentence; bold, italics and the other marks are gone. A .txt file is read as plain text.
+- Android offers Trellis under “Open with” for Markdown and text files, from a file manager or a chat app. A Markdown file shared to Trellis is read as Markdown too.
+- Read aloud doesn’t say a list mark or a link’s address.
+- **Transcription quality** on Models & storage: Fast (the default), More accurate, or Most accurate. The larger models make fewer mistakes with names and take longer; nothing changes unless you choose.
+- Fix: words were repeated where two parts of a transcript met (“into two measures … into two measures”), and then translated and spoken twice.
+- Fix: “[BLANK_AUDIO]” and similar notes from the transcriber no longer appear in transcripts. Transcripts already made keep them until you use “Transcribe again”.
+- Fix: a saved translated episode whose audio was deleted is made again by the same tap, instead of being left as a row that plays nothing.
+- Not yet: links in a Markdown file are shown with their address but can’t be tapped.
+
 ## 1.6.0 — 2026-11-10
 
 - **Listen in the language you’re learning, in one tap.** On an episode’s page, “Listen in Spanish” transcribes the episode, translates it, speaks the translation and plays it. The first time it asks which language you’re learning and, once, what it needs to download. It says which stage it is at, keeps going behind a dark screen, and picks up where it stopped if it is cut off. Spanish is the language Trellis can save as audio today; others can still be translated and read aloud from an episode’s Read page.

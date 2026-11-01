@@ -82,6 +82,34 @@ void main() {
     expect(all, contains('application/pdf'));
   });
 
+  // Owner, 1.6.x: "tried to open a markdown file in Trellis and could
+  // not". A file manager or a chat app offers "Open with" through VIEW,
+  // not through the share sheet.
+  test('Open with: Trellis is offered for Markdown and text files, by '
+      'content address only', () {
+    final view = filters
+        .where((f) => f.contains('android.intent.action.VIEW'))
+        .toList();
+    expect(view, hasLength(1));
+    final f = view.single;
+    expect(f, contains('android.intent.category.DEFAULT'));
+    expect(f, contains('android:scheme="content"'));
+    for (final mime in ['text/markdown', 'text/x-markdown', 'text/plain']) {
+      expect(f, contains('android:mimeType="$mime"'), reason: mime);
+    }
+    expect(f, isNot(contains('*/*')));
+    expect(f, isNot(contains('android:scheme="http')));
+  });
+
+  test('the platform side takes a file opened with Trellis as it takes a '
+      'shared one', () {
+    final inbox = File(
+            'android/app/src/main/kotlin/com/openhearth/trellis/ShareInbox.kt')
+        .readAsStringSync();
+    expect(inbox, contains('Intent.ACTION_VIEW'));
+    expect(inbox, contains('intent.data'));
+  });
+
   test('the launcher filter is still there', () {
     expect(
         filters.any((f) =>
