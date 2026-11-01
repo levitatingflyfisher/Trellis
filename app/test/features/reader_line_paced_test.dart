@@ -125,4 +125,50 @@ void main() {
 
     expect(blockHeight, closeTo(plainHeight, 0.5));
   });
+
+  group('Japanese on Line', () {
+    // The display units the tokenizer makes of 今日は晴れです。
+    const ja = ['今', '日', 'は', '晴', 'れ', 'で', 'す。'];
+
+    testWidgets('the characters sit together, with no space between them',
+        (tester) async {
+      await tester.pumpWidget(const MaterialApp(
+        home: Scaffold(
+            body: SizedBox(
+                width: 300,
+                child: LinePacedBlock(
+                    words: ja, style: style, currentLocalWordIdx: 0))),
+      ));
+      final shown = tester
+          .widgetList<RichText>(find.byType(RichText))
+          .map((r) => r.text.toPlainText())
+          .where((t) => t.contains('今'));
+      expect(shown, ['今日は晴れです。']);
+    });
+
+    test('a tap on a character finds that character', () {
+      final painter = TextPainter(
+          text: const TextSpan(text: '今日は晴れです。', style: style),
+          textDirection: TextDirection.ltr)
+        ..layout(maxWidth: 300);
+      final box = painter
+          .getBoxesForSelection(
+              const TextSelection(baseOffset: 3, extentOffset: 4))
+          .single;
+      painter.dispose();
+      final at = Offset((box.left + box.right) / 2, (box.top + box.bottom) / 2);
+
+      expect(
+          wordIndexAtOffset(
+              words: ja, style: style, maxWidth: 300, offset: at),
+          3);
+    });
+
+    test('each character is on the line its own box is on', () {
+      final lines =
+          computeLinePacedLines(words: ja, style: style, maxWidth: 300);
+      expect(lines, hasLength(1));
+      expect(lines.single.lastWordIdx, ja.length - 1);
+    });
+  });
 }

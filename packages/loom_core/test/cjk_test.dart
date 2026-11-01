@@ -143,4 +143,24 @@ void main() {
       expect(joinSentences(['一つ。']), '一つ。');
     });
   });
+
+  group('joinWords: the page puts display units back together', () {
+    test('Japanese units take no space between them', () {
+      final units = segmentCjkRun('今日は晴れです。「本」を読む。');
+      expect(joinWords(units), '今日は晴れです。「本」を読む。');
+    });
+
+    test('Latin words keep their space, inside Japanese too', () {
+      expect(joinWords(['the', 'quick', 'fox']), 'the quick fox');
+      expect(joinWords(['称', '号', 'を', 'MWP', 'に']), '称号を MWP に');
+    });
+
+    test('joinsWithoutSpace asks only about the two touching ends', () {
+      expect(joinsWithoutSpace('す。', '明'), isTrue);
+      expect(joinsWithoutSpace('カタカナ', 'の'), isTrue);
+      expect(joinsWithoutSpace('word', '水'), isFalse);
+      expect(joinsWithoutSpace('水', 'means'), isFalse);
+      expect(joinsWithoutSpace('', '水'), isFalse);
+    });
+  });
 }

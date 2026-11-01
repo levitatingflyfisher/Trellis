@@ -150,3 +150,29 @@ bool _endsCjkSentence(String s) {
 bool _isClosingBracket(int cp) =>
     cp == 0x300D || // 」
     cp == 0x300F; // 』
+
+/// Whether two display units sit side by side with no space between them
+/// on the page: both touching ends are CJK (a character, its trailing
+/// punctuation, or an opening corner bracket). Latin words keep their
+/// space, inside Japanese too.
+bool joinsWithoutSpace(String before, String after) {
+  if (before.isEmpty || after.isEmpty) return false;
+  return _cjkEnd(before.runes.last) && _cjkEnd(after.runes.first);
+}
+
+bool _cjkEnd(int cp) =>
+    isCjkCodepoint(cp) ||
+    isCjkTrailingPunctuation(cp) ||
+    cp == 0x300C || // 「 opening corner bracket
+    cp == 0x300E; // 『 opening white corner bracket
+
+/// [words] put back together as the page shows them: a space between
+/// two words unless [joinsWithoutSpace] says they touch.
+String joinWords(List<String> words) {
+  final out = StringBuffer();
+  for (var i = 0; i < words.length; i++) {
+    if (i > 0 && !joinsWithoutSpace(words[i - 1], words[i])) out.write(' ');
+    out.write(words[i]);
+  }
+  return out.toString();
+}

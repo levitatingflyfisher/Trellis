@@ -81,6 +81,11 @@ class TranslationJobController extends ChangeNotifier {
   /// this controller's own logic.
   final String engine;
 
+  /// True when a row another engine made is not good enough to keep: the
+  /// person asked this engine for its own translation (better Japanese
+  /// over the offline one). Rows this engine made are still skipped.
+  final bool redoOtherEngines;
+
   TranslationJobController({
     required this.dao,
     required this.workId,
@@ -91,6 +96,7 @@ class TranslationJobController extends ChangeNotifier {
     required this.lang,
     this.inputOf,
     this.engine = 'marian',
+    this.redoOtherEngines = false,
   }) : _state = TranslationJobState(
             phase: TranslationJobPhase.idle,
             doneUnits: 0,
@@ -140,12 +146,7 @@ class TranslationJobController extends ChangeNotifier {
             totalUnits: units.length));
         return;
       }
-      final already = translatedTextFor(
-              stored: stored,
-              segIdx: u.segIdx,
-              sentenceIdx: u.sentenceIdx,
-              currentSourceText: u.text) !=
-          null;
+      final already = _done(stored, u);
       final input = already ? null : (inputOf == null ? u.text : inputOf!(u));
       if (input != null) {
         try {
@@ -177,6 +178,21 @@ class TranslationJobController extends ChangeNotifier {
         phase: TranslationJobPhase.done,
         doneUnits: done,
         totalUnits: units.length));
+  }
+
+  /// Whether [u] already has a current row this run keeps.
+  bool _done(Map<(int, int), TranslationSentence> stored,
+      TranslatableSentence u) {
+    if (translatedTextFor(
+            stored: stored,
+            segIdx: u.segIdx,
+            sentenceIdx: u.sentenceIdx,
+            currentSourceText: u.text) ==
+        null) {
+      return false;
+    }
+    return !redoOtherEngines ||
+        stored[(u.segIdx, u.sentenceIdx)]!.engine == engine;
   }
 
   /// The chunked-request path. Groups not-already-stored units into
@@ -213,12 +229,7 @@ class TranslationJobController extends ChangeNotifier {
       while (chunk.length < chunkSize && i < units.length) {
         final u = units[i];
         i++;
-        final already = translatedTextFor(
-                stored: stored,
-                segIdx: u.segIdx,
-                sentenceIdx: u.sentenceIdx,
-                currentSourceText: u.text) !=
-            null;
+        final already = _done(stored, u);
         if (already) {
           done++;
           _setState(TranslationJobState(
@@ -273,7 +284,14 @@ class TranslationJobController extends ChangeNotifier {
 class TranslationStep {
   final String lang;
   final Future<SentenceTranslator?> Function() open;
-  const TranslationStep({required this.lang, required this.open});
+
+  /// Set for an engine whose translation the person asked for over any
+  /// other (better Japanese, by a brain): only rows this engine made
+  /// count as done, and every other row is made again. Null keeps any
+  /// current row, whoever made it.
+  final String? engine;
+
+  const TranslationStep({required this.lang, required this.open, this.engine});
 }
 
 /// A whole translation into [target]: one pass for a direct pair, two
@@ -301,6 +319,7 @@ class TranslationRun extends ChangeNotifier {
     required this.steps,
     this.foreground,
     this.title = 'Translating',
+    this.resumable = true,
   }) : _state = TranslationJobState(
             phase: TranslationJobPhase.idle,
             doneUnits: 0,
@@ -346,6 +365,11 @@ class TranslationRun extends ChangeNotifier {
 
   /// What the notification calls the work.
   final String title;
+
+  /// Whether a run the system kills is picked up on the next open. A
+  /// brain run is not: it sends the text away, and that needs a fresh
+  /// yes each time (ADR-0003 law 6), so it never sets the marker.
+  final bool resumable;
   bool _held = false;
 
   /// One notification update in this many sentences: a long book would
@@ -413,7 +437,7 @@ class TranslationRun extends ChangeNotifier {
   }
 
   Future<void> _run() async {
-    await dao.setTranslationRunLang(workId, target);
+    if (resumable) await dao.setTranslationRunLang(workId, target);
     _set(TranslationJobPhase.running, 0);
     var before = 0;
     for (var i = 0; i < steps.length; i++) {
@@ -431,14 +455,16 @@ class TranslationRun extends ChangeNotifier {
               currentSourceText: u.text);
 
       final stored = await dao.translationSentencesOf(workId, lang: step.lang);
-      final pending = units.any((u) =>
-          inputOf(u) != null &&
+      bool kept(TranslatableSentence u) =>
           translatedTextFor(
                   stored: stored,
                   segIdx: u.segIdx,
                   sentenceIdx: u.sentenceIdx,
-                  currentSourceText: u.text) ==
-              null);
+                  currentSourceText: u.text) !=
+              null &&
+          (step.engine == null ||
+              stored[(u.segIdx, u.sentenceIdx)]!.engine == step.engine);
+      final pending = units.any((u) => inputOf(u) != null && !kept(u));
       if (pending && !_cancelled) {
         SentenceTranslator? translator;
         try {
@@ -457,6 +483,14 @@ class TranslationRun extends ChangeNotifier {
           units: units,
           lang: step.lang,
           translate: translator.translate,
+          translateBatch: translator is BatchSentenceTranslator
+              ? translator.translateBatch
+              : null,
+          engine: step.engine ??
+              (translator is BatchSentenceTranslator
+                  ? translator.engine
+                  : 'marian'),
+          redoOtherEngines: step.engine != null,
           inputOf: previous == null ? null : inputOf,
         );
         final offset = before;

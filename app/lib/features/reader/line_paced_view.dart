@@ -20,6 +20,21 @@ library;
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
+import 'package:loom_core/loom_core.dart' show joinWords, joinsWithoutSpace;
+
+/// Where each of [words] sits in `joinWords(words)`: start and end
+/// offsets, a space between words except where Japanese (or Chinese)
+/// characters touch.
+List<(int, int)> _wordRanges(List<String> words) {
+  final ranges = <(int, int)>[];
+  var cursor = 0;
+  for (var i = 0; i < words.length; i++) {
+    if (i > 0 && !joinsWithoutSpace(words[i - 1], words[i])) cursor++;
+    ranges.add((cursor, cursor + words[i].length));
+    cursor += words[i].length;
+  }
+  return ranges;
+}
 
 /// One visual line within a block: which words (by LOCAL index into the
 /// block's own word list) fall on it, and its highlight rect relative to
@@ -47,7 +62,7 @@ class LinePacedLine {
       localWordIdx >= firstWordIdx && localWordIdx <= lastWordIdx;
 }
 
-/// Lays [words] out as a single space-joined paragraph at [maxWidth]
+/// Lays [words] out as a single paragraph ([joinWords]) at [maxWidth]
 /// under [style], then groups them by which visual line each word landed
 /// on.
 ///
@@ -65,13 +80,8 @@ List<LinePacedLine> computeLinePacedLines({
   double textScaleFactor = 1.0,
 }) {
   if (words.isEmpty) return const [];
-  final text = words.join(' ');
-  final wordRanges = <(int, int)>[];
-  var cursor = 0;
-  for (final w in words) {
-    wordRanges.add((cursor, cursor + w.length));
-    cursor += w.length + 1; // +1 for the joining space
-  }
+  final text = joinWords(words);
+  final wordRanges = _wordRanges(words);
 
   final painter = TextPainter(
     text: TextSpan(text: text, style: style),
@@ -126,17 +136,26 @@ int wordIndexAtOffset({
 }) {
   if (words.isEmpty) return 0;
   final painter = TextPainter(
-    text: TextSpan(text: words.join(' '), style: style),
+    text: TextSpan(text: joinWords(words), style: style),
     textDirection: TextDirection.ltr,
     textScaler: TextScaler.linear(textScaleFactor),
   )..layout(maxWidth: maxWidth);
+  final ranges = _wordRanges(words);
+  // The word whose own box is under the tap: Japanese characters touch,
+  // so a caret between two of them can't say which one was meant.
+  for (var i = 0; i < words.length; i++) {
+    final boxes = painter.getBoxesForSelection(
+        TextSelection(baseOffset: ranges[i].$1, extentOffset: ranges[i].$2));
+    if (boxes.any((b) => b.toRect().contains(offset))) {
+      painter.dispose();
+      return i;
+    }
+  }
+  // In a gap or past the end: the word the caret there ends.
   final at = painter.getPositionForOffset(offset).offset;
   painter.dispose();
-  var start = 0;
   for (var i = 0; i < words.length; i++) {
-    final end = start + words[i].length;
-    if (at <= end) return i;
-    start = end + 1;
+    if (at <= ranges[i].$2) return i;
   }
   return words.length - 1;
 }
@@ -202,7 +221,7 @@ class LinePacedBlock extends StatelessWidget {
                   decoration: BoxDecoration(color: highlight)),
             ),
           Text.rich(
-            TextSpan(text: words.join(' '), style: style),
+            TextSpan(text: joinWords(words), style: style),
             textScaler: scaler,
           ),
         ],

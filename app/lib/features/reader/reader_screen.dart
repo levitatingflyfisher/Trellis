@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:brain_wiring/brain_wiring.dart' show BrainTier;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:loom_core/loom_core.dart' as core;
@@ -43,6 +44,7 @@ import 'speech/speech_playback_pipeline.dart';
 import 'speech/speech_temp_files.dart';
 import 'speech/spoken_text.dart';
 import 'speech/read_aloud_voices.dart';
+import 'translation/brain_translator.dart';
 import 'translation/language_names.dart';
 import 'translation/sentence_units.dart';
 import 'translation/translation_job.dart';
@@ -625,6 +627,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (p != null) _lastTurn = (id: p.current?.id, playing: p.playing);
     p?.addListener(_onPlayerTurn);
     _load();
+    unawaited(_findAnthropic());
   }
 
   @override
@@ -1837,8 +1840,9 @@ class _ReaderScreenState extends State<ReaderScreen>
     final routes = await service.routesFrom(source);
     routes.sort((a, b) =>
         languageDisplayName(a.target).compareTo(languageDisplayName(b.target)));
+    final better = source == 'en' ? await _betterJapanese() : null;
     if (!mounted) return;
-    final chosen = await showModalBottomSheet<TranslationRoute>(
+    final chosen = await showModalBottomSheet<Object>(
       context: context,
       isScrollControlled: true,
       showDragHandle: true,
@@ -1875,17 +1879,116 @@ class _ReaderScreenState extends State<ReaderScreen>
                       : Icons.download_outlined),
                   onTap: () => Navigator.of(ctx).pop(r),
                 ),
+              if (better != null)
+                ListTile(
+                  key: const Key('translate-better-ja'),
+                  minTileHeight: 56,
+                  title: const Text('Japanese, better'),
+                  subtitle: Text('Online: Anthropic’s Claude, with your key. '
+                      '${costLine(better.cents)}'),
+                  trailing: const Icon(Icons.cloud_outlined),
+                  onTap: () => Navigator.of(ctx).pop(better),
+                ),
             ],
           ),
         ),
       ),
     );
     if (chosen == null || !mounted) return;
+    if (chosen is _BetterJapanese) return _translateBetterJapanese(chosen);
+    if (chosen is! TranslationRoute) return;
     if (!chosen.ready && !await _downloadLegs(chosen)) return;
     final fresh = await service.route(source, chosen.target);
     if (fresh == null || !fresh.ready || !mounted) return;
     await _startTranslation(fresh);
   }
+
+  /// The Anthropic brain, when it is the chosen brain and its key is
+  /// there; null otherwise. Found once as the reader opens, in the
+  /// background, so the Translate sheet never waits on the key store.
+  BrainReady? _anthropic;
+
+  Future<void> _findAnthropic() async {
+    final store = widget.brain ?? widget.translation?.brain;
+    if (store == null) return;
+    final use = await store.brainForUse();
+    if (!mounted) return;
+    if (use is BrainReady &&
+        use.provenance.brainTier == BrainTier.byokAnthropic) {
+      _anthropic = use;
+    }
+  }
+
+  /// Better Japanese (board-0126 point 2): offered for an English work
+  /// only while Anthropic is the chosen brain and its key is there. A key
+  /// kept while another brain is chosen is not used: the person picks the
+  /// brain (brain_wiring's no-silent-fallback law). [cents] prices only
+  /// the sentences the brain has not translated yet.
+  Future<_BetterJapanese?> _betterJapanese() async {
+    final use = _anthropic;
+    if (use == null) return null;
+    final stored =
+        await widget.db.spineDao.translationSentencesOf(widget.work.id, lang: 'ja');
+    final todo = [
+      for (final u in sentenceUnitsOf(_original))
+        if (!_madeByBrain(stored, u)) u.text,
+    ];
+    // All of it made by the brain already: nothing to send, no choice.
+    if (todo.isEmpty) return null;
+    return _BetterJapanese(use, brainTranslationCents(todo));
+  }
+
+  /// Whether [u]'s current Japanese is the brain's.
+  static bool _madeByBrain(Map<(int, int), TranslationSentence> stored,
+      TranslatableSentence u) {
+    final row = stored[(u.segIdx, u.sentenceIdx)];
+    return row != null &&
+        row.sourceText == u.text &&
+        row.engine == _betterJapaneseEngine;
+  }
+
+  /// Asks before anything leaves the device (ADR-0003 law 6), naming
+  /// where the text goes, under whose key, and what it costs; then runs
+  /// the translation through the brain. A no sends and stores nothing.
+  Future<void> _translateBetterJapanese(_BetterJapanese better) async {
+    final ok = await confirmDownload(context,
+        title: 'Send to Anthropic?',
+        accept: 'Send',
+        items: [
+          DownloadItem('The text of “${widget.work.title}” goes to '
+              '${better.ready.egressHost}, where Anthropic’s Claude puts it '
+              'into Japanese.'),
+          DownloadItem('It uses your Anthropic key. '
+              '${costLine(better.cents)}'),
+        ]);
+    if (!ok || !mounted) return;
+    final translator = BrainSentenceTranslator(BrainTranslator(
+        brain: better.ready.brain,
+        sourceLang: languageDisplayName('en'),
+        targetLang: languageDisplayName('ja'),
+        engine: _betterJapaneseEngine));
+    final phase = await _runTranslation(
+      target: 'ja',
+      steps: [
+        TranslationStep(
+            lang: 'ja',
+            engine: _betterJapaneseEngine,
+            open: () async => translator),
+      ],
+      resumable: false,
+    );
+    if (!mounted) return;
+    final missed = sentenceUnitsOf(_original)
+        .any((u) => !_madeByBrain(_translatedSentences, u));
+    if (phase == TranslationJobPhase.done && missed) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Anthropic didn’t translate every sentence. '
+              'Choose Japanese, better again to try the rest.')));
+    }
+  }
+
+  /// What rows made by the Anthropic brain carry as their engine.
+  static final _betterJapaneseEngine = anthropicTranslationEngine;
 
   /// "Ready", "Via English · Ready", "Download 113 MB", "Update
   /// available: 60 MB" (a pair already here whose decoder was re-pinned).
@@ -1977,37 +2080,50 @@ class _ReaderScreenState extends State<ReaderScreen>
   Future<void> _startTranslation(TranslationRoute route) async {
     final service = widget.translation;
     if (service == null) return;
-    if (route.target == _sourceLang || route.target == route.source) return;
-    if (_activeLang != null || _translationJob != null) return;
-    await widget.db.spineDao
-        .setActiveTranslationLang(widget.work.id, route.target);
+    if (route.target == route.source) return;
+    await _runTranslation(target: route.target, steps: [
+      for (final leg in route.legs)
+        TranslationStep(lang: leg.target, open: () => service.open(leg.spec)),
+    ]);
+  }
+
+  /// Runs [steps] into [target] (see [_startTranslation]). [resumable] is
+  /// false for a run that sends text away: it is never picked up again
+  /// without a new yes. Returns how the run ended, or null when none ran.
+  Future<TranslationJobPhase?> _runTranslation({
+    required String target,
+    required List<TranslationStep> steps,
+    bool resumable = true,
+  }) async {
+    final service = widget.translation;
+    if (target == _sourceLang) return null;
+    if (_activeLang != null || _translationJob != null) return null;
+    await widget.db.spineDao.setActiveTranslationLang(widget.work.id, target);
     // The sentences in memory are the old target's until this run ends:
     // left there, Both would show another language's sentences under the
     // new one's name, and Read aloud would hand them to the new
     // language's voice. Swap in what is stored for the new target (none,
     // or what an interrupted run already made).
-    final stored = route.target == _activeTranslationLang
+    final stored = target == _activeTranslationLang
         ? _translatedSentences
         : await widget.db.spineDao
-            .translationSentencesOf(widget.work.id, lang: route.target);
-    if (!mounted) return;
+            .translationSentencesOf(widget.work.id, lang: target);
+    if (!mounted) return null;
     final from = _cursorSentence();
     final onlyBefore = _translationOnlyActive;
     final run = TranslationRun(
       dao: widget.db.spineDao,
       workId: widget.work.id,
       units: sentenceUnitsOf(_original),
-      target: route.target,
-      steps: [
-        for (final leg in route.legs)
-          TranslationStep(lang: leg.target, open: () => service.open(leg.spec)),
-      ],
-      foreground: service.foreground,
+      target: target,
+      steps: steps,
+      foreground: service?.foreground,
       title: widget.work.title,
+      resumable: resumable,
     );
     run.addListener(_onTranslationProgress);
     setState(() {
-      _activeTranslationLang = route.target;
+      _activeTranslationLang = target;
       _translatedSentences = stored;
       _showTranslation = true;
       _translationJob = run;
@@ -2015,10 +2131,10 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (onlyBefore || _translationOnlyActive) _applyProjection(from);
     await run.start();
     run.removeListener(_onTranslationProgress);
-    if (!mounted) return;
+    if (!mounted) return null;
     final translatedSentences = await widget.db.spineDao
-        .translationSentencesOf(widget.work.id, lang: route.target);
-    if (!mounted) return;
+        .translationSentencesOf(widget.work.id, lang: target);
+    if (!mounted) return null;
     final at = _cursorSentence();
     final wasOnly = _translationOnlyActive;
     setState(() {
@@ -2031,6 +2147,7 @@ class _ReaderScreenState extends State<ReaderScreen>
           content: Text('The translator couldn’t start. Try downloading '
               'its language again in Models.')));
     }
+    return run.state.phase;
   }
 
   void _onTranslationProgress() {
@@ -3777,6 +3894,35 @@ class _ReaderScreenState extends State<ReaderScreen>
     // and run spacing set Follow along looser than the same text on Line,
     // and the gap didn't grow with the text.
     final space = _wordSpace(base);
+    // Japanese is one unit a character, and its characters touch: a block
+    // holding any such pair carries each word's gap after it instead, and
+    // none where two characters meet. A block without one keeps the plain
+    // spacing, so Latin pages lay out exactly as before.
+    final touches = <int>{
+      for (var w = start; w + 1 < end; w++)
+        if (core.joinsWithoutSpace(doc.words[w], doc.words[w + 1])) w,
+    };
+    if (touches.isNotEmpty) {
+      return Wrap(
+        runSpacing: 0,
+        alignment: WrapAlignment.start,
+        crossAxisAlignment: WrapCrossAlignment.end,
+        children: [
+          for (var w = start; w < end; w++)
+            GestureDetector(
+              onTap: () => _seekToWord(w),
+              onLongPress: () => _openDefinitionSheet(doc.words[w]),
+              child: Padding(
+                padding: EdgeInsets.only(
+                    right: touches.contains(w) || w == end - 1 ? 0 : space),
+                // No band reaches past its own character: the one beside
+                // it touches, and a band would paint over its edge.
+                child: _flowWord(doc, w, base, theme, 0),
+              ),
+            ),
+        ],
+      );
+    }
     return Wrap(
       spacing: space,
       runSpacing: 0,
@@ -4082,4 +4228,12 @@ class _ReadAloudClient implements SessionClient {
 
   @override
   Future<void> seek(Duration position) async {}
+}
+
+/// The better-Japanese choice in the Translate sheet: the brain to send
+/// to, and what it would cost in US cents.
+class _BetterJapanese {
+  const _BetterJapanese(this.ready, this.cents);
+  final BrainReady ready;
+  final int cents;
 }

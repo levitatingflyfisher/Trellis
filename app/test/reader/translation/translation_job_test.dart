@@ -8,6 +8,7 @@ import 'package:trellis/features/reader/translation/brain_translator.dart';
 import 'package:trellis/features/reader/translation/sentence_units.dart';
 import 'package:trellis/features/reader/translation/marian_types.dart';
 import 'package:trellis/features/reader/translation/translation_job.dart';
+import 'package:trellis/features/reader/translation/translator.dart';
 
 import '../../support/fake_brain.dart';
 import '../../support/fake_sentence_translator.dart';
@@ -749,6 +750,155 @@ void main() {
     });
   });
 
+  group('a run by an engine that takes many sentences at once (better '
+      'Japanese, by a brain)', () {
+    test('sends whole chunks, stamps its engine, and replaces what another '
+        'engine made while keeping its own', () async {
+      final u = units(['A.', 'B.', 'C.']);
+      for (final (i, engine) in [(0, 'marian'), (1, 'domovoi:byokAnthropic')]) {
+        await db.spineDao.upsertTranslationSentence(
+            workId: workId,
+            segmentIdx: 0,
+            sentenceIdx: i,
+            lang: 'ja',
+            sourceText: u[i].text,
+            body: 'old-$i',
+            engine: engine);
+      }
+      final brain = _FakeBatchTranslator();
+      final run = TranslationRun(
+        dao: db.spineDao,
+        workId: workId,
+        units: u,
+        target: 'ja',
+        steps: [
+          TranslationStep(
+              lang: 'ja', engine: brain.engine, open: () async => brain)
+        ],
+      );
+
+      await run.start();
+
+      expect(run.state.phase, TranslationJobPhase.done);
+      expect(brain.batches, [
+        ['A.', 'C.']
+      ], reason: 'one request for the chunk; its own row is not sent again');
+      expect(brain.singles, isEmpty);
+      final rows = await db.spineDao.translationSentencesOf(workId, lang: 'ja');
+      expect({for (final e in rows.entries) e.key: (e.value.body, e.value.engine)}, {
+        (0, 0): ('ja:A.', 'domovoi:byokAnthropic'),
+        (0, 1): ('old-1', 'domovoi:byokAnthropic'),
+        (0, 2): ('ja:C.', 'domovoi:byokAnthropic'),
+      });
+    });
+
+    test('when every sentence has another engine’s translation, the run '
+        'still sends them all', () async {
+      final u = units(['A.', 'B.']);
+      for (var i = 0; i < u.length; i++) {
+        await db.spineDao.upsertTranslationSentence(
+            workId: workId,
+            segmentIdx: 0,
+            sentenceIdx: i,
+            lang: 'ja',
+            sourceText: u[i].text,
+            body: 'old-$i',
+            engine: 'marian');
+      }
+      final brain = _FakeBatchTranslator();
+      await TranslationRun(
+        dao: db.spineDao,
+        workId: workId,
+        units: u,
+        target: 'ja',
+        steps: [
+          TranslationStep(
+              lang: 'ja',
+              engine: brain.engine,
+              open: () async => brain)
+        ],
+      ).start();
+
+      expect(brain.batches, [
+        ['A.', 'B.']
+      ]);
+      final rows = await db.spineDao.translationSentencesOf(workId, lang: 'ja');
+      expect([for (final r in rows.values) r.body], ['ja:A.', 'ja:B.']);
+    });
+
+    test('an offline run still keeps what the brain made', () async {
+      await db.spineDao.upsertTranslationSentence(
+          workId: workId,
+          segmentIdx: 0,
+          sentenceIdx: 0,
+          lang: 'ja',
+          sourceText: 'A.',
+          body: 'better',
+          engine: 'domovoi:byokAnthropic');
+      final t = FakeSentenceTranslator((s) => 'm:$s');
+      await TranslationRun(
+        dao: db.spineDao,
+        workId: workId,
+        units: units(['A.', 'B.']),
+        target: 'ja',
+        steps: [TranslationStep(lang: 'ja', open: () async => t)],
+      ).start();
+
+      expect(t.calls, ['B.']);
+      final rows = await db.spineDao.translationSentencesOf(workId, lang: 'ja');
+      expect(rows[(0, 0)]!.body, 'better');
+    });
+
+    test('a run that may not resume leaves no marker, even when killed '
+        'partway, so nothing is sent again without a new yes', () async {
+      final held = _FakeBatchTranslator(hold: true);
+      final run = TranslationRun(
+        dao: db.spineDao,
+        workId: workId,
+        units: units(['A.', 'B.']),
+        target: 'ja',
+        resumable: false,
+        steps: [
+          TranslationStep(
+              lang: 'ja', engine: held.engine, open: () async => held)
+        ],
+      );
+      unawaited(run.start());
+      await pumpEventQueue();
+
+      expect(held.batches, hasLength(1));
+      expect(await db.spineDao.translationRunLang(workId), isNull);
+    });
+  });
+}
+
+/// A many-sentences-at-once engine: answers `ja:<sentence>`, records each
+/// request, and with [hold] never answers (a killed process).
+class _FakeBatchTranslator implements BatchSentenceTranslator {
+  _FakeBatchTranslator({this.hold = false});
+
+  final bool hold;
+  final List<List<String>> batches = [];
+  final List<String> singles = [];
+
+  @override
+  String get engine => 'domovoi:byokAnthropic';
+
+  @override
+  Future<List<String?>> translateBatch(List<String> sentences) {
+    batches.add(sentences);
+    if (hold) return Completer<List<String?>>().future;
+    return Future.value([for (final s in sentences) 'ja:$s']);
+  }
+
+  @override
+  Future<String> translate(String sentence) async {
+    singles.add(sentence);
+    return 'ja:$sentence';
+  }
+
+  @override
+  Future<void> dispose() async {}
 }
 
 /// Stands in for `UnavailableTierBrain` (brain_wiring's real stove/

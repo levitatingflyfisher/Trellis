@@ -1,0 +1,1 @@
+Japanese reads without a space between every character. "Japanese, better": an optional online translation with your own Anthropic key, only after you say yes.

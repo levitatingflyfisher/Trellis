@@ -1,4 +1,4 @@
-import 'package:brain_wiring/brain_wiring.dart' show AskException;
+import 'package:brain_wiring/brain_wiring.dart' show AnthropicBrain, AskException;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/features/reader/translation/brain_translator.dart';
 
@@ -167,6 +167,61 @@ void main() {
 
       await expectLater(
           translator.translateBatch(['Hello.']), throwsA(isA<AskException>()));
+    });
+  });
+
+  group('as a run’s engine', () {
+    test('a single sentence is a chunk of one, and its engine is the '
+        'brain’s', () async {
+      final brain = FakeBrain(['{"translations": ["こんにちは。"]}']);
+      final t = BrainSentenceTranslator(BrainTranslator(
+          brain: brain,
+          sourceLang: 'en',
+          targetLang: 'ja',
+          engine: 'domovoi:byokAnthropic'));
+
+      expect(await t.translate('Hello.'), 'こんにちは。');
+      expect(t.engine, 'domovoi:byokAnthropic');
+      expect(brain.callCount, 1);
+    });
+
+    test('a blank answer for a single sentence is a failure, not an empty '
+        'translation', () async {
+      final t = BrainSentenceTranslator(BrainTranslator(
+          brain: FakeBrain(['{"translations": [""]}']),
+          sourceLang: 'en',
+          targetLang: 'ja',
+          engine: 'domovoi:byokAnthropic'));
+
+      await expectLater(t.translate('Hello.'),
+          throwsA(isA<BrainTranslationFailedException>()));
+    });
+  });
+
+  group('what better Japanese costs', () {
+    test('the estimate is priced for the model the app sends to', () {
+      // The prices in brainTranslationCents are claude-sonnet-5's. A new
+      // default model must bring its own prices with it.
+      expect(AnthropicBrain.defaultModel, 'claude-sonnet-5');
+    });
+
+    test('a short work costs about a cent', () {
+      expect(brainTranslationCents(['Hello there.', 'How are you?']), 1);
+      expect(costLine(1), 'About 1 cent for this.');
+    });
+
+    test('an hour of talk (about 9,000 words) costs well under a dollar',
+        () {
+      // 600 sentences of 83 characters: about 50,000 characters.
+      final hour = List.filled(600, 'The harbour was quiet this morning, '
+          'and the boats sat still on the grey water.     ');
+      final cents = brainTranslationCents(hour);
+      expect(cents, inInclusiveRange(40, 90));
+      expect(costLine(cents), 'About $cents cents for this.');
+    });
+
+    test('a long book is shown in dollars', () {
+      expect(costLine(740), 'About \$7.40 for this.');
     });
   });
 }

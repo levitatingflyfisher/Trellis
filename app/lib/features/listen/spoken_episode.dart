@@ -22,6 +22,8 @@ import '../../db/database.dart';
 import '../intake/paste_intake.dart' show epochDayUtcNow;
 import '../reader/speech/speech_engine.dart';
 import '../reader/speech/wav.dart' show resample;
+import '../reader/translation/brain_translator.dart'
+    show anthropicTranslationEngine;
 import '../reader/translation/language_names.dart';
 import '../transcribe/transcript_writer.dart' show encodeWordTimingBlob;
 import 'spoken_guid.dart';
@@ -230,11 +232,25 @@ Future<int> storeSpokenEpisode({
         .add(s);
   }
   final language = languageDisplayName(lang);
+  // Where the words were translated, read from the rows themselves: a
+  // page that says "on this device" must not be wrong about it.
+  final engines = {
+    for (final r in (await db.spineDao
+            .translationSentencesOf(original.id, lang: lang))
+        .values)
+      r.engine == anthropicTranslationEngine,
+  };
+  final where = switch ((engines.contains(true), engines.contains(false))) {
+    (true, false) => 'translated online by Anthropic’s Claude',
+    (true, true) => 'translated partly online by Anthropic’s Claude and '
+        'partly on this device',
+    _ => 'translated on this device',
+  };
   final about = [
     'This is “${original.title}” in $language, spoken by a machine-made '
         'voice ($voice).',
-    'The words were translated on this device from a transcript made on '
-        'this device, so both can be wrong in places.',
+    'The words were $where from a transcript made on this device, so both '
+        'can be wrong in places.',
   ];
 
   final existing = await spokenEpisodeOf(db, original.id, lang);

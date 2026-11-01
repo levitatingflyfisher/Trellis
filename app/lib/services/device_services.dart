@@ -30,6 +30,7 @@ import '../features/reader/speech/supertonic_voice_handle.dart';
 import '../features/reader/speech/speech_temp_files.dart';
 import '../features/dsp/dsp_encoder.dart';
 import '../features/dsp/dsp_ffmpeg_encoder.dart';
+import '../features/brain/brain_store.dart';
 import '../features/reader/translation/marian_engine.dart';
 import '../features/reader/translation/translation_service.dart';
 import '../features/reader/translation/translation_route.dart'
@@ -320,6 +321,10 @@ class DeviceServices {
   /// reminder is shown.
   final BackupCustody? backupCustody;
 
+  /// The person's brain settings, read by the Translate sheet to offer
+  /// better Japanese. Null (tests, the background check) offers none.
+  final BrainStore? brainStore;
+
   DeviceServices({
     required this.supportDir,
     required this.modelStore,
@@ -337,6 +342,7 @@ class DeviceServices {
     this.tier = DeviceTier.t1,
     this.webFetchLane = WebFetchLane.direct,
     this.backupCustody,
+    this.brainStore,
   }) : tts = tts ?? NoopTtsSpeaker(),
        phoneVoices = phoneVoices ?? PhoneVoiceCache(null),
        dspEncoder = dspEncoder ?? UnavailableDspEncoder();
@@ -362,6 +368,7 @@ class DeviceServices {
         dspEncoder: _isAndroid ? FfmpegDspEncoder() : UnavailableDspEncoder(),
         databaseFile: databaseFile,
         backupCustody: SecureBackupCustody(),
+        brainStore: BrainStore.production(),
         engineFor: (modelPath) => WhisperEngineSpec(
           modelPath: modelPath,
           libraryPath: whisperLibraryPath(),
@@ -574,6 +581,7 @@ class DeviceServices {
           store: modelStore,
           openSpec: translatorFor,
           foreground: foregroundGate,
+          brain: brainStore,
         )
       : null;
 

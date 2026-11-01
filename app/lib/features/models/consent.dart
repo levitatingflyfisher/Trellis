@@ -16,15 +16,20 @@ class DownloadItem {
 
 /// Returns true only on the user's explicit "Download". Everything else —
 /// cancel, barrier tap, back — is a no.
+///
+/// [title] and [accept] name the egress when it sends rather than
+/// fetches (text to a cloud brain): the same one dialog, honest words.
 Future<bool> confirmDownload(
   BuildContext context, {
   required List<DownloadItem> items,
+  String title = 'Download?',
+  String accept = 'Download',
 }) async {
   final ok = await showDialog<bool>(
     context: context,
     builder: (context) => AlertDialog(
       key: const Key('consent-dialog'),
-      title: const Text('Download?'),
+      title: Text(title),
       content: Column(
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -51,7 +56,7 @@ Future<bool> confirmDownload(
         FilledButton(
           key: const Key('consent-accept'),
           onPressed: () => Navigator.of(context).pop(true),
-          child: const Text('Download'),
+          child: Text(accept),
         ),
       ],
     ),

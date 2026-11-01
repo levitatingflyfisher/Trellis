@@ -7,6 +7,7 @@ library;
 
 import 'package:ml_runtime/ml_runtime.dart';
 
+import '../../brain/brain_store.dart';
 import '../../models/model_store.dart';
 import '../../transcribe/foreground_gate.dart';
 import 'translation_route.dart' as route_plan;
@@ -32,7 +33,13 @@ class TranslationService {
     required this.store,
     required this.openSpec,
     this.foreground,
+    this.brain,
   });
+
+  /// The person's brain settings, for better Japanese: the Translate sheet
+  /// offers it when Anthropic is the chosen brain with its key. Null
+  /// offers none (tests, and any build without a key store).
+  final BrainStore? brain;
 
   Future<Map<String, int>> _missing() async => {
         for (final s in registry.translationPairsAt(tier))

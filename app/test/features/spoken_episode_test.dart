@@ -257,6 +257,56 @@ void main() {
       expect(notes.plain, contains('Harbour episode'));
     });
 
+    Future<void> translatedBy(List<String> engines) async {
+      for (final (i, engine) in engines.indexed) {
+        await db.spineDao.upsertTranslationSentence(
+            workId: original.id,
+            segmentIdx: 0,
+            sentenceIdx: i,
+            lang: 'ja',
+            sourceText: 'Sentence $i.',
+            body: '文$i。',
+            engine: engine);
+      }
+    }
+
+    test('made from Japanese by the Anthropic brain, its page says so and '
+        'never says the words were translated on this device', () async {
+      await translatedBy(['domovoi:byokAnthropic', 'domovoi:byokAnthropic']);
+      final id = await store(lang: 'ja', sentences: const [
+        (seg: 0, text: '文0。'),
+        (seg: 0, text: '文1。'),
+      ]);
+
+      final notes = (await db.feedsDao.notesOf(id))!.plain;
+      expect(notes, contains('translated online by Anthropic’s Claude'));
+      expect(notes, isNot(contains('translated on this device')));
+    });
+
+    test('made from both, its page names both', () async {
+      await translatedBy(['domovoi:byokAnthropic', 'marian']);
+      final id = await store(lang: 'ja', sentences: const [
+        (seg: 0, text: '文0。'),
+        (seg: 0, text: '文1。'),
+      ]);
+
+      final notes = (await db.feedsDao.notesOf(id))!.plain;
+      expect(notes, contains('partly online by Anthropic’s Claude'));
+      expect(notes, contains('partly on this device'));
+    });
+
+    test('made offline, its page says this device', () async {
+      await translatedBy(['marian', 'marian']);
+      final id = await store(lang: 'ja', sentences: const [
+        (seg: 0, text: '文0。'),
+        (seg: 0, text: '文1。'),
+      ]);
+
+      final notes = (await db.feedsDao.notesOf(id))!.plain;
+      expect(notes, contains('translated on this device'));
+      expect(notes, isNot(contains('Anthropic')));
+    });
+
     test('making it again replaces the first, not adds a second', () async {
       final first = await store();
       final second = await store();

@@ -7,6 +7,11 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.6.7 — 2026-11-11
+
+- **Japanese reads as Japanese.** Scroll and Line modes no longer put a space between every Japanese character; Latin words inside Japanese keep their spaces, and the word being said still lights up.
+- **Better Japanese, online, if you choose it.** With your own Anthropic key set as the brain, the Translate sheet on an English text offers “Japanese, better”, with its cost (about 67 cents for an hour of talk). Nothing is sent until you say yes to “Send to Anthropic?”. A spoken episode made from it says it was translated online by Anthropic’s Claude.
+
 ## 1.6.6 — 2026-11-11
 
 - **Settings is on the bottom bar**, always there, beside Latest, Queue, Library and Courses. Every app-wide setting lives there now: theme, reading, voices, listening, learning language, storage and backup. Each screen’s ⋮ menu holds only that screen’s own actions, in the same order everywhere.

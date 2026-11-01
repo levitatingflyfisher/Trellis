@@ -24,6 +24,8 @@ import 'dart:convert';
 
 import 'package:brain_wiring/brain_wiring.dart';
 
+import 'translator.dart';
+
 /// The Brain's reply could not be turned into a batch of translations —
 /// calm and typed, the same shape brain_wiring's own
 /// `GradeSuggestionFailedException`/`RecapFailedException` already use.
@@ -147,4 +149,78 @@ If a sentence genuinely cannot be translated, use an empty string ""
 for its entry rather than omitting it or adding commentary.
 ''';
   }
+}
+
+/// The engine stored on rows the bring-your-own-key Anthropic brain
+/// translated: the run stamps it, and a spoken episode reads it to say
+/// where its words were translated.
+final String anthropicTranslationEngine =
+    'domovoi:${BrainTier.byokAnthropic.name}';
+
+/// [BrainTranslator] as a run's engine: whole chunks go to
+/// [translateBatch]; a single sentence is a chunk of one. Holds nothing
+/// native, so [dispose] has nothing to free.
+class BrainSentenceTranslator implements BatchSentenceTranslator {
+  BrainSentenceTranslator(this.brainTranslator);
+
+  final BrainTranslator brainTranslator;
+
+  @override
+  String get engine => brainTranslator.engine;
+
+  @override
+  Future<List<String?>> translateBatch(List<String> sentences) =>
+      brainTranslator.translateBatch(sentences);
+
+  @override
+  Future<String> translate(String sentence) async {
+    final out = await translateBatch([sentence]);
+    final text = out.isEmpty ? null : out.first;
+    if (text == null) {
+      throw BrainTranslationFailedException(cause: 'no translation');
+    }
+    return text;
+  }
+
+  @override
+  Future<void> dispose() async {}
+}
+
+/// What sending [sentences] to Anthropic for Japanese costs, in US cents,
+/// rounded up, never less than 1. An estimate, and said as one ("About").
+///
+/// Priced for `claude-sonnet-5`, the model `AnthropicBrain` sends to:
+/// US$2 per million input tokens and US$10 per million output tokens
+/// (https://platform.claude.com/docs/en/about-claude/pricing, read
+/// 2026-11-11). A test pins the model, so a new default brings its prices.
+///
+/// The token counts are rough, and on the high side on purpose:
+/// - English in: one token per 3 characters, plus about 400 tokens of
+///   instructions for each request of [_perRequest] sentences.
+/// - Japanese out: about 0.6 tokens per English character, with the JSON
+///   around it.
+/// - The model may think before it answers when the request does not say
+///   otherwise, and thinking is billed as output, so output counts twice.
+int brainTranslationCents(List<String> sentences) {
+  if (sentences.isEmpty) return 0;
+  final chars = sentences.fold<int>(0, (n, s) => n + s.length);
+  final requests = (sentences.length / _perRequest).ceil();
+  final inputTokens = chars / 3 + requests * 400;
+  final outputTokens = chars * 0.6 * 2;
+  final dollars = inputTokens * 2 / 1e6 + outputTokens * 10 / 1e6;
+  final cents = (dollars * 100).ceil();
+  return cents < 1 ? 1 : cents;
+}
+
+/// Sentences per request: a run's chunk size
+/// (`TranslationJobController.chunkSize`).
+const _perRequest = 15;
+
+/// "About 1 cent for this.", "About 25 cents for this.", and from a
+/// dollar up "About $7.40 for this."
+String costLine(int cents) {
+  if (cents >= 100) {
+    return 'About \$${(cents / 100).toStringAsFixed(2)} for this.';
+  }
+  return 'About $cents ${cents == 1 ? 'cent' : 'cents'} for this.';
 }
