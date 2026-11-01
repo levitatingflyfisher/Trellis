@@ -370,4 +370,38 @@ void main() {
       fixtureName: 'ja',
     );
   });
+
+  group('half-width Japanese is read as NFKC reads it', () {
+    // Hugging Face's tokenizer (the model's own NFKC normalizer) turns a
+    // half-width ｡ into 。; without the same mapping it became <unk>
+    // (found measuring the ja-en pair on NTREX, 2026-11-11).
+    test('half-width punctuation becomes the full-width form', () {
+      expect(MarianUnigramTokenizer.normalize('今日は｡'), '▁今日は。');
+      expect(MarianUnigramTokenizer.normalize('｢ﾃｽﾄ｣､･ｰ'), '▁「テスト」、・ー');
+    });
+
+    test('half-width katakana becomes full-width, and a voicing mark joins '
+        'the kana before it', () {
+      expect(MarianUnigramTokenizer.normalize('ｺﾝﾆﾁﾊ'), '▁コンニチハ');
+      expect(MarianUnigramTokenizer.normalize('ｶﾞｷﾞﾊﾟﾋﾟｳﾞ'), '▁ガギパピヴ');
+      expect(MarianUnigramTokenizer.normalize('かﾞ'), '▁が',
+          reason: 'NFKC joins the mark to a hiragana too');
+      expect(MarianUnigramTokenizer.normalize('ｧｯｬｦﾝ'), '▁ァッャヲン');
+      // A mark with nothing to join stays a combining mark, as in NFKC.
+      expect(MarianUnigramTokenizer.normalize('ｱﾞ'), '▁ア\u3099');
+    });
+
+    test('text already full-width is left as it is', () {
+      expect(MarianUnigramTokenizer.normalize('「ガ」、。'), '▁「ガ」、。');
+    });
+
+    test('a half-width ｡ is the same pieces as 。', () {
+      final t = MarianUnigramTokenizer([
+        SpmPiece('▁', -1, SpmPieceType.normal),
+        SpmPiece('今日は', -1, SpmPieceType.normal),
+        SpmPiece('。', -1, SpmPieceType.normal),
+      ]);
+      expect(t.encodeToPieces('今日は｡'), t.encodeToPieces('今日は。'));
+    });
+  });
 }

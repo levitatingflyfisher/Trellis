@@ -12,18 +12,24 @@ import 'package:flutter/material.dart';
 /// DeviceServices.lookupDefinition, closed over so this widget never
 /// reaches a device-services mock in its own tests. [onKeep] is the
 /// existing ledger add (ReaderScreen._keepWord), unchanged — the sheet
-/// only decides WHEN it runs, not what it does.
+/// only decides WHEN it runs, not what it does. [onMakeCard], where the
+/// reader gives one, makes a card from the word in its sentence; the
+/// sheet closes before it runs.
 Future<void> showDefinitionSheet(
   BuildContext context, {
   required String word,
   required Future<String?> Function(String word) lookupDefinition,
   required Future<void> Function() onKeep,
+  Future<void> Function()? onMakeCard,
 }) {
   return showModalBottomSheet<void>(
     context: context,
     isScrollControlled: true,
     builder: (_) => _DefinitionSheet(
-        word: word, lookupDefinition: lookupDefinition, onKeep: onKeep),
+        word: word,
+        lookupDefinition: lookupDefinition,
+        onKeep: onKeep,
+        onMakeCard: onMakeCard),
   );
 }
 
@@ -31,11 +37,13 @@ class _DefinitionSheet extends StatefulWidget {
   const _DefinitionSheet(
       {required this.word,
       required this.lookupDefinition,
-      required this.onKeep});
+      required this.onKeep,
+      this.onMakeCard});
 
   final String word;
   final Future<String?> Function(String word) lookupDefinition;
   final Future<void> Function() onKeep;
+  final Future<void> Function()? onMakeCard;
 
   @override
   State<_DefinitionSheet> createState() => _DefinitionSheetState();
@@ -102,9 +110,26 @@ class _DefinitionSheetState extends State<_DefinitionSheet> {
             else
               Text(_definition!, style: theme.textTheme.bodyLarge),
             const SizedBox(height: 16),
-            Align(
-              alignment: Alignment.centerRight,
-              child: FilledButton.icon(
+            Wrap(
+              alignment: WrapAlignment.end,
+              spacing: 8,
+              runSpacing: 8,
+              children: [
+                if (widget.onMakeCard case final make?)
+                  OutlinedButton.icon(
+                    key: const Key('definition-sheet-card'),
+                    style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(48, 48)),
+                    onPressed: () async {
+                      // Closed first: the card editor opens as a page
+                      // of its own, not over the sheet.
+                      Navigator.of(context).pop();
+                      await make();
+                    },
+                    icon: const Icon(Icons.style_outlined),
+                    label: const Text('Make a card'),
+                  ),
+                FilledButton.icon(
                 key: const Key('definition-sheet-keep'),
                 onPressed: () async {
                   await widget.onKeep();
@@ -117,6 +142,7 @@ class _DefinitionSheetState extends State<_DefinitionSheet> {
                 icon: const Icon(Icons.bookmark_add_outlined),
                 label: const Text('Add to word ledger'),
               ),
+              ],
             ),
           ],
         ),

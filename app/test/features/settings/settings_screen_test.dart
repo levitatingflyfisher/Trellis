@@ -4,6 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/listen/listen_jobs.dart'
     show learningLanguageKey;
+import 'package:trellis/features/listen/spoken_share.dart'
+    show shareClonedVoiceAudioKey;
 import 'package:trellis/features/settings/settings_screen.dart';
 import 'package:trellis/services/device_services.dart' show SystemVoice;
 
@@ -120,6 +122,33 @@ void main() {
         (tester) async {
       await pumpSettings(tester, await seedProfile());
       expect(find.byKey(const Key('dsp-global-default-toggle')), findsNothing);
+    });
+  });
+
+  group('Share audio made in a host’s own voice', () {
+    testWidgets('is under Listening, off by default, and a tap turns it on',
+        (tester) async {
+      final profile = await seedProfile();
+      await pumpSettings(tester, profile, localMlAvailable: true);
+      const key = Key('share-cloned-voice-toggle');
+      expect(switchOn(tester, key), isFalse);
+      expect(await db.deviceSettingsDao.read(shareClonedVoiceAudioKey),
+          isNull);
+
+      await tapRow(tester, key);
+      expect(switchOn(tester, key), isTrue);
+      expect(await db.deviceSettingsDao.read(shareClonedVoiceAudioKey), '1');
+
+      await tapRow(tester, key);
+      expect(switchOn(tester, key), isFalse);
+      expect(await db.deviceSettingsDao.read(shareClonedVoiceAudioKey), '0');
+    });
+
+    testWidgets('is not offered where nothing can be made (the web)',
+        (tester) async {
+      final profile = await seedProfile();
+      await pumpSettings(tester, profile);
+      expect(find.byKey(const Key('share-cloned-voice-toggle')), findsNothing);
     });
   });
 

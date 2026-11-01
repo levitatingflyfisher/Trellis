@@ -404,6 +404,14 @@ class Episodes extends Table {
   /// app for, which shows its source's title ("Shared").
   TextColumn get sourceLabel => text().nullable()();
 
+  /// The kind of voice a made episode was spoken in (1.6.x): 'machine', a
+  /// made voice that copies nobody, or 'cloned', a copy of a real
+  /// person's voice. Share keeps a cloned voice's file behind its own
+  /// switch, so the kind is stored rather than read back out of words.
+  /// Null for every episode Trellis did not make, and for one made
+  /// before the kind was stored, when every voice was a machine voice.
+  TextColumn get voiceKind => text().nullable()();
+
   @override
   Set<Column> get primaryKey => {workId};
 }
@@ -884,6 +892,42 @@ class StudyDao extends DatabaseAccessor<AppDatabase> with _$StudyDaoMixin {
       );
     });
   }
+
+  /// Replaces course row [courseRowId]'s text with [raw] (a card made or
+  /// edited by hand). The strict parser checks it first and nothing is
+  /// written if it fails; the cards and their history stay, keyed by item
+  /// id, as on a re-import.
+  Future<void> saveCourseRaw(int courseRowId, String raw) async {
+    final course = study.parseCourseString(raw); // throws before any write
+    await (update(courses)..where((c) => c.id.equals(courseRowId))).write(
+      CoursesCompanion(title: Value(course.title), raw: Value(raw)),
+    );
+  }
+
+  Future<CourseRow?> courseRowById(int courseRowId) =>
+      (select(courses)..where((c) => c.id.equals(courseRowId)))
+          .getSingleOrNull();
+
+  /// This reader's course with the id inside its text, if any.
+  Future<CourseRow?> courseRowOf(int profileId, String courseId) =>
+      (select(courses)
+            ..where((c) =>
+                c.profileId.equals(profileId) & c.courseId.equals(courseId)))
+          .getSingleOrNull();
+
+  /// Removes a course with its cards and their review history, in one
+  /// transaction: a removed course leaves no card that nothing can show.
+  Future<void> deleteCourse(int courseRowId) => transaction(() async {
+        final ids = (await (select(cards)
+                  ..where((c) => c.courseId.equals(courseRowId)))
+                .get())
+            .map((c) => c.id)
+            .toList();
+        await (delete(revlog)..where((r) => r.cardId.isIn(ids))).go();
+        await (delete(cards)..where((c) => c.courseId.equals(courseRowId)))
+            .go();
+        await (delete(courses)..where((c) => c.id.equals(courseRowId))).go();
+      });
 
   Future<List<CourseRow>> coursesOf(int profileId) =>
       (select(courses)
@@ -2241,6 +2285,19 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
     };
   }
 
+  /// The works with at least one sentence in [lang] translated by
+  /// [engine], in one query: what a whole list of one-tap rows asks to
+  /// say where their words would come from.
+  Future<Set<int>> worksTranslatedBy(String lang, String engine) async {
+    final q = selectOnly(translationSentences, distinct: true)
+      ..addColumns([translationSentences.workId])
+      ..where(translationSentences.lang.equals(lang) &
+          translationSentences.engine.equals(engine));
+    return {
+      for (final r in await q.get()) r.read(translationSentences.workId)!,
+    };
+  }
+
   /// Whether this work has ANY translated sentences in [lang] yet — the
   /// reader's honesty gate for showing the dual-display toggle at all (a
   /// work no translation job has ever touched offers nothing to switch on).
@@ -3173,6 +3230,7 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
     String? imageUrl,
     required int publishedAtMs,
     String? sourceLabel,
+    String? voiceKind,
   }) => into(episodes).insert(
     EpisodesCompanion.insert(
       workId: Value(workId),
@@ -3183,6 +3241,7 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
       imageUrl: Value(imageUrl),
       publishedAtMs: publishedAtMs,
       sourceLabel: Value(sourceLabel),
+      voiceKind: Value(voiceKind),
     ),
   );
 
@@ -4008,7 +4067,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 32;
+  int get schemaVersion => 33;
   // There is no v14: it was reserved for the reader-depth campaign, which
   // landed as v18 after three sibling campaigns merged ahead of it, so the
   // guard chain skips from 13 to 15. Version gaps are harmless — an
@@ -4419,6 +4478,13 @@ class AppDatabase extends _$AppDatabase {
               // 1.5.8: Translation only / Both, per work. Unconditional:
               // `works` is never created inside onUpgrade.
               await m.addColumn(works, works.translationView);
+            });
+          }
+          if (from >= 2 && from < 33) {
+            // 1.6.x: a made episode's voice kind. Guarded like every
+            // episodes column (the from < 2 block creates the table).
+            await transaction(() async {
+              await m.addColumn(episodes, episodes.voiceKind);
             });
           }
         },

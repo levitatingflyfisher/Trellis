@@ -72,6 +72,7 @@ class ListenState {
 /// and the call that says one sentence.
 typedef SavedVoice = ({
   String name,
+  VoiceKind voiceKind,
   Future<SynthResult> Function(String text) say,
 });
 
@@ -137,7 +138,7 @@ class ListenChain extends ChangeNotifier {
   /// and the [voice] that said it, and returns it, or null to keep the
   /// WAV (no encoder here, or it failed).
   final Future<File?> Function(File wav,
-      {required String title, required String voice})? encode;
+      {required String title, required String comment})? encode;
 
   /// Keeps the app alive behind a dark screen for the whole job: an
   /// hour's episode is many minutes of work, and Android freezes an app
@@ -316,18 +317,22 @@ class ListenChain extends ChangeNotifier {
           onProgress: (done, total) => beat(ListenState(
               ListenStage.speaking, lang: lang, done: done, total: total)));
       File audio = wav;
-      final packed = await encode?.call(wav,
-          title: '${fresh.title} (${languageDisplayName(lang)})',
-          voice: voice.name);
+      final title = '${fresh.title} (${languageDisplayName(lang)})';
+      final comment = spokenAudioComment(voice.name, voice.voiceKind);
+      final packed =
+          await encode?.call(wav, title: title, comment: comment);
       if (packed != null) {
         audio = packed;
         if (wav.existsSync()) wav.deleteSync();
+      } else {
+        await tagWav(wav, title: title, comment: comment);
       }
       final id = await storeSpokenEpisode(
           db: db,
           original: fresh,
           lang: lang,
           voice: voice.name,
+          voiceKind: voice.voiceKind,
           render: render,
           audio: audio,
           audioFileFor: audioFileFor);

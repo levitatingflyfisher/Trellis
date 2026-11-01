@@ -14,3 +14,4 @@ export 'listen_native.dart'
 
 // Pure, and the same on every tier: how a made episode names its original.
 export 'spoken_guid.dart';
+export 'spoken_voice.dart';

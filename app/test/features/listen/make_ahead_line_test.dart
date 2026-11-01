@@ -9,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:openhearth_design/openhearth_design.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/listen/listen_chain.dart';
+import 'package:trellis/features/listen/spoken_episode.dart' show VoiceKind;
 import 'package:trellis/features/listen/listen_jobs.dart';
 import 'package:trellis/features/listen/make_ahead.dart';
 import 'package:trellis/features/listen/make_ahead_jobs.dart';
@@ -113,6 +114,7 @@ void main() {
         },
         voiceFor: (_, lang) async => (
           name: 'Test voice',
+          voiceKind: VoiceKind.machine,
           say: (String t) async =>
               SynthResult(samples: Float32List(100), sampleRate: 1000),
         ),

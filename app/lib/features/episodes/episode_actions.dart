@@ -5,6 +5,7 @@
 library;
 
 import '../listen/listen.dart';
+import '../listen/spoken_share.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -47,6 +48,10 @@ class EpisodeActions {
   /// The platform share; null copies to the clipboard instead.
   final ShareText? shareText;
 
+  /// The platform share for a file; null where there is none (the web),
+  /// and then Share sends words only.
+  final ShareFile? shareFile;
+
   /// Null on the web tier: there `existsSync` throws, so no artwork or
   /// download check may touch the disk.
   final DeviceServices? services;
@@ -69,6 +74,7 @@ class EpisodeActions {
     this.dsp,
     this.transcriber,
     ShareText? shareText,
+    ShareFile? shareFile,
     bool useDefaultShare = true,
     DeviceServices? services,
     this.localMlAvailable = true,
@@ -79,6 +85,7 @@ class EpisodeActions {
   }) : services = localMlAvailable ? services : null,
        _givenListenJobs = listenJobs,
        shareText = shareText ?? (useDefaultShare ? defaultShareText : null),
+       shareFile = shareFile ?? (useDefaultShare ? defaultShareFile : null),
        _nowMs = nowMs ?? (() => DateTime.now().millisecondsSinceEpoch);
 
   bool get canDownload => localMlAvailable && downloader != null;
@@ -449,8 +456,7 @@ class EpisodeActions {
     }
     switch (choice) {
       case 'share':
-        await shareItem(
-            context, SearchItem(e.work, episode, showTitle), shareText);
+        await share(context, e, showTitle: showTitle);
         return true;
       case 'transcribe' || 'translate':
         if (episode == null) return true;
@@ -467,6 +473,95 @@ class EpisodeActions {
         return true;
     }
     return false;
+  }
+
+  /// Share. A made episode sends its audio file, named by its title,
+  /// with words that say the voice is machine made (its own address can
+  /// never be fetched). An episode whose audio is on the phone offers its
+  /// link or the file, link first: the link is what its makers publish.
+  /// Anything else sends its title and link.
+  ///
+  /// With [ownWords], [words] stands in for [shareText] (null copies to
+  /// the clipboard): the search screen's doors carry their own.
+  Future<void> share(BuildContext context, WorkEntry e,
+      {String? showTitle, ShareText? words, bool ownWords = false}) async {
+    final shareText = ownWords ? words : this.shareText;
+    final episode = e.episode;
+    final item = SearchItem(e.work, episode, showTitle);
+    final send = shareFile;
+    final device = services;
+    if (episode != null) {
+      final made = await spokenShareOf(db, e.work, episode,
+          audioFileFor: device?.audioFileFor);
+      if (made != null) {
+        if (made.audio case final audio?
+            when send != null && device != null) {
+          if (await _sendFile(audio, made.title, made.text, send, device)) {
+            return;
+          }
+        }
+        if (!context.mounted) return;
+        await shareWords(context, made.text,
+            subject: made.title, share: shareText);
+        return;
+      }
+      final url = episode.enclosureUrl;
+      final audio = url == null || device == null
+          ? null
+          : device.audioFileFor(e.work.id, url);
+      if (audio != null && send != null && audio.existsSync()) {
+        if (!context.mounted) return;
+        final choice = await _askLinkOrFile(context, audio);
+        if (choice == null) return;
+        if (choice == 'file' &&
+            await _sendFile(
+                audio, e.work.title, shareTextFor(item), send, device!)) {
+          return;
+        }
+      }
+    }
+    if (!context.mounted) return;
+    await shareItem(context, item, shareText);
+  }
+
+  Future<String?> _askLinkOrFile(BuildContext context, File audio) =>
+      showModalBottomSheet<String>(
+        context: context,
+        builder: (sheet) => SafeArea(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              ListTile(
+                key: const Key('share-link'),
+                leading: const Icon(Icons.link),
+                title: const Text('Send the link'),
+                subtitle: const Text('Where the show publishes it'),
+                onTap: () => Navigator.pop(sheet, 'link'),
+              ),
+              ListTile(
+                key: const Key('share-audio-file'),
+                leading: const Icon(Icons.audio_file_outlined),
+                title: const Text('Send the audio file'),
+                subtitle: Text(formatBytes(audio.lengthSync())),
+                onTap: () => Navigator.pop(sheet, 'file'),
+              ),
+            ],
+          ),
+        ),
+      );
+
+  /// Hands a copy of [audio] named by [title] to the share; false when
+  /// that failed, so the caller sends words instead.
+  Future<bool> _sendFile(File audio, String title, String text,
+      ShareFile send, DeviceServices device) async {
+    try {
+      final copy = await namedCopyForShare(audio, title, device.shareTempDir);
+      await send(copy.path,
+          mimeType: audioMimeTypeOf(copy.path), subject: title, text: text);
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
 
   static const commonChoices = {

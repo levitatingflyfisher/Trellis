@@ -151,4 +151,36 @@ void main() {
         reason: 'the empty state is an invitation, not a void');
   });
 
+
+  testWidgets(
+      'a held word becomes a cloze card in its own sentence: the sheet’s '
+      'Make a card opens the editor with the word hidden, and saving puts '
+      'it in My cards', (tester) async {
+    final (profileId, _) =
+        await seed('It rained all day. One two three four five.');
+    await openReader(tester);
+    await tester.tap(find.byKey(const Key('mode-toggle')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('mode-item-page')));
+    await tester.pumpAndSettle();
+
+    await tester.longPress(find.text('four'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('definition-sheet-card')));
+    await tester.pumpAndSettle();
+
+    final text = tester
+        .widget<TextField>(find.byKey(const Key('card-cloze-text')))
+        .controller!
+        .text;
+    expect(text, 'One two three {{c1::four}} five.',
+        reason: 'the sentence the word is in, not the whole passage');
+    await tester.tap(find.byKey(const Key('card-save')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Saved to My cards.'), findsOneWidget);
+    final rows = await db.studyDao.coursesOf(profileId);
+    expect(rows.single.courseId, 'my-cards');
+    expect(rows.single.raw, contains('One two three {{c1::four}} five.'));
+  });
 }

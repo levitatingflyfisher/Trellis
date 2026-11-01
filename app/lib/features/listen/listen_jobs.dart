@@ -12,11 +12,14 @@ library;
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show setEquals;
 import 'package:flutter/material.dart';
 
 import '../../db/database.dart';
 import '../models/consent.dart';
 import '../player/player_controller.dart';
+import '../reader/translation/brain_translator.dart'
+    show anthropicTranslationEngine;
 import '../reader/translation/language_names.dart';
 import 'listen_chain.dart';
 import 'listen_languages.dart';
@@ -48,6 +51,10 @@ class ListenOffer {
   /// It is made, and its audio is on the device.
   final bool ready;
 
+  /// Some of its words are already translated online (the Translate
+  /// sheet's online choice), and making it reuses them.
+  final bool translatedOnline;
+
   final ListenState? _state;
 
   const ListenOffer._({
@@ -56,6 +63,7 @@ class ListenOffer {
     this.making = false,
     this.waiting = false,
     this.ready = false,
+    this.translatedOnline = false,
     ListenState? state,
   }) : _state = state;
 
@@ -100,6 +108,14 @@ class ListenOffer {
           'the audio.';
     }
     if (ready) return '$_language is ready. The voice is machine made.';
+    // The saved episode says where its words were translated
+    // (storeSpokenEpisode); this line must not say otherwise first.
+    if (translatedOnline) {
+      return 'The first time, the $_language is made from words already '
+          'translated online by Anthropic’s Claude; any sentence still '
+          'missing is translated on this device. The audio is spoken on '
+          'this device and kept.';
+    }
     return 'The first time, the $_language is made on this device: the '
         'episode is transcribed, translated and spoken, and the audio is '
         'kept.';
@@ -198,6 +214,10 @@ class ListenJobs extends ChangeNotifier {
   /// Made episodes in the learning language: the original's work id to
   /// the spoken one's.
   Map<int, int> _made = {};
+
+  /// Episodes with words in the learning language already translated
+  /// online, which making them reuses.
+  Set<int> _online = {};
 
   final _waiting = <_Job>[];
   _Job? _current;
@@ -387,6 +407,9 @@ class ListenJobs extends ChangeNotifier {
   Future<void> _readMade() async {
     final lang = _language;
     _made = lang == null ? {} : await chain.madeEpisodesIn(lang);
+    _online = lang == null
+        ? {}
+        : await db.spineDao.worksTranslatedBy(lang, anthropicTranslationEngine);
   }
 
   /// Looks again at which episodes are made: a screen calls this when it
@@ -394,6 +417,7 @@ class ListenJobs extends ChangeNotifier {
   Future<void> refresh() async {
     if (!_loaded) return;
     final before = _made;
+    final onlineBefore = _online;
     final aheadBytes = makeAhead?.madeBytes;
     try {
       await _readMade();
@@ -403,7 +427,8 @@ class ListenJobs extends ChangeNotifier {
     }
     if (aheadBytes != makeAhead?.madeBytes) {
       notifyListeners();
-    } else if (before.length != _made.length ||
+    } else if (!setEquals(onlineBefore, _online) ||
+        before.length != _made.length ||
         before.entries.any((e) => _made[e.key] != e.value)) {
       notifyListeners();
     }
@@ -493,6 +518,7 @@ class ListenJobs extends ChangeNotifier {
         lang: lang,
         languages: languages,
         ready: _made.containsKey(id),
+        translatedOnline: _online.contains(id),
         state: state?.lang == lang ? state : null);
   }
 

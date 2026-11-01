@@ -9,11 +9,14 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:openhearth_design/openhearth_design.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/listen/listen_chain.dart';
+import 'package:trellis/features/listen/spoken_episode.dart' show VoiceKind;
 import 'package:trellis/features/listen/listen_jobs.dart';
 import 'package:trellis/features/listen/listen_row_button.dart';
 import 'package:trellis/features/models/consent.dart';
 import 'package:trellis/features/player/player_controller.dart';
 import 'package:trellis/features/reader/speech/speech_engine.dart';
+import 'package:trellis/features/reader/translation/brain_translator.dart'
+    show anthropicTranslationEngine;
 import 'package:trellis/features/works/work_row.dart';
 
 import '../support/fake_player.dart';
@@ -113,6 +116,7 @@ void main() {
         },
         voiceFor: (_, lang) async => (
           name: 'Test voice',
+          voiceKind: VoiceKind.machine,
           say: (String t) async =>
               SynthResult(samples: Float32List(100), sampleRate: 1000),
         ),
@@ -927,6 +931,31 @@ void main() {
 
       expect(j.offerFor(e.work, e.episode, feedLang: 'es'), isNull);
       expect(j.offerFor(e.work, e.episode, feedLang: 'en')?.lang, 'es');
+    });
+
+    test('the line says where the words were translated, as the saved '
+        'episode will', () async {
+      await db.deviceSettingsDao.write(learningLanguageKey, 'es');
+      final plain = await episode('Harbour');
+      final better = await episode('Lighthouse');
+      // Words already translated online for one of them (the Translate
+      // sheet's online choice): the one tap reuses those rows.
+      await db.spineDao.upsertTranslationSentence(
+          workId: better.work.id,
+          segmentIdx: 0,
+          sentenceIdx: 0,
+          lang: 'es',
+          sourceText: 'Hello there.',
+          body: 'Hola.',
+          engine: anthropicTranslationEngine);
+      final j = jobs();
+      await j.ready;
+
+      expect(j.offerFor(plain.work, plain.episode)!.line,
+          contains('made on this device'));
+      final line = j.offerFor(better.work, better.episode)!.line;
+      expect(line, contains('translated online by Anthropic’s Claude'));
+      expect(line, isNot(contains('is made on this device')));
     });
   });
 

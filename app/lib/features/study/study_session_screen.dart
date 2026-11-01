@@ -8,6 +8,9 @@ import '../../db/database.dart' hide Alignment;
 import '../brain/brain_labels.dart';
 import '../brain/brain_store.dart';
 import '../intake/paste_intake.dart' show epochDayUtcNow;
+import 'card_editing.dart' show draftOf;
+import 'card_editor_screen.dart';
+import 'card_store.dart' show editCard;
 import '../models/consent.dart';
 import '../shared/capped_body.dart';
 
@@ -191,7 +194,8 @@ class _StudySessionScreenState extends State<StudySessionScreen> {
         return p == null || p.isDue(today);
       }).toList();
       if (due.isEmpty) continue;
-      steps.add(_IntakeStep(node));
+      // A step with nothing to read (My cards) goes straight to its cards.
+      if (node.intake.trim().isNotEmpty) steps.add(_IntakeStep(node));
       // Discourse rides between reading and retrieval ("after intake,
       // teach it back" — proposal-2 §6). Courses without the rider are
       // untouched: no prompts, no steps, the session exactly as today.
@@ -438,8 +442,9 @@ class _StudySessionScreenState extends State<StudySessionScreen> {
   Widget _declarationScreen() {
     final theme = Theme.of(context);
     final items = '$_declaredItems item${_declaredItems == 1 ? '' : 's'}';
-    final concepts =
-        '$_declaredConcepts concept${_declaredConcepts == 1 ? '' : 's'}';
+    final concepts = _declaredConcepts == 0
+        ? ''
+        : ' · $_declaredConcepts concept${_declaredConcepts == 1 ? '' : 's'}';
     final prompts = _declaredPrompts == 0
         ? ''
         : ' · $_declaredPrompts prompt${_declaredPrompts == 1 ? '' : 's'}';
@@ -459,7 +464,7 @@ class _StudySessionScreenState extends State<StudySessionScreen> {
                     style: theme.textTheme.labelMedium,
                     textAlign: TextAlign.center),
                 const SizedBox(height: 4),
-                Text('$items · $concepts$prompts',
+                Text('$items$concepts$prompts',
                     style: theme.textTheme.headlineSmall,
                     textAlign: TextAlign.center),
                 if (provenance != null) ...[
@@ -646,6 +651,13 @@ class _StudySessionScreenState extends State<StudySessionScreen> {
             // ellipsizes instead of overflowing the row (the fleet's
             // recurring 320dp wound).
             Flexible(child: _RungChip(rung: item.rung)),
+            if (draftOf(item) != null && !_revealed)
+              IconButton(
+                key: const Key('edit-card'),
+                tooltip: 'Edit card',
+                icon: const Icon(Icons.edit_outlined),
+                onPressed: () => _editCard(node, item),
+              ),
           ],
         ),
         if (!_revealed && item.hints.isNotEmpty)
@@ -676,6 +688,40 @@ class _StudySessionScreenState extends State<StudySessionScreen> {
         ],
       ],
     );
+  }
+
+  /// Changes the card being asked, the way Anki's Edit does mid-review:
+  /// the course text is written, and the session asks the new words at
+  /// once, here and wherever the card comes back in it. Hidden once the
+  /// answer shows, so a grade is never given to words it was not asked.
+  Future<void> _editCard(
+      study.KnowledgeNode node, study.RetrievalItem item) async {
+    final draft = draftOf(item);
+    if (draft == null) return;
+    String? raw;
+    final saved = await showCardEditor(context,
+        title: 'Edit card',
+        initial: draft,
+        onSave: (d, _) async {
+          await editCard(widget.db, widget.courseRowId, item.id, d);
+          raw = (await widget.db.studyDao.courseRowById(widget.courseRowId))
+              ?.raw;
+        });
+    if (!saved || raw == null || !mounted) return;
+    final fresh = study
+        .parseCourseString(raw!)
+        .nodes
+        .expand((n) => n.items)
+        .firstWhere((i) => i.id == item.id);
+    _clearResponses(item);
+    setState(() {
+      final steps = _steps!;
+      for (var k = _i; k < steps.length; k++) {
+        if (steps[k] case final _ItemStep s when s.item.id == item.id) {
+          steps[k] = _ItemStep(s.node, fresh, relearn: s.relearn);
+        }
+      }
+    });
   }
 
   // ---- cloze ---------------------------------------------------------------

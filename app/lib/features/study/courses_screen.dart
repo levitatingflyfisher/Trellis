@@ -5,6 +5,8 @@ import 'package:study_core/study_core.dart' as study;
 
 import '../../db/database.dart';
 import '../intake/paste_intake.dart' show epochDayUtcNow;
+import 'card_editor_screen.dart';
+import 'card_store.dart';
 import 'course_import.dart';
 import 'course_map_screen.dart';
 import 'daily_review_screen.dart';
@@ -13,8 +15,9 @@ import '../shared/capped_body.dart';
 typedef _Entry = ({CourseRow row, study.Course course});
 
 /// The Courses tab: this reader's imported courses. Every entry parsed here
-/// was validated by the strict parser at import time; the bundled starter
-/// course is offered as a sample, never auto-imported.
+/// was validated by the strict parser at import time; the bundled example
+/// course is offered as an example, never auto-imported, and marked as one
+/// once it is here.
 class CoursesScreen extends StatefulWidget {
   final AppDatabase db;
   final Profile profile;
@@ -94,8 +97,17 @@ class _CoursesScreenState extends State<CoursesScreen> {
     }
   }
 
-  Future<void> _addStarter() async {
-    await importStarterCourse(db: widget.db, profileId: widget.profile.id);
+  /// A card made from no course goes into My cards, made with it.
+  Future<void> _makeCard() async {
+    final saved = await showCardEditor(context,
+        title: 'Make a card',
+        onSave: (draft, _) =>
+            addToMyCards(widget.db, widget.profile.id, draft));
+    if (saved) await _load();
+  }
+
+  Future<void> _addExample() async {
+    await importExampleCourse(db: widget.db, profileId: widget.profile.id);
     await _load();
   }
 
@@ -106,6 +118,15 @@ class _CoursesScreenState extends State<CoursesScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            ListTile(
+              leading: const Icon(Icons.style_outlined),
+              title: const Text('Make a card'),
+              subtitle: const Text('It goes in My cards'),
+              onTap: () {
+                Navigator.pop(sheet);
+                _makeCard();
+              },
+            ),
             ListTile(
               leading: const Icon(Icons.content_paste),
               title: const Text('Paste a course'),
@@ -122,14 +143,17 @@ class _CoursesScreenState extends State<CoursesScreen> {
                 _pickFile();
               },
             ),
-            ListTile(
-              leading: const Icon(Icons.spa_outlined),
-              title: const Text('Add the starter course'),
-              onTap: () {
-                Navigator.pop(sheet);
-                _addStarter();
-              },
-            ),
+            if (!(_entries ?? const <_Entry>[])
+                .any((e) => e.row.courseId == exampleCourseId))
+              ListTile(
+                leading: const Icon(Icons.spa_outlined),
+                title: const Text('Try an example course'),
+                subtitle: const Text('A short course on Kalman filters'),
+                onTap: () {
+                  Navigator.pop(sheet);
+                  _addExample();
+                },
+              ),
           ],
         ),
       ),
@@ -166,7 +190,10 @@ class _CoursesScreenState extends State<CoursesScreen> {
             child: switch (entries) {
               null => const Center(child: CircularProgressIndicator()),
               [] => _EmptyState(
-                  onPaste: _paste, onPick: _pickFile, onStarter: _addStarter),
+                  onPaste: _paste,
+                  onPick: _pickFile,
+                  onExample: _addExample,
+                  onMakeCard: _makeCard),
               _ => ListView.builder(
                   padding: const EdgeInsets.only(bottom: 88),
                   itemCount: entries.length,
@@ -214,6 +241,10 @@ class _CoursesScreenState extends State<CoursesScreen> {
         subtitle: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (e.row.courseId == exampleCourseId)
+              Text('Example course',
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                      color: Theme.of(context).colorScheme.primary)),
             if (e.course.subtitle.isNotEmpty)
               Text(e.course.subtitle,
                   overflow: TextOverflow.ellipsis, maxLines: 2),
@@ -229,9 +260,13 @@ class _CoursesScreenState extends State<CoursesScreen> {
 class _EmptyState extends StatelessWidget {
   final VoidCallback onPaste;
   final VoidCallback onPick;
-  final VoidCallback onStarter;
+  final VoidCallback onExample;
+  final VoidCallback onMakeCard;
   const _EmptyState(
-      {required this.onPaste, required this.onPick, required this.onStarter});
+      {required this.onPaste,
+      required this.onPick,
+      required this.onExample,
+      required this.onMakeCard});
 
   @override
   Widget build(BuildContext context) {
@@ -253,7 +288,8 @@ class _EmptyState extends StatelessWidget {
               const SizedBox(height: 8),
               Text(
                   'A course is a ladder of concepts, drilled until they '
-                  'stay. Bring a .ohcourse file, or begin with the starter.',
+                  'stay. Bring a .ohcourse file, make cards of your own, or '
+                  'try an example to see how one works.',
                   style: Theme.of(context).textTheme.bodyMedium,
                   textAlign: TextAlign.center),
               const SizedBox(height: 24),
@@ -268,9 +304,14 @@ class _EmptyState extends StatelessWidget {
                   label: const Text('Import a course file')),
               const SizedBox(height: 12),
               OutlinedButton.icon(
-                  onPressed: onStarter,
+                  onPressed: onMakeCard,
+                  icon: const Icon(Icons.style_outlined),
+                  label: const Text('Make a card')),
+              const SizedBox(height: 12),
+              TextButton.icon(
+                  onPressed: onExample,
                   icon: const Icon(Icons.spa_outlined),
-                  label: const Text('Add the starter course')),
+                  label: const Text('Try an example course')),
             ],
           ),
         ),

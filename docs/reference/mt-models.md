@@ -564,7 +564,7 @@ onnx-community's carry none.
 | pt->en | `Xenova/opus-mt-ROMANCE-en` | 115.5 | none on card | apache-2.0 |  |
 | en->nl | `Xenova/opus-mt-en-nl` | 117.8 | none on card | apache-2.0 |  |
 | nl->en | `Xenova/opus-mt-nl-en` | 117.8 | none on card | apache-2.0 |  |
-| ja->en | `Xenova/opus-mt-ja-en` | 111.1 | none on card | apache-2.0 |  |
+| ja->en | `Mitsua/elan-mt-bt-ja-en`, converted by Trellis (replaced `Xenova/opus-mt-ja-en`, 2026-11-11) | 97.0 | CC BY-SA 4.0 (own card) | n/a, not OPUS-MT |  |
 | ko->en | `Xenova/opus-mt-ko-en` | 115.8 | none on card | apache-2.0 |  |
 | en->zh | `Xenova/opus-mt-en-zh` | 115.7 | none on card | apache-2.0 | `>>cmn_Hans<<` |
 | en->ar | `Xenova/opus-mt-en-ar` | 113.9 | none on card | apache-2.0 | `>>ara<<` |
@@ -630,3 +630,39 @@ upstream commit.
 Credit on the Models screen: “English to Japanese: ElanMT-BT by ELAN
 MITSUA Project / Abstract Engine, under CC BY-SA 4.0, converted to ONNX by
 Trellis.”
+
+## Japanese to English: ElanMT-BT, converted by Trellis (2026-11-11)
+
+Japanese to English had one pair, `Xenova/opus-mt-ja-en`. It is replaced
+by ElanMT-BT (`Mitsua/elan-mt-bt-ja-en`, commit
+`539f80eb05306e27a166b45e4264c7fa2eb4de97`), converted the same way as
+English to Japanese above, so Japanese has one pair each way.
+
+Measured on 300 lines of NTREX-128 (Japanese source, English reference),
+both pairs as the int8 ONNX the app runs, scored with sacreBLEU 2.4.3:
+
+| Pair | BLEU | chrF |
+|---|---|---|
+| `opus-mt-ja-en` (before) | 13.32 | 42.05 |
+| `elanmt-bt-ja-en` (now) | 19.16 | 49.67 |
+
+The two graphs are assets of the permanent Trellis release
+`models-jaen-1` (encoder 35,890,766 bytes, sha256
+`cd4aba53f281351e20e708be365494f4c9f7cfcdbb64d4f498620b9c5cbb837f`;
+merged decoder 59,457,806 bytes, sha256
+`37f568860465ef6f164025640bbad3bf1af917df9ef617faa4056dba8719e189`),
+which also keeps the licence text and the export recipe and is never
+deleted. `source.spm`, `vocab.json` and `config.json` come from the
+upstream commit and are byte-identical to the English to Japanese
+pair's; only `tokenizer_config.json` differs (source ja, target en). The
+whole download is 97.0 MB, against 111.1 MB before. A phone that had
+the old pair prunes it at start-up, as for any spec the registry no
+longer names.
+
+The app's own generation loop is checked against these files by
+`app/test/reader/translation/marian_real_pair_ja_en_test.dart`, skipped
+unless `MARIAN_JA_EN_DIR` and `ORT_PYTHON` are set.
+
+Credit on the Models screen: “Japanese to and from English: ElanMT-BT by
+ELAN MITSUA Project / Abstract Engine, under CC BY-SA 4.0, converted to
+ONNX by Trellis.”

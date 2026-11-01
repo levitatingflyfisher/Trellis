@@ -63,8 +63,9 @@ void main() {
     void Function(int workId)? stopTranslating,
     Future<void>? translateUntil,
     String voiceName = 'Test voice',
+    VoiceKind voiceKind = VoiceKind.machine,
     Future<File?> Function(File wav,
-            {required String title, required String voice})?
+            {required String title, required String comment})?
         encode,
   }) =>
       ListenChain(
@@ -93,7 +94,7 @@ void main() {
           return null;
         },
         voiceFor: (_, lang) async => hasVoice
-            ? (name: voiceName, say: (String t) {
+            ? (name: voiceName, voiceKind: voiceKind, say: (String t) {
                 ran.add('say $t');
                 return synth(t);
               })
@@ -373,22 +374,53 @@ void main() {
     final tags = <(String, String)>[];
     final c = chain(
         voiceName: 'the phone’s own voice, Speech Services by Google',
-        encode: (wav, {required title, required voice}) async {
-          tags.add((title, voice));
+        encode: (wav, {required title, required comment}) async {
+          tags.add((title, comment));
           return null;
         });
 
     final id = await c.start(work, 'ru');
 
-    expect(tags, [
-      (
-        'Harbour episode (Russian)',
-        'the phone’s own voice, Speech Services by Google'
-      )
-    ]);
+    expect(tags.single.$1, 'Harbour episode (Russian)');
+    expect(
+        tags.single.$2,
+        contains('Machine-made voice (the phone’s own voice, Speech '
+            'Services by Google)'));
     final about = (await db.feedsDao.notesOf(id!))!.plain;
     expect(about, contains('machine-made voice (the phone’s own voice, '
         'Speech Services by Google)'));
+  });
+
+  test('with no encoder, the WAV itself carries the title and the '
+      'machine-made label, and the episode stores its voice kind', () async {
+    final id = await chain().start(work, 'es');
+
+    final ep = (await db.feedsDao.episodeOf(id!))!;
+    expect(ep.voiceKind, 'machine');
+    final file = testServices(dir).audioFileFor(id, ep.enclosureUrl!);
+    final text = String.fromCharCodes(file.readAsBytesSync());
+    expect(text, contains('INAM'));
+    expect(text, contains('Harbour episode (Spanish)'));
+    expect(text, contains('ICMT'));
+    expect(text, contains('Machine-made voice (Test voice)'));
+    // Still a whole RIFF file: its size field counts every byte after it.
+    final bytes = file.readAsBytesSync();
+    expect(ByteData.sublistView(bytes).getUint32(4, Endian.little),
+        bytes.length - 8);
+  });
+
+  test('a cloned voice is stored as one, and its tag says whose voice it '
+      'copies', () async {
+    final tags = <String>[];
+    final id = await chain(
+        voiceKind: VoiceKind.cloned,
+        encode: (wav, {required title, required comment}) async {
+          tags.add(comment);
+          return null;
+        }).start(work, 'es');
+
+    expect((await db.feedsDao.episodeOf(id!))!.voiceKind, 'cloned');
+    expect(tags.single, contains('real person’s voice'));
   });
 
   test('each stage has a plain line for the page', () {

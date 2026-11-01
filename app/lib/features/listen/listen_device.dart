@@ -33,6 +33,7 @@ import 'listen_chain.dart';
 import 'listen_jobs.dart';
 import 'listen_languages.dart';
 import 'saved_voice.dart';
+import 'spoken_voice.dart' show VoiceKind, spokenAudioComment;
 import 'make_ahead_jobs.dart';
 
 /// The languages whose speech this device can save to a file: those the
@@ -353,6 +354,7 @@ ListenChain deviceListenChain({
           final dir = Directory('${services.supportDir.path}/spoken-temp/phone');
           return (
             name: phoneVoiceName(services.phoneVoices.engine),
+            voiceKind: VoiceKind.machine,
             say: (String text) => sayWithPhone(saver, text,
                 lang: lang, voice: plan!.phoneVoice, dir: dir),
           );
@@ -364,6 +366,7 @@ ListenChain deviceListenChain({
           return (
             // The voice's plain name, for the episode's page.
             name: 'Supertonic',
+            voiceKind: VoiceKind.machine,
             say: (String text) => engine.synthesize(text, lang: lang),
           );
       }
@@ -433,12 +436,13 @@ MakeAhead? _deviceMakeAhead(AppDatabase db, DeviceServices services,
   );
 }
 
-/// Packs [wav] into a small file beside it with ffmpeg, tagged as a
-/// machine-made voice and named ([voice]): Opus first (about 11 MB an hour), then two
+/// Packs [wav] into a small file beside it with ffmpeg, tagged with its
+/// [title] and the [comment] that names its voice as machine made
+/// ([spokenAudioComment]): Opus first (about 11 MB an hour), then two
 /// fallbacks. Null when no encoder took it or there is no ffmpeg here
-/// (anything but Android); the WAV is then what is kept.
+/// (anything but Android); the WAV is then what is kept, tagged itself.
 Future<File?> packSpoken(File wav,
-    {required String title, required String voice}) async {
+    {required String title, required String comment}) async {
   if (!Platform.isAndroid) return null;
   final stem = wav.path.substring(0, wav.path.length - 4);
   const tries = [
@@ -456,9 +460,7 @@ Future<File?> packSpoken(File wav,
         '-y', '-i', wav.path, '-ac', '1',
         '-c:a', t.codec, '-b:a', t.rate,
         '-metadata', 'title=$title',
-        '-metadata',
-        'comment=Machine-made voice ($voice). Translated and spoken on a '
-            'device by Trellis.',
+        '-metadata', 'comment=$comment',
         out.path,
       ]);
       if (ReturnCode.isSuccess(await session.getReturnCode()) &&

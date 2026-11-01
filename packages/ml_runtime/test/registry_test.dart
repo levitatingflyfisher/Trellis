@@ -744,7 +744,11 @@ void main() {
         expect(route('en', lang), isNull,
             reason: 'no trusted en->$lang ONNX export');
       }
-      expect(route('ja', 'en'), isNotNull, reason: 'ja->en');
+      expect(route('ja', 'en'), 'elanmt-bt-ja-en',
+          reason: 'converted by Trellis; it replaced opus-mt-ja-en, which '
+              'scored BLEU 13.32 against its 19.16 on 300 NTREX lines');
+      expect(starter.byId('opus-mt-ja-en'), isNull,
+          reason: 'one pair for Japanese to English');
       expect(route('en', 'ja'), 'elanmt-bt-en-ja',
           reason: 'converted by Trellis (ADR-0014 amendment)');
     });
@@ -796,9 +800,56 @@ void main() {
       expect(ja.sizeBytes, 97025163);
     });
 
+    test('Japanese to English is ElanMT-BT, converted by Trellis: its two '
+        'graphs from the Trellis release, its small files from the upstream '
+        'commit, each pinned as the conversion made it', () {
+      final en = starter.byId('elanmt-bt-ja-en')!;
+      expect(en.sourceLang, 'ja');
+      expect(en.langs, {'en'});
+      expect(en.licenses, ['CC-BY-SA-4.0']);
+      expect(en.convertedFrom, 'ElanMT-BT (Mitsua/elan-mt-bt-ja-en)');
+      expect(en.marianLayout!.targetToken, isNull);
+      const hf = 'https://huggingface.co/Mitsua/elan-mt-bt-ja-en/resolve/'
+          '539f80eb05306e27a166b45e4264c7fa2eb4de97/';
+      const rel = 'https://github.com/levitatingflyfisher/Trellis/releases/download/models-jaen-1/';
+      expect([for (final f in en.files) (f.url, f.sha256, f.bytes)], [
+        (
+          '${rel}encoder_model_quantized.onnx',
+          'cd4aba53f281351e20e708be365494f4c9f7cfcdbb64d4f498620b9c5cbb837f',
+          35890766
+        ),
+        (
+          '${rel}decoder_model_merged_quantized.onnx',
+          '37f568860465ef6f164025640bbad3bf1af917df9ef617faa4056dba8719e189',
+          59457806
+        ),
+        (
+          '${hf}source.spm',
+          'a6824c2996a4877cae8a0240f11a112ab0e4ea1f22e54cd42179376fe558f4ff',
+          792751
+        ),
+        (
+          '${hf}vocab.json',
+          'f508b75734ee21cf16b3816b7b29dea400f1f5998f47b7695cef1979ca49e106',
+          881911
+        ),
+        (
+          '${hf}config.json',
+          '78298efb7b70a119900886b41de089e2543c1234bb7d767defa09ea494cb7ab7',
+          1075
+        ),
+        (
+          '${hf}tokenizer_config.json',
+          '93fc43bf001eae301e111352d2f993d1fb9ccb408dda2fa51644c0c3a34c5a66',
+          854
+        ),
+      ]);
+      expect(en.sizeBytes, 97025163);
+    });
+
     test('only a converted pair names what it was converted from', () {
       for (final s in pairs) {
-        if (s.id == 'elanmt-bt-en-ja') continue;
+        if (s.id == 'elanmt-bt-en-ja' || s.id == 'elanmt-bt-ja-en') continue;
         expect(s.convertedFrom, isNull, reason: s.id);
       }
     });

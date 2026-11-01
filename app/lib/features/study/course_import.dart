@@ -8,10 +8,16 @@ import 'package:flutter/services.dart' show rootBundle;
 
 import '../../db/database.dart';
 
-/// The bundled Trellis starter course. Registered as an importable sample
-/// only — nothing here runs at boot; every import below sits behind the
-/// user's tap (ADR-0003: the user's hand does the importing).
-const String starterCourseAsset = 'assets/courses/kalman.ohcourse';
+/// The bundled example course. It is offered as an example only, never
+/// as the reader's own: nothing here runs at boot, every import below sits
+/// behind the user's tap (ADR-0003: the user's hand does the importing),
+/// and the list marks it as an example by [exampleCourseId]. It stays in
+/// the bundle because it is small and shows what a course is with no
+/// network; the owner's worry was it being installed as if it were his.
+const String exampleCourseAsset = 'assets/courses/kalman.ohcourse';
+
+/// The example course's own id, inside [exampleCourseAsset].
+const String exampleCourseId = 'kalman-filters';
 
 /// Validates [raw] with study_core's strict parser and stores it (the parser
 /// law: a file that doesn't parse leaves zero rows). Returns the course row
@@ -23,13 +29,13 @@ Future<int> importCourseText(
         raw: raw,
         nowMs: DateTime.now().millisecondsSinceEpoch);
 
-/// Imports the bundled starter course — called from a button, never boot.
-Future<int> importStarterCourse(
+/// Imports the bundled example course: called from a button, never boot.
+Future<int> importExampleCourse(
         {required AppDatabase db, required int profileId}) async =>
     importCourseText(
         db: db,
         profileId: profileId,
-        raw: await rootBundle.loadString(starterCourseAsset));
+        raw: await rootBundle.loadString(exampleCourseAsset));
 
 /// The thin file_picker wrapper: pick one `.ohcourse` (or `.json`) file and
 /// delegate to [importCourseText]. Returns null when the picker is

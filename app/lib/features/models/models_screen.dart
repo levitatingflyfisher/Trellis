@@ -62,19 +62,20 @@ String modelLabel(String id) =>
     kModelLabels[id] ?? _translationLabels[id] ?? id;
 
 /// The credit the translation models' licences ask for, shown with them:
-/// OPUS-MT for every pair but one, and ElanMT-BT for English to Japanese,
-/// which Trellis converted itself (ADR-0014's amendment).
+/// OPUS-MT for every pair but two, and ElanMT-BT for Japanese to and
+/// from English, which Trellis converted itself (ADR-0014's amendment).
 const String translationModelsCredit =
     'Translation models: OPUS-MT by Helsinki-NLP (University of Helsinki), '
     'each under CC-BY 4.0 or Apache-2.0 as its row says. Converted to ONNX '
     'by Xenova and onnx-community. Source and licences: '
     'https://github.com/Helsinki-NLP/Opus-MT\n'
-    'English to Japanese: ElanMT-BT by ELAN MITSUA Project / Abstract '
-    'Engine, under CC BY-SA 4.0, converted to ONNX by Trellis. Source and '
-    'licence: https://huggingface.co/Mitsua/elan-mt-bt-en-ja. The '
-    'converted files, the licence text and the export recipe are kept at '
-    'https://github.com/levitatingflyfisher/Trellis/releases/tag/'
-    'models-enja-1, which is never deleted.';
+    'Japanese to and from English: ElanMT-BT by ELAN MITSUA Project / '
+    'Abstract Engine, under CC BY-SA 4.0, converted to ONNX by Trellis. '
+    'Source and licence: https://huggingface.co/Mitsua/elan-mt-bt-en-ja and '
+    'https://huggingface.co/Mitsua/elan-mt-bt-ja-en. The converted files, '
+    'the licence text and the export recipe are kept at '
+    'https://github.com/levitatingflyfisher/Trellis/releases/tag/models-enja-1 '
+    'and .../releases/tag/models-jaen-1, which are never deleted.';
 
 class ModelsScreen extends StatefulWidget {
   final ModelStore store;

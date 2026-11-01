@@ -24,9 +24,12 @@
 /// cards say CC-BY-4.0; Xenova's cards carry none, so the upstream
 /// Helsinki-NLP card's license is recorded instead.
 ///
-/// One pair is not OPUS-MT and has no third-party export: English to
-/// Japanese is ElanMT-BT (CC BY-SA 4.0), a Marian model of the same
-/// shape, converted to int8 ONNX by Trellis itself ([_convertedFrom]).
+/// Two pairs are not OPUS-MT and have no third-party export: English to
+/// Japanese and Japanese to English are ElanMT-BT (CC BY-SA 4.0), Marian
+/// models of the same shape, converted to int8 ONNX by Trellis itself
+/// ([_convertedFrom]). Japanese to English replaced opus-mt-ja-en
+/// (2026-11-11): on 300 NTREX lines it scored BLEU 19.16, chrF 49.67,
+/// against 13.32 and 42.05 (docs/reference/mt-models.md).
 library;
 
 import 'registry.dart';
@@ -630,41 +633,41 @@ const List<_Pair> _pairs = [
     ],
   ),
   (
-    'opus-mt-ja-en',
+    'elanmt-bt-ja-en',
     'ja',
     'en',
     null,
-    'Apache-2.0',
+    'CC-BY-SA-4.0',
     [
       (
-        'https://huggingface.co/Xenova/opus-mt-ja-en/resolve/1a906cfaaf7c8f4193f67f5885c082aa6dbd9d16/onnx/encoder_model_quantized.onnx',
-        '345262b16bcdda1468b0f3380c112b7ce79f731176b4b1d21f6edd5b2ae0d25c',
-        50705822
+        'https://github.com/levitatingflyfisher/Trellis/releases/download/models-jaen-1/encoder_model_quantized.onnx',
+        'cd4aba53f281351e20e708be365494f4c9f7cfcdbb64d4f498620b9c5cbb837f',
+        35890766
       ),
       (
-        'https://huggingface.co/Xenova/opus-mt-ja-en/resolve/1a906cfaaf7c8f4193f67f5885c082aa6dbd9d16/onnx/decoder_model_merged_quantized.onnx',
-        'b304d0014e4e1575437b6af95467b6cb54405d923732d8359113bd6dbbee93c0',
-        58001744
+        'https://github.com/levitatingflyfisher/Trellis/releases/download/models-jaen-1/decoder_model_merged_quantized.onnx',
+        '37f568860465ef6f164025640bbad3bf1af917df9ef617faa4056dba8719e189',
+        59457806
       ),
       (
-        'https://huggingface.co/Xenova/opus-mt-ja-en/resolve/1a906cfaaf7c8f4193f67f5885c082aa6dbd9d16/source.spm',
-        'd0b5c3b10b5959f056ff2c86e2f2356129242ff1fc72d3a4a34d6a8c0eee4e57',
-        781853
+        'https://huggingface.co/Mitsua/elan-mt-bt-ja-en/resolve/539f80eb05306e27a166b45e4264c7fa2eb4de97/source.spm',
+        'a6824c2996a4877cae8a0240f11a112ab0e4ea1f22e54cd42179376fe558f4ff',
+        792751
       ),
       (
-        'https://huggingface.co/Xenova/opus-mt-ja-en/resolve/1a906cfaaf7c8f4193f67f5885c082aa6dbd9d16/vocab.json',
-        'a1667b43d021e09c76f385101bd473f20b5691a12cdca7dda43e4a8daff20021',
-        1622775
+        'https://huggingface.co/Mitsua/elan-mt-bt-ja-en/resolve/539f80eb05306e27a166b45e4264c7fa2eb4de97/vocab.json',
+        'f508b75734ee21cf16b3816b7b29dea400f1f5998f47b7695cef1979ca49e106',
+        881911
       ),
       (
-        'https://huggingface.co/Xenova/opus-mt-ja-en/resolve/1a906cfaaf7c8f4193f67f5885c082aa6dbd9d16/config.json',
-        'd35476f1d3858883feec67e5a63ddc387452a70fda9c8e26db99c71aa2ad6a34',
-        1376
+        'https://huggingface.co/Mitsua/elan-mt-bt-ja-en/resolve/539f80eb05306e27a166b45e4264c7fa2eb4de97/config.json',
+        '78298efb7b70a119900886b41de089e2543c1234bb7d767defa09ea494cb7ab7',
+        1075
       ),
       (
-        'https://huggingface.co/Xenova/opus-mt-ja-en/resolve/1a906cfaaf7c8f4193f67f5885c082aa6dbd9d16/tokenizer_config.json',
-        '414e9e7e2492b95fa80f24ccb295645d35c4dd0a74d7ef8b89820c0c7e8ec356',
-        280
+        'https://huggingface.co/Mitsua/elan-mt-bt-ja-en/resolve/539f80eb05306e27a166b45e4264c7fa2eb4de97/tokenizer_config.json',
+        '93fc43bf001eae301e111352d2f993d1fb9ccb408dda2fa51644c0c3a34c5a66',
+        854
       ),
     ],
   ),
@@ -1067,6 +1070,7 @@ const List<_Pair> _pairs = [
 /// convert_marian_onnx.py (docs/how-to/convert-a-translation-model.md).
 const Map<String, String> _convertedFrom = {
   'elanmt-bt-en-ja': 'ElanMT-BT (Mitsua/elan-mt-bt-en-ja)',
+  'elanmt-bt-ja-en': 'ElanMT-BT (Mitsua/elan-mt-bt-ja-en)',
 };
 
 /// Every pair as a [ModelSpec]. A multi-target export (en-ROMANCE,

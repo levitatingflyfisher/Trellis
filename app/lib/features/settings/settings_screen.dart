@@ -21,6 +21,8 @@ import '../episodes/episode_actions.dart';
 import '../feeds/background/feed_check_section.dart';
 import '../feeds/background/feed_check_settings.dart';
 import '../listen/listen_jobs.dart' show learningLanguageKey;
+import '../listen/spoken_share.dart'
+    show clonedVoiceShareAllowed, shareClonedVoiceAudioKey;
 import '../reader/reader_prefs.dart' show ReaderPrefs;
 import '../reader/speech/read_aloud_voices.dart';
 import '../reader/speech/supertonic_voice_handle.dart'
@@ -83,6 +85,7 @@ class SettingsScreen extends StatefulWidget {
 class _SettingsScreenState extends State<SettingsScreen> {
   bool _downloadedVoice = false;
   bool _dspDefault = false;
+  bool _shareClonedVoice = false;
   String _scheduler = 'fsrs';
   bool _loaded = false;
 
@@ -97,13 +100,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final dsp = await widget.db.profilesDao.dspGlobalDefault(id);
     final scheduler = await widget.db.profilesDao.scheduler(id);
     final voice = await widget.hasDownloadedVoice?.call() ?? false;
+    final shareCloned = await clonedVoiceShareAllowed(widget.db);
     if (!mounted) return;
     setState(() {
       _dspDefault = dsp;
+      _shareClonedVoice = shareCloned;
       _scheduler = scheduler;
       _downloadedVoice = voice;
       _loaded = true;
     });
+  }
+
+  /// The owner's rule: a file in a copy of a real host's voice is a
+  /// separate switch, off by default (see spoken_share.dart).
+  Future<void> _setShareClonedVoice(bool on) async {
+    setState(() => _shareClonedVoice = on);
+    await widget.db.deviceSettingsDao
+        .write(shareClonedVoiceAudioKey, on ? '1' : '0');
   }
 
   Future<void> _setDspDefault(bool on) async {
@@ -312,6 +325,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ),
                   value: _dspDefault,
                   onChanged: _loaded ? _setDspDefault : null,
+                ),
+              if (widget.localMlAvailable)
+                SwitchListTile(
+                  key: const Key('share-cloned-voice-toggle'),
+                  secondary: const Icon(Icons.record_voice_over_outlined),
+                  title: const Text('Share audio made in a host’s own voice'),
+                  subtitle: const Text(
+                    'When off, Share sends only words for an episode spoken '
+                    'in a copy of a real person’s voice. Trellis makes no '
+                    'such voice yet.',
+                  ),
+                  value: _shareClonedVoice,
+                  onChanged: _loaded ? _setShareClonedVoice : null,
                 ),
               if (widget.onOpenHeadsetKeys case final open?)
                 _door(

@@ -79,8 +79,11 @@ class SearchDoors {
     await open(context, hit.item, startSegmentIdx: hit.segmentIdx);
   }
 
-  Future<void> share(BuildContext context, SearchItem item) =>
-      shareItem(context, item, shareText);
+  /// The same Share as every list (a made episode sends its audio or the
+  /// words about it), with these doors' own way to send words.
+  Future<void> share(BuildContext context, SearchItem item) => actions.share(
+      context, (work: item.work, episode: item.episode),
+      showTitle: item.showTitle, words: shareText, ownWords: true);
 }
 
 /// One history or search row: the shared row, for an episode or a book

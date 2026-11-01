@@ -46,7 +46,13 @@ String get stripV31 => [
     ].join('\n');
 
 /// What v32 added, for a fixture stamped v31.
-String get stripV32 => 'ALTER TABLE works DROP COLUMN translation_view;';
+String get stripV32 => [
+      'ALTER TABLE works DROP COLUMN translation_view;',
+      stripV33,
+    ].join('\n');
+
+/// What v33 added, for a fixture stamped v32.
+String get stripV33 => 'ALTER TABLE episodes DROP COLUMN voice_kind;';
 
 /// v28's search index, verbatim: no stemming, two columns, no shows
 /// table, and a show trigger with no WHEN guard. Frozen here so the v29

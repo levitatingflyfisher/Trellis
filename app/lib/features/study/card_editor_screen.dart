@@ -1,0 +1,277 @@
+/// The page to make or change one card by hand: front and back, or a
+/// cloze written the Anki way (`{{c1::answer}}`). What is saved goes
+/// through [CardEditorScreen.onSave], which writes the course text (see
+/// card_store.dart); a sentence it refuses with is shown here, and the
+/// page stays open.
+library;
+
+import 'package:flutter/material.dart';
+
+import '../shared/capped_body.dart';
+import 'card_editing.dart';
+
+class CardEditorScreen extends StatefulWidget {
+  const CardEditorScreen({
+    super.key,
+    required this.title,
+    required this.onSave,
+    this.initial,
+    this.steps = const [],
+    this.stepId,
+    this.onDelete,
+  });
+
+  /// "Add card" or "Edit card".
+  final String title;
+  final CardDraft? initial;
+
+  /// The course's steps, to choose where a new card goes; offered only
+  /// when there is more than one.
+  final List<({String id, String title})> steps;
+  final String? stepId;
+
+  /// Writes the card. A [FormatException] or [StateError] it throws is
+  /// shown as its message, and nothing is closed.
+  final Future<void> Function(CardDraft draft, String? stepId) onSave;
+
+  /// Null where the card cannot be deleted from here.
+  final Future<void> Function()? onDelete;
+
+  @override
+  State<CardEditorScreen> createState() => _CardEditorScreenState();
+}
+
+class _CardEditorScreenState extends State<CardEditorScreen> {
+  late CardKind _kind = widget.initial?.kind ?? CardKind.frontBack;
+  late final _front = TextEditingController(
+      text: widget.initial?.kind == CardKind.frontBack
+          ? widget.initial!.front
+          : '');
+  late final _back = TextEditingController(text: widget.initial?.back ?? '');
+  late final _cloze = TextEditingController(
+      text:
+          widget.initial?.kind == CardKind.cloze ? widget.initial!.front : '');
+  late String? _step = widget.stepId ??
+      (widget.steps.isEmpty ? null : widget.steps.first.id);
+  String? _error;
+  bool _saving = false;
+
+  @override
+  void dispose() {
+    _front.dispose();
+    _back.dispose();
+    _cloze.dispose();
+    super.dispose();
+  }
+
+  CardDraft get _draft => _kind == CardKind.cloze
+      ? CardDraft.cloze(_cloze.text)
+      : CardDraft.frontBack(_front.text, _back.text);
+
+  Future<void> _save() async {
+    if (_saving) return;
+    setState(() {
+      _saving = true;
+      _error = null;
+    });
+    try {
+      await widget.onSave(_draft, _step);
+      if (mounted) Navigator.of(context).pop(true);
+    } on FormatException catch (e) {
+      setState(() => _error = e.message);
+    } on StateError catch (e) {
+      setState(() => _error = e.message);
+    } finally {
+      if (mounted) setState(() => _saving = false);
+    }
+  }
+
+  Future<void> _delete() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: const Text('Delete this card?'),
+        content: const Text('What you have studied of it goes with it.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(dialog, true),
+              child: const Text('Delete')),
+        ],
+      ),
+    );
+    if (ok != true || !mounted) return;
+    try {
+      await widget.onDelete!();
+      if (mounted) Navigator.of(context).pop(true);
+    } on StateError {
+      setState(() => _error = 'A step keeps at least one card. Change this '
+          'one instead, or add another first.');
+    }
+  }
+
+  void _blankSelection() {
+    final sel = _cloze.selection;
+    if (!sel.isValid || sel.isCollapsed) {
+      setState(() => _error = 'Select the words to hide first.');
+      return;
+    }
+    final text = blankSelection(_cloze.text, sel.start, sel.end);
+    _cloze.value = TextEditingValue(
+        text: text,
+        selection: TextSelection.collapsed(
+            offset: sel.end + (text.length - _cloze.text.length)));
+    setState(() => _error = null);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Scaffold(
+      appBar: AppBar(
+        title: Text(widget.title),
+        actions: [
+          // A word on the bar, not a bare icon (fleet rule C11).
+          TextButton(
+            key: const Key('card-save'),
+            onPressed: _saving ? null : _save,
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+      body: CappedBody(
+        child: ListView(
+          padding: const EdgeInsets.all(16),
+          children: [
+            SegmentedButton<CardKind>(
+              key: const Key('card-kind'),
+              segments: const [
+                ButtonSegment(
+                    value: CardKind.frontBack,
+                    label: Text('Front and back'),
+                    tooltip: 'A question on the front, its answer on the back'),
+                ButtonSegment(
+                    value: CardKind.cloze,
+                    label: Text('Cloze'),
+                    tooltip: 'A sentence with words hidden'),
+              ],
+              selected: {_kind},
+              onSelectionChanged: (s) => setState(() {
+                _kind = s.single;
+                _error = null;
+              }),
+            ),
+            const SizedBox(height: 16),
+            if (widget.steps.length > 1) ...[
+              DropdownButtonFormField<String>(
+                key: const Key('card-step'),
+                initialValue: _step,
+                decoration: const InputDecoration(
+                    labelText: 'Step', border: OutlineInputBorder()),
+                items: [
+                  for (final s in widget.steps)
+                    DropdownMenuItem(
+                        value: s.id,
+                        child: Text(s.title, overflow: TextOverflow.ellipsis)),
+                ],
+                onChanged: (v) => setState(() => _step = v),
+              ),
+              const SizedBox(height: 16),
+            ],
+            if (_kind == CardKind.frontBack) ...[
+              TextField(
+                key: const Key('card-front'),
+                controller: _front,
+                minLines: 2,
+                maxLines: 8,
+                decoration: const InputDecoration(
+                    labelText: 'Front', border: OutlineInputBorder()),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                key: const Key('card-back'),
+                controller: _back,
+                minLines: 2,
+                maxLines: 8,
+                decoration: const InputDecoration(
+                    labelText: 'Back', border: OutlineInputBorder()),
+              ),
+            ] else ...[
+              TextField(
+                key: const Key('card-cloze-text'),
+                controller: _cloze,
+                minLines: 3,
+                maxLines: 10,
+                decoration: const InputDecoration(
+                  labelText: 'Text',
+                  helperText: 'Hide words as {{c1::word}}, the way Anki '
+                      'does. Blanks with the same number are asked '
+                      'together.',
+                  helperMaxLines: 3,
+                  border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 8),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Tooltip(
+                  message: 'Hide the selected words as the next blank',
+                  child: OutlinedButton.icon(
+                    key: const Key('card-blank'),
+                    style: OutlinedButton.styleFrom(
+                        minimumSize: const Size(48, 48)),
+                    onPressed: _blankSelection,
+                    icon: const Icon(Icons.format_strikethrough),
+                    label: const Text('Hide the selection'),
+                  ),
+                ),
+              ),
+            ],
+            if (_error != null) ...[
+              const SizedBox(height: 12),
+              Text(_error!,
+                  key: const Key('card-error'),
+                  style: TextStyle(color: theme.colorScheme.error)),
+            ],
+            if (widget.onDelete != null) ...[
+              const SizedBox(height: 32),
+              Align(
+                alignment: Alignment.centerLeft,
+                child: TextButton.icon(
+                  key: const Key('card-delete'),
+                  style:
+                      TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                  onPressed: _delete,
+                  icon: const Icon(Icons.delete_outline),
+                  label: const Text('Delete card'),
+                ),
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// Opens the editor; true when a card was saved or deleted.
+Future<bool> showCardEditor(
+  BuildContext context, {
+  required String title,
+  required Future<void> Function(CardDraft draft, String? stepId) onSave,
+  CardDraft? initial,
+  List<({String id, String title})> steps = const [],
+  String? stepId,
+  Future<void> Function()? onDelete,
+}) async =>
+    await Navigator.of(context).push<bool>(MaterialPageRoute(
+        builder: (_) => CardEditorScreen(
+            title: title,
+            onSave: onSave,
+            initial: initial,
+            steps: steps,
+            stepId: stepId,
+            onDelete: onDelete))) ??
+    false;

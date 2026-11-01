@@ -27,8 +27,49 @@ import '../reader/translation/brain_translator.dart'
 import '../reader/translation/language_names.dart';
 import '../transcribe/transcript_writer.dart' show encodeWordTimingBlob;
 import 'spoken_guid.dart';
+import 'spoken_voice.dart';
 
 export 'spoken_guid.dart';
+export 'spoken_voice.dart';
+
+/// Tags the WAV at [wav] with its [title] and [comment] (a RIFF LIST
+/// INFO chunk after the sound), for when no encoder packed it: the file
+/// is then what is kept and shared, and must still say what it is.
+Future<void> tagWav(File wav,
+    {required String title, required String comment}) async {
+  List<int> field(String id, String value) {
+    final text = [...utf8.encode(value), 0];
+    if (text.length.isOdd) text.add(0);
+    final head = ByteData(8)..setUint32(4, text.length, Endian.little);
+    for (var i = 0; i < 4; i++) {
+      head.setUint8(i, id.codeUnitAt(i));
+    }
+    return [...head.buffer.asUint8List(), ...text];
+  }
+
+  final body = [
+    ...ascii.encode('INFO'),
+    ...field('INAM', title),
+    ...field('ICMT', comment),
+  ];
+  final list = ByteData(8)..setUint32(4, body.length, Endian.little);
+  for (var i = 0; i < 4; i++) {
+    list.setUint8(i, 'LIST'.codeUnitAt(i));
+  }
+  final raf = await wav.open(mode: FileMode.append);
+  try {
+    // A chunk starts on an even byte; the sound is 16-bit, so it does.
+    await raf.writeFrom([...list.buffer.asUint8List(), ...body]);
+    final size = await raf.length();
+    await raf.setPosition(4);
+    await raf.writeFrom(
+        (ByteData(4)..setUint32(0, size - 8, Endian.little))
+            .buffer
+            .asUint8List());
+  } finally {
+    await raf.close();
+  }
+}
 
 /// The pause after a sentence, and the longer one after a paragraph.
 const sentenceGapMs = 250;
@@ -209,6 +250,7 @@ Future<int> storeSpokenEpisode({
   required Work original,
   required String lang,
   required String voice,
+  VoiceKind voiceKind = VoiceKind.machine,
   required SpokenRender render,
   required File audio,
   required File Function(int workId, String url) audioFileFor,
@@ -247,8 +289,8 @@ Future<int> storeSpokenEpisode({
     _ => 'translated on this device',
   };
   final about = [
-    'This is “${original.title}” in $language, spoken by a machine-made '
-        'voice ($voice).',
+    'This is “${original.title}” in $language, spoken by '
+        '${spokenVoicePhrase(voiceKind)} ($voice).',
     'The words were $where from a transcript made on this device, so both '
         'can be wrong in places.',
   ];
@@ -264,7 +306,8 @@ Future<int> storeSpokenEpisode({
       await (db.delete(db.segments)..where((s) => s.workId.equals(id))).go();
       await (db.delete(db.workNotes)..where((n) => n.workId.equals(id))).go();
       await (db.update(db.episodes)..where((e) => e.workId.equals(id)))
-          .write(EpisodesCompanion(enclosureUrl: Value(url)));
+          .write(EpisodesCompanion(
+              enclosureUrl: Value(url), voiceKind: Value(voiceKind.name)));
       await (db.update(db.works)..where((w) => w.id.equals(id)))
           .write(WorksCompanion(sourceUrl: Value(url)));
     } else {
@@ -281,6 +324,7 @@ Future<int> storeSpokenEpisode({
           feedId: episode.feedId,
           guid: spokenGuid(original.id, lang),
           enclosureUrl: url,
+          voiceKind: voiceKind.name,
           // Just after the original, so the two sit together in the show.
           publishedAtMs: episode.publishedAtMs + 1);
     }

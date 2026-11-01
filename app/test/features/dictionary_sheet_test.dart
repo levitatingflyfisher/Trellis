@@ -90,4 +90,38 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('dictionary-sheet')), findsNothing);
   });
+
+  testWidgets('Make a card is offered only where the reader gives a way '
+      'to make one, and closes the sheet first', (tester) async {
+    var made = 0;
+    Future<void> open(Future<void> Function()? onMakeCard) async {
+      await tester.pumpWidget(MaterialApp(
+        home: Builder(
+          builder: (context) => ElevatedButton(
+            onPressed: () => showDefinitionSheet(context,
+                word: 'hello',
+                lookupDefinition: (w) async => null,
+                onKeep: () async {},
+                onMakeCard: onMakeCard),
+            child: const Text('open'),
+          ),
+        ),
+      ));
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+    }
+
+    await open(null);
+    expect(find.byKey(const Key('definition-sheet-card')), findsNothing);
+    await tester.tap(find.byKey(const Key('definition-sheet-close')));
+    await tester.pumpAndSettle();
+
+    await open(() async => made++);
+    expect(tester.getSize(find.byKey(const Key('definition-sheet-card'))).height,
+        greaterThanOrEqualTo(48));
+    await tester.tap(find.byKey(const Key('definition-sheet-card')));
+    await tester.pumpAndSettle();
+    expect(made, 1);
+    expect(find.byKey(const Key('dictionary-sheet')), findsNothing);
+  });
 }

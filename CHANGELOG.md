@@ -7,6 +7,14 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.6.8 — 2026-11-12
+
+- **Share sends the audio.** Share on an episode made in another language sends the audio file itself, named by its title, with a line saying the voice is machine made. A downloaded episode offers the link or the file. A file in a host’s own cloned voice is shared only if you turn that on in Settings (off by default).
+- **Make and edit cards by hand**, front and back or a cloze written the Anki way (`{{c1::word}}`). Hold a word in the reader and choose “Make a card”: the editor opens with its sentence and that word hidden.
+- **The example course is an example.** It is offered as “Try an example course”, and any course can be removed with its cards.
+- **Better Japanese to English.** The Japanese to English translator is now ElanMT-BT (CC BY-SA 4.0): clearly better on a standard test, and 14 MB smaller.
+- Fixes: a half-width “｡” is read as a full stop; the one-tap line says where the words were translated.
+
 ## 1.6.7 — 2026-11-11
 
 - **Japanese reads as Japanese.** Scroll and Line modes no longer put a space between every Japanese character; Latin words inside Japanese keep their spaces, and the word being said still lights up.

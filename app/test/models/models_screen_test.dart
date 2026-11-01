@@ -161,17 +161,19 @@ void main() {
         contains('https://github.com/Helsinki-NLP/Opus-MT'));
     expect(
         translationModelsCredit,
-        contains('English to Japanese: ElanMT-BT by ELAN MITSUA Project / '
-            'Abstract Engine, under CC BY-SA 4.0, converted to ONNX by '
-            'Trellis'));
+        contains('Japanese to and from English: ElanMT-BT by ELAN MITSUA '
+            'Project / Abstract Engine, under CC BY-SA 4.0, converted to '
+            'ONNX by Trellis'));
     expect(translationModelsCredit,
         contains('https://huggingface.co/Mitsua/elan-mt-bt-en-ja'));
+    expect(translationModelsCredit,
+        contains('https://huggingface.co/Mitsua/elan-mt-bt-ja-en'));
     expect(
         translationModelsCredit,
         contains('The converted files, the licence text and the export '
             'recipe are kept at https://github.com/levitatingflyfisher/'
-            'Trellis/releases/tag/models-enja-1, which is never '
-            'deleted.'));
+            'Trellis/releases/tag/models-enja-1 and '
+            '.../releases/tag/models-jaen-1, which are never deleted.'));
 
     final pt = find.text('English to Portuguese translation, offline');
     await tester.scrollUntilVisible(pt, 200);
@@ -194,8 +196,17 @@ void main() {
         find.byKey(const Key('model-converted-elanmt-bt-en-ja')), findsOneWidget);
     expect(find.text('Converted by Trellis from ElanMT-BT '
         '(Mitsua/elan-mt-bt-en-ja)'), findsOneWidget);
-    expect(find.textContaining('CC-BY-SA-4.0'), findsOneWidget);
+    expect(find.textContaining('CC-BY-SA-4.0'), findsNWidgets(2),
+        reason: 'both Japanese pairs, and no other');
     expect(find.byKey(const Key('model-converted-opus-mt-en-de')), findsNothing);
+
+    final jaEn = find.text('Japanese to English translation, offline');
+    await tester.scrollUntilVisible(jaEn, 200);
+    expect(jaEn, findsOneWidget);
+    expect(find.byKey(const Key('model-converted-elanmt-bt-ja-en')),
+        findsOneWidget);
+    expect(find.text('Converted by Trellis from ElanMT-BT '
+        '(Mitsua/elan-mt-bt-ja-en)'), findsOneWidget);
   });
 
   testWidgets('a pair downloaded before its config files were registered '

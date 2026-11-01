@@ -15,7 +15,7 @@ import '../support/pick_reader.dart';
 
 /// The Courses tab: import is study_core's strict parser or nothing (a bad
 /// paste shows the parser's own calm error and leaves ZERO rows), the list
-/// is the reader's imported courses, and the bundled starter course is an
+/// is the reader's imported courses, and the bundled example course is an
 /// offer — never auto-imported (the user's hand does the importing).
 void main() {
   late AppDatabase db;
@@ -82,7 +82,7 @@ void main() {
     await pumpToCourses(tester);
     expect(find.text('Nothing to study yet.'), findsOneWidget);
     expect(await db.studyDao.coursesOf(1), isEmpty,
-        reason: 'the starter course is an offer, not an import');
+        reason: 'the example course is an offer, not an import');
   });
 
   testWidgets(
@@ -130,16 +130,61 @@ void main() {
     expect(find.textContaining('2 concepts'), findsOneWidget);
   });
 
-  testWidgets('the starter course imports on the user\'s tap', (tester) async {
+  testWidgets(
+      'the example course is offered as an example, never as the reader\'s '
+      'own, and only on a tap', (tester) async {
     await pumpToCourses(tester);
-    await tester.tap(find.text('Add the starter course'));
+    expect(find.textContaining('starter'), findsNothing);
+    await tester.tap(find.text('Try an example course'));
     await tester.pumpAndSettle();
     expect(find.text('The Kalman Filter Family'), findsOneWidget);
+    // The tile says what it is.
+    expect(find.text('Example course'), findsOneWidget);
     final rows = await db.studyDao.coursesOf(1);
     expect(rows.single.courseId, 'kalman-filters');
+
+    // Once it is here, the Add sheet does not offer it again.
+    await tester.tap(find.text('Add'));
+    await tester.pumpAndSettle();
+    expect(find.text('Try an example course'), findsNothing);
   });
 
-  test('the bundled starter course parses with the strict parser', () {
+  testWidgets('a course can be removed, and its cards go with it',
+      (tester) async {
+    await db.profilesDao.create('Ada');
+    final id = await db.studyDao
+        .importCourse(profileId: 1, raw: ladderCourse(), nowMs: 1);
+    const seen = study.CardState(
+        itemId: 'i-a',
+        ease: 2.5,
+        intervalDays: 1,
+        dueEpochDay: 1 << 40,
+        reps: 1,
+        lapses: 0);
+    await db.studyDao.recordGrade(
+        courseRowId: id,
+        before: seen.copyWith(intervalDays: 0),
+        after: seen,
+        grade: study.Grade.good,
+        tsMs: 1);
+    await pumpToCourses(tester);
+    await tester.tap(find.text('A Ladder of Two'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('remove-course')));
+    await tester.pumpAndSettle();
+    // It asks first, and says what goes.
+    expect(find.textContaining('Remove “A Ladder of Two”?'), findsOneWidget);
+    await tester.tap(find.text('Remove'));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Nothing to study yet.'), findsOneWidget);
+    expect(await db.studyDao.coursesOf(1), isEmpty);
+    expect(await db.studyDao.loadCards(id), isEmpty);
+    expect(await db.studyDao.revlogOf(id), isEmpty);
+  });
+
+  test('the bundled example course parses with the strict parser', () {
     // Straight off disk: rootBundle wiring is already proven by the
     // import-on-tap test above; this pins the FILE against rot. (A second
     // rootBundle load here would await a future cached by the previous

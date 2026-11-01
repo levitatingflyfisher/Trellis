@@ -26,6 +26,9 @@ import '../player/mini_player_host.dart';
 import '../player/playback_session.dart';
 import '../player/player_controller.dart';
 import '../transcribe/transcript_writer.dart' show decodeWordTimingBlob;
+import '../study/card_editing.dart' show CardDraft, clozeFromSentence;
+import '../study/card_editor_screen.dart';
+import '../study/card_store.dart' show addToMyCards;
 import 'dictionary_sheet.dart';
 import 'ledger_screen.dart';
 import 'line_paced_view.dart';
@@ -2362,7 +2365,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// modal — an un-paused cursor would keep calling `_followAlongScroll`'s
   /// `Scrollable.ensureVisible` on a scrollable sitting under the sheet's
   /// route, racing the sheet for the user's attention.
-  void _openDefinitionSheet(String token) {
+  void _openDefinitionSheet(String token, int wordIdx) {
     final cleaned = ledgerWord(token);
     if (cleaned == null) return;
     _pause();
@@ -2372,7 +2375,35 @@ class _ReaderScreenState extends State<ReaderScreen>
       word: cleaned,
       lookupDefinition: widget.lookupDefinition ?? (_) async => null,
       onKeep: () => _keepWord(token),
+      onMakeCard: () => _makeCardFrom(wordIdx, cleaned),
     ));
+  }
+
+  /// A held word as a cloze card in its own sentence (owner, 28 Oct:
+  /// "flashcard mechanics for highlighting and writing stuff"): the
+  /// sentence as shown, with the word hidden, opened in the card editor
+  /// to change before it is saved into My cards.
+  Future<void> _makeCardFrom(int wordIdx, String word) async {
+    final doc = _doc;
+    final blocks = _blocks;
+    if (doc == null || blocks == null || wordIdx >= doc.words.length) return;
+    final c = cursorAt(doc, wordIdx);
+    final text = blocks[c.segment].text;
+    var sentence = text;
+    // The last sentence starting at or before the word is the one it is
+    // in: the splitter counts words the way the cursor does.
+    for (final s in core.splitSentences(text)) {
+      if (s.firstWordIdx <= c.word) sentence = s.text;
+    }
+    final saved = await showCardEditor(context,
+        title: 'Make a card',
+        initial: CardDraft.cloze(clozeFromSentence(sentence.trim(), word)),
+        onSave: (draft, _) =>
+            addToMyCards(widget.db, widget.profileId, draft));
+    if (!saved || !mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(const SnackBar(content: Text('Saved to My cards.')));
   }
 
   void _openLedger() {
@@ -3162,7 +3193,7 @@ class _ReaderScreenState extends State<ReaderScreen>
               // there).
               onLongPress: doc.segments.containsKey(_wordIdx)
                   ? null
-                  : () => _openDefinitionSheet(doc.words[_wordIdx]),
+                  : () => _openDefinitionSheet(doc.words[_wordIdx], _wordIdx),
               onTapUp: (details) {
                 final width = context.size?.width ?? 1;
                 final dx = details.localPosition.dx;
@@ -3911,7 +3942,7 @@ class _ReaderScreenState extends State<ReaderScreen>
           for (var w = start; w < end; w++)
             GestureDetector(
               onTap: () => _seekToWord(w),
-              onLongPress: () => _openDefinitionSheet(doc.words[w]),
+              onLongPress: () => _openDefinitionSheet(doc.words[w], w),
               child: Padding(
                 padding: EdgeInsets.only(
                     right: touches.contains(w) || w == end - 1 ? 0 : space),
@@ -3938,7 +3969,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         for (var w = start; w < end; w++)
           GestureDetector(
             onTap: () => _seekToWord(w),
-            onLongPress: () => _openDefinitionSheet(doc.words[w]),
+            onLongPress: () => _openDefinitionSheet(doc.words[w], w),
             child: _flowWord(doc, w, base, theme, space),
           ),
       ],

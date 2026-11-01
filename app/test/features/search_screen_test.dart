@@ -382,6 +382,39 @@ void main() {
       expect(copied, [text]);
     });
 
+    testWidgets(
+        'a made episode shares words that say its voice is machine made, '
+        'never its own address, which can’t be fetched', (tester) async {
+      final feed = (await db.feedsDao.episodeOf(aurora))!.feedId;
+      final made = await db.spineDao.insertWork(
+          profileId: profile.id,
+          kind: 'episode',
+          title: 'Aurora season (Spanish)',
+          persistence: 'ephemeron',
+          firstSeenEpochDay: 100,
+          sourceUrl: 'https://spoken.trellis.invalid/$aurora-es.ogg',
+          lang: 'es');
+      await db.feedsDao.insertEpisode(
+          workId: made,
+          feedId: feed,
+          guid: 'spoken:$aurora:es',
+          enclosureUrl: 'https://spoken.trellis.invalid/$aurora-es.ogg',
+          publishedAtMs: 1001,
+          voiceKind: 'machine');
+      final shared = <String>[];
+      await pumpSearch(tester,
+          doors(share: (t, {subject}) async => shared.add(t)));
+      await type(tester, 'spanish');
+      await tester.tap(find.byKey(Key('menu-$made')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(Key('share-$made')));
+      await tester.pumpAndSettle();
+
+      expect(shared.single, contains('machine-made voice'));
+      expect(shared.single, contains('https://cast.test/a.mp3'));
+      expect(shared.single, isNot(contains('.invalid')));
+    });
+
     testWidgets('a book with no link shares its title', (tester) async {
       await pumpSearch(tester, doors());
       await type(tester, 'journal');

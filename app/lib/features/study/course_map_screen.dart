@@ -8,6 +8,7 @@ import 'package:study_core/study_core.dart' as study;
 import '../../db/database.dart' hide Alignment;
 import '../intake/paste_intake.dart' show epochDayUtcNow;
 import 'anki_export.dart';
+import 'course_cards_screen.dart';
 import 'study_session_screen.dart';
 import 'wall/espalier_wall.dart';
 import '../shared/capped_body.dart';
@@ -54,6 +55,10 @@ class CourseMapScreen extends StatefulWidget {
 class _CourseMapScreenState extends State<CourseMapScreen> {
   Map<String, study.CardProgress>? _cards;
 
+  /// The course as stored now: a card made or changed by hand (Cards)
+  /// changes it under this screen.
+  late study.Course _course = widget.course;
+
   @override
   void initState() {
     super.initState();
@@ -63,16 +68,27 @@ class _CourseMapScreenState extends State<CourseMapScreen> {
   Future<void> _reload() async {
     final stored = await widget.db.studyDao.loadCards(widget.courseRow.id);
     final cards = stored.map((id, c) => MapEntry(id, c.progress));
+    final row = await widget.db.studyDao.courseRowById(widget.courseRow.id);
     if (!mounted) return;
-    setState(() => _cards = cards);
+    setState(() {
+      _cards = cards;
+      if (row != null) _course = study.parseCourseString(row.raw);
+    });
+  }
+
+  Future<void> _openCards() async {
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+        builder: (_) => CourseCardsScreen(
+            db: widget.db, courseRowId: widget.courseRow.id)));
+    await _reload();
   }
 
   /// One tap -> a real `.apkg` through the save seam. The whole course
   /// travels (Anki gates nothing; the ladder survives as subdecks + tags),
   /// and scheduling stays home — Anki/FSRS owns it over there.
   Future<void> _exportAnki() async {
-    final name = apkgFileName(widget.course);
-    final bytes = await buildApkgBytes(widget.course);
+    final name = apkgFileName(_course);
+    final bytes = await buildApkgBytes(_course);
     final saved =
         await (widget.saveApkg ?? _pickAndSaveApkg)(name, bytes);
     if (!mounted || !saved) return;
@@ -80,8 +96,43 @@ class _CourseMapScreenState extends State<CourseMapScreen> {
         SnackBar(content: Text('Saved $name. Import it in Anki.')));
   }
 
+  /// Asks, then removes the course with its cards and their history, and
+  /// leaves the map: a course tried and not wanted (the example) must be
+  /// easy to undo.
+  Future<void> _remove() async {
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (dialog) => AlertDialog(
+        title: Text('Remove “${_course.title}”?'),
+        content: const Text(
+            'Its cards and what you have studied of them go with it.'),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(dialog, false),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(dialog, true),
+              child: const Text('Remove')),
+        ],
+      ),
+    );
+    if (ok != true) return;
+    await widget.db.studyDao.deleteCourse(widget.courseRow.id);
+    if (mounted) Navigator.of(context).pop();
+  }
+
   /// Hidden where the builder cannot run (web) — never shown-then-broken.
   List<Widget> get _actions => [
+        TextButton.icon(
+            key: const Key('open-cards'),
+            icon: const Icon(Icons.style_outlined),
+            label: const Text('Cards'),
+            onPressed: _openCards),
+        IconButton(
+            key: const Key('remove-course'),
+            tooltip: 'Remove this course',
+            icon: const Icon(Icons.delete_outline),
+            onPressed: _remove),
         if (ankiExportSupported)
           IconButton(
               key: const Key('export-anki'),
@@ -95,7 +146,7 @@ class _CourseMapScreenState extends State<CourseMapScreen> {
       builder: (_) => StudySessionScreen(
           db: widget.db,
           courseRowId: widget.courseRow.id,
-          course: widget.course),
+          course: _course),
     ));
     if (!mounted) return;
     await _reload(); // mastery moved — recompute every unlock from the cards
@@ -106,13 +157,13 @@ class _CourseMapScreenState extends State<CourseMapScreen> {
     final cards = _cards;
     if (cards == null) {
       return Scaffold(
-        appBar: AppBar(title: Text(widget.course.title), actions: _actions),
+        appBar: AppBar(title: Text(_course.title), actions: _actions),
         body: CappedBody(child: const Center(child: CircularProgressIndicator())),
       );
     }
 
     final theme = Theme.of(context);
-    final course = widget.course;
+    final course = _course;
     final today = epochDayUtcNow();
 
     // One progress pass, reused for totals, the wall and unlock checks.
@@ -141,7 +192,7 @@ class _CourseMapScreenState extends State<CourseMapScreen> {
     final overall = totalItems == 0 ? 0.0 : totalMastered / totalItems;
 
     return Scaffold(
-      appBar: AppBar(title: Text(widget.course.title), actions: _actions),
+      appBar: AppBar(title: Text(_course.title), actions: _actions),
       floatingActionButton: totalDue == 0
           ? null
           : FloatingActionButton.extended(

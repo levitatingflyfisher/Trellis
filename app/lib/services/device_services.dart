@@ -515,6 +515,11 @@ class DeviceServices {
   /// never touch" rule as [supportDir] itself.
   Directory get speechTempDir => Directory('${supportDir.path}/speech-temp');
 
+  /// Where Share puts a copy of an audio file named by its title (the
+  /// app keeps audio under a number). Only the newest share's copy is
+  /// kept: each share empties it first.
+  Directory get shareTempDir => Directory('${supportDir.path}/share-temp');
+
   /// Where a deleted transcript or translation waits 30 days to be
   /// restored (1.5.9). Null on the web tier, which has no files to keep it
   /// in; its deletes ask first instead.

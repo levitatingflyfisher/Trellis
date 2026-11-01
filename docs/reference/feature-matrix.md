@@ -101,7 +101,7 @@ land, entries gain a `✅ shipped` mark; until then this is the plan of record.
 - Transcription as checkpointed resumable job with foreground service and kill-anywhere property tests (donor had none — full restart on any failure)
 - Modal/dialog accessibility via Flutter semantics + C5 320dp x 3.0 sweep incl. dialogs
 - Course repository bundled+imported behind the same seam (Drift-backed; import cache keyed by raw text); paste-JSON import KEPT plus file picker and share-target (fixes Trellis jank)
-- Bundled starter courses (Kalman 26-concept + a new language-learning starter)
+- Bundled example course (Kalman), offered as an example on a tap and never installed as the reader’s own; no language-learning starter was made
 - Study-ahead affordance answering Trellis's documented empty-app jank — bounded, opt-in, display mastery unchanged
 - Behavior + visual test harness: widget/golden/integration + visual-loop skill + oh_fleet_conformance C1-C7
 - Audiobooks (Campaign 7 ✅ shipped, `docs/adr/0013-audiobooks-are-a-door.md`):
@@ -639,6 +639,59 @@ otherwise.
   shows or reads the old language’s sentences while it starts
   (`features/reader_speak_translation_test.dart`, “a new language started
   while another is stored”).
+
+## Beyond both donors: owner asks, November 2026
+
+Paths are under `app/test/` unless they say otherwise.
+
+- ✅ shipped: **The example course is an example.** It stays in the
+  bundle (it is small and needs no network), but nothing installs it: the
+  empty Courses tab offers “Try an example course”, the course list marks
+  it “Example course”, the Add sheet stops offering it once it is there,
+  and any course can be removed from its map with its cards and their
+  history (`features/courses_flow_test.dart`).
+
+- ✅ shipped: **Share sends the made audio.** Share on an episode made
+  in the learning language sends its audio file, named by its title
+  (“Harbour episode (Spanish).ogg”), with words that say the voice is
+  machine made and give the original’s link; the file’s own tag says the
+  same, the WAV kept when no encoder takes it included. With the audio
+  gone from the phone it sends those words alone, never the made
+  episode’s address, which can’t be fetched. An ordinary episode whose
+  audio is on the phone offers “Send the link” or “Send the audio file”
+  (`features/listen/spoken_share_test.dart`,
+  `features/listen_chain_test.dart`, `db/voice_kind_db_test.dart`). The
+  web has no files to send, so there Share sends words.
+- ✅ shipped: **A host’s own voice stays behind its own switch.** A made
+  episode stores the kind of voice that said it (schema 33). Share sends
+  a file spoken in a copy of a real person’s voice only when Settings ›
+  Listening › “Share audio made in a host’s own voice” is on; it is off
+  by default, and otherwise Share sends words only. No such voice exists
+  in Trellis yet; the switch is there before it is
+  (`features/listen/spoken_share_test.dart`,
+  `features/settings/settings_screen_test.dart`).
+
+- ✅ shipped: **Make and edit a card by hand.** A course’s map has
+  Cards: every card step by step, Add card, and a tap to change one.
+  Two kinds are made by hand, front and back, and cloze written the Anki
+  way as `{{c1::word}}` (a hint after a second `::` is not part of the
+  answer; blanks with one number are asked together), with “Hide the
+  selection” to make a blank. A card keeps its id when changed, so its
+  history stays; a step keeps its last card. A card can be changed in
+  the middle of a session (Edit card, before the answer shows), and the
+  session asks the new words. “Make a card” on the Courses tab, and on
+  the sheet a held word opens in the reader, puts the card in **My
+  cards**, a course made with its first card whose session goes
+  straight to the cards; from the reader it is the word’s sentence with
+  the word hidden. Every change is a new course text the strict parser
+  accepts; study_core is unchanged (`study/card_editing_test.dart`,
+  `features/study/card_making_flow_test.dart`,
+  `features/reader_ledger_test.dart`, `features/dictionary_sheet_test.dart`).
+  **Not yet:** images on cards. They need an optional image field on an
+  item in study_core (additive, with parser tests), the image files kept
+  in app storage and named in the course text, a picker in the editor,
+  the image shown in a session with no network, the backup carrying the
+  files, and the Anki export adding them as media.
 
 ## Fleet rollout (2026-09): shared conventions adopted
 
