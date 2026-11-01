@@ -42,7 +42,9 @@ Future<int> importDocumentFile(
     required String path,
     required String name,
     PdfReader? readPdf}) {
-  if (_endingOf(name) == 'pdf') {
+  // The constant comes first: where there is no PDF engine (the web) the
+  // compiler drops the PDF import and the page rebuilding with it.
+  if (pdfReadingAvailable && _endingOf(name) == 'pdf') {
     return importPdfFile(
         db: db,
         profileId: profileId,

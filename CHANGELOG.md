@@ -7,6 +7,11 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.6.3 — 2026-11-10
+
+- The web app is smaller: the parts that only work on a phone (listening in another language, PDF reading) are no longer downloaded by a browser that can’t use them. The web bundle is 17,016 bytes lighter, compressed.
+- Nothing changes on the phone.
+
 ## 1.6.2 — 2026-11-10
 
 - **Links in the reader can be opened.** A web address in a text looks like a link, and a tap on it asks where it goes, as show notes do, then opens it in your browser. It works for any text: a Markdown file, a paste, a PDF, a transcript.

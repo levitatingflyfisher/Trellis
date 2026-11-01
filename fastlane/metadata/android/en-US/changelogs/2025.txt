@@ -1,0 +1,1 @@
+A smaller web app: code the browser could never run is no longer in it. Nothing changes on the phone.

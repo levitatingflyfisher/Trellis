@@ -4,8 +4,7 @@
 /// still exactly one download consent path (ADR-0003 law 6).
 library;
 
-import '../listen/listen_chain.dart';
-import '../listen/listen_device.dart';
+import '../listen/listen.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';

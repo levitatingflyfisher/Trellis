@@ -610,6 +610,12 @@ class ShareIntake {
                     );
               saved.add(ShareSaved(id, inLatest: false));
             case _FileKind.pdf:
+              // Where there is no PDF engine (the web) this is a constant,
+              // and the compiler drops the PDF import behind it.
+              if (!pdfReadingAvailable) {
+                failed++;
+                break;
+              }
               final importPdf = _importPdf;
               final id = importPdf != null
                   ? await importPdf(f.path, f.name)
