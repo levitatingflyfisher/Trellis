@@ -60,7 +60,11 @@ String get stripV34 =>
     ['DROP TABLE IF EXISTS card_images;', stripV35].join('\n');
 
 /// What v35 added, for a fixture stamped v34.
-String get stripV35 => 'ALTER TABLE episodes DROP COLUMN clearness;';
+String get stripV35 =>
+    ['ALTER TABLE episodes DROP COLUMN clearness;', stripV36].join('\n');
+
+/// What v36 added, for a fixture stamped v35.
+String get stripV36 => 'DROP TABLE IF EXISTS segment_links;';
 
 /// v28's search index, verbatim: no stemming, two columns, no shows
 /// table, and a show trigger with no WHEN guard. Frozen here so the v29

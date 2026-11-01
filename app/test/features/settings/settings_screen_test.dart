@@ -176,6 +176,14 @@ void main() {
     expect(await db.deviceSettingsDao.read('read_aloud_citations'), 'on');
   });
 
+  testWidgets('Keep linked pages is a switch here, off until turned on',
+      (tester) async {
+    await pumpSettings(tester, await seedProfile());
+    expect(switchOn(tester, const Key('keep-linked-pages-toggle')), isFalse);
+    await tapRow(tester, const Key('keep-linked-pages-toggle'));
+    expect(await db.deviceSettingsDao.read('keep_linked_pages'), 'on');
+  });
+
   testWidgets('Read aloud voices offers a voice for every language this '
       'reader meets: the learning language, a work’s and a show’s',
       (tester) async {

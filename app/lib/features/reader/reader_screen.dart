@@ -4,6 +4,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:brain_wiring/brain_wiring.dart' show BrainTier;
+import 'package:comms_core/comms_core.dart' show HttpFetcher;
 import 'package:drift/drift.dart' show TableUpdate, TableUpdateQuery;
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -20,6 +21,9 @@ import '../brain/brain_store.dart';
 import '../brain/distill_screen.dart';
 import '../intake/paste_intake.dart' show epochDayUtcNow;
 import '../models/consent.dart';
+import '../references/keep_page.dart';
+import '../references/link_sheet.dart';
+import '../references/linked_pages_sheet.dart';
 import '../models/format.dart';
 import '../models/model_store.dart';
 import '../player/media_item_mapping.dart';
@@ -37,7 +41,6 @@ import 'ledger_screen.dart';
 import 'line_paced_view.dart';
 import 'reader_code_face.dart';
 import '../works/device_hooks.dart' show openExternalLink;
-import '../works/link_confirm.dart';
 import 'reader_logic.dart';
 import 'reader_prefs.dart';
 import '../settings/reading_settings.dart';
@@ -234,6 +237,10 @@ class ReaderScreen extends StatefulWidget {
   /// browser by default; tests stand in for it.
   final Future<void> Function(Uri uri) openLink;
 
+  /// Fetches a page a link points to, to keep a copy of it on the device
+  /// (frozen references). Null offers no keeping: the web tier, tests.
+  final HttpFetcher? fetcher;
+
   /// The media session read aloud takes while it reads (1.6.0, user: "it
   /// stops when the screen goes dark, I would like it treated just like
   /// media/podcast playing"): the session brings the playback service,
@@ -266,6 +273,7 @@ class ReaderScreen extends StatefulWidget {
       this.openOnPage = false,
       this.note,
       this.openLink = openExternalLink,
+      this.fetcher,
       this.session = const NoPlaybackSession()});
 
   @override
@@ -461,6 +469,12 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// [_original] holds the canonical segments; [_mtLangs] the mt layers on
   /// offer; [_activeLang] which one currently projects (null = original).
   List<core.Segment> _original = const [];
+
+  /// This text's links (frozen references), in text order, and the words
+  /// they cover in the current [_doc] (see [_linkedWords]).
+  List<SegmentLink> _links = const [];
+  Map<int, String> _linkedCache = const {};
+  core.TokenizedDocument? _linkedFor;
   List<String> _mtLangs = const [];
   Map<String, Map<int, String>> _mtTexts = const {};
   String? _activeLang;
@@ -900,6 +914,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     final translationOnly =
         await widget.db.spineDao.translationOnly(widget.work.id);
     final readerPrefs = await widget.db.profilesDao.readerPrefs(widget.profileId);
+    final links = await widget.db.spineDao.linksOf(widget.work.id);
     if (!mounted) return;
     setState(() {
       _original = blocks;
@@ -918,6 +933,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       _hasAlignedAudio = hasAlignedAudio;
       _workLang = workLang;
       _sourceLang = sourceLang;
+      _links = links;
       _spine = spine;
       _wordTimings = wordTimings;
       _making = making;
@@ -2357,14 +2373,173 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (_playing) _step();
   }
 
+  /// The words of [_doc] inside this text's links: global word index to
+  /// href. Only blocks still showing their saved text carry links; a
+  /// translation shown in their place has none.
+  Map<int, String> get _linkedWords {
+    final doc = _doc;
+    final blocks = _blocks;
+    if (doc == null || blocks == null || _links.isEmpty) return const {};
+    if (identical(doc, _linkedFor)) return _linkedCache;
+    final bySeg = <int, List<(int, int, String)>>{};
+    for (final l in _links) {
+      bySeg.putIfAbsent(l.segIdx, () => []).add((l.startChar, l.endChar, l.href));
+    }
+    final saved = {for (final b in _original) b.idx: b.text};
+    final out = <int, String>{};
+    for (var i = 0; i < blocks.length; i++) {
+      final b = blocks[i];
+      final ranges = bySeg[b.idx];
+      if (ranges == null || saved[b.idx] != b.text) continue;
+      final start = doc.blockStartWordIdx[i];
+      final end = i + 1 < blocks.length
+          ? doc.blockStartWordIdx[i + 1]
+          : doc.words.length;
+      out.addAll(linkedWordsOf(
+          text: b.text,
+          originals: doc.originals.sublist(start, end),
+          firstWordIdx: start,
+          links: ranges));
+    }
+    _linkedFor = doc;
+    return _linkedCache = out;
+  }
+
+  /// A tapped link (frozen references): its kept copy, keeping one, or
+  /// the browser.
+  Future<void> _openLinkSheet(String href) async {
+    final kept = await widget.db.spineDao.keptCopyOf(widget.profileId, href);
+    if (!mounted) return;
+    final choice = await showLinkSheet(context,
+        href: href,
+        keptEpochDay: kept?.firstSeenEpochDay,
+        canKeep: widget.fetcher != null);
+    if (!mounted) return;
+    switch (choice) {
+      case LinkChoice.readKept:
+        if (kept != null) await _openKeptCopy(kept);
+      case LinkChoice.keep:
+        if (!await _confirmKeeping([href]) || !mounted) return;
+        final messenger = ScaffoldMessenger.of(context);
+        messenger.showSnackBar(
+            const SnackBar(content: Text('Keeping a copy…')));
+        final (outcome, _) = await _keep(href);
+        if (!mounted) return;
+        messenger.hideCurrentSnackBar();
+        switch (outcome) {
+          case PageKept(:final workId):
+            final work = await widget.db.spineDao.workById(workId);
+            if (work != null && mounted) await _openKeptCopy(work);
+          case PageNotKept(:final message):
+            messenger.showSnackBar(SnackBar(content: Text(message)));
+        }
+      case LinkChoice.openBrowser:
+        final uri = Uri.tryParse(href);
+        if (uri != null) await widget.openLink(uri);
+      case null:
+        break;
+    }
+  }
+
+  /// The one consent question (ADR-0003 law 6), naming every address.
+  Future<bool> _confirmKeeping(List<String> hrefs) => confirmDownload(context,
+      title: hrefs.length == 1 ? 'Keep a copy?' : 'Keep copies?',
+      items: [
+        for (final h in hrefs)
+          DownloadItem('${keptKeyOf(h)} (size unknown until it arrives)'),
+      ]);
+
+  /// Keeps one page with this reader's fetcher: the outcome and, when
+  /// kept, the day it was kept.
+  Future<(KeepOutcome, int?)> _keep(String href) async {
+    final fetcher = widget.fetcher;
+    if (fetcher == null) {
+      return (const PageNotKept('Pages can’t be kept here.'), null);
+    }
+    final outcome = await keepLinkedPage(
+        db: widget.db,
+        fetcher: fetcher,
+        profileId: widget.profileId,
+        href: href,
+        epochDay: epochDayUtcNow());
+    if (outcome is PageKept) {
+      final w = await widget.db.spineDao.workById(outcome.workId);
+      return (outcome, w?.firstSeenEpochDay);
+    }
+    return (outcome, null);
+  }
+
+  /// Reads a kept copy in a reader of its own, with this one's seams: its
+  /// own links can be followed and kept the same way.
+  Future<void> _openKeptCopy(Work work) async {
+    _pause();
+    unawaited(_stopSpeak());
+    await Navigator.of(context).push(MaterialPageRoute<void>(
+      builder: (_) => ReaderScreen(
+          db: widget.db,
+          profileId: widget.profileId,
+          work: work,
+          tts: widget.tts,
+          brain: widget.brain,
+          resolveSpeechEngine: widget.resolveSpeechEngine,
+          lookupDefinition: widget.lookupDefinition,
+          createSpeechAudioQueue: widget.createSpeechAudioQueue,
+          createSpeechTempFiles: widget.createSpeechTempFiles,
+          translation: widget.translation,
+          openLink: widget.openLink,
+          fetcher: widget.fetcher,
+          session: widget.session),
+    ));
+  }
+
+  /// Every link of this text, with what is kept (frozen references).
+  Future<void> _openLinkedPages() async {
+    final doc = _doc;
+    if (doc == null) return;
+    final saved = {for (final b in _original) b.idx: b.text};
+    final links = [
+      for (final l in _links)
+        (
+          words: () {
+            final t = saved[l.segIdx];
+            if (t == null || l.endChar > t.length) return l.href;
+            return t.substring(l.startChar, l.endChar);
+          }(),
+          href: l.href,
+        ),
+    ];
+    final kept = await widget.db.spineDao
+        .keptCopiesFor(widget.profileId, [for (final l in links) l.href]);
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheet) => LinkedPagesSheet(
+        links: links,
+        keptDays: {
+          for (final MapEntry(:key, :value) in kept.entries)
+            key: value.firstSeenEpochDay,
+        },
+        keep: _keep,
+        confirm: _confirmKeeping,
+        onOpen: (href) {
+          Navigator.of(sheet).pop();
+          unawaited(_openLinkSheet(href));
+        },
+      ),
+    );
+  }
+
   void _seekToWord(int globalIdx) {
     final doc = _doc;
     if (doc == null || doc.words.isEmpty) return;
     // A link's word opens the link (1.6.2), after the same question show
     // notes ask. It does not also move the reading place.
-    final link = linkOfToken(doc.originals[globalIdx]);
+    final link =
+        _linkedWords[globalIdx] ?? linkOfToken(doc.originals[globalIdx]);
     if (link != null) {
-      unawaited(confirmAndOpenLink(context, link, widget.openLink));
+      unawaited(_openLinkSheet(link));
       return;
     }
     _timer?.cancel();
@@ -3026,6 +3201,7 @@ class _ReaderScreenState extends State<ReaderScreen>
               if (value == 'work-language') unawaited(_openWorkLanguagePicker());
               if (value == 'lang') _toggleLanguage();
               if (value == 'ledger') _openLedger();
+              if (value == 'linked-pages') unawaited(_openLinkedPages());
             },
             itemBuilder: (_) => [
               if (_mtLangs.isNotEmpty && doc != null)
@@ -3040,6 +3216,11 @@ class _ReaderScreenState extends State<ReaderScreen>
                   key: Key('open-ledger'),
                   value: 'ledger',
                   child: Text('Word ledger')),
+              if (_links.isNotEmpty)
+                const PopupMenuItem(
+                    key: Key('linked-pages-action'),
+                    value: 'linked-pages',
+                    child: Text('Linked pages')),
               const PopupMenuItem(
                   value: 'distill',
                   child: Text('Distill into a course')),
@@ -4216,7 +4397,8 @@ class _ReaderScreenState extends State<ReaderScreen>
     final inLit = lit != null && w >= lit.$1 && w < lit.$2;
     final scheme = theme.colorScheme;
     // A link looks like one: it can be tapped.
-    final linked = linkOfToken(doc.originals[w]) != null;
+    final linked = _linkedWords.containsKey(w) ||
+        linkOfToken(doc.originals[w]) != null;
     final plain = linked
         ? base?.copyWith(
             color: scheme.primary, decoration: TextDecoration.underline)

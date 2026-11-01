@@ -10,10 +10,37 @@ sealed class IntakeBlock {
   const IntakeBlock();
 }
 
+/// A link inside a [TextBlock]: the words `text.substring(start, end)` point
+/// to [href], an absolute http or https address (frozen references, owner
+/// ask of 21 and 24 Oct 2026).
+final class TextLink {
+  final int start;
+  final int end;
+  final String href;
+  const TextLink({required this.start, required this.end, required this.href});
+
+  @override
+  bool operator ==(Object other) =>
+      other is TextLink &&
+      other.start == start &&
+      other.end == end &&
+      other.href == href;
+
+  @override
+  int get hashCode => Object.hash(start, end, href);
+
+  @override
+  String toString() => 'TextLink($start, $end, $href)';
+}
+
 /// A run of prose (donor `{type:"text",text}`). Whitespace already collapsed.
 final class TextBlock extends IntakeBlock {
   final String text;
-  const TextBlock(this.text);
+
+  /// Its web links, in text order, never overlapping. Only the article
+  /// extractor fills these; every other parser leaves them empty.
+  final List<TextLink> links;
+  const TextBlock(this.text, {this.links = const []});
 
   @override
   String toString() => 'TextBlock($text)';

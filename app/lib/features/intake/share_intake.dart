@@ -16,6 +16,7 @@
 /// read is tried again when it is shared again or opened.
 library;
 
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -34,6 +35,7 @@ import 'paste_intake.dart' show storePastedText;
 import 'text_intake.dart';
 import 'pdf_intake.dart';
 import 'pdf_reader.dart';
+import '../references/keep_page.dart' show keepLinkedPagesIfAsked;
 
 /// One file another app shared, already copied into app storage by the
 /// platform side; [path] is that copy, which the intake removes when done.
@@ -540,7 +542,16 @@ class ShareIntake {
           workId: workId);
     }
     await db.spineDao.replaceBody(workId,
-        kind: 'article', title: article.article.title, rows: article.rows);
+        kind: 'article',
+        title: article.article.title,
+        rows: article.rows,
+        links: article.links);
+    unawaited(keepLinkedPagesIfAsked(
+        db: db,
+        fetcher: fetcher,
+        profileId: profileId,
+        workId: workId,
+        epochDay: _nowMs ~/ Duration.millisecondsPerDay));
     return ShareUpgraded(workId);
   }
 
@@ -775,9 +786,16 @@ class ShareIntake {
           firstSeenEpochDay: nowMs ~/ Duration.millisecondsPerDay,
         );
         await db.spineDao.insertSegments(workId, article.rows);
+        await db.spineDao.insertLinks(workId, article.links);
         return workId;
       },
     );
+    unawaited(keepLinkedPagesIfAsked(
+        db: db,
+        fetcher: fetcher,
+        profileId: profileId,
+        workId: id,
+        epochDay: nowMs ~/ Duration.millisecondsPerDay));
     return ShareSaved(id, inLatest: true);
   }
 }

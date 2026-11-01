@@ -824,6 +824,20 @@ Paths are under `app/test/` unless they say otherwise.
   `packages/comms_core/test/feed_archive_test.dart`,
   `packages/comms_core/test/feed_parser_test.dart`). Not compared yet:
   one real show side by side with AntennaPod on a phone.
+- ✅ built, not yet released: **Frozen copies of the pages a text cites**
+  (owner, 21 and 24 Oct). A saved article keeps its links (schema 36,
+  `segment_links`); the linked words look like links in the reader. A
+  tap offers the copy kept on this device with the day it was kept,
+  keeping one (after the one consent question, through the guarded
+  fetcher), or the browser. Linked pages in the reader's ⋮ lists every
+  link and keeps them all after one yes. Settings › Reading › Keep
+  linked pages when saving does it on save; off by default. A kept copy
+  is a work of kind `frozen`, never listed in the Library, search or
+  History; it goes when no remaining text links to it, and links ride in
+  a backup (`features/references/`, `db/segment_links_db_test.dart`,
+  `reader/linked_words_test.dart`,
+  `packages/intake_core/test/article_links_test.dart`). Articles saved
+  before keep no links. Not heard on a phone yet.
 
 ## Fleet rollout (2026-09): shared conventions adopted
 

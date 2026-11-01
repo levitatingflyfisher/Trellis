@@ -155,22 +155,126 @@ ArticleResult extractArticle(String html, {String? baseUrl}) {
 
   // Extract text preserving paragraph breaks. Nested matches duplicate their
   // text (a li and its child p both emit) — donor behavior, kept.
+  final base = baseUrl == null ? null : Uri.tryParse(baseUrl);
   final parts = <String>[];
+  final blocks = <TextBlock>[];
   for (final el in _descendants(root)) {
     if (!_partTags.contains(el.localName)) continue;
-    final t = el.text.replaceAll(_wsRe, ' ').trim();
-    if (t.length > 20) parts.add(t);
+    final b = _linkedText(el, base);
+    if (b.text.length > 20) {
+      parts.add(b.text);
+      blocks.add(b);
+    }
   }
   if (parts.isEmpty) {
-    final t = root.text.replaceAll(_wsRe, ' ').trim();
-    if (t.isNotEmpty) parts.add(t);
+    final b = _linkedText(root, base);
+    if (b.text.isNotEmpty) {
+      parts.add(b.text);
+      blocks.add(b);
+    }
   }
 
   return ArticleResult(
     title: title,
     byline: byline,
-    blocks: [for (final p in parts) TextBlock(p)],
+    blocks: blocks,
     text: parts.join('\n\n'),
     url: baseUrl,
   );
+}
+
+
+/// [el]'s text exactly as `el.text.replaceAll(_wsRe, ' ').trim()` gives it,
+/// with the places of its web links carried through the collapse.
+TextBlock _linkedText(dom.Element el, Uri? base) {
+  final raw = StringBuffer();
+  final spans = <(int, int, String)>[];
+  void walk(dom.Node node, String? href) {
+    for (final child in node.nodes) {
+      if (child is dom.Text) {
+        raw.write(child.data);
+      } else if (child is dom.Element) {
+        String? inner = href;
+        if (href == null && child.localName == 'a') {
+          inner = _webHref(child.attributes['href'], base);
+          if (inner != null) {
+            final start = raw.length;
+            walk(child, inner);
+            spans.add((start, raw.length, inner));
+            continue;
+          }
+        }
+        walk(child, inner);
+      }
+    }
+  }
+
+  walk(el, null);
+  final source = raw.toString();
+  // Collapse runs of whitespace to one space and trim, keeping for each raw
+  // index the collapsed index it lands on.
+  final out = StringBuffer();
+  final at = List<int>.filled(source.length + 1, 0);
+  var i = 0;
+  while (i < source.length) {
+    at[i] = out.length;
+    final m = _wsRe.matchAsPrefix(source, i);
+    if (m != null) {
+      out.write(' ');
+      for (var k = i; k < m.end; k++) {
+        at[k] = out.length - 1;
+      }
+      i = m.end;
+    } else {
+      out.write(source[i]);
+      i++;
+    }
+  }
+  at[source.length] = out.length;
+  final collapsed = out.toString();
+  final lead = collapsed.length - collapsed.trimLeft().length;
+  final text = collapsed.trim();
+  final links = <TextLink>[];
+  for (final (s, e, href) in spans) {
+    var start = (at[s] - lead).clamp(0, text.length);
+    var end = (at[e] - lead).clamp(0, text.length);
+    while (start < end && text[start] == ' ') {
+      start++;
+    }
+    while (end > start && text[end - 1] == ' ') {
+      end--;
+    }
+    if (end > start) links.add(TextLink(start: start, end: end, href: href));
+  }
+  return TextBlock(text, links: links);
+}
+
+/// [href] as an absolute http or https address, or null: mail, scripts,
+/// fragments of this page and, with no [base], relative links stay out.
+String? _webHref(String? href, Uri? base) {
+  if (href == null) return null;
+  final h = href.trim();
+  if (h.isEmpty || h.startsWith('#')) return null;
+  final Uri parsed;
+  try {
+    parsed = Uri.parse(h);
+  } on FormatException {
+    return null;
+  }
+  Uri resolved;
+  if (parsed.hasScheme) {
+    resolved = parsed;
+  } else {
+    if (base == null || !base.hasScheme) return null;
+    try {
+      resolved = base.resolveUri(parsed);
+    } on FormatException {
+      return null;
+    }
+  }
+  final scheme = resolved.scheme.toLowerCase();
+  if ((scheme != 'http' && scheme != 'https') || resolved.host.isEmpty) {
+    return null;
+  }
+  return resolved.toString();
 }

@@ -256,6 +256,7 @@ const _homes = [
   Key('settings-reading-style'),
   Key('settings-read-aloud-voices'),
   Key('speak-citations-toggle'),
+  Key('keep-linked-pages-toggle'),
   Key('dsp-global-default-toggle'),
   Key('open-headset-keys'),
   Key('learning-language-setting'),

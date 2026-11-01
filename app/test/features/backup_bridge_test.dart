@@ -101,6 +101,17 @@ Future<void> seedRichly(AppDatabase db) async {
   await db.spineDao.insertLayers(walden, [
     (segmentIdx: 1, lang: 'pt', kind: 'translation', text: 'Fui'),
   ]);
+  // A link and the page it points to, kept (frozen references).
+  await db.spineDao.insertLinks(walden, const [
+    (segIdx: 1, start: 14, end: 19, href: 'https://woods.example/#pond'),
+  ]);
+  await db.spineDao.storeKeptCopy(
+      profileId: ada,
+      href: 'https://woods.example/',
+      title: 'The woods',
+      epochDay: 20601,
+      rows: const [(idx: 0, kind: 'prose', text: 'Trees and a pond')],
+      links: const [(segIdx: 0, start: 0, end: 5, href: 'https://pond.example/')]);
   await db.into(db.alignments).insert(AlignmentsCompanion.insert(
       workId: walden,
       segmentIdx: 1,
@@ -378,7 +389,9 @@ void main() {
       // Typed spot checks: ids and FK edges landed verbatim.
       final ada = (await db2.profilesDao.all()).first;
       final works = await db2.spineDao.worksOf(ada.id);
-      expect(works.map((w) => w.title).toSet(), {'Walden', 'Episode One'});
+      // The woods is the kept copy of the page Walden links to.
+      expect(works.map((w) => w.title).toSet(),
+          {'Walden', 'Episode One', 'The woods'});
       final episodeWork =
           works.singleWhere((w) => w.kind == 'episode');
       expect((await db2.feedsDao.episodeOf(episodeWork.id))?.guid, 'guid-1');

@@ -837,6 +837,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         createSpeechTempFiles: widget.services.createSpeechTempFiles,
         player: _player,
         translation: widget.services.translation,
+        fetcher: widget.fetcher,
       );
 
   /// History, from the Queue bar: the queue is what plays next, history
@@ -926,6 +927,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
             playerController: _player,
             coordinator: _coordinator,
             onOpenJobs: _openJobs,
+            fetcher: widget.fetcher,
             downloadCoordinator: _downloadCoordinator,
             dspCoordinator: _dspCoordinator,
             localMlAvailable: widget.services.localMlAvailable,

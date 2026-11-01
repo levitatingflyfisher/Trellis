@@ -79,18 +79,18 @@ void main() {
       expect(plain.style?.decoration, isNot(TextDecoration.underline));
     });
 
-    testWidgets('a tap on it asks where it goes, and Open opens it',
-        (tester) async {
+    testWidgets('a tap on it asks where it goes, and Open in the browser '
+        'opens it', (tester) async {
       await pumpReader(tester);
 
       await tester.tap(find.text('example.org/tides'));
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const Key('link-confirm')), findsOneWidget);
+      expect(find.byKey(const Key('link-sheet')), findsOneWidget);
       expect(find.text('example.org'), findsOneWidget);
       expect(opened, isEmpty, reason: 'nothing leaves before the yes');
 
-      await tester.tap(find.byKey(const Key('link-open')));
+      await tester.tap(find.byKey(const Key('link-open-browser')));
       await tester.pumpAndSettle();
       expect(opened, [Uri.parse('https://example.org/tides')]);
     });
@@ -107,7 +107,7 @@ void main() {
 
       await tester.tap(find.text('tables'));
       await tester.pumpAndSettle();
-      expect(find.byKey(const Key('link-confirm')), findsNothing);
+      expect(find.byKey(const Key('link-sheet')), findsNothing);
     });
   });
 }

@@ -480,7 +480,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
       lookupDefinition: widget.lookupDefinition,
       createSpeechTempFiles: widget.createSpeechTempFiles,
       player: widget.player,
-      translation: widget.translation);
+      translation: widget.translation,
+      fetcher: _fetcher);
 
   WorkDoors get _doors => WorkDoors(
       db: widget.db,

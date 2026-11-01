@@ -80,7 +80,8 @@ entry.
 
 ### Kokoro-82M v1.1-zh: Chinese
 
-- The fp16 ONNX export from `thewh1teagle/kokoro-onnx` (Apache-2.0), kept
+- The fp16 ONNX export from `thewh1teagle/kokoro-onnx` (the weights are
+  Kokoro's, Apache-2.0; the exporter's code is MIT), kept
   on `models-voices-1`. The onnx-community fp16 file returns NaN audio for
   every line past 30 phonemes on ONNX Runtime 1.32, and int8 drifts in
   Chinese. The engine refuses audio with a NaN in it rather than play it.

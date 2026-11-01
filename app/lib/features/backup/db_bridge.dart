@@ -71,6 +71,21 @@ class DbBridge {
           .add(Map<String, Object?>.from(c.toJson()));
     }
 
+    // A text's links ride on its work row too, in text order.
+    final links = await (db.select(db.segmentLinks)
+          ..orderBy([
+            (l) => OrderingTerm.asc(l.workId),
+            (l) => OrderingTerm.asc(l.segIdx),
+            (l) => OrderingTerm.asc(l.ord)
+          ]))
+        .get();
+    final linksByWork = <int, List<Map<String, Object?>>>{};
+    for (final l in links) {
+      linksByWork
+          .putIfAbsent(l.workId, () => [])
+          .add(Map<String, Object?>.from(l.toJson()));
+    }
+
     final profiles = await (db.select(db.profiles)
           ..orderBy([(p) => OrderingTerm.asc(p.id)]))
         .get();
@@ -95,6 +110,7 @@ class DbBridge {
               'episode': episodeByWork[w.id],
             if (capturesByWork.containsKey(w.id))
               'captures': capturesByWork[w.id],
+            if (linksByWork.containsKey(w.id)) 'links': linksByWork[w.id],
           }
       ],
       'segments': rows(await (db.select(db.segments)
@@ -207,6 +223,7 @@ class DbBridge {
         db.positions,
         db.alignments,
         db.layers,
+        db.segmentLinks,
         db.segments,
         db.feeds,
         db.works,
@@ -263,6 +280,17 @@ class DbBridge {
       }
       for (final row in t['segments']!) {
         await db.into(db.segments).insert(Segment.fromJson(cast(row)));
+      }
+      for (final row in t['works']!) {
+        final links = row['links'];
+        if (links is List) {
+          for (final entry in links) {
+            if (entry is Map) {
+              await db.into(db.segmentLinks).insert(
+                  SegmentLink.fromJson(Map<String, dynamic>.from(entry)));
+            }
+          }
+        }
       }
       for (final row in t['layers']!) {
         await db.into(db.layers).insert(Layer.fromJson(cast(row)));

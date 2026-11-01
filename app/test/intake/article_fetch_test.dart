@@ -17,4 +17,19 @@ void main() {
     expect(message, contains('Subscriptions'));
     expect(message, isNot(contains('Latest')));
   });
+
+  test('the links of an article come with its rows, by row and place', () {
+    final words = 'plain words to make the paragraph long enough ' * 5;
+    final outcome = articleFromHtml(
+        '<html><body><article><p>First <a href="https://a.test/x">cited</a> '
+        '$words</p><p>Second $words <a href="/y">there</a></p>'
+        '</article></body></html>',
+        Uri.parse('https://blog.test/p'));
+    final fetched = outcome as ArticleFetched;
+    expect(fetched.rows, hasLength(2));
+    expect([for (final l in fetched.links) (l.segIdx, l.href)],
+        [(0, 'https://a.test/x'), (1, 'https://blog.test/y')]);
+    final l = fetched.links.last;
+    expect(fetched.rows[1].text.substring(l.start, l.end), 'there');
+  });
 }

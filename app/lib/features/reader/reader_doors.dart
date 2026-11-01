@@ -1,3 +1,4 @@
+import 'package:comms_core/comms_core.dart' show HttpFetcher;
 import 'package:flutter/material.dart';
 
 import '../../bootstrap/bootstrap.dart' show playbackSession;
@@ -23,6 +24,7 @@ class ReaderDoors {
     this.createSpeechTempFiles,
     this.player,
     this.translation,
+    this.fetcher,
   });
 
   final TtsSpeaker? tts;
@@ -35,6 +37,10 @@ class ReaderDoors {
   /// Translation for the readers this opens (1.5.5); null hides
   /// Translate. See [TranslationService].
   final TranslationService? translation;
+
+  /// Fetches a page a link points to, to keep a copy (frozen
+  /// references); null offers no keeping.
+  final HttpFetcher? fetcher;
 
   /// Pushes the reader for [work] and completes when it pops. The voice
   /// and the recap offer are settled before the push (ADR-0006): the
@@ -89,6 +95,7 @@ class ReaderDoors {
           openTranslatePicker: openTranslatePicker,
           openOnPage: openOnPage,
           note: note,
+          fetcher: fetcher,
           // The app's one media session (nothing in tests and on the web):
           // every door opens a reader that can read on behind the screen.
           session: playbackSession),

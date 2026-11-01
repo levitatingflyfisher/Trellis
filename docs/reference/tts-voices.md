@@ -73,7 +73,8 @@ How the voices were picked:
 
 ### Kokoro-82M v1.1-zh (hexgrad), Chinese
 
-- Model: `thewh1teagle/kokoro-onnx` fp16 export (Apache-2.0), sha256
+- Model: `thewh1teagle/kokoro-onnx` fp16 export (weights Apache-2.0;
+  the exporter's code is MIT), sha256
   `a628ea5d6fbde96d1a85f691a6a00847829937f9e488021ba2c5359bc6ea08b5`,
   kept on the release. onnx-community's fp16 file gave
   NaN audio past 30 phonemes.

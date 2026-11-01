@@ -144,6 +144,37 @@ class Segments extends Table {
   Set<Column> get primaryKey => {workId, idx};
 }
 
+/// A web link inside a segment's text (frozen references, owner ask of 21
+/// and 24 Oct 2026): the words `body.substring(startChar, endChar)` of
+/// segment [segIdx] point to [href], an absolute http or https address.
+/// [ord] keeps text order. The text itself never carries the link, so the
+/// reading place, speech and translation are untouched by it.
+@DataClassName('SegmentLink')
+class SegmentLinks extends Table {
+  IntColumn get workId => integer().references(Works, #id)();
+  IntColumn get segIdx => integer()();
+  IntColumn get ord => integer()();
+  IntColumn get startChar => integer()();
+  IntColumn get endChar => integer()();
+  TextColumn get href => text()();
+  @override
+  Set<Column> get primaryKey => {workId, segIdx, ord};
+}
+
+/// The kind of a page kept on the device because a text links to it. The
+/// Library never lists it; the reader opens it from the link.
+const keptCopyKind = 'frozen';
+
+/// The address a kept copy is filed under: [href] without its #fragment,
+/// so every link into one page finds the same copy.
+String keptKeyOf(String href) {
+  final hash = href.indexOf('#');
+  return hash < 0 ? href : href.substring(0, hash);
+}
+
+/// One link to store: where in which segment, and to what address.
+typedef LinkRow = ({int segIdx, int start, int end, String href});
+
 class Layers extends Table {
   IntColumn get workId => integer().references(Works, #id)();
   IntColumn get segmentIdx => integer()();
@@ -1483,7 +1514,7 @@ class ProfilesDao extends DatabaseAccessor<AppDatabase>
 @DriftAccessor(
     tables: [Works, Segments, Layers, Alignments, Positions, Episodes,
         PlayerPositions, Captures, QueueTable, TranslationSentences,
-        Audiobooks, AudiobookFiles, WorkNotes])
+        Audiobooks, AudiobookFiles, WorkNotes, SegmentLinks])
 class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
   SpineDao(super.db);
 
@@ -1535,14 +1566,138 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
     required String kind,
     required String title,
     required List<({int idx, String kind, String text})> rows,
+    List<LinkRow> links = const [],
   }) => transaction(() async {
     await (delete(positions)..where((p) => p.workId.equals(workId))).go();
+    await (delete(segmentLinks)..where((x) => x.workId.equals(workId))).go();
     await (delete(segments)..where((x) => x.workId.equals(workId))).go();
     await insertSegments(workId, rows);
+    await insertLinks(workId, links);
     await (update(works)..where((w) => w.id.equals(workId))).write(
       WorksCompanion(kind: Value(kind), title: Value(title)),
     );
   });
+
+  /// Stores [links] for [workId], numbered in the order given.
+  Future<void> insertLinks(int workId, List<LinkRow> links) {
+    if (links.isEmpty) return Future.value();
+    final ord = <int, int>{};
+    return batch(
+      (b) => b.insertAll(segmentLinks, [
+        for (final l in links)
+          SegmentLinksCompanion.insert(
+            workId: workId,
+            segIdx: l.segIdx,
+            ord: ord.update(l.segIdx, (n) => n + 1, ifAbsent: () => 0),
+            startChar: l.start,
+            endChar: l.end,
+            href: l.href,
+          ),
+      ]),
+    );
+  }
+
+  /// [workId]'s links in text order.
+  Future<List<SegmentLink>> linksOf(int workId) =>
+      (select(segmentLinks)
+            ..where((l) => l.workId.equals(workId))
+            ..orderBy([
+              (l) => OrderingTerm.asc(l.segIdx),
+              (l) => OrderingTerm.asc(l.ord),
+            ]))
+          .get();
+
+  /// The page [href] points to, as kept on this device for [profileId].
+  Future<Work?> keptCopyOf(int profileId, String href) =>
+      (select(works)
+            ..where(
+              (w) =>
+                  w.profileId.equals(profileId) &
+                  w.kind.equals(keptCopyKind) &
+                  w.sourceUrl.equals(keptKeyOf(href)),
+            )
+            ..limit(1))
+          .getSingleOrNull();
+
+  /// [keptCopyOf] for many addresses: each one that has a copy, keyed by
+  /// the address as given.
+  Future<Map<String, Work>> keptCopiesFor(
+    int profileId,
+    Iterable<String> hrefs,
+  ) async {
+    final rows = await (select(works)
+          ..where(
+            (w) => w.profileId.equals(profileId) & w.kind.equals(keptCopyKind),
+          ))
+        .get();
+    final byKey = {for (final w in rows) w.sourceUrl: w};
+    return {
+      for (final h in hrefs) h: ?byKey[keptKeyOf(h)],
+    };
+  }
+
+  /// Keeps a copy of the page at [href]: a [keptCopyKind] work dated
+  /// [epochDay], with its own text and links. A page already kept is
+  /// left as it is and its id returned.
+  Future<int> storeKeptCopy({
+    required int profileId,
+    required String href,
+    required String title,
+    required int epochDay,
+    required List<({int idx, String kind, String text})> rows,
+    List<LinkRow> links = const [],
+  }) => transaction(() async {
+    final have = await keptCopyOf(profileId, href);
+    if (have != null) return have.id;
+    final id = await insertWork(
+      profileId: profileId,
+      kind: keptCopyKind,
+      title: title,
+      persistence: 'work',
+      firstSeenEpochDay: epochDay,
+      sourceUrl: keptKeyOf(href),
+    );
+    await insertSegments(id, rows);
+    await insertLinks(id, links);
+    return id;
+  });
+
+  /// Kept copies no remaining text reaches, through its links or through
+  /// another kept copy's: they go with the last text that cited them.
+  Future<List<int>> _unreachedKeptCopies() async {
+    final kept = await (select(works)
+          ..where((w) => w.kind.equals(keptCopyKind)))
+        .get();
+    if (kept.isEmpty) return const [];
+    final keptIds = {for (final w in kept) w.id};
+    final copyOf = {
+      for (final w in kept) (w.profileId, w.sourceUrl ?? ''): w.id,
+    };
+    final profileOf = <int, int>{};
+    final hrefsOf = <int, List<String>>{};
+    final rows = await customSelect(
+      'SELECT l.work_id AS w, w.profile_id AS p, l.href AS h '
+      'FROM segment_links l JOIN works w ON w.id = l.work_id',
+    ).get();
+    for (final r in rows) {
+      final w = r.read<int>('w');
+      profileOf[w] = r.read<int>('p');
+      hrefsOf.putIfAbsent(w, () => []).add(r.read<String>('h'));
+    }
+    final reached = <int>{};
+    final todo = [
+      for (final w in hrefsOf.keys)
+        if (!keptIds.contains(w)) w,
+    ];
+    while (todo.isNotEmpty) {
+      final w = todo.removeLast();
+      for (final h in hrefsOf[w] ?? const <String>[]) {
+        final c = copyOf[(profileOf[w]!, keptKeyOf(h))];
+        if (c != null && reached.add(c)) todo.add(c);
+      }
+    }
+    return [for (final id in keptIds) if (!reached.contains(id)) id];
+  }
 
   Future<void> insertSegments(
     int workId,
@@ -1853,9 +2008,13 @@ class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
         await (delete(translationSentences)..where((t) => t.workId.isIn(c)))
             .go();
         await (delete(layers)..where((l) => l.workId.isIn(c))).go();
+        await (delete(segmentLinks)..where((x) => x.workId.isIn(c))).go();
         await (delete(segments)..where((x) => x.workId.isIn(c))).go();
         await (delete(works)..where((w) => w.id.isIn(c))).go();
       }
+      // A page kept only because a removed text cited it goes with it.
+      final orphans = await _unreachedKeptCopies();
+      if (orphans.isNotEmpty) await deleteWorks(orphans);
     });
   }
 
@@ -4140,7 +4299,7 @@ class HouseholdDao extends DatabaseAccessor<AppDatabase>
         Episodes, PlayerPositions, Courses, Cards, Revlog, JobsTable,
         WordLedger, HouseholdPin, Captures, DailyReviewCards, QueueTable,
         TranslationSentences, SavedViews, Audiobooks, AudiobookFiles,
-        ReadingDays, DeviceSettings, WorkNotes, CardImages],
+        ReadingDays, DeviceSettings, WorkNotes, CardImages, SegmentLinks],
     daos: [ProfilesDao, SpineDao, FeedsDao, StudyDao, JobsDao, LedgerDao,
         HouseholdDao, CapturesDao, DailyReviewDao, QueueDao, LibraryDao,
         AudiobooksDao, DeviceSettingsDao])
@@ -4149,7 +4308,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 35;
+  int get schemaVersion => 36;
   // There is no v14: it was reserved for the reader-depth campaign, which
   // landed as v18 after three sibling campaigns merged ahead of it, so the
   // guard chain skips from 13 to 15. Version gaps are harmless — an
@@ -4199,6 +4358,13 @@ class AppDatabase extends _$AppDatabase {
           await installIndexes(this);
         },
         onUpgrade: (m, from, to) async {
+          if (from < 36) {
+            // v36, frozen references: the links of a saved text. First,
+            // not in order: an older hop (v26's fold) removes works, and
+            // every removal now clears their links, so the table must be
+            // there before any hop runs.
+            await m.createTable(segmentLinks);
+          }
           if (from < 2) {
             // P2: feeds + river metadata + the no-alignments player fallback.
             await m.createTable(feeds);

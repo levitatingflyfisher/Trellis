@@ -16,9 +16,11 @@ const _essay =
     '<link rel="alternate" type="application/rss+xml" href="/feed.xml">'
     '</head><body><article><h1>On hedges</h1><p>'
     'A laid hedge is cut most of the way through at the base and bent '
-    'over, so it grows thick from below. It takes a winter, a billhook '
+    'over, so it grows thick from below. It takes a winter, a '
+    '<a href="/tools/billhook">billhook</a> '
     'and patience, and it lasts for decades if it is laid again when it '
-    'grows up and out of reach of the cattle it was meant to keep in.'
+    'grows up and out of reach of the '
+    '<a href="https://farm.example/cattle">cattle</a> it was meant to keep in.'
     '</p></article></body></html>';
 
 const _feed =
@@ -221,6 +223,47 @@ void main() {
       expect(await db.spineDao.segmentCount(row.work.id), greaterThan(0));
       final found = await SearchStore(db).search(profileId, 'billhook');
       expect([for (final i in found.items) i.work.id], [saved.workId]);
+      // Frozen references: the page's links are kept, by place.
+      final links = await db.spineDao.linksOf(saved.workId);
+      expect([for (final l in links) l.href], [
+        'https://blog.example/tools/billhook',
+        'https://farm.example/cattle',
+      ]);
+      final body = (await db.spineDao.segmentsOf(saved.workId))
+          .firstWhere((x) => x.idx == links.first.segIdx)
+          .body;
+      expect(body.substring(links.first.startChar, links.first.endChar),
+          'billhook');
+    });
+
+    test('with Keep linked pages on, a saved page’s linked pages are kept '
+        'too; off, nothing more is fetched', () async {
+      const second = 'https://blog.example/2026/hedges-again';
+      pages[essayUrl] = _essay;
+      pages[second] = _essay;
+      pages['https://farm.example/cattle'] = _essay.replaceAll(
+          'On hedges', 'On cattle');
+      final saved = await intake().take(
+          const SharedPayload(text: essayUrl)) as ShareSaved;
+      await intake().fetchPageFor(saved);
+      await pumpEventQueue(times: 50);
+      expect(fetcher.calls, hasLength(1), reason: 'off by default');
+
+      await db.deviceSettingsDao.write('keep_linked_pages', 'on');
+      final again = await intake().take(
+          const SharedPayload(text: second)) as ShareSaved;
+      await intake().fetchPageFor(again);
+      await pumpEventQueue(times: 50);
+      expect(
+          (await db.spineDao.keptCopyOf(
+                  profileId, 'https://farm.example/cattle'))
+              ?.title,
+          'On cattle');
+      expect(
+          await db.spineDao.keptCopyOf(
+              profileId, 'https://blog.example/tools/billhook'),
+          isNull,
+          reason: 'offline: not kept, and the save is not affected');
     });
 
     test('trackers are stripped before the duplicate check and the fetch',
@@ -363,6 +406,10 @@ void main() {
         SharedFile(path: '/cache/p.html', name: 'p.html', mimeType: 'text/html'),
       ])) as ShareSaved;
       expect((await db.spineDao.workById(saved.workId))!.title, 'On hedges');
+      expect(
+          [for (final l in await db.spineDao.linksOf(saved.workId)) l.href],
+          ['https://farm.example/cattle'],
+          reason: 'a file has no web address, so only whole links are kept');
     });
 
     test('a text file past the cap is not read into memory', () async {

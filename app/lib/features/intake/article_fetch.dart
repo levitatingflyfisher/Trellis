@@ -31,7 +31,12 @@ sealed class ArticleFetchOutcome {
 final class ArticleFetched extends ArticleFetchOutcome {
   final ArticleResult article;
   final List<SegmentRow> rows;
-  const ArticleFetched({required this.article, required this.rows});
+
+  /// The web links in [rows], each by its row's idx and its place in that
+  /// row's text (frozen references).
+  final List<({int segIdx, int start, int end, String href})> links;
+  const ArticleFetched(
+      {required this.article, required this.rows, this.links = const []});
 }
 
 /// A calm refusal: one user-facing sentence, no exception type leaks out.
@@ -138,10 +143,15 @@ ArticleFetchOutcome articleFromExtraction(ArticleResult article) {
   // Articles flatten to prose-only spine rows (the extractor emits nothing
   // else); keeping the mapping here mirrors epub_flatten's block→row seam.
   final rows = <SegmentRow>[];
+  final links = <({int segIdx, int start, int end, String href})>[];
   for (final block in article.blocks) {
     if (block is TextBlock) {
+      for (final l in block.links) {
+        links.add(
+            (segIdx: rows.length, start: l.start, end: l.end, href: l.href));
+      }
       rows.add((idx: rows.length, kind: 'prose', text: block.text));
     }
   }
-  return ArticleFetched(article: article, rows: rows);
+  return ArticleFetched(article: article, rows: rows, links: links);
 }

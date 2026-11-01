@@ -1,0 +1,1 @@
+Tap a link in a saved article to read a copy kept on your phone, keep one, or open it in the browser. Settings can keep linked pages when you save (off at first).

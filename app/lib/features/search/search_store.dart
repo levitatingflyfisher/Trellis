@@ -153,7 +153,11 @@ class SearchStore {
       this.libraryOnly = false});
 
   /// The clause that keeps a query to the Library, after its WHERE.
-  String get _kept => libraryOnly ? " AND w.persistence <> 'ephemeron'" : '';
+  /// A kept copy of a cited page is never listed: it is reached from the
+  /// text that cites it (frozen references).
+  String get _kept =>
+      " AND w.kind <> '$keptCopyKind'"
+      "${libraryOnly ? " AND w.persistence <> 'ephemeron'" : ''}";
 
   /// The user's words as an FTS5 query: each word quoted, so nothing they
   /// type is read as syntax, and each one a prefix, so "tim machine"
@@ -512,7 +516,7 @@ class SearchStore {
             AND fw.finished_epoch_day IS NOT NULL
       ) t
       JOIN works w ON w.id = t.work_id
-      WHERE w.profile_id = ?
+      WHERE w.profile_id = ? AND w.kind <> '$keptCopyKind'
       GROUP BY t.work_id
       ORDER BY at DESC, t.work_id DESC
       LIMIT ?

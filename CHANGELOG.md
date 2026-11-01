@@ -7,6 +7,12 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.6.16 — 2026-11-14
+
+- **Copies of the pages an article links to.** A saved article now keeps its links, and they look like links in the reader. Tap one to read the copy kept on this phone, to keep a copy (Trellis asks first, then gets the page once and keeps its text, dated), or to open it in the browser. Linked pages in the reader’s ⋮ lists every link and can keep them all at once. Settings › Keep linked pages when saving does it for every article you save; it is off until you turn it on. Kept pages are not listed in the Library or search: you reach them from the text that links to them, and they go when that text goes. Articles saved before this keep no links.
+- **Known limits.** Storage does not yet count kept pages under the article that links to them, and keeping pages has not yet been tried on a phone.
+- **The Kokoro export’s licence, stated right.** The exporter’s code is MIT and the weights Apache-2.0 (ADR-0022, the voices reference).
+
 ## 1.6.15 — 2026-11-13
 
 - **What the voices learned from, as far as is known.** The voice records (ADR-0022 and the voices reference) now say it plainly: Kyutai does not name the training data of its released Pocket TTS models, and the paper it cites trained on sets that include non-commercial and share-alike ones; Kokoro’s Chinese data was granted by a dataset company with no licence named. The code, the weights and every voice clip are clean. Nothing about the voices changes in this release.

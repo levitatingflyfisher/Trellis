@@ -692,6 +692,27 @@ void main() {
       expect(h[1].item.episode, isNull);
     });
 
+    test('a kept copy of a cited page is in neither search nor history: '
+        'it is reached from the text that cites it', () async {
+      final kept = await db.spineDao.storeKeptCopy(
+          profileId: profileId,
+          href: 'https://cited.test/',
+          title: 'Cited comet page',
+          epochDay: 100,
+          rows: const [(idx: 0, kind: 'prose', text: 'comet tails')]);
+      final read = await book('Comet book');
+      await stampPosition(kept, 6000);
+      await stampPosition(read, 4000);
+      expect([for (final e in await store.history(profileId)) e.item.work.id],
+          [read]);
+      for (final s in [store, SearchStore(db, forceLike: true)]) {
+        final r = await s.search(profileId, 'comet');
+        expect([for (final i in r.titleSection.rows) i.work.id], [read]);
+        expect([for (final i in r.notesSection.rows) i.work.id],
+            isNot(contains(kept)));
+      }
+    });
+
     test('the latest touch of an item is its place', () async {
       final id = await episode('Twice');
       await db.feedsDao.markPlayed(id, 1000);

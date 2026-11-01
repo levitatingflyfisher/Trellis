@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:comms_core/comms_core.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
@@ -5,6 +7,7 @@ import 'package:flutter/material.dart';
 import '../../db/database.dart';
 import '../../services/device_services.dart' show WebFetchLane;
 import '../models/consent.dart';
+import '../references/keep_page.dart' show keepLinkedPagesIfAsked;
 import 'article_fetch.dart';
 import 'paste_intake.dart' show epochDayUtcNow, showPasteIntakeDialog;
 import '../shared/capped_body.dart';
@@ -23,6 +26,7 @@ Future<int> storeArticle(AppDatabase db,
       firstSeenEpochDay: epochDayUtcNow(),
       sourceUrl: fetched.article.url);
   await db.spineDao.insertSegments(workId, fetched.rows);
+  await db.spineDao.insertLinks(workId, fetched.links);
   return workId;
 }
 
@@ -133,6 +137,12 @@ class _UrlIntakeScreenState extends State<UrlIntakeScreen> {
   Future<void> _add() async {
     final workId = await storeArticle(widget.db,
         profileId: widget.profileId, fetched: _preview!);
+    unawaited(keepLinkedPagesIfAsked(
+        db: widget.db,
+        fetcher: widget.fetcher,
+        profileId: widget.profileId,
+        workId: workId,
+        epochDay: epochDayUtcNow()));
     if (!mounted) return;
     Navigator.of(context).pop(workId);
   }

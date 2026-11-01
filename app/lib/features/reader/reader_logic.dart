@@ -355,3 +355,51 @@ String? linkOfToken(String original) {
   final uri = Uri.tryParse(href);
   return uri == null || uri.host.isEmpty ? null : href;
 }
+
+/// The words of one block that sit inside its links (frozen references):
+/// global word index to href. [originals] are the tokenizer's originals
+/// for the block, from its first word on (words past the block are never
+/// matched: a search that fails stops there), [firstWordIdx] the global
+/// index of its first word, and [links] the block's (start, end, href)
+/// character ranges in [text]. A word is in a link when their ranges
+/// overlap; every part of a split compound shares the compound's range.
+Map<int, String> linkedWordsOf({
+  required String text,
+  required List<String> originals,
+  required int firstWordIdx,
+  required List<(int, int, String)> links,
+}) {
+  if (links.isEmpty) return const {};
+  final out = <int, String>{};
+  var cursor = 0;
+  var partsLeft = 0;
+  var range = (0, 0);
+  for (var i = 0; i < originals.length; i++) {
+    final original = originals[i];
+    if (partsLeft > 0) {
+      partsLeft--;
+    } else {
+      final at = text.indexOf(original, cursor);
+      if (at < 0) break;
+      range = (at, at + original.length);
+      cursor = range.$2;
+      // A compound the tokenizer split shows as one word per part.
+      partsLeft = original.length > 6 && original.contains('-')
+          ? original.split('-').where((p) => p.isNotEmpty).length - 1
+          : 0;
+      if (partsLeft < 0) partsLeft = 0;
+      if (partsLeft > 0 &&
+          (i + partsLeft >= originals.length ||
+              originals[i + partsLeft] != original)) {
+        partsLeft = 0;
+      }
+    }
+    for (final (s, e, href) in links) {
+      if (range.$1 < e && s < range.$2) {
+        out[firstWordIdx + i] = href;
+        break;
+      }
+    }
+  }
+  return out;
+}

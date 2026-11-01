@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:comms_core/comms_core.dart' show HttpFetcher;
 import 'package:flutter/material.dart';
 import 'package:openhearth_design/openhearth_design.dart';
 
@@ -106,6 +107,9 @@ class RiverScreen extends StatefulWidget {
   /// Opens the Jobs page, where a job's Pause, Try again and Discard are.
   final VoidCallback onOpenJobs;
 
+  /// For the readers this opens: keeping a page a text links to.
+  final HttpFetcher? fetcher;
+
   const RiverScreen(
       {super.key,
       this.active = true,
@@ -119,6 +123,7 @@ class RiverScreen extends StatefulWidget {
       required this.playerController,
       required this.coordinator,
       required this.onOpenJobs,
+      this.fetcher,
       this.downloadCoordinator,
       this.dspCoordinator,
       this.localMlAvailable = true,
@@ -522,7 +527,8 @@ class _RiverScreenState extends State<RiverScreen>
       lookupDefinition: widget.lookupDefinition,
       createSpeechTempFiles: widget.createSpeechTempFiles,
       player: widget.playerController,
-      translation: widget.translation);
+      translation: widget.translation,
+      fetcher: widget.fetcher);
 
   SearchDoors get _searchDoors => SearchDoors(
       db: widget.db,

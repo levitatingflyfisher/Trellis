@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 import '../../db/database.dart';
 import '../reader/reader_typography_settings_screen.dart';
 import '../reader/speech/spoken_text.dart' show speakCitationsKey;
+import '../references/keep_page.dart' show keepLinkedPagesKey;
 import '../shared/capped_body.dart';
 
 /// The rows. [offerSystemVoice] shows "Use the system voice", which only
@@ -40,6 +41,7 @@ class ReadingSettingsSection extends StatefulWidget {
 class _ReadingSettingsSectionState extends State<ReadingSettingsSection> {
   bool _systemVoice = false;
   bool _citations = false;
+  bool _keepLinked = false;
   bool _loaded = false;
 
   @override
@@ -54,10 +56,13 @@ class _ReadingSettingsSectionState extends State<ReadingSettingsSection> {
     );
     final citations =
         await widget.db.deviceSettingsDao.read(speakCitationsKey) == 'on';
+    final keepLinked =
+        await widget.db.deviceSettingsDao.read(keepLinkedPagesKey) == 'on';
     if (!mounted) return;
     setState(() {
       _systemVoice = systemVoice;
       _citations = citations;
+      _keepLinked = keepLinked;
       _loaded = true;
     });
   }
@@ -73,6 +78,14 @@ class _ReadingSettingsSectionState extends State<ReadingSettingsSection> {
     setState(() => _citations = on);
     await widget.db.deviceSettingsDao.write(
       speakCitationsKey,
+      on ? 'on' : 'off',
+    );
+  }
+
+  Future<void> _setKeepLinked(bool on) async {
+    setState(() => _keepLinked = on);
+    await widget.db.deviceSettingsDao.write(
+      keepLinkedPagesKey,
       on ? 'on' : 'off',
     );
   }
@@ -129,6 +142,18 @@ class _ReadingSettingsSectionState extends State<ReadingSettingsSection> {
           ),
           value: _citations,
           onChanged: _loaded ? _setCitations : null,
+        ),
+        SwitchListTile(
+          key: const Key('keep-linked-pages-toggle'),
+          secondary: const Icon(Icons.inventory_2_outlined),
+          title: const Text('Keep linked pages when saving'),
+          subtitle: const Text(
+            'When you save an article, Trellis also gets the pages it '
+            'links to and keeps their text on this device. Each page is a '
+            'request to its site.',
+          ),
+          value: _keepLinked,
+          onChanged: _loaded ? _setKeepLinked : null,
         ),
       ],
     );
