@@ -18,7 +18,7 @@ void main() {
   setUp(() => db = AppDatabase.forTesting(NativeDatabase.memory()));
   tearDown(() => db.close());
 
-  String courseJson() => json.encode({
+  String courseJson({String? image}) => json.encode({
         'schemaVersion': '1.0',
         'id': 'anki-c',
         'title': 'My Course',
@@ -34,6 +34,7 @@ void main() {
                 'rung': 1,
                 'text': 'The sky is {{c1::blue}}.',
                 'answers': {'c1': 'blue'},
+                'image': ?image,
               },
             ],
           },
@@ -112,4 +113,41 @@ void main() {
     expect(find.byType(SnackBar), findsNothing,
         reason: 'the user said no — nothing to celebrate, nothing to nag');
   });
+
+  testWidgets('a card’s picture goes into the .apkg as Anki media',
+      (tester) async {
+    final sky = Uint8List.fromList([0x89, 0x50, 0x4E, 0x47, 1, 2]);
+    late CourseRow row;
+    await tester.runAsync(() async {
+      await db.profilesDao.create('Ada');
+      await db.studyDao.putCardImage('sky.png', sky);
+      await db.studyDao.importCourse(
+          profileId: 1, raw: courseJson(image: 'sky.png'), nowMs: 1);
+      row = (await db.studyDao.coursesOf(1)).single;
+    });
+    Uint8List? saved;
+    await tester.pumpWidget(MaterialApp(
+        home: CourseMapScreen(
+            db: db,
+            courseRow: row,
+            course: study.parseCourseString(row.raw),
+            saveApkg: (name, bytes) async {
+              saved = bytes;
+              return true;
+            })));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('export-anki')));
+    await tester.pump();
+    for (var i = 0; i < 30 && saved == null; i++) {
+      await tester.runAsync(
+          () => Future<void>.delayed(const Duration(milliseconds: 100)));
+      await tester.pump();
+    }
+    final zip = ZipDecoder().decodeBytes(saved!);
+    expect(
+        jsonDecode(utf8.decode(zip.findFile('media')!.content as List<int>)),
+        {'0': 'sky.png'});
+    expect(zip.findFile('0')!.content, sky);
+  });
 }
+

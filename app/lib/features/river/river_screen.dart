@@ -881,7 +881,7 @@ class _RiverScreenState extends State<RiverScreen>
       // The shared items first, then Latest's own: the same menu as this
       // episode has anywhere else, plus triage.
       menuBuilder: (_) => workMenuItems(_actions, entry,
-          transcribed: _rowState.transcribed.contains(e.work.id),
+          transcript: _rowState.transcriptOf(e.work.id),
           sourceLang: _rowState.sourceLangOf(entry), extras: [
         PopupMenuItem(
             key: Key('keep-${e.work.id}'),

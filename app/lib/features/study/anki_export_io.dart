@@ -245,7 +245,23 @@ String _meta(RetrievalItem it) {
   return parts.join('<br><br>');
 }
 
-({String kind, List<String> fields}) _fieldsFor(RetrievalItem it) {
+({String kind, List<String> fields}) _fieldsFor(
+    RetrievalItem it, Set<String> pictures) {
+  final fields = _plainFieldsFor(it);
+  // A card's picture goes on its front, as Anki shows one; only a picture
+  // the deck carries, so Anki never shows a missing-file box.
+  final name = it.image;
+  if (name == null || !pictures.contains(name)) return fields;
+  return (
+    kind: fields.kind,
+    fields: [
+      '${fields.fields.first}<br><img src="$name">',
+      ...fields.fields.skip(1),
+    ],
+  );
+}
+
+({String kind, List<String> fields}) _plainFieldsFor(RetrievalItem it) {
   String withExtra(String back) {
     final extra = _meta(it);
     return extra.isEmpty ? back : '$back<br><br>$extra';
@@ -293,10 +309,13 @@ class _RawSqliteUser extends QueryExecutorUser {
 }
 
 /// Build the bytes of a real Anki `.apkg` (a zip of collection.anki2 +
-/// media manifest) for [course]. Uses only a system temp file for the
+/// media manifest) for [course]. [images] are the cards' pictures by
+/// name: each one an item names goes in as Anki media, the files named
+/// 0, 1, 2… and the manifest mapping each to its name. Uses only a system temp file for the
 /// sqlite working DB, so it runs under `flutter test` on the VM as well as
 /// on-device.
-Future<Uint8List> buildApkgBytes(Course course) async {
+Future<Uint8List> buildApkgBytes(Course course,
+    {Map<String, Uint8List> images = const {}}) async {
   final nowMs = DateTime.now().millisecondsSinceEpoch;
   final nowS = nowMs ~/ 1000;
   final root = course.title.isNotEmpty
@@ -316,6 +335,11 @@ Future<Uint8List> buildApkgBytes(Course course) async {
     '$parentDid': _deck(parentDid, root, nowS),
   };
 
+  final pictures = {
+    for (final n in course.nodes)
+      for (final it in n.items) ?it.image,
+  }.where(images.containsKey).toList()
+    ..sort();
   final notes = <List<Object?>>[];
   final cards = <List<Object?>>[];
   var pos = 0;
@@ -326,7 +350,7 @@ Future<Uint8List> buildApkgBytes(Course course) async {
     final nodeDid = id();
     decks['$nodeDid'] = _deck(nodeDid, '$root::$nodeTitle', nowS);
     for (final it in node.items) {
-      final r = _fieldsFor(it);
+      final r = _fieldsFor(it, pictures.toSet());
       final mid = r.kind == 'cloze' ? clozeMid : basicMid;
       notes.add([
         id(),
@@ -404,10 +428,16 @@ Future<Uint8List> buildApkgBytes(Course course) async {
     }
 
     final colBytes = File(colPath).readAsBytesSync();
-    final media = utf8.encode('{}');
+    final media = utf8.encode(jsonEncode({
+      for (var i = 0; i < pictures.length; i++) '$i': pictures[i],
+    }));
     final archive = Archive()
       ..addFile(ArchiveFile('collection.anki2', colBytes.length, colBytes))
       ..addFile(ArchiveFile('media', media.length, media));
+    for (var i = 0; i < pictures.length; i++) {
+      final bytes = images[pictures[i]]!;
+      archive.addFile(ArchiveFile('$i', bytes.length, bytes));
+    }
     return Uint8List.fromList(ZipEncoder().encode(archive));
   } finally {
     // Remove the working dir on success AND on any failure above.

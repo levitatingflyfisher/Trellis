@@ -221,7 +221,7 @@ class _QueueScreenState extends State<QueueScreen> {
             }
           : null,
       menuBuilder: (_) => workMenuItems(_actions, entry,
-          transcribed: _rowState.transcribed.contains(work.id),
+          transcript: _rowState.transcriptOf(work.id),
           sourceLang: _rowState.sourceLangOf(entry), extras: [
         PopupMenuItem(
             key: Key('queue-remove-${work.id}'),

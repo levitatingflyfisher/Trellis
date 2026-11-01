@@ -7,27 +7,28 @@ library;
 import 'package:flutter/material.dart';
 
 import '../episodes/episode_actions.dart';
+import '../transcribe/transcript_so_far.dart';
 import 'work_row.dart';
 
-/// [transcribed] says whether [e] has a transcript, so Transcribe reads
-/// "Transcribe again" on every screen alike. [shownAsButtons] names the
+/// [transcript] says where [e]'s transcript stands, so Transcribe reads
+/// the same on every screen: "Transcribe again" only over a whole one. [shownAsButtons] names the
 /// item values the caller already shows as buttons (the work page's Play
 /// next, Download, Translate…): they are left out, so ⋮ holds only what
 /// isn't on screen. Filtered by value, never forked.
 ///
 /// [sourceLang] is what the work is in (see [WorkListState.sourceLangOf]):
-/// with [transcribed] it decides [offersEnglishTranslate].
+/// with [transcript] it decides [offersEnglishTranslate].
 List<PopupMenuEntry<String>> workMenuItems(
   EpisodeActions actions,
   WorkEntry e, {
   List<PopupMenuEntry<String>> extras = const [],
-  bool transcribed = false,
+  TranscriptStage transcript = TranscriptStage.none,
   String? sourceLang,
   Set<String> shownAsButtons = const {},
 }) {
   final core = [
     for (final i in actions.sharedMenuItems(e,
-        transcribed: transcribed, sourceLang: sourceLang))
+        transcript: transcript, sourceLang: sourceLang))
       if (i is! PopupMenuItem<String> || !shownAsButtons.contains(i.value)) i,
   ];
   return [

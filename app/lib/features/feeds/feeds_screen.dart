@@ -758,7 +758,7 @@ class _FeedsScreenState extends State<FeedsScreen> {
       // The same menu a book has in the Library, minus the Library's own
       // Pin and Remove.
       menuBuilder: (_) => workMenuItems(_actions, entry,
-          transcribed: _bookState.transcribed.contains(b.work.id)),
+          transcript: _bookState.transcriptOf(b.work.id)),
       onMenu: (choice) async {
         await _actions.handleShared(context, choice, entry);
         await _load();

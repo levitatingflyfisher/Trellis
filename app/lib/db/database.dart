@@ -621,6 +621,21 @@ class Courses extends Table {
   ];
 }
 
+/// A picture on a card (owner, 28 Oct: "anything stolen from mochi or
+/// from anki on having cloze and images"). A course item names it by
+/// [name] (study_core's `image`); the bytes live here, not in files, so
+/// the web build keeps them too, a session needs no network, and a
+/// backup carries them with the course that names them. The name is the
+/// bytes' hash, so one picture is kept once however often it is used.
+@DataClassName('CardImageRow')
+class CardImages extends Table {
+  TextColumn get name => text()();
+  BlobColumn get bytes => blob()();
+
+  @override
+  Set<Column> get primaryKey => {name};
+}
+
 /// One retrieval item's SRS state. [stateJson] carries
 /// reps/ease/intervalDays/dueEpochDay/lapses (see [encodeCardState]) so the
 /// schema never couples to the scheduler's exact field set.
@@ -848,7 +863,7 @@ String mergeCardStateJson(
   return json.encode(merged);
 }
 
-@DriftAccessor(tables: [Courses, Cards, Revlog])
+@DriftAccessor(tables: [Courses, Cards, Revlog, CardImages])
 class StudyDao extends DatabaseAccessor<AppDatabase> with _$StudyDaoMixin {
   StudyDao(super.db);
 
@@ -879,6 +894,8 @@ class StudyDao extends DatabaseAccessor<AppDatabase> with _$StudyDaoMixin {
             importedAtMs: Value(nowMs),
           ),
         );
+        // A revision can drop a picture the old text named.
+        await _letGoOfUnnamedImages();
         return existing.id;
       }
       return into(courses).insert(
@@ -899,9 +916,46 @@ class StudyDao extends DatabaseAccessor<AppDatabase> with _$StudyDaoMixin {
   /// id, as on a re-import.
   Future<void> saveCourseRaw(int courseRowId, String raw) async {
     final course = study.parseCourseString(raw); // throws before any write
-    await (update(courses)..where((c) => c.id.equals(courseRowId))).write(
-      CoursesCompanion(title: Value(course.title), raw: Value(raw)),
-    );
+    await transaction(() async {
+      await (update(courses)..where((c) => c.id.equals(courseRowId))).write(
+        CoursesCompanion(title: Value(course.title), raw: Value(raw)),
+      );
+      await _letGoOfUnnamedImages();
+    });
+  }
+
+  /// Drops every picture no course's text names. Run with each write
+  /// that can stop naming one, so a picture taken off a card, or one
+  /// picked in the editor and never saved, does not stay unseen. A
+  /// picture's name is a plain file name, so it appears in a course's
+  /// JSON exactly as `"name"`.
+  Future<void> _letGoOfUnnamedImages() => customStatement('''
+        DELETE FROM card_images WHERE NOT EXISTS (
+          SELECT 1 FROM courses
+          WHERE instr(courses.raw, '"' || card_images.name || '"') > 0)
+      ''');
+
+  /// Keeps [bytes] as the picture [name]; a name already kept stays as
+  /// it is (the name is the bytes' hash).
+  Future<void> putCardImage(String name, Uint8List bytes) =>
+      into(cardImages).insert(
+          CardImagesCompanion.insert(name: name, bytes: bytes),
+          mode: InsertMode.insertOrIgnore);
+
+  Future<Uint8List?> cardImage(String name) async =>
+      (await (select(cardImages)..where((i) => i.name.equals(name)))
+              .getSingleOrNull())
+          ?.bytes;
+
+  /// The pictures kept under [names], by name; a name not kept is left
+  /// out.
+  Future<Map<String, Uint8List>> cardImagesNamed(Iterable<String> names) async {
+    final wanted = names.toSet();
+    if (wanted.isEmpty) return const {};
+    final rows = await (select(cardImages)
+          ..where((i) => i.name.isIn(wanted)))
+        .get();
+    return {for (final r in rows) r.name: r.bytes};
   }
 
   Future<CourseRow?> courseRowById(int courseRowId) =>
@@ -927,6 +981,7 @@ class StudyDao extends DatabaseAccessor<AppDatabase> with _$StudyDaoMixin {
         await (delete(cards)..where((c) => c.courseId.equals(courseRowId)))
             .go();
         await (delete(courses)..where((c) => c.id.equals(courseRowId))).go();
+        await _letGoOfUnnamedImages();
       });
 
   Future<List<CourseRow>> coursesOf(int profileId) =>
@@ -4069,7 +4124,7 @@ class HouseholdDao extends DatabaseAccessor<AppDatabase>
         Episodes, PlayerPositions, Courses, Cards, Revlog, JobsTable,
         WordLedger, HouseholdPin, Captures, DailyReviewCards, QueueTable,
         TranslationSentences, SavedViews, Audiobooks, AudiobookFiles,
-        ReadingDays, DeviceSettings, WorkNotes],
+        ReadingDays, DeviceSettings, WorkNotes, CardImages],
     daos: [ProfilesDao, SpineDao, FeedsDao, StudyDao, JobsDao, LedgerDao,
         HouseholdDao, CapturesDao, DailyReviewDao, QueueDao, LibraryDao,
         AudiobooksDao, DeviceSettingsDao])
@@ -4078,7 +4133,7 @@ class AppDatabase extends _$AppDatabase {
   AppDatabase.forTesting(super.e);
 
   @override
-  int get schemaVersion => 33;
+  int get schemaVersion => 34;
   // There is no v14: it was reserved for the reader-depth campaign, which
   // landed as v18 after three sibling campaigns merged ahead of it, so the
   // guard chain skips from 13 to 15. Version gaps are harmless — an
@@ -4497,6 +4552,10 @@ class AppDatabase extends _$AppDatabase {
             await transaction(() async {
               await m.addColumn(episodes, episodes.voiceKind);
             });
+          }
+          if (from < 34) {
+            // Pictures on cards.
+            await m.createTable(cardImages);
           }
         },
         beforeOpen: (details) async {

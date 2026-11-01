@@ -219,4 +219,45 @@ void main() {
       expect(() => courseWithoutCard(ladder(), 'i-c'), throwsStateError);
     });
   });
+
+  // Pictures on cards (owner, 28 Oct): a draft carries its picture's
+  // name, and the course text names it on the item.
+  group('pictures', () {
+    test('a new card names its picture', () {
+      final raw = courseWithNewCard(ladder(),
+          nodeId: 'a',
+          itemId: 'card-1',
+          draft: const CardDraft.frontBack('What bird?', 'A heron.',
+              image: 'heron.png'));
+      expect(itemOf(raw, 'card-1').image, 'heron.png');
+      final cloze = courseWithNewCard(ladder(),
+          nodeId: 'a',
+          itemId: 'card-2',
+          draft: const CardDraft.cloze('A {{c1::heron}}.', image: 'h.jpg'));
+      expect(itemOf(cloze, 'card-2').image, 'h.jpg');
+    });
+
+    test('an edit keeps, changes or takes off the picture, as the draft '
+        'says', () {
+      final named = courseWithEditedCard(ladder(), 'i-b',
+          const CardDraft.frontBack('Why?', 'Because.', image: 'a.png'));
+      expect(itemOf(named, 'i-b').image, 'a.png');
+      expect(draftOf(itemOf(named, 'i-b')),
+          const CardDraft.frontBack('Why?', 'Because.', image: 'a.png'));
+      final off = courseWithEditedCard(
+          named, 'i-b', const CardDraft.frontBack('Why?', 'Because.'));
+      expect(itemOf(off, 'i-b').image, isNull);
+      expect((json.decode(off) as Map).toString(), isNot(contains('a.png')));
+    });
+
+    test('a draft with a different picture is a different draft', () {
+      expect(const CardDraft.cloze('{{c1::x}}', image: 'a.png'),
+          isNot(const CardDraft.cloze('{{c1::x}}')));
+      expect(const CardDraft.cloze('{{c1::x}}').withImage('b.png').image,
+          'b.png');
+      expect(const CardDraft.frontBack('f', 'b', image: 'b.png')
+          .withImage(null), const CardDraft.frontBack('f', 'b'));
+    });
+  });
 }
+

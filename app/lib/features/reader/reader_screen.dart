@@ -30,6 +30,7 @@ import '../transcribe/transcript_so_far.dart';
 import '../transcribe/transcript_writer.dart' show decodeWordTimingBlob;
 import '../study/card_editing.dart' show CardDraft, clozeFromSentence;
 import '../study/card_editor_screen.dart';
+import '../study/card_images.dart' show CardPictures;
 import '../study/card_store.dart' show addToMyCards;
 import 'dictionary_sheet.dart';
 import 'ledger_screen.dart';
@@ -1932,7 +1933,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// work is written in first when nobody knows.
   Future<void> _openTranslatePicker() async {
     final service = widget.translation;
-    if (service == null || _activeLang != null) return;
+    if (service == null || _activeLang != null || _making != null) return;
     if (_translationJob != null || _download != null) return;
     final source = _sourceLang ??
         await _openWorkLanguagePicker(title: 'What language is this in?');
@@ -2496,6 +2497,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     final saved = await showCardEditor(context,
         title: 'Make a card',
         initial: CardDraft.cloze(clozeFromSentence(sentence.trim(), word)),
+        pictures: CardPictures(widget.db),
         onSave: (draft, _) =>
             addToMyCards(widget.db, widget.profileId, draft));
     if (!saved || !mounted) return;
@@ -3042,14 +3044,22 @@ class _ReaderScreenState extends State<ReaderScreen>
               // English text — hidden under the existing mt language
               // swap. "Translate…" opens a picker (there is no longer a
               // SINGLE fixed target — see [_openTranslatePicker]).
+              // A transcript still being made waits: translated now,
+              // each window landing after it would stay untranslated.
               if (widget.translation != null &&
                   _activeLang == null &&
                   _translationJob == null &&
                   _download == null)
-                const PopupMenuItem(
-                    key: Key('translate-action'),
-                    value: 'translate',
-                    child: Text('Translate…')),
+                _making == null
+                    ? const PopupMenuItem(
+                        key: Key('translate-action'),
+                        value: 'translate',
+                        child: Text('Translate…'))
+                    : const PopupMenuItem(
+                        key: Key('translate-action'),
+                        value: 'translate',
+                        enabled: false,
+                        child: Text('Translate waits for the whole transcript')),
               // Gated on stored rows actually existing, not just on a
               // target having been chosen: setActiveTranslationLang runs
               // BEFORE the batch completes (so the progress card can show

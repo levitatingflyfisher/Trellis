@@ -6,6 +6,7 @@ import 'package:study_core/study_core.dart' as study;
 import '../../db/database.dart';
 import '../intake/paste_intake.dart' show epochDayUtcNow;
 import 'card_editor_screen.dart';
+import 'card_images.dart' show CardPictures;
 import 'card_store.dart';
 import 'course_import.dart';
 import 'course_map_screen.dart';
@@ -101,6 +102,7 @@ class _CoursesScreenState extends State<CoursesScreen> {
   Future<void> _makeCard() async {
     final saved = await showCardEditor(context,
         title: 'Make a card',
+        pictures: CardPictures(widget.db),
         onSave: (draft, _) =>
             addToMyCards(widget.db, widget.profile.id, draft));
     if (saved) await _load();

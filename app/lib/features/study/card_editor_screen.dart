@@ -5,10 +5,13 @@
 /// page stays open.
 library;
 
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import '../shared/capped_body.dart';
 import 'card_editing.dart';
+import 'card_images.dart';
 
 class CardEditorScreen extends StatefulWidget {
   const CardEditorScreen({
@@ -19,7 +22,12 @@ class CardEditorScreen extends StatefulWidget {
     this.steps = const [],
     this.stepId,
     this.onDelete,
+    this.pictures,
   });
+
+  /// Where a picture for the card is picked and kept; null shows no
+  /// picture controls.
+  final CardPictures? pictures;
 
   /// "Add card" or "Edit card".
   final String title;
@@ -56,6 +64,43 @@ class _CardEditorScreenState extends State<CardEditorScreen> {
   String? _error;
   bool _saving = false;
 
+  /// The card's picture, by name, and its bytes once read.
+  late String? _image = widget.initial?.image;
+  Uint8List? _imageBytes;
+
+  @override
+  void initState() {
+    super.initState();
+    final name = _image;
+    if (name != null) {
+      widget.pictures?.load(name).then((bytes) {
+        if (mounted && _image == name) setState(() => _imageBytes = bytes);
+      });
+    }
+  }
+
+  Future<void> _pickPicture() async {
+    final pictures = widget.pictures!;
+    final bytes = await pictures.pick();
+    if (bytes == null || !mounted) return;
+    try {
+      final name = await pictures.keep(bytes);
+      if (!mounted) return;
+      setState(() {
+        _image = name;
+        _imageBytes = bytes;
+        _error = null;
+      });
+    } on FormatException catch (e) {
+      if (mounted) setState(() => _error = e.message);
+    }
+  }
+
+  void _removePicture() => setState(() {
+        _image = null;
+        _imageBytes = null;
+      });
+
   @override
   void dispose() {
     _front.dispose();
@@ -65,8 +110,8 @@ class _CardEditorScreenState extends State<CardEditorScreen> {
   }
 
   CardDraft get _draft => _kind == CardKind.cloze
-      ? CardDraft.cloze(_cloze.text)
-      : CardDraft.frontBack(_front.text, _back.text);
+      ? CardDraft.cloze(_cloze.text, image: _image)
+      : CardDraft.frontBack(_front.text, _back.text, image: _image);
 
   Future<void> _save() async {
     if (_saving) return;
@@ -124,6 +169,68 @@ class _CardEditorScreenState extends State<CardEditorScreen> {
         selection: TextSelection.collapsed(
             offset: sel.end + (text.length - _cloze.text.length)));
     setState(() => _error = null);
+  }
+
+  /// The card's picture, shown with it on the front in a session: one to
+  /// add, or the one it has, to change or take off.
+  Widget _picture(ThemeData theme) {
+    final bytes = _imageBytes;
+    final buttonStyle =
+        OutlinedButton.styleFrom(minimumSize: const Size(48, 48));
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          if (_image != null)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: bytes == null
+                  ? Text('This card’s picture isn’t on this device.',
+                      style: theme.textTheme.bodySmall)
+                  : ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 200),
+                      child: Image.memory(bytes,
+                          key: const Key('card-picture'),
+                          semanticLabel: 'The card’s picture',
+                          fit: BoxFit.contain),
+                    ),
+            ),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              Tooltip(
+                message: _image == null
+                    ? 'Pick a picture to show with this card'
+                    : 'Pick another picture for this card',
+                child: OutlinedButton.icon(
+                  key: Key(_image == null
+                      ? 'card-picture-add'
+                      : 'card-picture-change'),
+                  style: buttonStyle,
+                  onPressed: _pickPicture,
+                  icon: const Icon(Icons.image_outlined),
+                  label: Text(
+                      _image == null ? 'Add a picture' : 'Change picture'),
+                ),
+              ),
+              if (_image != null)
+                Tooltip(
+                  message: 'Show no picture with this card',
+                  child: OutlinedButton.icon(
+                    key: const Key('card-picture-remove'),
+                    style: buttonStyle,
+                    onPressed: _removePicture,
+                    icon: const Icon(Icons.hide_image_outlined),
+                    label: const Text('Remove picture'),
+                  ),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -229,6 +336,7 @@ class _CardEditorScreenState extends State<CardEditorScreen> {
                 ),
               ),
             ],
+            if (widget.pictures != null) _picture(theme),
             if (_error != null) ...[
               const SizedBox(height: 12),
               Text(_error!,
@@ -265,6 +373,7 @@ Future<bool> showCardEditor(
   List<({String id, String title})> steps = const [],
   String? stepId,
   Future<void> Function()? onDelete,
+  CardPictures? pictures,
 }) async =>
     await Navigator.of(context).push<bool>(MaterialPageRoute(
         builder: (_) => CardEditorScreen(
@@ -273,5 +382,6 @@ Future<bool> showCardEditor(
             initial: initial,
             steps: steps,
             stepId: stepId,
-            onDelete: onDelete))) ??
+            onDelete: onDelete,
+            pictures: pictures))) ??
     false;

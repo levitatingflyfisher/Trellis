@@ -12,6 +12,8 @@ import 'package:trellis/features/reader/reader_screen.dart';
 import 'package:trellis/features/transcribe/transcribe_coordinator.dart';
 import 'package:trellis/features/transcribe/transcript_writer.dart';
 
+import '../support/fake_translation_service.dart';
+
 /// The reader over a transcript still being made (owner, 21 Oct: "more
 /// streaming updates rather than batch"): it says how far the transcript
 /// has got, and new text appears on the open page as each window lands,
@@ -107,5 +109,25 @@ void main() {
     await tester.runAsync(() => db.jobsDao.deleteJob(transcribeJobId(work.id)));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('reader-so-far')), findsNothing);
+  });
+
+  // Translating part of a transcript would leave each later window
+  // untranslated as it lands, so Translate waits and says why.
+  testWidgets('Translate waits for the whole transcript', (tester) async {
+    await tester.pumpWidget(MaterialApp(
+        home: ReaderScreen(
+            db: db,
+            profileId: profileId,
+            work: work,
+            openOnPage: true,
+            translation: FakeTranslation().service)));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('reader-overflow')));
+    await tester.pumpAndSettle();
+    final item = tester.widget<PopupMenuItem<String>>(
+        find.byKey(const Key('translate-action')));
+    expect(item.enabled, isFalse);
+    expect(find.text('Translate waits for the whole transcript'),
+        findsOneWidget);
   });
 }

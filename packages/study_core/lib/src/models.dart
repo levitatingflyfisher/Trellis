@@ -11,11 +11,17 @@ sealed class RetrievalItem {
     required this.rung,
     this.hints = const [],
     this.sources = const [],
+    this.image,
   });
   final String id;
   final int rung;
   final List<String> hints;
   final List<String> sources;
+
+  /// A picture shown with the card: a plain file name in the app's own
+  /// store, never a path or a URL, so a session needs no network. Null
+  /// for a card without one. Scheduling never reads it.
+  final String? image;
   ItemType get type;
 }
 
@@ -25,6 +31,7 @@ class ClozeItem extends RetrievalItem {
     required super.rung,
     super.hints,
     super.sources,
+    super.image,
     required this.text,
     required this.answers,
   });
@@ -45,6 +52,7 @@ class QaItem extends RetrievalItem {
     required super.rung,
     super.hints,
     super.sources,
+    super.image,
     required this.prompt,
     required this.answer,
     this.acceptable = const [],
@@ -67,6 +75,7 @@ class DiscriminationItem extends RetrievalItem {
     required super.rung,
     super.hints,
     super.sources,
+    super.image,
     required this.prompt,
     required this.choices,
     required this.correctIndex,
@@ -87,6 +96,7 @@ class ProcedureItem extends RetrievalItem {
     required super.rung,
     super.hints,
     super.sources,
+    super.image,
     required this.prompt,
     required this.steps,
     this.rubric,

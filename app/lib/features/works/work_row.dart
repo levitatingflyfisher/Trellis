@@ -15,6 +15,7 @@ import '../../db/database.dart' hide Alignment;
 import '../feeds/episode_download_coordinator.dart';
 import '../models/format.dart';
 import '../player/player_controller.dart';
+import '../transcribe/transcript_so_far.dart';
 
 /// A work as a list holds it: the episode is there when it came from a
 /// feed.
@@ -34,6 +35,10 @@ class WorkListState {
   /// Where listening reached, by work.
   final Map<int, int> progressMs;
   final Set<int> transcribed;
+
+  /// The transcripts still being made, by work: part of each is in
+  /// [transcribed] already, so Read opens it, but it is not whole.
+  final Map<int, TranscriptMaking> making;
 
   /// Which segment reading reached, by work.
   final Map<int, int> readIdx;
@@ -57,6 +62,7 @@ class WorkListState {
     this.queued = const {},
     this.progressMs = const {},
     this.transcribed = const {},
+    this.making = const {},
     this.readIdx = const {},
     this.textSizes = const {},
     this.fileIdx = const {},
@@ -68,6 +74,7 @@ class WorkListState {
     required this.queued,
     required this.progressMs,
     required this.transcribed,
+    required this.making,
     required this.readIdx,
     required this.textSizes,
     required this.fileIdx,
@@ -77,6 +84,16 @@ class WorkListState {
   }) : _sized = sized;
 
   static const empty = WorkListState();
+
+  /// Where [id]'s transcript stands: what the ⋮ offers depends on it.
+  TranscriptStage transcriptOf(int id) {
+    if (!transcribed.contains(id)) return TranscriptStage.none;
+    return switch (making[id]) {
+      null => TranscriptStage.whole,
+      (running: true, soFarMs: _) => TranscriptStage.makingNow,
+      _ => TranscriptStage.stoppedPartWay,
+    };
+  }
 
   /// What [e] is spoken or written in: its own language, else its show's
   /// — the work page's rule, so a row's ⋮ and the page agree.
@@ -104,6 +121,7 @@ class WorkListState {
       queued: {for (final r in queue) r.workId},
       progressMs: listening.progressMs,
       transcribed: listening.transcribed,
+      making: await transcriptsMaking(db),
       readIdx: {for (final p in positions.values) p.workId: p.segmentIdx},
       textSizes: carry?.textSizes ?? const {},
       fileIdx: {for (final id in books) id: ?listening.fileIdx[id]},
@@ -122,6 +140,7 @@ class WorkListState {
     queued: queued,
     progressMs: progressMs,
     transcribed: transcribed,
+    making: making,
     readIdx: readIdx,
     textSizes: {...other.textSizes, ...textSizes},
     fileIdx: {...other.fileIdx, ...fileIdx},
@@ -158,6 +177,7 @@ class WorkListState {
       queued: queued,
       progressMs: progressMs,
       transcribed: transcribed,
+      making: making,
       readIdx: readIdx,
       textSizes: {...textSizes, ...sizes},
       fileIdx: fileIdx,
@@ -188,6 +208,10 @@ class WorkRowFacts {
   final bool downloaded;
   final bool queued;
   final bool transcribed;
+
+  /// How far a transcript still being made has got; null when it is
+  /// whole or there is none.
+  final TranscriptMaking? making;
   final bool video;
   final bool archived;
 
@@ -213,6 +237,7 @@ class WorkRowFacts {
     this.downloaded = false,
     this.queued = false,
     this.transcribed = false,
+    this.making,
     this.video = false,
     this.archived = false,
     this.kept = false,
@@ -255,6 +280,7 @@ class WorkRowFacts {
       downloaded: downloaded,
       queued: state.queued.contains(id),
       transcribed: state.transcribed.contains(id),
+      making: state.making[id],
       video: isVideoEnclosure(e?.enclosureUrl),
       archived: e?.archivedAtMs != null,
       kept: e != null && w.persistence == 'work',
@@ -274,6 +300,7 @@ class WorkRowFacts {
     played: played,
     downloaded: downloaded,
     transcribed: transcribed,
+    making: making,
     video: video,
     archived: archived,
     kept: kept,
@@ -756,8 +783,8 @@ List<Widget> workMarkers(ThemeData theme, WorkRowFacts facts, int id) {
     if (facts.transcribed)
       _Marker(
         key: Key('transcribed-$id'),
-        label: 'Transcript',
-        icon: Icons.subject,
+        label: transcriptMarkerLabel(facts.making, facts.durationMs),
+        icon: facts.making == null ? Icons.subject : Icons.hourglass_top,
       ),
     if (facts.video)
       _Marker(

@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:brain_wiring/brain_wiring.dart' as brain;
 import 'package:flutter/material.dart';
@@ -10,6 +11,7 @@ import '../brain/brain_store.dart';
 import '../intake/paste_intake.dart' show epochDayUtcNow;
 import 'card_editing.dart' show draftOf;
 import 'card_editor_screen.dart';
+import 'card_images.dart' show CardPictures;
 import 'card_store.dart' show editCard;
 import '../models/consent.dart';
 import '../shared/capped_body.dart';
@@ -676,6 +678,11 @@ class _StudySessionScreenState extends State<StudySessionScreen> {
             ],
           ),
         const SizedBox(height: 12),
+        if (item.image case final name?)
+          _CardPicture(
+              key: ValueKey('card-picture-of-${item.id}-$name'),
+              db: widget.db,
+              name: name),
         switch (item) {
           study.ClozeItem() => _cloze(item),
           study.QaItem() => _qa(item),
@@ -702,6 +709,7 @@ class _StudySessionScreenState extends State<StudySessionScreen> {
     final saved = await showCardEditor(context,
         title: 'Edit card',
         initial: draft,
+        pictures: CardPictures(widget.db),
         onSave: (d, _) async {
           await editCard(widget.db, widget.courseRowId, item.id, d);
           raw = (await widget.db.studyDao.courseRowById(widget.courseRowId))
@@ -1012,6 +1020,48 @@ class _StudySessionScreenState extends State<StudySessionScreen> {
       ],
     );
   }
+}
+
+/// A card's picture, read from the device's own store: a session needs
+/// no network to show it. A course text can name a picture this device
+/// does not have (a course file from elsewhere); that is said plainly.
+class _CardPicture extends StatefulWidget {
+  const _CardPicture({super.key, required this.db, required this.name});
+  final AppDatabase db;
+  final String name;
+
+  @override
+  State<_CardPicture> createState() => _CardPictureState();
+}
+
+class _CardPictureState extends State<_CardPicture> {
+  late final Future<Uint8List?> _bytes =
+      widget.db.studyDao.cardImage(widget.name);
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<Uint8List?>(
+        future: _bytes,
+        builder: (context, snap) {
+          if (snap.connectionState != ConnectionState.done) {
+            return const SizedBox(height: 12);
+          }
+          final bytes = snap.data;
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: bytes == null
+                ? Text('This card’s picture isn’t on this device.',
+                    style: Theme.of(context).textTheme.bodySmall)
+                : ConstrainedBox(
+                    constraints: BoxConstraints(
+                        maxHeight: MediaQuery.sizeOf(context).height * 0.4),
+                    child: Image.memory(bytes,
+                        key: const Key('card-picture'),
+                        semanticLabel: 'The card’s picture',
+                        fit: BoxFit.contain),
+                  ),
+          );
+        },
+      );
 }
 
 class _RungChip extends StatelessWidget {

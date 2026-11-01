@@ -90,12 +90,9 @@ void main() => runFleetConformance(const FleetAppConfig(
       // path; theme construction stays local (local ThemeData over
       // package tokens).
       styleTier: StyleTier.tokens,
-      // The app root is PrimingTrellis/app — one level deeper than the
-      // fleet norm of <AppName>/ being the Flutter root — so the default
-      // ../ohStyle path would miss the canonical package and C1 would
-      // fail for the wrong reason. This override reaches the SAME
-      // canonical sibling, not a fork.
-      designPackagePath: '../../ohStyle/openhearth_design',
+      // The shared design package is found through pub's own resolution
+      // (package_config.json), so the app root sitting one level deeper
+      // than the fleet norm needs no path of its own here.
       // The exact source-manifest permission surface, both directions —
       // ADR-0003 law 7 verbatim: INTERNET (podcasts and model downloads),
       // FOREGROUND_SERVICE + its dataSync (transcription jobs) and

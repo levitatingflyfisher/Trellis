@@ -9,6 +9,7 @@ import '../../db/database.dart' hide Alignment;
 import '../intake/paste_intake.dart' show epochDayUtcNow;
 import 'anki_export.dart';
 import 'course_cards_screen.dart';
+import 'card_images.dart' show imageNamesOf;
 import 'study_session_screen.dart';
 import 'wall/espalier_wall.dart';
 import '../shared/capped_body.dart';
@@ -88,7 +89,9 @@ class _CourseMapScreenState extends State<CourseMapScreen> {
   /// and scheduling stays home — Anki/FSRS owns it over there.
   Future<void> _exportAnki() async {
     final name = apkgFileName(_course);
-    final bytes = await buildApkgBytes(_course);
+    final bytes = await buildApkgBytes(_course,
+        images: await widget.db.studyDao
+            .cardImagesNamed(imageNamesOf(_course)));
     final saved =
         await (widget.saveApkg ?? _pickAndSaveApkg)(name, bytes);
     if (!mounted || !saved) return;

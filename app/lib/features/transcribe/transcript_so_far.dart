@@ -7,6 +7,8 @@ library;
 
 import 'dart:convert';
 
+import 'package:drift/drift.dart' show Variable;
+
 import 'package:jobs_core/jobs_core.dart';
 
 import '../../db/database.dart';
@@ -64,3 +66,68 @@ String soFarReaderLine(TranscriptMaking making) => making.running
         'appears here as it is made.'
     : 'Transcribing stopped part way: this is ${soFarSpan(making.soFarMs)}. '
         'Resume it on the episode’s page.';
+
+/// Where a work's transcript stands, as a list or a menu needs it. Part
+/// of one, made or stopped, is never [whole]: "Transcribe again" and
+/// translating wait for that.
+enum TranscriptStage { none, makingNow, stoppedPartWay, whole }
+
+/// Every transcript still being made, by work: [transcriptMaking] for a
+/// whole list in two queries, so a long list costs what a short one does.
+Future<Map<int, TranscriptMaking>> transcriptsMaking(AppDatabase db) async {
+  final running = <int, bool>{};
+  for (final row in await db.jobsDao.unfinished()) {
+    if (row.kind != 'transcribe') continue;
+    final id = int.tryParse(row.id.substring(row.id.indexOf('-') + 1));
+    if (id == null || row.id != transcribeJobId(id)) continue;
+    try {
+      final payload = jsonDecode(row.payloadJson) as Map<String, dynamic>;
+      if (payload['soFar'] != true) continue;
+    } catch (_) {
+      continue;
+    }
+    running[id] = row.state == JobState.running.name;
+  }
+  if (running.isEmpty) return const {};
+  final ids = running.keys.toList();
+  final ends = await db.customSelect(
+    'SELECT work_id, MAX(t_end_ms) AS end_ms FROM alignments '
+    'WHERE work_id IN (${List.filled(ids.length, '?').join(', ')}) '
+    'GROUP BY work_id',
+    variables: [for (final id in ids) Variable.withInt(id)],
+    readsFrom: {db.alignments},
+  ).get();
+  return {
+    for (final r in ends)
+      r.read<int>('work_id'): (
+        running: running[r.read<int>('work_id')]!,
+        soFarMs: r.read<int>('end_ms'),
+      ),
+  };
+}
+
+/// The row's marker for a work with a transcript: "Transcript" when it
+/// is whole, and how far it has got while it is made ("Transcribing, 12
+/// of 40 min") or since it stopped ("Part transcript, 12 of 40 min").
+String transcriptMarkerLabel(TranscriptMaking? making, int? durationMs) {
+  if (making == null) return 'Transcript';
+  final lead = making.running ? 'Transcribing' : 'Part transcript';
+  if (durationMs == null || durationMs <= 0) {
+    return '$lead, ${making.soFarMs ~/ 60000} min so far';
+  }
+  return '$lead, ${soFarOfLength(making.soFarMs, durationMs)}';
+}
+
+/// How much of an episode of [durationMs] a transcript so far covers:
+/// "12 of 40 min", or "12 min" when the length is unknown.
+String soFarOfLength(int soFarMs, int? durationMs) {
+  final done = soFarMs ~/ 60000;
+  if (durationMs == null || durationMs <= 0) return '$done min';
+  return '$done of ${(durationMs / 60000).round()} min';
+}
+
+/// Why Translate waits on a transcript still being made: translating
+/// part of one would leave the rest untranslated as it lands.
+String translateWaitsLine(TranscriptMaking making, int? durationMs) =>
+    'Translate waits for the whole transcript: '
+    '${soFarOfLength(making.soFarMs, durationMs)} is done.';

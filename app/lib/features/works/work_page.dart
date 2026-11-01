@@ -26,6 +26,7 @@ import 'package:openhearth_design/openhearth_design.dart';
 import '../feeds/episode_download_coordinator.dart'
     show EpisodeDownloadState, downloadFraction, downloadingWords;
 import '../transcribe/job_cards.dart';
+import '../transcribe/transcript_so_far.dart';
 import '../../db/database.dart' hide Alignment;
 import '../episodes/episode_actions.dart';
 import '../models/format.dart';
@@ -158,6 +159,25 @@ class _WorkPageState extends State<WorkPage> {
   bool get _isAudiobook => _work.kind == 'audiobook';
   bool get _transcribed => _facts?.transcribed ?? false;
 
+  /// How far a transcript still being made has got; null once it is
+  /// whole. Part of one opens in Read, but Translate waits for it all.
+  TranscriptMaking? get _making => _facts?.making;
+  bool get _wholeTranscript => _transcribed && _making == null;
+
+  TranscriptStage get _stage => !_transcribed
+      ? TranscriptStage.none
+      : switch (_making) {
+          null => TranscriptStage.whole,
+          (running: true, soFarMs: _) => TranscriptStage.makingNow,
+          _ => TranscriptStage.stoppedPartWay,
+        };
+
+  /// The plain line that says why Translate waits, while it does.
+  String? get _translateWaits => switch (_making) {
+        final m? => translateWaitsLine(m, _episode?.durationMs),
+        null => null,
+      };
+
   StreamSubscription<Set<TableUpdate>>? _transcriptWrites;
 
   @override
@@ -167,11 +187,12 @@ class _WorkPageState extends State<WorkPage> {
     _load();
     // Jobs finish while the page is open (1.5.6): a transcript landing or
     // a download completing must change what the page offers without
-    // leaving and coming back.
+    // leaving and coming back. A transcript shown as it is made is whole
+    // only when its job ends, which writes the jobs table, not this one.
     _transcriptWrites = _db
-        .tableUpdates(TableUpdateQuery.onTable(_db.alignments))
+        .tableUpdates(TableUpdateQuery.onAllTables([_db.alignments, _db.jobsTable]))
         .listen((_) {
-      if (!_transcribed) _load();
+      if (!_transcribed || _making != null) _load();
     });
     _actions?.downloader?.addListener(_onDownloads);
     _jobs?.addListener(_onJobs);
@@ -565,7 +586,7 @@ class _WorkPageState extends State<WorkPage> {
   /// transcribe-and-translate into English, even for an English episode).
   VoidCallback? get _translate {
     if (_isAudiobook) return null;
-    if (_isAudio && !_transcribed) return null;
+    if (_isAudio && !_wholeTranscript) return null;
     if (_doors.readerDoors.translation == null) return null;
     return () async {
       await _doors.read(context, _entry, openTranslatePicker: true);
@@ -710,7 +731,7 @@ class _WorkPageState extends State<WorkPage> {
       actions,
       _entry,
       extras: extras,
-      transcribed: _transcribed,
+      transcript: _stage,
       sourceLang: _work.lang ?? _feed?.language,
       shownAsButtons: _shownAsButtons,
     );
@@ -1151,7 +1172,8 @@ class _WorkPageState extends State<WorkPage> {
       read: null,
       readWhy: !_transcribed
           ? 'A translation needs a transcript first. $listenIt makes both.'
-          : 'This device can’t translate offline. $listenIt makes the '
+          : _translateWaits ??
+              'This device can’t translate offline. $listenIt makes the '
                 'translation.',
     );
   }
@@ -1264,7 +1286,7 @@ class _WorkPageState extends State<WorkPage> {
                         ? 'Translating needs a transcript first.'
                         : 'Translating needs a transcript, and this device '
                               'can’t transcribe.'
-                  : 'This device can’t translate offline.',
+                  : _translateWaits ?? 'This device can’t translate offline.',
               style: theme.textTheme.bodySmall,
             ),
           ),
@@ -1407,7 +1429,7 @@ class _WorkPageState extends State<WorkPage> {
                         ? 'Translating needs a transcript first.'
                         : 'Translating needs a transcript, and this device '
                               'can’t transcribe.'
-                  : 'This device can’t translate offline.',
+                  : _translateWaits ?? 'This device can’t translate offline.',
               style: theme.textTheme.bodySmall,
             ),
           ),

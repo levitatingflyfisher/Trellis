@@ -10,7 +10,8 @@ import 'package:study_core/study_core.dart';
 
 bool get ankiExportSupported => false;
 
-Future<Uint8List> buildApkgBytes(Course course) async =>
+Future<Uint8List> buildApkgBytes(Course course,
+        {Map<String, Uint8List> images = const {}}) async =>
     throw UnsupportedError('Anki export is not available on the web');
 
 String apkgFileName(Course course) =>

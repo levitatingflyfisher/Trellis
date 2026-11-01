@@ -159,7 +159,7 @@ class SearchItemTile extends StatelessWidget {
             }
           : null,
       menuBuilder: (_) => workMenuItems(actions, entry,
-          transcribed: state.transcribed.contains(work.id),
+          transcript: state.transcriptOf(work.id),
           sourceLang: state.sourceLangOf(entry)),
       onMenu: (choice) async {
         // These doors may carry their own share (a test's, the web's).

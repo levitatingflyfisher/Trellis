@@ -7,6 +7,11 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.6.10 — 2026-11-12
+
+- **Pictures on cards.** Add a picture to any card you make or edit; it shows above the question, with no network. Backups carry the pictures, and the Anki export adds them to the card. PNG, JPEG, GIF or WebP, up to 3 MB.
+- **A transcript still being made says so.** A row shows “Transcribing, 12 of 40 min”, or “Part transcript” if it stopped, and offers “Resume transcribing”. Translate waits for the whole transcript and says how much is done.
+
 ## 1.6.9 — 2026-11-12
 
 - **Read the transcript while it is being made.** Each finished part appears as it lands, and the job says how much you can read now. Your place holds, and a transcription stopped by the phone picks up where it left off.

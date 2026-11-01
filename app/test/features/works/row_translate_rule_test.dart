@@ -9,6 +9,7 @@ import 'package:trellis/features/works/work_menu.dart';
 import 'package:trellis/features/works/work_row.dart';
 
 import 'package:trellis/features/transcribe/transcribe_coordinator.dart';
+import 'package:trellis/features/transcribe/transcript_so_far.dart';
 
 import '../../support/fake_services.dart';
 
@@ -17,15 +18,15 @@ import '../../support/fake_services.dart';
 /// for an English work (its own language, else its show's).
 void main() {
   test('the rule itself', () {
-    expect(offersEnglishTranslate(transcribed: false, sourceLang: 'es'),
+    expect(offersEnglishTranslate(wholeTranscript: false, sourceLang: 'es'),
         isFalse);
-    expect(offersEnglishTranslate(transcribed: true, sourceLang: 'en'),
+    expect(offersEnglishTranslate(wholeTranscript: true, sourceLang: 'en'),
         isFalse);
-    expect(offersEnglishTranslate(transcribed: true, sourceLang: 'en-US'),
+    expect(offersEnglishTranslate(wholeTranscript: true, sourceLang: 'en-US'),
         isFalse);
-    expect(offersEnglishTranslate(transcribed: true, sourceLang: 'es'),
+    expect(offersEnglishTranslate(wholeTranscript: true, sourceLang: 'es'),
         isTrue);
-    expect(offersEnglishTranslate(transcribed: true, sourceLang: null),
+    expect(offersEnglishTranslate(wholeTranscript: true, sourceLang: null),
         isTrue);
   });
 
@@ -79,7 +80,7 @@ void main() {
       final state = await WorkListState.load(db, profileId, entries: [e]);
       expect(
           values(workMenuItems(actions, e,
-              transcribed: false, sourceLang: state.sourceLangOf(e))),
+              transcript: TranscriptStage.none, sourceLang: state.sourceLangOf(e))),
           isNot(contains('translate')));
     });
 
@@ -88,7 +89,7 @@ void main() {
       final state = await WorkListState.load(db, profileId, entries: [e]);
       expect(
           values(workMenuItems(actions, e,
-              transcribed: true, sourceLang: state.sourceLangOf(e))),
+              transcript: TranscriptStage.whole, sourceLang: state.sourceLangOf(e))),
           isNot(contains('translate')));
     });
 
@@ -97,7 +98,7 @@ void main() {
       final state = await WorkListState.load(db, profileId, entries: [e]);
       expect(
           values(workMenuItems(actions, e,
-              transcribed: true, sourceLang: state.sourceLangOf(e))),
+              transcript: TranscriptStage.whole, sourceLang: state.sourceLangOf(e))),
           contains('translate'));
     });
   });

@@ -25,6 +25,7 @@ import '../search/search_store.dart' show SearchItem;
 import '../search/share_item.dart';
 import '../transcribe/job_cards.dart';
 import '../transcribe/transcribe_coordinator.dart';
+import '../transcribe/transcript_so_far.dart';
 import '../works/device_hooks.dart' show deviceTranscribeRate;
 import '../works/work_row.dart' show WorkEntry;
 import '../../services/device_services.dart';
@@ -425,8 +426,12 @@ class EpisodeActions {
   /// Audio: queue, download, played, transcribe, share. A text (a book,
   /// an article, a feed's text item) or an audiobook: finished, share.
   /// Screens add only their own items after these.
+  ///
+  /// A transcript being made offers no Transcribe: its job is already
+  /// at work. One stopped part way offers to resume it.
   List<PopupMenuEntry<String>> sharedMenuItems(WorkEntry e,
-      {bool transcribed = false, String? sourceLang}) {
+      {TranscriptStage transcript = TranscriptStage.none,
+      String? sourceLang}) {
     final id = e.work.id;
     final episode = e.episode;
     final share = PopupMenuItem<String>(
@@ -435,16 +440,21 @@ class EpisodeActions {
       return [
         ...commonMenuItems((work: e.work, episode: episode)),
         if (canTranscribe) ...[
-          PopupMenuItem(
-              key: Key('transcribe-$id'),
-              value: 'transcribe',
-              child: Text(episode.archivedAtMs != null
-                  ? 'Re-download audio'
-                  : transcribed
-                      ? 'Transcribe again'
-                      : 'Transcribe')),
+          if (transcript != TranscriptStage.makingNow)
+            PopupMenuItem(
+                key: Key('transcribe-$id'),
+                value: 'transcribe',
+                child: Text(episode.archivedAtMs != null
+                    ? 'Re-download audio'
+                    : switch (transcript) {
+                        TranscriptStage.whole => 'Transcribe again',
+                        TranscriptStage.stoppedPartWay =>
+                          'Resume transcribing',
+                        _ => 'Transcribe',
+                      })),
           if (offersEnglishTranslate(
-              transcribed: transcribed, sourceLang: sourceLang))
+              wholeTranscript: transcript == TranscriptStage.whole,
+              sourceLang: sourceLang))
             PopupMenuItem(
                 key: Key('translate-$id'),
                 value: 'translate',
@@ -686,12 +696,12 @@ class EpisodeActions {
 }
 
 /// Whisper's translate needs no text but can only write English, so it
-/// waits for a transcript as the reader's Translate does, and is never
+/// waits for a whole transcript as the reader's Translate does, and is never
 /// offered for an English work. An unknown language is not assumed
 /// English. One rule for every row's ⋮ and the work page's.
 bool offersEnglishTranslate(
-    {required bool transcribed, required String? sourceLang}) {
-  if (!transcribed) return false;
+    {required bool wholeTranscript, required String? sourceLang}) {
+  if (!wholeTranscript) return false;
   final base =
       sourceLang?.trim().toLowerCase().split(RegExp('[-_]')).first;
   return base != 'en';

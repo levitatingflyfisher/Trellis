@@ -165,6 +165,7 @@ land, entries gain a `✅ shipped` mark; until then this is the plan of record.
 - diagramMermaid: parsed and displayed as description + source block; true diagram rendering (offline mermaid in a native WebView) is roadmap — the donor parsed it and rendered nothing, so this is parity-plus-honesty, not regression.
 - Stove household tier on the web surface: impossible today (stove server has no CORS; https PWA cannot fetch http LAN — packet finding); household brain is native-only until the server grows CORS + a serving-context answer.
 - Word-level timestamps on non-English audio: shipped with a documented drift caveat + VAD mitigation (the donor was English-only and never faced this; forced alignment a la WhisperX is out of scope).
+- A language change in the middle of an episode: **not handled.** Every window is decoded in one language, the work's or its show's, else the one whisper detects on the first window with words, so a passage in another language comes out written in the locked one's spelling. Checking again cheaply needs whisper's own confidence for each window (token probabilities and the no-speech probability, both already computed as it decodes); the native shim does not export them yet, so nothing is built. Detecting the language of every window would cost a second encoder pass each, on every episode.
 - 32-bit (armeabi-v7a) potato phones: full T0 app + whisper-tiny (slow); LiteRT local LLM is arm64-only, so their Brain tiers are stove/BYOK.
 - Auto-download queue: built (ADR-0018), Android only. A per-show switch, "Download new episodes", on the podcast's settings page, turned on through the one consent dialog (ADR-0003 law 6: the consent is given once, at the switch, for up to 3 per check on Wi-Fi only). After a check finds something new, WorkManager runs a pass only on an unmetered network. The pass fetches the newest min(3, keep-latest) new rows through the download coordinator, so they get job rows, show on the Jobs screen and fall under keep-latest eviction. **Degraded vs the donor**: no disk-quota guard (dart:io has no cheap free-space call, ADR-0017); a full disk fails the job with its own reason. History: before ADR-0018 this row said the flag was left unwired on purpose, because a refresh-time download would have bypassed the consent gate. Moving the consent to the switch is what answers that.
 
@@ -687,11 +688,24 @@ Paths are under `app/test/` unless they say otherwise.
   accepts; study_core is unchanged (`study/card_editing_test.dart`,
   `features/study/card_making_flow_test.dart`,
   `features/reader_ledger_test.dart`, `features/dictionary_sheet_test.dart`).
-  **Not yet:** images on cards. They need an optional image field on an
-  item in study_core (additive, with parser tests), the image files kept
-  in app storage and named in the course text, a picker in the editor,
-  the image shown in a session with no network, the backup carrying the
-  files, and the Anki export adding them as media.
+- ✅ shipped: **Pictures on cards.** Any course item can name a picture
+  (`image`, a plain file name; study_core reads it and scheduling never
+  does: `packages/study_core/test/curriculum_parser_test.dart`). The card
+  editor offers “Add a picture”, “Change picture” and “Remove picture”
+  through the system picker; a file must be a PNG, JPEG, GIF or WebP of
+  at most 3 MB, and is named by its own hash, so a picture two cards use
+  is kept once (`study/card_images_test.dart`,
+  `study/card_editing_test.dart`, `features/study/card_picture_test.dart`).
+  Pictures are kept in the app’s own database, which the web build has
+  too; a picture no course names any more is let go when a course is
+  saved or removed (`db/card_images_db_test.dart`). A session shows the
+  picture above the question with no network, and says so plainly when a
+  course from elsewhere names a picture this device does not have. A
+  backup carries each picture with the course that names it
+  (`features/backup_bridge_test.dart`), and the Anki export adds each as
+  Anki media shown on the card’s front (`study/anki_export_test.dart`,
+  `study/course_map_export_test.dart`). A course file saved from the map
+  is text only: its pictures stay in the backup and the Anki deck.
 
 - ✅ shipped: **The transcript appears as it is made.** An episode with
   no transcript gets the text of each finished window on its page as the
@@ -709,7 +723,15 @@ Paths are under `app/test/` unless they say otherwise.
   `features/reader_transcript_so_far_test.dart`). A job over a transcript
   the work already has shows nothing part way; Discard takes the part
   away; making an episode in another language waits for the whole
-  transcript (`features/listen_chain_test.dart`).
+  transcript (`features/listen_chain_test.dart`). Part of a transcript
+  is never taken for a whole one: a row says “Transcribing, 12 of 40
+  min” while the job runs, or “Part transcript, 12 of 40 min” once it
+  stops, in place of “Transcript”. The ⋮ offers no Transcribe while the
+  job runs and “Resume transcribing” once it stops; “Transcribe again”
+  and translating into English wait for the whole transcript. Translate
+  on the episode’s page and in the reader waits too, and says how much
+  is done (`features/works/partial_transcript_test.dart`,
+  `features/reader_transcript_so_far_test.dart`).
 - ✅ shipped: **Stream or download, chosen per episode.** Settings still
   says what Listen and Play do with an episode that isn’t downloaded. The
   episode’s page offers the other way for this play, “Stream now” or

@@ -31,23 +31,34 @@ class CardDraft {
   final String front;
   final String back;
 
-  const CardDraft.frontBack(this.front, this.back) : kind = CardKind.frontBack;
-  const CardDraft.cloze(this.front)
+  /// The card's picture, by its name in the store (see card_images.dart);
+  /// null for none.
+  final String? image;
+
+  const CardDraft.frontBack(this.front, this.back, {this.image})
+      : kind = CardKind.frontBack;
+  const CardDraft.cloze(this.front, {this.image})
       : kind = CardKind.cloze,
         back = '';
+
+  /// This draft with [image] as its picture, or none.
+  CardDraft withImage(String? image) => kind == CardKind.cloze
+      ? CardDraft.cloze(front, image: image)
+      : CardDraft.frontBack(front, back, image: image);
 
   @override
   bool operator ==(Object other) =>
       other is CardDraft &&
       other.kind == kind &&
       other.front == front &&
-      other.back == back;
+      other.back == back &&
+      other.image == image;
 
   @override
-  int get hashCode => Object.hash(kind, front, back);
+  int get hashCode => Object.hash(kind, front, back, image);
 
   @override
-  String toString() => 'CardDraft($kind, $front, $back)';
+  String toString() => 'CardDraft($kind, $front, $back, $image)';
 }
 
 /// The same pattern the study session blanks by, so what is written here
@@ -114,9 +125,10 @@ String clozeFromSentence(String sentence, String word) {
 /// The draft an existing item reads back as; null for the kinds that are
 /// not made by hand.
 CardDraft? draftOf(study.RetrievalItem item) => switch (item) {
-      study.QaItem(:final prompt, :final answer) =>
-        CardDraft.frontBack(prompt, answer),
-      study.ClozeItem(:final text) => CardDraft.cloze(text),
+      study.QaItem(:final prompt, :final answer, :final image) =>
+        CardDraft.frontBack(prompt, answer, image: image),
+      study.ClozeItem(:final text, :final image) =>
+        CardDraft.cloze(text, image: image),
       _ => null,
     };
 
@@ -132,7 +144,7 @@ String newCardId(Set<String> taken, int nowMs) {
 }
 
 /// The item JSON for [draft], over [old] when editing: what the parser
-/// ignores and the hints and sources stay; the old kind's own fields go,
+/// ignores and the hints and sources stay; the picture is the draft's; the old kind's own fields go,
 /// and so do a front and back card's keyword anchors, which were written
 /// for the old answer.
 Map<String, dynamic> _itemJson(CardDraft draft, String id,
@@ -140,11 +152,12 @@ Map<String, dynamic> _itemJson(CardDraft draft, String id,
   final out = <String, dynamic>{...?old};
   for (final k in const [
     'type', 'rung', 'text', 'answers', 'prompt', 'answer', 'acceptable',
-    'rubric', 'choices', 'correctIndex', 'explanation', 'steps',
+    'rubric', 'choices', 'correctIndex', 'explanation', 'steps', 'image',
   ]) {
     out.remove(k);
   }
   out['id'] = id;
+  if (draft.image case final image?) out['image'] = image;
   switch (draft.kind) {
     case CardKind.frontBack:
       final front = draft.front.trim(), back = draft.back.trim();

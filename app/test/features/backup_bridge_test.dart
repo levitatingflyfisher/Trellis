@@ -56,7 +56,8 @@ const donorCourseABody =
     '[{"id":"item-1","type":"cloze","rung":1,"text":"The sky is '
     '{{c1::blue}}.","answers":{"c1":"blue"}}]}]}';
 
-String ourCourseJson({String id = 'c1', String title = 'Course One'}) =>
+String ourCourseJson(
+        {String id = 'c1', String title = 'Course One', String? image}) =>
     json.encode({
       'schemaVersion': '1.0',
       'id': id,
@@ -73,6 +74,7 @@ String ourCourseJson({String id = 'c1', String title = 'Course One'}) =>
               'rung': 1,
               'text': 'The sky is {{c1::blue}}.',
               'answers': {'c1': 'blue'},
+              'image': ?image,
             },
           ],
         },
@@ -138,7 +140,10 @@ Future<void> seedRichly(AppDatabase db) async {
       .savePlayerPosition(profileId: ada, workId: episodeWork, tMs: 4200);
 
   final courseRow = await db.studyDao
-      .importCourse(profileId: ada, raw: ourCourseJson(), nowMs: 111);
+      .importCourse(
+          profileId: ada, raw: ourCourseJson(image: 'sky.png'), nowMs: 111);
+  // A card's picture rides on the course row that names it.
+  await db.studyDao.putCardImage('sky.png', skyPicture);
   const before = study.CardState(
       itemId: 'i1',
       ease: 2.5,
@@ -165,6 +170,8 @@ Future<void> seedRichly(AppDatabase db) async {
   await db.capturesDao.capture(
       profileId: ada, workId: episodeWork, positionMs: 4200, nowMs: 777);
 }
+
+final skyPicture = Uint8List.fromList([0x89, 0x50, 0x4E, 0x47, 7, 7, 7]);
 
 void main() {
   late AppDatabase db;
@@ -203,6 +210,16 @@ void main() {
           tables['profiles']!.singleWhere((p) => p['name'] == 'Ada');
       final ledger = ada['wordLedger'] as List;
       expect((ledger.single as Map)['word'], 'woods');
+    });
+
+    test('a card’s picture rides on the course row that names it, as '
+        'base64', () async {
+      await seedRichly(db);
+      final tables = await bridge.exportTables();
+      final course = tables['courses']!.single;
+      expect(course['images'], {'sky.png': base64.encode(skyPicture)});
+      expect(jsonDecode(jsonEncode(course['images'])),
+          {'sky.png': base64.encode(skyPicture)});
     });
 
     test('a blob column survives as a JSON-safe list', () async {
@@ -372,6 +389,8 @@ void main() {
       expect((await db2.studyDao.revlogOf(courseRow.id)).single.tsMs, 999);
       expect(
           (await db2.ledgerDao.wordsOf(ada.id)).single.word, 'woods');
+      expect(await db2.studyDao.cardImage('sky.png'), skyPicture,
+          reason: 'a card’s picture travels with its course');
       expect((await db2.capturesDao.capturesOf(episodeWork.id)).single.positionMs,
           4200,
           reason: 'a capture is a rider on its work row too — it must '

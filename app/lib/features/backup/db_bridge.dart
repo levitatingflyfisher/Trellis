@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:backup_core/backup_core.dart';
 import 'package:drift/drift.dart';
 import 'package:study_core/study_core.dart' as study;
@@ -128,9 +130,21 @@ class DbBridge {
             .get()))
           f..remove('notesFillPending'),
       ],
-      'courses': rows(await (db.select(db.courses)
-            ..orderBy([(c) => OrderingTerm.asc(c.id)]))
-          .get()),
+      // A card's pictures ride on the course row that names them, as
+      // base64 (a blob's own JSON is a list of numbers, four times the
+      // size). A picture two courses name rides on both; restore keeps
+      // it once.
+      'courses': [
+        for (final c in await (db.select(db.courses)
+              ..orderBy([(c) => OrderingTerm.asc(c.id)]))
+            .get())
+          {
+            ...c.toJson(),
+            if (await _imagesOf(c.raw) case final images
+                when images.isNotEmpty)
+              'images': images,
+          }
+      ],
       'cards': rows(await (db.select(db.cards)
             ..orderBy([(c) => OrderingTerm.asc(c.id)]))
           .get()),
@@ -143,6 +157,26 @@ class DbBridge {
               (p) => OrderingTerm.asc(p.workId)
             ]))
           .get()),
+    };
+  }
+
+  /// The pictures [raw]'s items name, base64 by name. A text this
+  /// device stored has passed the strict parser; one that no longer
+  /// does carries none rather than failing the whole backup.
+  Future<Map<String, String>> _imagesOf(String raw) async {
+    final Set<String> names;
+    try {
+      names = {
+        for (final n in study.parseCourseString(raw).nodes)
+          for (final i in n.items) ?i.image,
+      };
+    } on FormatException {
+      return const {};
+    }
+    final kept = await db.studyDao.cardImagesNamed(names);
+    return {
+      for (final name in (kept.keys.toList()..sort()))
+        name: base64.encode(kept[name]!),
     };
   }
 
@@ -162,6 +196,7 @@ class DbBridge {
         db.jobsTable,
         db.revlog,
         db.cards,
+        db.cardImages,
         db.courses,
         db.wordLedger,
         db.captures,
@@ -247,6 +282,14 @@ class DbBridge {
       // on the source device, and the AEAD tag vouches nothing changed.
       for (final row in t['courses']!) {
         await db.into(db.courses).insert(CourseRow.fromJson(cast(row)));
+        final images = row['images'];
+        if (images is Map) {
+          for (final MapEntry(:key, :value) in images.entries) {
+            if (key is String && value is String) {
+              await db.studyDao.putCardImage(key, base64.decode(value));
+            }
+          }
+        }
       }
       for (final row in t['cards']!) {
         await db.into(db.cards).insert(CardRow.fromJson(cast(row)));

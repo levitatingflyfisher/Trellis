@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:archive/archive.dart';
 import 'package:crypto/crypto.dart';
@@ -177,4 +178,76 @@ void main() {
         'SELECT COUNT(*) AS n FROM cards WHERE type != 0 OR reps != 0');
     expect(scheduled.single['n'], 0);
   });
+
+  // Pictures on cards (owner, 28 Oct): each picture goes into the deck as
+  // Anki media, and the card's front shows it, as Anki's own does.
+  test('a card’s picture travels as Anki media, shown on its front',
+      () async {
+    final withPictures = study.parseCourseString(json.encode({
+      'schemaVersion': '1.0',
+      'id': 'birds',
+      'title': 'Birds',
+      'nodes': [
+        {
+          'id': 'n',
+          'title': 'Shore',
+          'intake': '',
+          'items': [
+            {
+              'id': 'q',
+              'type': 'qa',
+              'rung': 3,
+              'prompt': 'What bird?',
+              'answer': 'A heron.',
+              'image': 'heron.jpg',
+            },
+            {
+              'id': 'z',
+              'type': 'cloze',
+              'rung': 1,
+              'text': 'A {{c1::heron}} waits.',
+              'answers': {'c1': 'heron'},
+              'image': 'heron.jpg',
+            },
+            {
+              'id': 'g',
+              'type': 'qa',
+              'rung': 3,
+              'prompt': 'Gone?',
+              'answer': 'Yes.',
+              'image': 'gone.png',
+            },
+          ],
+        },
+      ],
+    }));
+    final heron = [0xFF, 0xD8, 0xFF, 1, 2, 3];
+    final bytes = await buildApkgBytes(withPictures,
+        images: {'heron.jpg': Uint8List.fromList(heron)});
+    final zip = ZipDecoder().decodeBytes(bytes);
+    final manifest = jsonDecode(
+        utf8.decode(zip.findFile('media')!.content as List<int>)) as Map;
+    expect(manifest, {'0': 'heron.jpg'},
+        reason: 'one file for a picture two cards use; none for a picture '
+            'this device does not have');
+    expect(zip.findFile('0')!.content, heron);
+
+    final dir = await Directory.systemTemp.createTemp('anki_media');
+    addTearDown(() => dir.delete(recursive: true));
+    final path = '${dir.path}/collection.anki2';
+    File(path).writeAsBytesSync(
+        zip.findFile('collection.anki2')!.content as List<int>);
+    final db = raw.sqlite3.open(path);
+    addTearDown(db.dispose);
+    final fronts = [
+      for (final n in db.select('SELECT flds FROM notes'))
+        (n['flds'] as String).split('\u001f').first,
+    ];
+    expect(fronts, containsAll([
+      'What bird?<br><img src="heron.jpg">',
+      'A {{c1::heron}} waits.<br><img src="heron.jpg">',
+      'Gone?',
+    ]));
+  });
 }
+

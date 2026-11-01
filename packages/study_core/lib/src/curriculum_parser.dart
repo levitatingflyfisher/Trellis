@@ -184,6 +184,7 @@ RetrievalItem _parseItem(
 
   final hints = _optStringList(json, 'hints', itemWhere) ?? const [];
   final sources = _optStringList(json, 'sources', itemWhere) ?? const [];
+  final image = _optImageName(json, itemWhere);
 
   final typeRaw = json['type'];
   if (typeRaw == null) {
@@ -210,6 +211,7 @@ RetrievalItem _parseItem(
         rung: rung,
         hints: hints,
         sources: sources,
+        image: image,
         text: text,
         answers: answers,
       );
@@ -227,6 +229,7 @@ RetrievalItem _parseItem(
         rung: rung,
         hints: hints,
         sources: sources,
+        image: image,
         prompt: prompt,
         answer: answer,
         acceptable:
@@ -260,6 +263,7 @@ RetrievalItem _parseItem(
         rung: rung,
         hints: hints,
         sources: sources,
+        image: image,
         prompt: prompt,
         choices: choices,
         correctIndex: correctIndex,
@@ -284,6 +288,7 @@ RetrievalItem _parseItem(
         rung: rung,
         hints: hints,
         sources: sources,
+        image: image,
         prompt: prompt,
         steps: steps,
         rubric: _optString(json, 'rubric'),
@@ -298,6 +303,25 @@ RetrievalItem _parseItem(
 }
 
 // --- field helpers -----------------------------------------------------------
+
+/// A picture's name: one plain file name (letters, digits, dot, dash,
+/// underscore; not starting with a dot), so it can only ever name a file
+/// in the app's own store, never a path out of it or a URL.
+final _imageName = RegExp(r'^[A-Za-z0-9_-][A-Za-z0-9._-]{0,127}$');
+
+String? _optImageName(Map<String, dynamic> json, String where) {
+  final value = json['image'];
+  if (value == null) return null;
+  if (value is! String) {
+    throw FormatException("$where: 'image' must be a string");
+  }
+  if (!_imageName.hasMatch(value)) {
+    throw FormatException(
+      "$where: 'image' must be a plain file name, like 'map.png'",
+    );
+  }
+  return value;
+}
 
 /// Returns a required string field, throwing [FormatException] if missing or
 /// not a string. [where] is a path prefix for the error message.

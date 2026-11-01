@@ -533,4 +533,61 @@ void main() {
       );
     });
   });
+
+  // Images on cards (owner, 28 Oct): an optional picture's name on any
+  // item. Additive: a course without one parses exactly as before.
+  group('parseCourse — an item’s image', () {
+    Map<String, dynamic> firstItem(Map<String, dynamic> map) =>
+        ((map['nodes'] as List).first['items'] as List).first
+            as Map<String, dynamic>;
+
+    test('is null when absent, on every kind', () {
+      final course = parseCourse(validCourseMap());
+      for (final n in course.nodes) {
+        for (final i in n.items) {
+          expect(i.image, isNull, reason: i.id);
+        }
+      }
+    });
+
+    test('is read on every kind of item', () {
+      final map = validCourseMap();
+      for (final n in map['nodes'] as List) {
+        for (final i in (n as Map)['items'] as List) {
+          (i as Map)['image'] = 'pic-${i['id']}.png';
+        }
+      }
+      final course = parseCourse(map);
+      final kinds = <ItemType>{};
+      for (final n in course.nodes) {
+        for (final i in n.items) {
+          expect(i.image, 'pic-${i.id}.png');
+          kinds.add(i.type);
+        }
+      }
+      expect(kinds, ItemType.values.toSet());
+    });
+
+    test('must be a string', () {
+      final map = validCourseMap();
+      firstItem(map)['image'] = 7;
+      expect(
+          () => parseCourse(map),
+          throwsA(isA<FormatException>().having(
+              (e) => e.message, 'message', contains("'image'"))));
+    });
+
+    for (final bad in ['', '../x.png', 'a/b.png', r'a\b.png', '.hidden',
+        'x' * 200]) {
+      test('refuses a name that is not a plain file name: "$bad"', () {
+        final map = validCourseMap();
+        firstItem(map)['image'] = bad;
+        expect(
+            () => parseCourse(map),
+            throwsA(isA<FormatException>().having((e) => e.message,
+                'message', contains("item 'ss-1': 'image'"))));
+      });
+    }
+  });
 }
+

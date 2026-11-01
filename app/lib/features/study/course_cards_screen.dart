@@ -11,6 +11,7 @@ import '../../db/database.dart';
 import '../shared/capped_body.dart';
 import 'card_editing.dart';
 import 'card_editor_screen.dart';
+import 'card_images.dart' show CardPictures;
 import 'card_store.dart';
 
 /// How a card is listed: a cloze as it is asked, with its blanks.
@@ -63,6 +64,7 @@ class _CourseCardsScreenState extends State<CourseCardsScreen> {
     final saved = await showCardEditor(context,
         title: 'Add card',
         steps: _steps,
+        pictures: CardPictures(widget.db),
         onSave: (draft, step) => addCard(widget.db, widget.courseRowId,
             nodeId: step ?? _course!.nodes.first.id, draft: draft));
     if (saved) await _load();
@@ -81,6 +83,7 @@ class _CourseCardsScreenState extends State<CourseCardsScreen> {
     final changed = await showCardEditor(context,
         title: 'Edit card',
         initial: draft,
+        pictures: CardPictures(widget.db),
         onSave: (d, _) => editCard(widget.db, widget.courseRowId, item.id, d),
         onDelete: () => deleteCard(widget.db, widget.courseRowId, item.id));
     if (changed) await _load();
