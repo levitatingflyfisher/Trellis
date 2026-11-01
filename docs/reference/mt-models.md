@@ -666,3 +666,149 @@ unless `MARIAN_JA_EN_DIR` and `ORT_PYTHON` are set.
 Credit on the Models screen: “Japanese to and from English: ElanMT-BT by
 ELAN MITSUA Project / Abstract Engine, under CC BY-SA 4.0, converted to
 ONNX by Trellis.”
+
+## Trellis 1.6.13: more pairs (2026-11-12)
+
+The owner wants to pick any language to learn. This pass lists every
+existing OPUS-MT ONNX export with English on one end and a clean
+licence. Nothing was trained. Every pair is a published model, pinned.
+
+Checked 2026-11-12, by the method above. The two ONNX graphs were pinned
+from the tree API at a commit. The four small files were downloaded and
+hashed. Each pair was then run once for real: both graphs downloaded,
+their local sha256 checked against the pin (72 pairs tried, all 144
+graph checks matched), and three everyday sentences translated by a
+greedy loop shaped like the app’s (joint vocab, frozen cross-attention
+cache). The weights were
+deleted after the run.
+
+Every pair has 6 decoder layers and `separate_vocabs: false`. All but
+one have 8 heads and `d_model` 512. English to Turkish is a “tc-big”
+model with 16 heads and `d_model` 1024; the loop reads both from
+`config.json`, so it needs no code change.
+
+Some rows reuse a multi-language model under their own id: ROMANCE-en
+(ro, ca, gl to English), en-ROMANCE (en to ca, gl), bat-en (lt, lv to
+English), mul-en (hr, mk, eo, ml, sl to English) and en-mul (en to eo,
+ga). The store keeps files per id, so two such rows on one phone hold
+two copies. The en-ROMANCE and ROMANCE-en rows reuse the commits and
+hashes already pinned for pt; they matched.
+
+The mul-en and en-mul models cover hundreds of languages, many badly.
+A language was tried on them only when the model card's Tatoeba BLEU for
+that direction was 25 or more and no smaller model covers it. It was
+kept only when all three test sentences kept their meaning. Seven
+passed.
+
+| Pair | Repo | MB | License on the ONNX card | Upstream Helsinki-NLP card | Target token |
+|---|---|---|---|---|---|
+| af->en | `Xenova/opus-mt-af-en` | 107.6 | none on card | apache-2.0 |  |
+| en->af | `Xenova/opus-mt-en-af` | 107.6 | none on card | apache-2.0 |  |
+| cs->en | `Xenova/opus-mt-cs-en` | 113.1 | none on card | apache-2.0 |  |
+| en->cs | `Xenova/opus-mt-en-cs` | 113.1 | none on card | apache-2.0 |  |
+| da->en | `Xenova/opus-mt-da-en` | 109.2 | none on card | apache-2.0 |  |
+| en->da | `Xenova/opus-mt-en-da` | 109.2 | none on card | apache-2.0 |  |
+| fi->en | `Xenova/opus-mt-fi-en` | 110.0 | none on card | apache-2.0 |  |
+| en->fi | `Xenova/opus-mt-en-fi` | 115.6 | none on card | apache-2.0 |  |
+| hu->en | `Xenova/opus-mt-hu-en` | 113.1 | none on card | apache-2.0 |  |
+| en->hu | `Xenova/opus-mt-en-hu` | 113.0 | none on card | apache-2.0 |  |
+| id->en | `Xenova/opus-mt-id-en` | 104.8 | none on card | apache-2.0 |  |
+| en->id | `Xenova/opus-mt-en-id` | 104.8 | none on card | apache-2.0 |  |
+| sv->en | `Xenova/opus-mt-sv-en` | 106.5 | none on card | apache-2.0 |  |
+| en->sv | `Xenova/opus-mt-en-sv` | 106.5 | none on card | apache-2.0 |  |
+| vi->en | `Xenova/opus-mt-vi-en` | 103.6 | none on card | apache-2.0 |  |
+| en->vi | `Xenova/opus-mt-en-vi` | 103.6 | none on card | apache-2.0 | `>>vie<<` |
+| xh->en | `Xenova/opus-mt-xh-en` | 111.6 | none on card | apache-2.0 |  |
+| en->xh | `Xenova/opus-mt-en-xh` | 111.6 | none on card | apache-2.0 |  |
+| en->ro | `Xenova/opus-mt-en-ro` | 109.8 | none on card | apache-2.0 |  |
+| ro->en | `Xenova/opus-mt-ROMANCE-en` | 115.5 | none on card | apache-2.0 |  |
+| ca->en | `Xenova/opus-mt-ROMANCE-en` | 115.5 | none on card | apache-2.0 |  |
+| en->gl | `Xenova/opus-mt-en-ROMANCE` | 115.5 | none on card | apache-2.0 | `>>gl<<` |
+| gl->en | `Xenova/opus-mt-ROMANCE-en` | 115.5 | none on card | apache-2.0 |  |
+| et->en | `Xenova/opus-mt-et-en` | 109.1 | none on card | apache-2.0 |  |
+| lt->en | `Xenova/opus-mt-bat-en` | 109.4 | none on card | apache-2.0 |  |
+| lv->en | `Xenova/opus-mt-bat-en` | 109.4 | none on card | apache-2.0 |  |
+| tr->en | `Xenova/opus-mt-tr-en` | 113.0 | none on card | apache-2.0 |  |
+| en->tr | `onnx-community/opus-mt-tc-big-en-tr` | 533.7 | cc-by-4.0 (own card) | cc-by-4.0 |  |
+| th->en | `Xenova/opus-mt-th-en` | 114.1 | none on card | apache-2.0 |  |
+| hr->en | `Xenova/opus-mt-mul-en` | 114.5 | none on card | apache-2.0 |  |
+| mk->en | `Xenova/opus-mt-mul-en` | 114.5 | none on card | apache-2.0 |  |
+| eo->en | `Xenova/opus-mt-mul-en` | 114.5 | none on card | apache-2.0 |  |
+| ml->en | `Xenova/opus-mt-mul-en` | 114.5 | none on card | apache-2.0 |  |
+| sl->en | `Xenova/opus-mt-mul-en` | 114.5 | none on card | apache-2.0 |  |
+| en->eo | `Xenova/opus-mt-en-mul` | 114.5 | none on card | apache-2.0 | `>>epo<<` |
+| en->ga | `Xenova/opus-mt-en-mul` | 114.5 | none on card | apache-2.0 | `>>gle<<` |
+
+English to Turkish is large: about 534 MB, against about 110 MB for the
+others. It is the only clean export for that direction. The small
+`opus-mt-en-trk` (`>>tur<<`, 236 MB) scores 9.2 BLEU on newstest2016
+against tc-big's 23.4, so tc-big is pinned.
+
+Sample output. The en->X rows translate “Where is the train station?”,
+“I would like a cup of coffee, please.” and “My children are playing
+in the garden.” The X->en rows translate the same three sentences,
+written in X.
+
+| Pair | Sentence 1 | Sentence 2 | Sentence 3 |
+|---|---|---|---|
+| af->en | Where is the train station? | I would like a cup of coffee, please. | My children play in the garden. |
+| en->af | Waar is die treinstasie? | Ek wil graag 'n koppie koffie hê, asseblief | My kinders speel in die tuin. |
+| cs->en | Where's the train station? | I'd like a cup of coffee, please. | My kids are playing in the garden. |
+| en->cs | Kde je vlakové nádraží? | Dal bych si šálek kávy, prosím. | Moje děti si hrají na zahradě. |
+| da->en | Where's the train station? | I'd like a cup of coffee, please. | My kids are playing in the garden. |
+| en->da | Hvor er togstationen? | Jeg vil gerne have en kop kaffe, tak. | Mine børn leger i haven. |
+| fi->en | Where's the train station? | I'd like a cup of coffee, please. | My kids were playing in the garden. |
+| en->fi | Missä rautatieasema on? | Haluaisin kupin kahvia, kiitos. | Lapseni leikkivät puutarhassa. |
+| hu->en | Where's the train station? | I'll have a cup of coffee. | My kids are playing in the garden. |
+| en->hu | Hol van a vasútállomás? | Egy csésze kávét kérek. | A gyerekeim a kertben játszanak. |
+| id->en | Where's the train station? | I'd like a cup of coffee. | My kids are playing in the garden. |
+| en->id | Dimana stasiun kereta api? | Aku ingin secangkir kopi, tolong. | Anak-anakku bermain di kebun. |
+| sv->en | Where's the train station? | I'd like a cup of coffee, please. | My children play in the garden. |
+| en->sv | Var är tågstationen? | Jag vill ha en kopp kaffe, tack. | Mina barn leker i trädgården. |
+| vi->en | Where's the station? | I'll have a cup of coffee. | My kids are playing in the garden. |
+| en->vi | Ga tàu đâu? | Cho tôi một tách cà phê. | Con tôi đang chơi trong vườn. |
+| xh->en | Where is the railway station? | I would like a cup of coffee. | My children play in the garden. |
+| en->xh | Siphi isikhululo sikaloliwe? | Ndicela undinike ikomityi yekofu. | Abantwana bam badlala egadini. |
+| en->ro | Unde e gara? | Aş vrea o ceaşcă de cafea, vă rog. | Copiii mei se joacă în grădină. |
+| ro->en | Where's the station? | I'd like a coffee, please. | My kids are playing in the garden. |
+| ca->en | Where's the train station? | I'd like a coffee, please. | My kids play garden. |
+| en->gl | Onde está a estación de trenes? | Quero unha taza de café, por favor. | Os meus fillos están xogando no xardín. |
+| gl->en | Where's the train station? | I wanted a coffee, please. | My kids play in the garden. |
+| et->en | Where's the train station? | I'd like a cup of coffee, please. | My kids play in the garden. |
+| lt->en | Where's the train station? | I'd like a cup of coffee. | My children play in the garden. |
+| lv->en | Where's the railway station? | I'd like some coffee for a cup, please. | My children play in the garden. |
+| tr->en | Where's the train station? | I'd like a cup of coffee, please. | My kids are playing in the garden. |
+| en->tr | Tren istasyonu nerede? | Bir fincan kahve lütfen. | Çocuklarım bahçede oynuyor. |
+| th->en | Where's the train station? | One coffee please. | My kids are playing in the park. |
+| hr->en | Where's the railway station? | I'd like a cup of coffee, please. | My kids are playing in the garden. |
+| mk->en | Where's the train station? | I'd like a cup of coffee, please. | My kids are playing in the garden. |
+| eo->en | Where's the station? | I'd like a cup of coffee, please. | My kids are playing in the garden. |
+| ml->en | Where's the station on the train? | I need a cup of coffee. | My kids play in the garden. |
+| sl->en | Where's the train station? | I want a cup of coffee, please. | My kids are playing on the garden. |
+| en->eo | Kie estas la trenstacio? | Mi volas kafeon, bonvolu. | Miaj infanoj ludas en la ĝardeno. |
+| en->ga | Cáit é an stáisiún traenach? | Ba mhaith liom cupán caife, le do thoil. | Tá mo pháistí imirt sa ghairdín. |
+
+**Not registered:**
+
+| Wanted | Why |
+|---|---|
+| en->ca | Ran, then dropped by the lead: one of the three test sentences lost its meaning ("juntant", joining, for playing). |
+| en->et | Only on en-mul (`>>est<<`). Run for real: two of three sentences came out wrong (“rongivahemik”, “piirkonnas”). |
+| el, sq, sr, bs, bg, no, ga, zu, bn, mt, eu, be, is, ht, ms, he, hy, ka, ta, fo, ky, am, fy, az, lb ->en | Only on mul-en. Pinned and run for real; at least one of three sentences lost its meaning (for example “Where's the parking lot?” for Hebrew, “Where is the road to everlasting life?” for Azerbaijani). |
+| en->bg, el, mk, no, sq, zu, hr, sr, bs | Only on en-mul. Run for real; at least one sentence lost its meaning or the output was the wrong language (Norwegian came out as Danish). |
+| en->th, lt, lv, pl, he, sl, is, eu, be, cy | Only on en-mul, with card Tatoeba BLEU under 25 (th 2.2, lt 17.4, lv 20.4, pl 22.7, he 21.3). Not tried. |
+| co, ts, to, sm, an, ny, mg, ia, ie ->en | mul-en clears the BLEU bar, but no reliable test sentences could be written for a real run. Not tried. |
+| tr->en (tc-big) | `Xenova/opus-mt-tc-big-tr-en` (298 MB) and `onnx-community/opus-mt-tc-big-tr-en` (531 MB) exist. One pair per direction; the 113 MB `Xenova/opus-mt-tr-en` translated all three sentences right, so it is the one pinned. |
+| en->tr (en-trk) | `onnx-community/opus-mt-en-trk-ONNX` (`>>tur<<`): 9.2 BLEU on newstest2016 against 23.4 for tc-big. |
+| en->vi (onnx-community) | `onnx-community/opus-mt-en-vi-ONNX` has a 164 MB decoder; Xenova's export of the same model is 54 MB. |
+| cs, en-cs, bat-en at onnx-community | No quantized graphs in the merged-decoder layout; the Xenova exports are used. |
+| mul-en for languages already covered | One pair per direction; a bilingual or family model is used where one exists. |
+| en->ja via `opus-mt-en-jap`, ja->en | Japanese is ElanMT-BT (above). |
+| Non-English pairs (da-de, es-fr, gem-gem, gmw-gmw, he-ar and others) | Hub and spoke: English on one end of every pair. |
+| en->ko, en->pl | Still no clean single-language ONNX export. en-mul has `>>kor<<` and `>>pol<<` but pl scores 22.7 and ko is not on the card. |
+
+**Licenses.** All upstream Helsinki-NLP cards for the pinned models say
+apache-2.0, except tc-big-en-tr, which says cc-by-4.0, as does its
+onnx-community card. Xenova's cards carry no licence. No other licence
+was found, so nothing was skipped for its licence. The Models screen's
+OPUS-MT credit already covers both licences.

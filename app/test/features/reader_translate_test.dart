@@ -167,6 +167,9 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.text('What language is this in?'), findsOneWidget);
+      // The list holds every pair's language now (1.6.13): scroll to it.
+      await tester.ensureVisible(find.byKey(const Key('work-language-de')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('work-language-de')));
       await tester.pumpAndSettle();
 
@@ -429,6 +432,9 @@ void main() {
       expect(find.text('Language: English'), findsOneWidget);
       await tester.tap(find.byKey(const Key('work-language-action')));
       await tester.pumpAndSettle();
+      // The list holds every pair's language now (1.6.13): scroll to it.
+      await tester.ensureVisible(find.byKey(const Key('work-language-de')));
+      await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('work-language-de')));
       await tester.pumpAndSettle();
 
@@ -441,6 +447,9 @@ void main() {
       await pumpReader(tester, translation: FakeTranslation().service);
       await openOverflow(tester);
       await tester.tap(find.byKey(const Key('work-language-action')));
+      await tester.pumpAndSettle();
+      // The list holds every pair's language now (1.6.13): scroll to it.
+      await tester.ensureVisible(find.byKey(const Key('work-language-de')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('work-language-de')));
       await tester.pumpAndSettle();

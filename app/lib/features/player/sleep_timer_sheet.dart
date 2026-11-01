@@ -152,32 +152,60 @@ class SleepTimerSheet extends StatelessWidget {
   }
 }
 
+/// Any other length, by steps of 5 minutes (owner, 12 Nov: no typed box
+/// for a number from a small range).
 class _CustomMinutesDialog extends StatefulWidget {
   const _CustomMinutesDialog();
+
+  static const step = 5;
+  static const least = 5;
+  static const most = 180;
 
   @override
   State<_CustomMinutesDialog> createState() => _CustomMinutesDialogState();
 }
 
 class _CustomMinutesDialogState extends State<_CustomMinutesDialog> {
-  final _controller = TextEditingController();
+  int _minutes = 20;
 
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
+  void _by(int delta) => setState(() => _minutes = (_minutes + delta)
+      .clamp(_CustomMinutesDialog.least, _CustomMinutesDialog.most));
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('Minutes'),
-      content: TextField(
-        key: const Key('sleep-timer-custom-minutes'),
-        controller: _controller,
-        keyboardType: TextInputType.number,
-        autofocus: true,
-        decoration: const InputDecoration(hintText: 'e.g. 22'),
+      content: Row(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          IconButton.outlined(
+            key: const Key('sleep-timer-custom-less'),
+            tooltip: '5 minutes less',
+            icon: const Icon(Icons.remove),
+            onPressed: _minutes > _CustomMinutesDialog.least
+                ? () => _by(-_CustomMinutesDialog.step)
+                : null,
+          ),
+          Flexible(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Text(
+                '$_minutes min',
+                key: const Key('sleep-timer-custom-minutes'),
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+            ),
+          ),
+          IconButton.outlined(
+            key: const Key('sleep-timer-custom-more'),
+            tooltip: '5 minutes more',
+            icon: const Icon(Icons.add),
+            onPressed: _minutes < _CustomMinutesDialog.most
+                ? () => _by(_CustomMinutesDialog.step)
+                : null,
+          ),
+        ],
       ),
       actions: [
         TextButton(
@@ -186,11 +214,7 @@ class _CustomMinutesDialogState extends State<_CustomMinutesDialog> {
         ),
         FilledButton(
           key: const Key('sleep-timer-custom-confirm'),
-          onPressed: () {
-            final minutes = int.tryParse(_controller.text.trim());
-            Navigator.of(context)
-                .pop(minutes != null && minutes > 0 ? minutes : null);
-          },
+          onPressed: () => Navigator.of(context).pop(_minutes),
           child: const Text('Set'),
         ),
       ],

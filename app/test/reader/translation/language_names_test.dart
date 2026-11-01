@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:ml_runtime/ml_runtime.dart';
 import 'package:trellis/features/reader/translation/language_names.dart';
 
 /// languageDisplayName (Campaign 8 "Babel widens" Phase 1): the one
@@ -59,5 +60,18 @@ void main() {
       expect(localeDisplayName('ru'), 'Russian');
       expect(localeDisplayName('ru-KG'), 'Russian (KG)');
     });
+  });
+
+  test('a work can be marked as in any language a translator covers, '
+      'English first, the rest by name (1.6.13 widened the pairs)', () {
+    final covered = {
+      for (final p in ModelRegistry.starter().translationPairsAt(DeviceTier.t1))
+        ...{p.sourceLang!, ...p.langs!},
+    };
+    expect(selectableWorkLanguages.toSet(), covered);
+    expect(selectableWorkLanguages.first, 'en');
+    final rest = [for (final l in selectableWorkLanguages.skip(1))
+      languageDisplayName(l)];
+    expect(rest, [...rest]..sort());
   });
 }

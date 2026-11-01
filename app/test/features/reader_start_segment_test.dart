@@ -108,6 +108,9 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('work-language-action')));
     await tester.pumpAndSettle();
+    // The list holds every pair's language now (1.6.13): scroll to it.
+    await tester.ensureVisible(find.byKey(const Key('work-language-de')));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('work-language-de')));
     await tester.pumpAndSettle();
     await tester.tap(find.byTooltip('Listen from here'));

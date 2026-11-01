@@ -7,6 +7,12 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.6.13 — 2026-11-12
+
+- **Learn any language.** Settings › Learning language lists every language, with a search box. Each one shows what works today: reading, cards, transcribing, translating (and which way) and speaking, as works on this phone, needs a download, or not there yet. The languages an episode can be made in come first.
+- **36 more translators**, all free OPUS-MT models: Afrikaans, Czech, Danish, Finnish, Hungarian, Indonesian, Swedish, Vietnamese, Xhosa, Romanian, Galician, Turkish and Esperanto both ways; Catalan, Estonian, Lithuanian, Latvian, Thai, Croatian, Macedonian, Malayalam and Slovenian into English; Irish from English. Each was tried on real sentences first. A book can be marked as in any of these languages.
+- **A show’s playback settings are chips.** Speed, skip the start, stop before the end, how much audio to keep, and trim silence are each one row of choices (5 to 60 seconds, and Off). Nothing is typed. The sleep timer’s other length is a stepper.
+
 ## 1.6.12 — 2026-11-12
 
 - **“Subs” on the bottom bar**, and all six labels drawn at one full size. The Subscriptions screen keeps its full title.

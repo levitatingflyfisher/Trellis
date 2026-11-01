@@ -556,12 +556,13 @@ void main() {
     expect(find.text('Playback settings'), findsOneWidget);
 
     await tester.tap(find.byKey(const Key('feed-settings-speed-1.5')));
-    await tester.enterText(
-      find.byKey(const Key('feed-settings-skip-intro')),
-      '15',
-    );
-    await tester.enterText(
-        find.byKey(const Key('feed-settings-skip-outro')), '30');
+    for (final k in ['feed-settings-skip-intro-15',
+        'feed-settings-skip-outro-30']) {
+      await tester.ensureVisible(find.byKey(Key(k)));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(Key(k)));
+      await tester.pumpAndSettle();
+    }
     await tester.ensureVisible(find.byKey(const Key('feed-settings-save')));
     await tester.tap(find.byKey(const Key('feed-settings-save')));
     await tester.pumpAndSettle();
@@ -594,8 +595,10 @@ void main() {
     await tester.tap(find.text('Podcast settings'));
     await tester.pumpAndSettle();
 
-    expect(find.text('10'), findsOneWidget);
-    expect(find.text('20'), findsOneWidget);
+    ChoiceChip chip(String k) => tester.widget<ChoiceChip>(find.byKey(Key(k)));
+    expect(chip('feed-settings-skip-intro-10').selected, isTrue);
+    expect(chip('feed-settings-skip-outro-20').selected, isTrue,
+        reason: 'a value from before the chips gets a chip of its own');
 
     await tester.tap(find.byKey(const Key('feed-settings-speed-default')));
     await tester.ensureVisible(find.byKey(const Key('feed-settings-save')));
@@ -625,11 +628,12 @@ void main() {
       await tester.tap(find.text('Podcast settings'));
       await tester.pumpAndSettle();
 
-      expect(find.textContaining('Keep the latest'), findsOneWidget);
-      await tester.enterText(
-        find.byKey(const Key('feed-settings-keep-latest-audio')),
-        '5',
-      );
+      expect(find.textContaining('Keep downloaded audio'), findsOneWidget);
+      final five = find.byKey(const Key('feed-settings-keep-latest-audio-5'));
+      await tester.ensureVisible(five);
+      await tester.pumpAndSettle();
+      await tester.tap(five);
+      await tester.pumpAndSettle();
       await tester.ensureVisible(find.byKey(const Key('feed-settings-save')));
       await tester.tap(find.byKey(const Key('feed-settings-save')));
       await tester.pumpAndSettle();

@@ -148,7 +148,7 @@ void main() {
         store: FakeModelStore(downloadedIds: {'opus-mt-en-de'}));
     expect(find.byKey(const Key('model-download-opus-mt-en-ROMANCE')),
         findsNothing, reason: 'folded until opened');
-    expect(find.textContaining('1 of 26 downloaded'), findsOneWidget);
+    expect(find.textContaining('1 of 62 downloaded'), findsOneWidget);
 
     await tester.scrollUntilVisible(
         find.byKey(const Key('models-translation')), 200);
@@ -221,7 +221,7 @@ void main() {
     expect(store.downloadsStarted, [spec.id],
         reason: 'no consent dialog for a few KB of an already-kept model');
     expect(find.byKey(const Key('consent-dialog')), findsNothing);
-    expect(find.textContaining('1 of 26 downloaded'), findsOneWidget);
+    expect(find.textContaining('1 of 62 downloaded'), findsOneWidget);
   });
 
   testWidgets('a downloaded pair whose decoder was re-pinned reads as an '

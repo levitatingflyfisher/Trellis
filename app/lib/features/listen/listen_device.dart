@@ -32,6 +32,7 @@ import '../feeds/background/feed_check_settings.dart';
 import '../transcribe/transcribe_coordinator.dart';
 import '../transcribe/transcript_so_far.dart';
 import 'listen_chain.dart';
+import 'language_abilities.dart';
 import 'listen_jobs.dart';
 import 'listen_languages.dart';
 import 'saved_voice.dart';
@@ -87,6 +88,55 @@ ListenLanguages listenLanguagesAnywhere(DeviceServices services) {
     canSave: savable.contains,
     hasRoute: (lang) => sources
         .any((source) => source != lang && _routes(services, source, lang)),
+  );
+}
+
+/// What works today in every language Trellis can name, on this device
+/// (owner, 12 Nov: "pick ANY language to learn"): whisper, a translator
+/// and a voice, each here, a download away, or not there yet.
+Future<List<LanguageAbilities>> deviceLanguageAbilities(
+    DeviceServices services) async {
+  final store = services.modelStore;
+  final here = <String>{};
+  for (final spec in services.registry.specs) {
+    if (spec.task == ModelTask.asr ||
+        spec.task == ModelTask.tts ||
+        spec.task == ModelTask.translation) {
+      if (await store.isDownloaded(spec)) here.add(spec.id);
+    }
+  }
+  final whisperHere = services.registry.specs
+      .any((s) => s.task == ModelTask.asr && here.contains(s.id));
+  final voiceHere = <String>{...services.phoneVoices.langs};
+  final voiceToDownload = <String>{};
+  for (final l in supertonicSupportedLangs) {
+    final spec = _voiceSpec(services, l);
+    if (spec == null) continue;
+    (here.contains(spec.id) ? voiceHere : voiceToDownload).add(l);
+  }
+  voiceToDownload.removeAll(voiceHere);
+  final canTranslate = services.translation != null;
+  Ability route(String source, String target) {
+    if (!canTranslate) return Ability.notYet;
+    final r = planRoute(services.registry, services.tier,
+        source: source,
+        target: target,
+        missingBytesOf: (spec) => here.contains(spec.id) ? 0 : 1);
+    return r == null
+        ? Ability.notYet
+        : r.ready
+            ? Ability.works
+            : Ability.download;
+  }
+
+  return languageAbilities(
+    languages: allLanguageCodes,
+    whisperLanguages: whisperLanguages,
+    whisperHere: whisperHere,
+    route: route,
+    voiceHere: voiceHere,
+    voiceToDownload: voiceToDownload,
+    makesEpisodes: listenLanguagesAnywhere(services).offered.toSet(),
   );
 }
 
@@ -394,6 +444,7 @@ ListenJobs deviceListenJobs({
       sortedFor: ({required workLang, required feedLang}) =>
           listenLanguagesOf(services, workLang: workLang, feedLang: feedLang),
       sortedForAny: () => listenLanguagesAnywhere(services),
+      abilities: () => deviceLanguageAbilities(services),
       askVoices: services.phoneVoices.saver == null
           ? null
           : services.phoneVoices.refresh,

@@ -50,7 +50,7 @@ const Map<String, String> kModelLabels = {
 };
 
 /// Translation pairs are named from the registry itself ("English to
-/// Portuguese translation"): 25 of them, and an id like
+/// Portuguese translation"): many of them, and an id like
 /// `opus-mt-en-ROMANCE` doesn't say which language it writes.
 final Map<String, String> _translationLabels = {
   for (final s in ModelRegistry.starter().translationPairsAt(DeviceTier.t3))

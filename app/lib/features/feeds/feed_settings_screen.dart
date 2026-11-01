@@ -6,6 +6,7 @@ import 'auto_download.dart';
 import 'feed_rules.dart';
 import '../player/speed_control.dart';
 import '../shared/capped_body.dart';
+import '../shared/preset_chips.dart';
 
 /// One feed's playback settings (P4 mercy #2): a speed override for its
 /// episodes, how many seconds of intro/outro to skip, and how much of its
@@ -19,6 +20,16 @@ import '../shared/capped_body.dart';
 /// screen existed anywhere in this app to share a precedent with, so this
 /// campaign shares layout idioms with the closest real thing instead —
 /// this screen's own.
+/// Seconds to skip at a show's start or before its end; null is Off.
+const List<int?> skipSecondsPresets = [null, 5, 10, 15, 30, 45, 60];
+
+/// How many of the newest episodes keep their downloaded audio; null keeps
+/// every one.
+const List<int?> keepLatestPresets = [null, 1, 3, 5, 10, 25];
+
+String _offKey(int? v) => v == null ? 'off' : '$v';
+String _secondsLabel(int? v) => v == null ? 'Off' : '$v s';
+
 class FeedSettingsScreen extends StatefulWidget {
   final AppDatabase db;
   final Feed feed;
@@ -39,9 +50,9 @@ class FeedSettingsScreen extends StatefulWidget {
 class _FeedSettingsScreenState extends State<FeedSettingsScreen> {
 
   double? _speedOverride;
-  late final TextEditingController _introController;
-  late final TextEditingController _outroController;
-  late final TextEditingController _keepLatestController;
+  int? _skipIntro;
+  int? _skipOutro;
+  int? _keepLatest;
   bool? _dspEnabled;
   late bool _autoDownload = widget.feed.autoDownload;
 
@@ -55,14 +66,9 @@ class _FeedSettingsScreenState extends State<FeedSettingsScreen> {
   void initState() {
     super.initState();
     _speedOverride = widget.feed.speedOverride;
-    _introController = TextEditingController(
-      text: widget.feed.skipIntroSeconds?.toString() ?? '',
-    );
-    _outroController = TextEditingController(
-      text: widget.feed.skipOutroSeconds?.toString() ?? '',
-    );
-    _keepLatestController = TextEditingController(
-        text: widget.feed.keepLatestAudio?.toString() ?? '');
+    _skipIntro = widget.feed.skipIntroSeconds;
+    _skipOutro = widget.feed.skipOutroSeconds;
+    _keepLatest = widget.feed.keepLatestAudio;
     _rules = decodeFeedRules(widget.feed.rulesJson);
     _ruleTextController = TextEditingController();
     _dspEnabled = widget.feed.dspEnabled;
@@ -70,9 +76,6 @@ class _FeedSettingsScreenState extends State<FeedSettingsScreen> {
 
   @override
   void dispose() {
-    _introController.dispose();
-    _outroController.dispose();
-    _keepLatestController.dispose();
     _ruleTextController.dispose();
     super.dispose();
   }
@@ -81,9 +84,9 @@ class _FeedSettingsScreenState extends State<FeedSettingsScreen> {
     await widget.db.feedsDao.updatePlaybackSettings(
       widget.feed.id,
       speedOverride: _speedOverride,
-      skipIntroSeconds: int.tryParse(_introController.text.trim()),
-      skipOutroSeconds: int.tryParse(_outroController.text.trim()),
-      keepLatestAudio: int.tryParse(_keepLatestController.text.trim()),
+      skipIntroSeconds: _skipIntro,
+      skipOutroSeconds: _skipOutro,
+      keepLatestAudio: _keepLatest,
       dspEnabled: _dspEnabled,
     );
     await widget.db.feedsDao.setRules(widget.feed.id, encodeFeedRules(_rules));
@@ -160,98 +163,76 @@ class _FeedSettingsScreenState extends State<FeedSettingsScreen> {
               overflow: TextOverflow.ellipsis,
               maxLines: 1,
             ),
-            const SizedBox(height: 16),
-            Text(
-              'Playback speed for this podcast',
-              style: Theme.of(context).textTheme.bodyLarge,
-            ),
-            const SizedBox(height: 8),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: [
-                SizedBox(
-                  width: 140,
-                  height: 48,
-                  child: OutlinedButton(
-                    key: const Key('feed-settings-speed-default'),
-                    style: OutlinedButton.styleFrom(
-                      backgroundColor: _speedOverride == null
-                          ? Theme.of(context).colorScheme.secondaryContainer
-                          : null,
-                    ),
-                    onPressed: () => setState(() => _speedOverride = null),
-                    child: const Text('Use app default'),
-                  ),
-                ),
-                for (final s in speedPresets)
-                  SizedBox(
-                    width: 72,
-                    height: 48,
-                    child: OutlinedButton(
-                      key: Key('feed-settings-speed-$s'),
-                      style: OutlinedButton.styleFrom(
-                        backgroundColor: _speedOverride == s
-                            ? Theme.of(context).colorScheme.secondaryContainer
-                            : null,
-                      ),
-                      onPressed: () => setState(() => _speedOverride = s),
-                      child: Text(speedLabel(s)),
-                    ),
-                  ),
-                // The same swipe control as the player, for anything
-                // between the presets.
-                SpeedControl(
-                  key: const Key('feed-settings-speed-wheel'),
-                  speed: _speedOverride ?? 1.0,
-                  onChanged: (s) => setState(() => _speedOverride = s),
-                ),
-              ],
-            ),
-            const SizedBox(height: 24),
-            Text(
-              'Skip the first this many seconds',
-              style: Theme.of(context).textTheme.bodyLarge,
-            ),
-            const SizedBox(height: 8),
-            TextField(
-              key: const Key('feed-settings-skip-intro'),
-              controller: _introController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                hintText: 'e.g. 15. Leave blank to play from the start',
+            PresetChips<double?>(
+              label: 'Speed',
+              keyPrefix: 'feed-settings-speed',
+              options: const [null, ...speedPresets],
+              selected: _speedOverride,
+              keyOf: (s) => s == null ? 'default' : '$s',
+              labelOf: (s) => s == null ? 'App default' : speedLabel(s),
+              onSelected: (s) => setState(() => _speedOverride = s),
+              // The same swipe control as the player, for anything
+              // between the presets.
+              trailing: SpeedControl(
+                key: const Key('feed-settings-speed-wheel'),
+                speed: _speedOverride ?? 1.0,
+                onChanged: (s) => setState(() => _speedOverride = s),
               ),
             ),
-            const SizedBox(height: 24),
-            Text(
-              'Stop this many seconds before the end',
-              style: Theme.of(context).textTheme.bodyLarge,
+            PresetChips<int?>(
+              label: 'Skip the start',
+              keyPrefix: 'feed-settings-skip-intro',
+              options: skipSecondsPresets,
+              selected: _skipIntro,
+              keyOf: _offKey,
+              labelOf: _secondsLabel,
+              onSelected: (v) => setState(() => _skipIntro = v),
             ),
-            const SizedBox(height: 8),
-            TextField(
-              key: const Key('feed-settings-skip-outro'),
-              controller: _outroController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                hintText: 'e.g. 30. Leave blank to play to the true end',
-              ),
+            PresetChips<int?>(
+              label: 'Stop before the end',
+              keyPrefix: 'feed-settings-skip-outro',
+              options: skipSecondsPresets,
+              selected: _skipOutro,
+              keyOf: _offKey,
+              labelOf: _secondsLabel,
+              onSelected: (v) => setState(() => _skipOutro = v),
             ),
-            const SizedBox(height: 24),
-            Text(
-              'Keep the latest this many episodes\' downloaded audio',
-              style: Theme.of(context).textTheme.bodyLarge,
+            PresetChips<int?>(
+              label: 'Keep downloaded audio of the newest',
+              keyPrefix: 'feed-settings-keep-latest-audio',
+              options: keepLatestPresets,
+              selected: _keepLatest,
+              keyOf: (v) => v == null ? 'all' : '$v',
+              labelOf: (v) => v == null ? 'All' : '$v',
+              onSelected: (v) => setState(() => _keepLatest = v),
             ),
-            const SizedBox(height: 8),
-            TextField(
-              key: const Key('feed-settings-keep-latest-audio'),
-              controller: _keepLatestController,
-              keyboardType: TextInputType.number,
-              decoration: const InputDecoration(
-                hintText: 'e.g. 5. Leave blank to keep every episode’s audio',
+            PresetChips<bool?>(
+              label: 'Trim silence & even out volume',
+              keyPrefix: 'feed-settings-dsp',
+              options: const [null, true, false],
+              selected: _dspEnabled,
+              keyOf: (v) => switch (v) {
+                null => 'default',
+                true => 'on',
+                false => 'off',
+              },
+              labelOf: (v) => switch (v) {
+                null => 'App default',
+                true => 'On',
+                false => 'Off',
+              },
+              onSelected: (v) => setState(() => _dspEnabled = v),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(top: 2),
+              child: Text(
+                'Done on this device when an episode downloads. Streaming '
+                'is never changed.',
+                style: Theme.of(context).textTheme.bodySmall,
               ),
             ),
             if (widget.offerAutoDownload) ...[
-              const SizedBox(height: 16),
+              const SizedBox(height: 8),
               SwitchListTile(
                 key: const Key('feed-settings-auto-download'),
                 contentPadding: EdgeInsets.zero,
@@ -263,11 +244,6 @@ class _FeedSettingsScreenState extends State<FeedSettingsScreen> {
                 onChanged: _toggleAutoDownload,
               ),
             ],
-            const SizedBox(height: 24),
-            _DspSettingsSection(
-              value: _dspEnabled,
-              onChanged: (v) => setState(() => _dspEnabled = v),
-            ),
             const SizedBox(height: 32),
             const Divider(),
             const SizedBox(height: 16),
@@ -376,87 +352,6 @@ class _FeedSettingsScreenState extends State<FeedSettingsScreen> {
           ),
         ],
       ),
-    );
-  }
-}
-
-/// The offline DSP preprocess's per-feed opt-in (Campaign 6, ADR-0012) —
-/// a self-contained subtree (own state read from [value], own Keys
-/// namespace) so it composes cleanly with whatever else lands on this
-/// same screen. Same tri-state law as the speed override above: null
-/// defers to the household default (set elsewhere), true/false is an
-/// explicit override either way.
-class _DspSettingsSection extends StatelessWidget {
-  final bool? value;
-  final ValueChanged<bool?> onChanged;
-  const _DspSettingsSection({required this.value, required this.onChanged});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: [
-        Text(
-          'Trim silence & even out volume (downloaded episodes)',
-          style: theme.textTheme.bodyLarge,
-        ),
-        const SizedBox(height: 4),
-        Text(
-          'Processed on this device when an episode downloads. '
-          'Streaming playback is never touched.',
-          style: theme.textTheme.bodySmall,
-        ),
-        const SizedBox(height: 8),
-        Wrap(
-          spacing: 8,
-          runSpacing: 8,
-          children: [
-            SizedBox(
-              width: 140,
-              height: 48,
-              child: OutlinedButton(
-                key: const Key('feed-settings-dsp-default'),
-                style: OutlinedButton.styleFrom(
-                  backgroundColor: value == null
-                      ? theme.colorScheme.secondaryContainer
-                      : null,
-                ),
-                onPressed: () => onChanged(null),
-                child: const Text('Use app default'),
-              ),
-            ),
-            SizedBox(
-              width: 88,
-              height: 48,
-              child: OutlinedButton(
-                key: const Key('feed-settings-dsp-on'),
-                style: OutlinedButton.styleFrom(
-                  backgroundColor: value == true
-                      ? theme.colorScheme.secondaryContainer
-                      : null,
-                ),
-                onPressed: () => onChanged(true),
-                child: const Text('On'),
-              ),
-            ),
-            SizedBox(
-              width: 88,
-              height: 48,
-              child: OutlinedButton(
-                key: const Key('feed-settings-dsp-off'),
-                style: OutlinedButton.styleFrom(
-                  backgroundColor: value == false
-                      ? theme.colorScheme.secondaryContainer
-                      : null,
-                ),
-                onPressed: () => onChanged(false),
-                child: const Text('Off'),
-              ),
-            ),
-          ],
-        ),
-      ],
     );
   }
 }

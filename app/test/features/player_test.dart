@@ -2155,13 +2155,19 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('sleep-timer-custom')));
       await tester.pumpAndSettle();
-      await tester.enterText(
-          find.byKey(const Key('sleep-timer-custom-minutes')), '22');
+      // A stepper, not a typed box (owner, 12 Nov): 20 to start, 5 a step.
+      expect(find.byType(TextField), findsNothing);
+      expect(find.text('20 min'), findsOneWidget);
+      await tester.tap(find.byKey(const Key('sleep-timer-custom-more')));
+      await tester.tap(find.byKey(const Key('sleep-timer-custom-more')));
+      await tester.tap(find.byKey(const Key('sleep-timer-custom-less')));
+      await tester.pump();
+      expect(find.text('25 min'), findsOneWidget);
       await tester.tap(find.byKey(const Key('sleep-timer-custom-confirm')));
       await tester.pumpAndSettle();
 
       expect(controller.sleepTimerMode, SleepTimerMode.duration);
-      expect(controller.sleepTimerRemaining, const Duration(minutes: 22));
+      expect(controller.sleepTimerRemaining, const Duration(minutes: 25));
     });
 
     testWidgets('the queue button opens whatever the shell wires it to',

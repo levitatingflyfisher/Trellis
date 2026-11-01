@@ -60,7 +60,7 @@ void main() {
 
   test('an episode in a language no translator reads is offered nothing',
       () {
-    expect(offered('sv'), isEmpty);
+    expect(offered('cy'), isEmpty);
   });
 
   test('the show’s language stands in when the episode has none of its '
@@ -180,7 +180,7 @@ void main() {
 
     test('a phone voice for a language no translator knows at all is never '
         'offered', () {
-      expect(offeredWith(['sv', 'fi'], 'en'), ['es', 'fr', 'pt']);
+      expect(offeredWith(['cy', 'bo'], 'en'), ['es', 'fr', 'pt']);
     });
 
     test('a language with a translator and no voice is left out, and the '

@@ -23,6 +23,8 @@ import '../reader/translation/brain_translator.dart'
 import '../reader/translation/language_names.dart';
 import 'listen_chain.dart';
 import 'listen_clearness.dart';
+import 'language_abilities.dart';
+import 'learning_language_page.dart';
 import 'listen_languages.dart';
 import 'make_ahead_jobs.dart';
 import 'spoken_episode.dart' show spokenClearnessOf;
@@ -156,6 +158,7 @@ class ListenJobs extends ChangeNotifier {
     this.makeAhead,
     this.sortedFor,
     this.sortedForAny,
+    this.abilities,
     this.askVoices,
     this.openVoiceSettings,
     Listenable? voices,
@@ -192,6 +195,11 @@ class ListenJobs extends ChangeNotifier {
   /// Every language some episode could be made in, sorted the same way:
   /// the learning-language setting asks with no episode in view.
   final ListenLanguages Function()? sortedForAny;
+
+  /// What works today in every language Trellis can name, for the
+  /// learning-language picker (owner, 12 Nov: "pick ANY language").
+  /// Null keeps the short list of languages episodes can be made in.
+  final Future<List<LanguageAbilities>> Function()? abilities;
 
   /// Asks the phone again which voices it has (a voice is installed in
   /// Android's settings, outside the app).
@@ -533,9 +541,36 @@ class ListenJobs extends ChangeNotifier {
   /// The learning-language setting (board-0128): the same question,
   /// asked with no episode in view, over every language some episode
   /// could be made in.
-  Future<String?> chooseLearningLanguage(BuildContext context) =>
-      pickLanguage(context, sortedForAny?.call().offered ?? const [],
+  ///
+  /// With [abilities], every language is listed, each with what works in
+  /// it today; one that episodes cannot be made in can still be chosen.
+  Future<String?> chooseLearningLanguage(BuildContext context) async {
+    final load = abilities;
+    if (load == null) {
+      return pickLanguage(context, sortedForAny?.call().offered ?? const [],
           anyEpisode: true);
+    }
+    final picked = await Navigator.of(context).push<String>(
+      MaterialPageRoute(
+        builder: (_) => LearningLanguagePage(
+          load: load,
+          changes: this,
+          chosen: _language,
+          openVoiceSettings: openVoiceSettings,
+        ),
+      ),
+    );
+    if (picked == null) return null;
+    await _keepLanguage(picked);
+    return picked;
+  }
+
+  Future<void> _keepLanguage(String lang) async {
+    await db.deviceSettingsDao.write(learningLanguageKey, lang);
+    _language = lang;
+    await _readMade();
+    notifyListeners();
+  }
 
   /// Asks how clearly the voice speaks in an episode made from now on,
   /// and keeps the answer. Null when the question was dismissed.
@@ -691,10 +726,7 @@ class ListenJobs extends ChangeNotifier {
       ),
     );
     if (picked == null) return null;
-    await db.deviceSettingsDao.write(learningLanguageKey, picked);
-    _language = picked;
-    await _readMade();
-    notifyListeners();
+    await _keepLanguage(picked);
     return picked;
   }
 

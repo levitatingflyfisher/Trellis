@@ -753,6 +753,38 @@ void main() {
           reason: 'converted by Trellis (ADR-0014 amendment)');
     });
 
+    test('1.6.13 widens the set: each new pair is there, and a pair on a '
+        'multi-language model names its language token', () {
+      ModelSpec? pair(String src, String tgt) => starter
+          .pickTranslationPair(DeviceTier.t1, sourceLang: src, targetLang: tgt);
+      for (final lang in ['af', 'cs', 'da', 'fi', 'hu', 'id', 'sv', 'vi',
+          'xh', 'ro', 'gl', 'tr', 'eo']) {
+        expect(pair('en', lang), isNotNull, reason: 'en->$lang');
+        expect(pair(lang, 'en'), isNotNull, reason: '$lang->en');
+      }
+      for (final lang in ['ca', 'et', 'lt', 'lv', 'th', 'hr', 'mk', 'ml',
+          'sl']) {
+        expect(pair(lang, 'en'), isNotNull, reason: '$lang->en');
+        expect(pair('en', lang), isNull,
+            reason: 'en->$lang failed its run or has no clean export');
+      }
+      expect(pair('en', 'ga'), isNotNull);
+      expect(pair('ga', 'en'), isNull,
+          reason: 'mul-en lost the meaning of Irish');
+      const tokens = {
+        'vi': '>>vie<<',
+        'gl': '>>gl<<',
+        'eo': '>>epo<<',
+        'ga': '>>gle<<',
+      };
+      tokens.forEach((lang, token) {
+        expect(pair('en', lang)!.marianLayout!.targetToken, token,
+            reason: 'en->$lang');
+      });
+      expect(pair('en', 'sv')!.marianLayout!.targetToken, isNull);
+      expect(pair('en', 'tr')!.licenses, ['CC-BY-4.0']);
+    });
+
     test('English to Japanese is ElanMT-BT, converted by Trellis: its two '
         'graphs from the Trellis release, its small files from the upstream '
         'commit, each pinned as the conversion made it', () {

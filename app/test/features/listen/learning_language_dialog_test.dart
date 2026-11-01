@@ -117,8 +117,12 @@ void main() {
   });
 
   testWidgets('nothing missing, nothing said', (tester) async {
-    final saver = FakePhoneSpeechSaver(
-        ['ar', 'de', 'hi', 'it', 'ja', 'nl', 'ru', 'uk', 'zh']);
+    // Every language a translator reaches from English, with a voice.
+    final saver = FakePhoneSpeechSaver([
+      'ar', 'de', 'hi', 'it', 'ja', 'nl', 'ru', 'uk', 'zh', //
+      'af', 'cs', 'da', 'eo', 'fi', 'ga', 'gl', 'hu', 'id', 'ro', 'sv', //
+      'tr', 'vi', 'xh', //
+    ]);
     final jobs = jobsOver(saver);
     await tester.runAsync(() => jobs.ready);
     await open(tester, jobs);
