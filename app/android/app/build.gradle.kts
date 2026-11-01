@@ -46,6 +46,18 @@ android {
         // APK is 4x the size and half-broken on non-arm64 anyway.
     }
 
+    // Build bookkeeping no code reads at run time. Only these: tika's
+    // mimetypes and the Kotlin builtins are loaded as resources and stay.
+    packaging {
+        resources {
+            excludes += setOf(
+                "/META-INF/*.version",
+                "/META-INF/DEPENDENCIES",
+                "/DebugProbesKt.bin",
+            )
+        }
+    }
+
     buildTypes {
         release {
             // TODO: Add your own signing config for the release build.

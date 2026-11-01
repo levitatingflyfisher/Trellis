@@ -69,8 +69,11 @@ unauditable binaries.
   keeps the build inside heavy.sh's memory cap.
 
   **Run this before any release APK build** — without it the APK ships no
-  transcription engine. Verify:
-  - `unzip -l app-arm64-v8a-release.apk | grep libwhisper` lists both;
+  transcription engine. A release built from `git archive` must copy them
+  into its build tree first, because the export drops gitignored files.
+  Verify:
+  - `natives/check-release-apk.sh app-arm64-v8a-release.apk` exits 0 (the
+    release recipe must stop if it doesn't);
   - `llvm-readelf -d <lib> | grep -E 'NEEDED|SONAME'` lists only
     libm/libdl/libc (bionic) and the file's own name;
   - `llvm-objdump -d --no-show-raw-insn --mattr=+dotprod,+fullfp16 <lib> |
@@ -91,6 +94,21 @@ unauditable binaries.
 
   The memory flags matter: rootless podman moves the container into its
   own cgroup scope, outside heavy.sh's cap.
+
+## Prebuilt in release 1.5.8 (noted 2026-11-08)
+
+The arm64 libraries for 1.5.10 are the ones inside the signed 1.5.8 APK, not
+a fresh build: whisper.cpp isn't on the release box, and the shim hasn't
+changed since 478945f, so these match the current sources. They stay
+gitignored; this table is what a copy is checked against.
+
+Source APK: `Trellis.apk` 1.5.8, sha256
+`8fc3eb62361f900fc89dde08b8efe2bceee6e0490bc7340144e31ee58a48c8ac`
+
+| File (`lib/arm64-v8a/`) | Bytes | sha256 |
+|---|---|---|
+| `libwhisper.so` | 2642680 | `08185e237f41db00dc70b0913ab2521b796a493357756283192149997b102875` |
+| `libwhisper_dotprod.so` | 2651824 | `890bd660aedcae2cca0c985581e15c3e2fc14852ac3b46e64d911fa071068316` |
 
 ## The pinned test model
 

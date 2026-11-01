@@ -1,0 +1,1 @@
+The whisper libraries are back in the app. Downloads and transcriptions keep going when you leave the app. The arm64 APK is 82,269,153 bytes: 5.2 MB more than 1.5.9 because the libraries return, and 129,219 bytes less than it would have been after trimming unused files.

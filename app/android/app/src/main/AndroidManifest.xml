@@ -97,6 +97,17 @@
                 <action android:name="android.media.browse.MediaBrowserService" />
             </intent-filter>
         </service>
+        <!-- The jobs' screen-off service (foreground_gate.dart): downloads,
+             transcription and DSP raise it as a dataSync service with
+             their progress notification. flutter_foreground_task leaves
+             its declaration to the app; without it every start was
+             refused as "not found" and a job lived only as long as
+             something else kept the process up. Not exported: only this
+             app starts it. -->
+        <service
+            android:name="com.pravera.flutter_foreground_task.service.ForegroundService"
+            android:foregroundServiceType="dataSync"
+            android:exported="false" />
         <!-- The home-screen widget (1.5.5). The provider is exported only
              because the launcher delivers APPWIDGET_UPDATE; it takes no
              other action. Its taps go to WidgetTapReceiver, which is not

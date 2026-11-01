@@ -7,6 +7,12 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.5.10 — 2026-11-08
+
+- Fix: downloads and transcriptions keep going when you leave the app. Their progress notification now really holds the app awake; before, Android could pause a job as soon as Trellis was out of sight and nothing was playing.
+- Fix: the whisper libraries are back in the Android app. 1.5.9 shipped without them. A release build now fails if either library is missing.
+- Size: the arm64 APK is 82,269,153 bytes, up from 77,087,662 in 1.5.9 because the two whisper libraries return. Trimming unused files took 129,219 bytes off what it would otherwise be (82,398,372).
+
 ## 1.5.9 — 2026-11-07
 
 - Deleting a transcript or a translation no longer asks first. It goes to Recently deleted, in Models & storage, for 30 days, where Restore brings it back. A restore that would mix with a newer transcript or translation is refused with a plain message, and a translation can’t be deleted while it’s being made.
