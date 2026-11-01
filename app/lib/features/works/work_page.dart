@@ -27,10 +27,12 @@ import '../transcribe/job_cards.dart';
 import '../../db/database.dart' hide Alignment;
 import '../episodes/episode_actions.dart';
 import '../models/format.dart';
+import '../reader/reader_screen.dart' show ReaderNote;
 import '../reader/translation/language_names.dart';
 import '../river/river_triage.dart';
 import '../shared/capped_body.dart';
 import '../storage/work_storage.dart';
+import 'episode_versions.dart';
 import 'notes_view.dart';
 import 'remove_undo.dart';
 import 'work_menu.dart';
@@ -102,9 +104,12 @@ class WorkLanguage {
 /// `en-us` and `en` both name English.
 String languageNameOf(String? code) {
   if (code == null || code.trim().isEmpty) return 'Unknown';
-  final base = code.trim().toLowerCase().split(RegExp('[-_]')).first;
-  return languageDisplayName(base);
+  return languageDisplayName(_bare(code));
 }
+
+/// The language a tag names, without its region: `en-US` is `en`.
+String _bare(String code) =>
+    code.trim().toLowerCase().split(RegExp('[-_]')).first;
 
 class WorkPage extends StatefulWidget {
   final WorkDoors doors;
@@ -137,6 +142,10 @@ class _WorkPageState extends State<WorkPage> {
   WorkLanguage _language = const WorkLanguage.original();
   List<CaptureRow> _captures = const [];
   WorkStorage? _stored;
+
+  /// An episode's original and its made versions (board-0130); null for
+  /// anything that is not an episode with audio.
+  EpisodeVersions? _versions;
   bool _loaded = false;
 
   WorkDoors get _doors => widget.doors;
@@ -260,6 +269,14 @@ class _WorkPageState extends State<WorkPage> {
     final captures = await _db.capturesDao.capturesOf(id);
     final stored = await loadWorkStorage(_db,
         services: _actions?.services, onlyWorkId: id);
+    final versions = episode == null ||
+            episode.enclosureUrl == null ||
+            work.kind == 'audiobook'
+        ? null
+        : await loadEpisodeVersions(_db,
+            work: work,
+            episode: episode,
+            audioFileFor: _actions?.services?.audioFileFor);
     String? opening;
     if (notes == null && isTextWork(work, episode)) {
       opening = await _openingOf(id);
@@ -282,6 +299,7 @@ class _WorkPageState extends State<WorkPage> {
       _language = language;
       _captures = captures;
       _stored = stored.isEmpty ? null : stored.single;
+      _versions = versions;
       _loaded = true;
     });
   }
@@ -391,9 +409,60 @@ class _WorkPageState extends State<WorkPage> {
         context,
         _entry,
         layerLang: _language.layer ? _language.tag : null,
+        note: _translationNote(_language.tag),
       );
     }
     await _load();
+  }
+
+  /// Read in a translation of an episode says at the top whether that
+  /// language has audio (board-0130: the owner tapped Spanish and kept
+  /// hearing English). With audio, it plays it; without, it offers the
+  /// one tap that makes it, where this episode can be made in it.
+  ReaderNote? _translationNote(String? tag) {
+    final v = _versions;
+    if (v == null || tag == null) return null;
+    final lang = _bare(tag);
+    final name = languageNameOf(lang);
+    if (v.withAudio(lang) case final made?) {
+      return ReaderNote(
+        'This is the $name text. The $name audio is its own episode.',
+        action: 'Play the $name audio',
+        onAction: (_) async {
+          final work = await _db.spineDao.workById(made.workId);
+          if (work != null) await _doors.play(work);
+        },
+      );
+    }
+    final jobs = _jobs;
+    final offer = _isOriginal
+        ? jobs?.offerFor(v.original, v.originalEpisode,
+            feedLang: _feed?.language)
+        : null;
+    final canMake = offer != null && offer.languages.contains(lang);
+    return ReaderNote(
+      'This is the $name text. There is no $name audio yet.',
+      action: canMake ? 'Make the $name audio' : null,
+      onAction: canMake
+          ? (context) => jobs!.makeIn(
+              context, v.original, v.originalEpisode, lang,
+              feedLang: _feed?.language)
+          : null,
+    );
+  }
+
+  bool get _isOriginal => _versions?.original.id == _work.id;
+
+  /// Goes to another language's episode, playing it first when asked: the
+  /// page opens on what is being heard.
+  Future<void> _openVersion(int workId, {required bool play}) async {
+    final work = await _db.spineDao.workById(workId);
+    final episode = await _db.feedsDao.episodeOf(workId);
+    if (work == null || !mounted) return;
+    if (play) await _doors.play(work);
+    if (!mounted) return;
+    await _doors.open(context, (work: work, episode: episode));
+    if (mounted) await _load();
   }
 
   // ───── transcribe ─────
@@ -1039,7 +1108,9 @@ class _WorkPageState extends State<WorkPage> {
                   onPressed: () => _jobs!.stop(id),
                   child: const Text('Stop'),
                 )
-              else if (offer.lang != null && offer.languages.length > 1)
+              // Even with one language offered: the list's note says why
+              // the others are missing (board-0128).
+              else if (offer.lang != null)
                 TextButton(
                   key: const Key('learning-language-change'),
                   style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
@@ -1059,6 +1130,7 @@ class _WorkPageState extends State<WorkPage> {
   /// holds only the others: the original and the learning language are
   /// columns of that group, and are not offered twice.
   Widget _languages(BuildContext context, ListenOffer? offer) {
+    if (_versions case final v?) return _versionsSection(context, offer, v);
     final theme = Theme.of(context);
     final translate = _translate;
     final four = offer != null;
@@ -1103,6 +1175,149 @@ class _WorkPageState extends State<WorkPage> {
             padding: const EdgeInsets.only(top: 4),
             child: Text(
               _isAudio && !_transcribed
+                  ? _canTranscribe
+                        ? 'Translating needs a transcript first.'
+                        : 'Translating needs a transcript, and this device '
+                              'can’t transcribe.'
+                  : 'This device can’t translate offline.',
+              style: theme.textTheme.bodySmall,
+            ),
+          ),
+      ],
+    );
+  }
+
+  /// "This episode in other languages" (board-0130): the original and
+  /// every other language it has, one row each, saying whether that
+  /// language's audio is on this phone. It takes the place of the
+  /// Language section on an episode, so no language shows twice. A
+  /// language with audio goes to its episode and plays it; a text-only
+  /// one is read, as a translation always was; this episode's own row
+  /// chooses its own text.
+  Widget _versionsSection(
+      BuildContext context, ListenOffer? offer, EpisodeVersions v) {
+    final theme = Theme.of(context);
+    final translate = _translate;
+    final originalLang = v.original.lang ?? _feed?.language;
+    final originalBare = originalLang == null ? null : _bare(originalLang);
+    final texts = <String, WorkLanguage>{};
+    for (final t in _translations) {
+      // The sentence-by-sentence translation first, as Read prefers.
+      final tag = _bare(t.tag!);
+      if (!texts.containsKey(tag) || texts[tag]!.layer) texts[tag] = t;
+    }
+    final langs = [
+      for (final l in {...v.made.keys, ...texts.keys})
+        if (l != originalBare &&
+            // The group above holds the learning language's text.
+            !(offer != null && l == offer.lang && v.made[l] == null))
+          l,
+    ]..sort((a, b) => languageNameOf(a).compareTo(languageNameOf(b)));
+
+    Widget row({
+      required Key key,
+      required String lang,
+      required String status,
+      required bool audio,
+      bool selected = false,
+      bool goes = false,
+      required VoidCallback onTap,
+    }) =>
+        ListTile(
+          key: key,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 4),
+          leading: Icon(audio
+              ? Icons.headphones_outlined
+              : Icons.chrome_reader_mode_outlined),
+          title: Text(languageNameOf(lang)),
+          subtitle: Text(status),
+          selected: selected,
+          trailing: goes
+              ? const Icon(Icons.chevron_right)
+              : selected
+                  ? const Icon(Icons.check)
+                  : null,
+          onTap: onTap,
+        );
+
+    final here = _isOriginal;
+    final rows = <Widget>[
+      row(
+        key: const Key('lang-original'),
+        lang: originalLang ?? '',
+        status: here ? 'This episode, the original' : 'The original',
+        audio: true,
+        selected: here && _language.isOriginal,
+        goes: !here,
+        onTap: here
+            ? () => _pickLanguage(const WorkLanguage.original())
+            : () => _openVersion(v.original.id, play: true),
+      ),
+      for (final l in langs)
+        if (v.made[l] case final made? when made.workId == _work.id)
+          row(
+            key: Key('lang-$l'),
+            lang: l,
+            status: made.audio
+                ? 'This episode, its audio is on this phone'
+                : 'This episode, its audio was removed',
+            audio: made.audio,
+            selected: _language.isOriginal,
+            onTap: () => _pickLanguage(const WorkLanguage.original()),
+          )
+        else if (v.made[l] case final made? when made.audio)
+          row(
+            key: Key('lang-$l'),
+            lang: l,
+            status: 'Audio on this phone',
+            audio: true,
+            goes: true,
+            onTap: () => _openVersion(made.workId, play: true),
+          )
+        else if (v.made[l] case final made?)
+          row(
+            key: Key('lang-$l'),
+            lang: l,
+            status: 'Text only, its audio was removed',
+            audio: false,
+            selected: texts[l] != null && _language == texts[l],
+            goes: texts[l] == null,
+            onTap: texts[l] != null
+                ? () => _pickLanguage(texts[l]!)
+                : () => _openVersion(made.workId, play: false),
+          )
+        else
+          row(
+            key: Key('lang-$l'),
+            lang: l,
+            status: 'Text only, no audio yet',
+            audio: false,
+            selected: _language == texts[l],
+            onTap: () => _pickLanguage(texts[l]!),
+          ),
+    ];
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Text('This episode in other languages',
+            style: theme.textTheme.titleSmall),
+        ...rows,
+        const SizedBox(height: 4),
+        Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: OutlinedButton.icon(
+            key: const Key('lang-translate'),
+            style: OutlinedButton.styleFrom(minimumSize: const Size(48, 48)),
+            icon: const Icon(Icons.translate),
+            label: const Text('Translate…'),
+            onPressed: translate,
+          ),
+        ),
+        if (translate == null)
+          Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: Text(
+              !_transcribed
                   ? _canTranscribe
                         ? 'Translating needs a transcript first.'
                         : 'Translating needs a transcript, and this device '

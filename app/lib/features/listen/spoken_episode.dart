@@ -24,6 +24,9 @@ import '../reader/speech/speech_engine.dart';
 import '../reader/speech/wav.dart' show resample;
 import '../reader/translation/language_names.dart';
 import '../transcribe/transcript_writer.dart' show encodeWordTimingBlob;
+import 'spoken_guid.dart';
+
+export 'spoken_guid.dart';
 
 /// The pause after a sentence, and the longer one after a paragraph.
 const sentenceGapMs = 250;
@@ -168,9 +171,6 @@ List<List<Object>> estimateWordTimings(String text, int startMs, int endMs) {
   return rows;
 }
 
-/// The guid of the spoken translation of work [originalId] into [lang]:
-/// how it is found again, so it is made once.
-String spokenGuid(int originalId, String lang) => 'spoken:$originalId:$lang';
 
 /// The spoken translation of [originalId] into [lang], when one has been
 /// made; null otherwise.

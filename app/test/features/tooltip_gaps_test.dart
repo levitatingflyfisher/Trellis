@@ -37,7 +37,7 @@ void main() {
 
     await tester.pumpWidget(MaterialApp(
       home:
-          LibraryScreen(db: db, profile: profile, onSwitchProfile: () {}),
+          LibraryScreen(db: db, profile: profile),
     ));
     await tester.pumpAndSettle();
 

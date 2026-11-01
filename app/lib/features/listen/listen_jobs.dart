@@ -137,6 +137,7 @@ class ListenJobs extends ChangeNotifier {
     bool Function()? inFront,
     this.makeAhead,
     this.sortedFor,
+    this.sortedForAny,
     this.askVoices,
     this.openVoiceSettings,
     Listenable? voices,
@@ -169,6 +170,10 @@ class ListenJobs extends ChangeNotifier {
   /// there is nothing to say.
   final ListenLanguages Function(
       {required String? workLang, required String? feedLang})? sortedFor;
+
+  /// Every language some episode could be made in, sorted the same way:
+  /// the learning-language setting asks with no episode in view.
+  final ListenLanguages Function()? sortedForAny;
 
   /// Asks the phone again which voices it has (a voice is installed in
   /// Android's settings, outside the app).
@@ -491,10 +496,20 @@ class ListenJobs extends ChangeNotifier {
         state: state?.lang == lang ? state : null);
   }
 
+  /// The learning-language setting (board-0128): the same question,
+  /// asked with no episode in view, over every language some episode
+  /// could be made in.
+  Future<String?> chooseLearningLanguage(BuildContext context) =>
+      pickLanguage(context, sortedForAny?.call().offered ?? const [],
+          anyEpisode: true);
+
   /// Asks which language is being learned, among [languages], and keeps
-  /// the answer. Null when the question was dismissed.
+  /// the answer. Null when the question was dismissed. [anyEpisode] asks
+  /// for no one episode: the list and its note cover every language some
+  /// episode could be made in.
   Future<String?> pickLanguage(BuildContext context, List<String> languages,
-      {({String? workLang, String? feedLang})? of}) async {
+      {({String? workLang, String? feedLang})? of,
+      bool anyEpisode = false}) async {
     final picked = await showDialog<String>(
       context: context,
       // Rebuilt when the phone's voices are asked again: back from
@@ -503,17 +518,26 @@ class ListenJobs extends ChangeNotifier {
         listenable: this,
         builder: (context, _) {
           final ep = of;
-          final offered =
-              ep == null ? languages : _languagesOf(ep.workLang, ep.feedLang);
-          final sorted = ep == null
-              ? null
-              : sortedFor?.call(workLang: ep.workLang, feedLang: ep.feedLang);
+          final sorted = anyEpisode
+              ? sortedForAny?.call()
+              : ep == null
+                  ? null
+                  : sortedFor?.call(
+                      workLang: ep.workLang, feedLang: ep.feedLang);
+          final offered = anyEpisode
+              ? sorted?.offered ?? languages
+              : ep == null
+                  ? languages
+                  : _languagesOf(ep.workLang, ep.feedLang);
           final note = sorted == null
               ? null
               : listenMissingNote(sorted,
-                  source: listenSourceLanguage(
-                      workLang: ep!.workLang, feedLang: ep.feedLang));
+                  source: anyEpisode
+                      ? null
+                      : listenSourceLanguage(
+                          workLang: ep!.workLang, feedLang: ep.feedLang));
           final settings = openVoiceSettings;
+          final chosen = _language;
           return SimpleDialog(
             key: const Key('learning-language-dialog'),
             title: const Text('Which language are you learning?'),
@@ -522,13 +546,27 @@ class ListenJobs extends ChangeNotifier {
                 SimpleDialogOption(
                   key: Key('learning-language-$l'),
                   onPressed: () => Navigator.pop(context, l),
-                  child: Text(languageDisplayName(l)),
+                  child: Row(
+                    children: [
+                      Expanded(child: Text(languageDisplayName(l))),
+                      if (l == chosen)
+                        const Icon(Icons.check,
+                            semanticLabel: 'Chosen now'),
+                    ],
+                  ),
                 ),
-              const Padding(
-                padding: EdgeInsets.fromLTRB(24, 12, 24, 0),
-                child: Text('These are the languages Trellis can make this '
-                    'episode in and keep as audio. Other languages can be '
-                    'translated and read aloud from the episode’s Read page.'),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
+                child: Text(anyEpisode
+                    ? 'These are the languages Trellis can make episodes in '
+                        'and keep as audio, from English or from another '
+                        'language it translates. Other languages can be '
+                        'translated and read aloud from an episode’s Read '
+                        'page.'
+                    : 'These are the languages Trellis can make this '
+                        'episode in and keep as audio. Other languages can '
+                        'be translated and read aloud from the episode’s '
+                        'Read page.'),
               ),
               if (note != null)
                 Padding(
@@ -580,17 +618,37 @@ class ListenJobs extends ChangeNotifier {
     final offer = offerFor(work, episode, feedLang: feedLang);
     if (offer == null) return;
     if (offer.busy) return _offerStop(context, work, episode, feedLang);
-    final messenger = ScaffoldMessenger.maybeOf(context);
     final lang = offer.lang ??
         await pickLanguage(context, offer.languages,
             of: (workLang: work.lang, feedLang: feedLang));
-    if (lang == null) return;
+    if (lang == null || !context.mounted) return;
+    await _makeOrPlay(context, work, episode, lang);
+  }
+
+  /// The one tap in a named language, which need not be the learning
+  /// language (board-0130): a translation read with no audio offers to
+  /// make its own language. Plays it when it is made; nothing when
+  /// [lang] cannot be made for this episode.
+  Future<void> makeIn(
+      BuildContext context, Work work, Episode episode, String lang,
+      {String? feedLang}) async {
+    final offer = offerFor(work, episode, feedLang: feedLang);
+    if (offer == null || !offer.languages.contains(lang)) return;
+    if (offer.busy) return _offerStop(context, work, episode, feedLang);
+    await _makeOrPlay(context, work, episode, lang);
+  }
+
+  Future<void> _makeOrPlay(
+      BuildContext context, Work work, Episode episode, String lang) async {
+    final messenger = ScaffoldMessenger.maybeOf(context);
     final made = await chain.madeEpisodeOf(work.id, lang);
     if (made != null) {
       await _play(made, messenger, asked: true);
       return;
     }
-    if (_made.remove(work.id) != null) notifyListeners();
+    if (lang == _language && _made.remove(work.id) != null) {
+      notifyListeners();
+    }
     final items = await downloadsFor(work, episode, lang);
     if (items.isNotEmpty) {
       if (!context.mounted) return;

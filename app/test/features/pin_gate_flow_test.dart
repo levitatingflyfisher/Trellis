@@ -27,15 +27,11 @@ void main() {
   }
 
   /// A one-reader household opens straight into its shell; the picker
-  /// (with its Add a reader and Parent dashboard doors) is the Library's
+  /// (with its Add a reader and Parent dashboard doors) is Settings'
   /// Switch reader away.
   Future<void> toPicker(WidgetTester tester) async {
     if (find.text('Who’s reading?').evaluate().isNotEmpty) return;
-    await toTab(tester, 'Library');
-    await tester.tap(find.byKey(const Key('library-more')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('profile-switcher')));
-    await tester.pumpAndSettle();
+    await openSetting(tester, const Key('profile-switcher'));
   }
 
   testWidgets('kids can always read: picking a profile never asks for a PIN',

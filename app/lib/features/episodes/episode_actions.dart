@@ -106,6 +106,17 @@ class EpisodeActions {
               player: player)
           : null);
 
+  /// The Learning language row in Settings (board-0128, owner: he could
+  /// not find where to set it): the same list as an episode's page, for
+  /// every language some episode could be made in.
+  Future<void> chooseLearningLanguage(BuildContext context) async {
+    final jobs = listenJobs;
+    if (jobs == null) return;
+    await jobs.ready;
+    if (!context.mounted) return;
+    await jobs.chooseLearningLanguage(context);
+  }
+
   /// The second button of [e]'s row: the episode in the learning
   /// language. Null where this tier has no such thing (the web), and for
   /// anything that is not an episode with audio; the button itself draws
@@ -272,11 +283,7 @@ class EpisodeActions {
     final s = services;
     final d = downloader;
     if (s == null || d == null) return (removed: 0, cancelled: 0, kept: 0);
-    final busy = {
-      ?player?.current?.id,
-      for (final j in await db.jobsDao.unfinished())
-        if (j.kind == 'transcribe' || j.kind == 'dsp') ?_workIdOf(j),
-    };
+    final busy = await busyWorkIds();
     final running = {for (final j in d.entries) j.workId};
     var removed = 0, cancelled = 0, kept = 0;
     for (final e in entries) {
@@ -304,6 +311,15 @@ class EpisodeActions {
     if (removed > 0) d.notifyListeners();
     return (removed: removed, cancelled: cancelled, kept: kept);
   }
+
+  /// The episodes whose audio stays when audio is removed: the one
+  /// playing, and any with a transcription or processing job not finished
+  /// (paused ones too, which pick up from that audio).
+  Future<Set<int>> busyWorkIds() async => {
+        ?player?.current?.id,
+        for (final j in await db.jobsDao.unfinished())
+          if (j.kind == 'transcribe' || j.kind == 'dsp') ?_workIdOf(j),
+      };
 
   static int? _workIdOf(JobRow job) {
     try {

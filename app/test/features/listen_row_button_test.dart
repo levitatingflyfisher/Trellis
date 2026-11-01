@@ -261,9 +261,10 @@ void main() {
 
         expect(
             tester
-                .widgetList<SimpleDialogOption>(
-                    find.byType(SimpleDialogOption))
-                .map((o) => (o.child! as Text).data),
+                .widgetList<Text>(find.descendant(
+                    of: find.byType(SimpleDialogOption),
+                    matching: find.byType(Text)))
+                .map((t) => t.data),
             ['English', 'French', 'Portuguese']);
         expect(find.textContaining('can make this episode in'), findsOneWidget);
 

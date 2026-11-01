@@ -19,7 +19,6 @@ import '../reader/reader_doors.dart';
 import '../reader/speech/speech_engine.dart';
 import '../reader/speech/speech_temp_files.dart';
 import '../reader/translation/translation_service.dart';
-import '../settings/theme_preference.dart';
 import '../episodes/episode_actions.dart';
 import '../works/work_menu.dart';
 import '../works/work_open.dart';
@@ -45,14 +44,6 @@ const copyProtectionNote =
 class LibraryScreen extends StatefulWidget {
   final AppDatabase db;
   final Profile profile;
-  final VoidCallback onSwitchProfile;
-
-  /// Opens the "Models & storage" model manager; the shell wires it.
-  final VoidCallback? onOpenModels;
-
-  /// Opens Backup & migrate. With Models & storage and Switch reader it
-  /// is app-wide, so it lives in this one menu (1.5.8 ⋮ rule).
-  final VoidCallback? onOpenBackup;
 
   /// The + Add sheet's "Subscribe to a feed": the shell's subscribe
   /// screen, opened from this tab. Null hides the entry.
@@ -132,9 +123,6 @@ class LibraryScreen extends StatefulWidget {
       {super.key,
       required this.db,
       required this.profile,
-      required this.onSwitchProfile,
-      this.onOpenModels,
-      this.onOpenBackup,
       this.onSubscribe,
       this.onOpenSubscriptions,
       this.fetcher,
@@ -533,12 +521,10 @@ class _LibraryScreenState extends State<LibraryScreen> {
   Widget build(BuildContext context) {
     final entries = _liveEntries;
     final hasFilter = _activeQuery != null;
-    final theme = ThemePreferenceScope.maybeOf(context);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Library'),
-        // Icon + word for what matters here; rarer doors in a worded menu
-        // (fleet ruling on top bars; audit rank 3).
+        // Icon + word for what matters here (fleet ruling on top bars).
         actions: [
           OhBarActions(children: [
             OhBarAction(
@@ -554,37 +540,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 label: 'Subscriptions',
                 onPressed: () => open(context),
               ),
-            OhBarOverflow<String>(
-              key: const Key('library-more'),
-              onSelected: (v) => switch (v) {
-                'models' => widget.onOpenModels?.call(),
-                'backup' => widget.onOpenBackup?.call(),
-                final v when isThemeMenuValue(v) =>
-                  chooseThemeFromMenu(theme!, v),
-                _ => widget.onSwitchProfile(),
-              },
-              itemBuilder: (_) => [
-                PopupMenuItem(
-                  key: const Key('profile-switcher'),
-                  value: 'switch',
-                  child: Text('Switch reader (${widget.profile.name})',
-                      overflow: TextOverflow.ellipsis),
-                ),
-                if (widget.onOpenModels != null)
-                  const PopupMenuItem(
-                    key: Key('open-models'),
-                    value: 'models',
-                    child: Text('Models & storage'),
-                  ),
-                if (widget.onOpenBackup != null)
-                  const PopupMenuItem(
-                    key: Key('open-backup'),
-                    value: 'backup',
-                    child: Text('Backup & migrate'),
-                  ),
-                if (theme != null) ...themeMenuItems(theme),
-              ],
-            ),
+            // No ⋮: the Library has no rare actions of its own, and
+            // app-wide things are in Settings (board-0131).
           ]),
         ],
       ),

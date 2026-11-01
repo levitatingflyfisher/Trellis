@@ -53,27 +53,59 @@ ListenLanguages listenLanguagesOf(DeviceServices services,
     {required String? workLang, required String? feedLang}) {
   if (services.translation == null) return const ListenLanguages();
   final source = listenSourceLanguage(workLang: workLang, feedLang: feedLang);
-  final pairs = services.registry.translationPairsAt(services.tier);
-  final translated = <String>{
-    for (final s in pairs) ...?s.langs,
-    for (final s in pairs) ?s.sourceLang,
-  };
+  final translated = _translatedLanguages(services);
   final savable = savableListenLanguages(services).toSet();
   return sortListenLanguages(
     source: source,
     candidates: {...translated, ...savable},
     translated: translated,
     canSave: savable.contains,
-    hasRoute: (lang) =>
-        planRoute(services.registry, services.tier,
-            source: source,
-            target: lang,
-            // Only whether a route exists is asked, not what it would
-            // download.
-            missingBytesOf: (_) => 0) !=
-        null,
+    hasRoute: (lang) => _routes(services, source, lang),
   );
 }
+
+/// Every language the one tap could make SOME episode in, for the
+/// learning-language setting, which is chosen with no episode in view
+/// (board-0128). Fairest is the union over every episode Trellis could
+/// be given: a language is offered when a voice here can save it and a
+/// translator reaches it from English or from any language Trellis
+/// translates. The missing ones are sorted with their reason, as for one
+/// episode.
+ListenLanguages listenLanguagesAnywhere(DeviceServices services) {
+  if (services.translation == null) return const ListenLanguages();
+  final translated = _translatedLanguages(services);
+  final savable = savableListenLanguages(services).toSet();
+  final sources = {'en', ...translated};
+  return sortListenLanguages(
+    // No language is the source: every one may be a target.
+    source: '',
+    candidates: {...translated, ...savable},
+    translated: translated,
+    canSave: savable.contains,
+    hasRoute: (lang) => sources
+        .any((source) => source != lang && _routes(services, source, lang)),
+  );
+}
+
+/// The languages any translator here knows, as source or target.
+Set<String> _translatedLanguages(DeviceServices services) {
+  final pairs = services.registry.translationPairsAt(services.tier);
+  return {
+    for (final s in pairs) ...?s.langs,
+    for (final s in pairs) ?s.sourceLang,
+  };
+}
+
+/// Whether a translator reaches [target] from [source], by its own pair
+/// or by way of English.
+bool _routes(DeviceServices services, String source, String target) =>
+    planRoute(services.registry, services.tier,
+        source: source,
+        target: target,
+        // Only whether a route exists is asked, not what it would
+        // download.
+        missingBytesOf: (_) => 0) !=
+    null;
 
 /// The languages the one tap can make for an episode in [workLang] (or,
 /// with none of its own, its show's [feedLang]): each one a voice on this
@@ -355,6 +387,7 @@ ListenJobs deviceListenJobs({
           listenLanguagesFor(services, workLang: workLang, feedLang: feedLang),
       sortedFor: ({required workLang, required feedLang}) =>
           listenLanguagesOf(services, workLang: workLang, feedLang: feedLang),
+      sortedForAny: () => listenLanguagesAnywhere(services),
       askVoices: services.phoneVoices.saver == null
           ? null
           : services.phoneVoices.refresh,

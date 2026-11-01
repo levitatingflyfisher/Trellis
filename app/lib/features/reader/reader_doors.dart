@@ -52,6 +52,7 @@ class ReaderDoors {
     String? layerLang,
     bool openTranslatePicker = false,
     bool openOnPage = false,
+    ReaderNote? note,
   }) async {
     final resolver = resolveSpeechEngine;
     final hasVoice =
@@ -87,6 +88,7 @@ class ReaderDoors {
           layerLang: layerLang,
           openTranslatePicker: openTranslatePicker,
           openOnPage: openOnPage,
+          note: note,
           // The app's one media session (nothing in tests and on the web):
           // every door opens a reader that can read on behind the screen.
           session: playbackSession),

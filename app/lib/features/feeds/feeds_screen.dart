@@ -122,7 +122,6 @@ class _FeedsScreenState extends State<FeedsScreen> {
   Map<int, int> _unplayed = const {};
   List<_Book> _books = const [];
   WorkListState _bookState = WorkListState.empty;
-  bool _dspGlobalDefault = false;
   int? _lastCheckedMs;
 
   /// Set while an OPML import is checking its new feeds.
@@ -213,9 +212,6 @@ class _FeedsScreenState extends State<FeedsScreen> {
         : await WorkListState.load(widget.db, profileId,
             entries: [for (final b in books) (work: b.work, episode: null)],
             carry: _bookState);
-    final dspGlobalDefault = await widget.db.profilesDao.dspGlobalDefault(
-      profileId,
-    );
     final lastChecked = await readLastChecked(widget.db, profileId);
     if (!mounted) return;
     unawaited(_findArt(feeds));
@@ -226,7 +222,6 @@ class _FeedsScreenState extends State<FeedsScreen> {
       _books = books..sort((a, b) => shelfKey(a.work.title)
           .compareTo(shelfKey(b.work.title)));
       _bookState = bookState;
-      _dspGlobalDefault = dspGlobalDefault;
       _lastCheckedMs = lastChecked;
     });
   }
@@ -260,13 +255,6 @@ class _FeedsScreenState extends State<FeedsScreen> {
     } finally {
       _findingArt = false;
     }
-  }
-
-  Future<void> _toggleDspGlobalDefault() async {
-    final next = !_dspGlobalDefault;
-    await widget.db.profilesDao.setDspGlobalDefault(widget.profile.id, next);
-    if (!mounted) return;
-    setState(() => _dspGlobalDefault = next);
   }
 
   void _toast(String message) {
@@ -464,21 +452,11 @@ class _FeedsScreenState extends State<FeedsScreen> {
               key: const Key('opml-menu'),
               onSelected: (v) => switch (v) {
                 'import' => _importOpml(),
-                'export' => _exportOpml(),
-                _ => _toggleDspGlobalDefault(),
+                _ => _exportOpml(),
               },
               itemBuilder: (_) => [
                 const PopupMenuItem(value: 'import', child: Text('Import OPML')),
                 const PopupMenuItem(value: 'export', child: Text('Export OPML')),
-                if (widget.localMlAvailable)
-                  CheckedPopupMenuItem<String>(
-                    key: const Key('dsp-global-default-toggle'),
-                    value: 'dsp-default',
-                    checked: _dspGlobalDefault,
-                    child: const Text(
-                      'Trim silence & even out volume by default',
-                    ),
-                  ),
               ],
             ),
             ]),

@@ -23,7 +23,7 @@ land, entries gain a `✅ shipped` mark; until then this is the plan of record.
   the gapless synthesis-ahead pipeline (reusing the podcast player's own
   audio queue) IS threaded into the reader's actual speak loop — a real
   fork on engine type, a settings escape to pin the system voice on
-  purpose, generation fencing across both paths — proven end to end
+  purpose (Use the system voice, in Reading settings), generation fencing across both paths — proven end to end
   through fakes (`reader_speak_synthesis_test.dart`). Not yet proven on a
   real device: the ONNX Runtime sessions actually opening and producing
   audible PCM. (1.5.8: the voice registers at T1, the tier the app runs
@@ -93,7 +93,7 @@ land, entries gain a `✅ shipped` mark; until then this is the plan of record.
 - Share/deep-link: ?url= on web kept; Android share-target intake on APK (superior)
 - Settings: high contrast, eviction policy, word timestamps, voice pickers with preview, AI provider. **Honesty fix (Campaign 4, ADR-0010):** this line previously also claimed "OpenDyslexic bundled (C7 cmap-checked)" and that no settings screen existed — neither was true. The pubspec bundles exactly two faces (Lora, Nunito), both C7-checked; OpenDyslexic was never added. A real reader-typography settings screen ✅ shipped in Campaign 4 Phase 1 (`reader_typography_settings_screen.dart`) — see the "Beyond both donors — reader depth" section below for what it actually covers.
 - Storage panel with real disk accounting, per-feed buckets incl. previously-orphaned ones, purge, boot eviction
-- Theme: light, dark or follow the phone (the default), a checked "Theme" group (Follow phone, Light, Dark) at the foot of every tab's menu (two taps to change; it replaced an app-bar "Auto" button whose purpose was a mystery until tapped), stored per device + high-contrast/dyslexia modes (fleet conventions)
+- Theme: light, dark or follow the phone (the default), the first group in Settings (Follow phone, Light, Dark; two taps from any tab: Settings, then the choice; it replaced an app-bar "Auto" button whose purpose was a mystery until tapped, then a group in every tab's ⋮), stored per device + high-contrast/dyslexia modes (fleet conventions)
 - Position persistence — structurally fixed: tiny Position row + flush on pause/background, not whole-record rewrites
 - PWA offline shell (Flutter web SW, drift-wasm, persist() request, slow-boot spinner per fleet playbook)
 - Model download UX: domovoi ResumableTransfer — true Range resume, sha256 fail-closed promote, honest MB/ETA, persistent resume card, cancel keeps partial
@@ -254,6 +254,57 @@ separately for that reason. Statuses follow the same convention as above.
   `learning_language_dialog_test.dart`). The browser cannot record its
   voices, so the web still has none of this: see
   `docs/reference/tts-voices.md`.
+- **The learning language as a setting** (board-0128). Settings has a
+  row "Learning language" that names the choice ("Spanish", or "Not
+  chosen"). It opens the same list
+  as an episode's page. With no episode in view the list is every
+  language some episode could be made in: a voice on this phone can save
+  it, and a translator reaches it from English or from any language
+  Trellis translates. The note under it still says why a language is
+  missing, and the current choice is ticked. Change beside the language
+  on an episode's page shows even when only one language is offered, so
+  the list and its note can always be reached
+  (`learning_language_setting_test.dart`,
+  `work_page_four_choices_test.dart`). Not on the web.
+- **Episodes on this phone** (boards 0127, 0129, 0131). Latest has a
+  chip "On this phone" beside All, Text and Audio. It shows only the
+  episodes whose audio is on the phone, made episodes in any language
+  included, biggest first, each with its size; the total is at the top.
+  Each row has a button to remove that episode's audio, and the app's
+  own selection (long-press, or Select in the ⋮) removes several at
+  once, with Remove audio first in the bar. One plain confirm says how
+  much space comes back. Removing audio keeps the episode, its
+  transcript, your place and your study cards, and the decoded copy left
+  by transcribing goes with it. Audio is not kept in Recently deleted, so
+  the space comes back at once and the confirm says so. A downloaded
+  episode can be downloaded again; a made episode is made again by the
+  same Listen tap on its original. An episode playing, transcribing or
+  being processed keeps its audio. In Models & storage the Episode audio
+  row has See episodes, which opens this view, and Clear all as the
+  second choice. The filter leaves books and texts out: their text is
+  small, and deleting it would lose the book itself, not a copy that can
+  be fetched again. The Library has no All, Text and Audio chips, so the
+  chip is on Latest only. Audio left by an episode that no longer exists
+  is not listed; Storage by item and Clear all still reach it
+  (`features/storage/on_phone_test.dart`). Not on the web.
+- **This episode in other languages** (board-0130). An episode's page
+  lists the episode in every language it has, on the original's page and
+  on each made episode's page alike: the original first, then each other
+  language, one row each, saying whether that language's audio is on the
+  phone ("Audio on this phone", "Text only, no audio yet", "Text only,
+  its audio was removed"). It replaces the Language section on an
+  episode, so no language shows twice; beside the group of four, the
+  learning language's text stays in the group and is listed only when it
+  has a made episode. Tapping a language with audio goes to that
+  episode's page and plays it; the original is one tap away from a made
+  episode the same way. A text-only language is read, as before. Reading
+  a translation says at the top of the reader whether that language has
+  audio: "This is the Spanish text. There is no Spanish audio yet." with
+  Make the Spanish audio (the one tap, in that language, where this
+  episode can be made in it), or "The Spanish audio is its own episode."
+  with Play the Spanish audio (`features/works/episode_versions_test.dart`,
+  `work_page_four_choices_test.dart`). Books and articles keep their
+  Language section.
 - ✅ shipped (1.5.3) — **A visible Play in the reader.** One button where
   the thumb rests (a floating button in Scroll and Lines; beside RSVP's
   own Play in RSVP): Listen / Pause for a work with aligned audio, and
@@ -336,7 +387,8 @@ or a private year-in-review — listed separately for the same reason as
 the study crown above. Statuses follow the same convention.
 
 - ✅ shipped — **Reader typography settings.** A real settings screen
-  (`reader_typography_settings_screen.dart`) with live preview: typeface
+  (`reader_typography_settings_screen.dart`, "Reading style", opened from
+  Settings or from the reader's Reading settings) with live preview: typeface
   (Lora/Nunito — the two faces actually bundled, both C7 cmap-checked;
   never OpenDyslexic, see the honesty fix above), line height, font
   scale. Applies to the scroll/print reader only — RSVP and the ticker
@@ -522,7 +574,8 @@ otherwise.
 - ✅ shipped: **The player bar.** One slim row (at most 72 px at text
   scale 1.0, fits 320 dp at 2.0): art and title open the episode, a drag
   across them scrubs (cancel puts it back), Back 15, Play/Pause, speed
-  and X. ⋮ holds Go to show and the rarer controls. X closes the bar for
+  and X. ⋮ holds Go to show and the rarer controls (Headphone buttons
+  moved to Settings, board-0131). X closes the bar for
   good, in every state (playing, paused, buffering, mid-skip, at the end
   of an episode with another queued), and keeps the place heard
   (`features/player/mini_player_bar_test.dart`, `features/player_test.dart`).
@@ -605,6 +658,26 @@ otherwise.
   when there is a choice (Switch reader).
 - **Top bars.** Icon plus a word for the main commands, the rest in a
   worded More menu; the reader names its current mode as a word.
+- ✅ shipped: **Settings on the bottom bar, and one rule for ⋮**
+  (board-0131/0132; owner: the three dots hid different things on
+  different screens). The bottom bar is always Latest, Queue, Library,
+  Courses, Settings, with plain labels that fit whole at 320 dp and the
+  bar's 1.3x text cap. Settings gathers every app-wide setting and door:
+  Theme; Reading (Reading style, Read aloud voices for every language the
+  reader meets, Use the system voice, Read citations aloud); Listening
+  (Wi-Fi and data, Trim silence & even out volume by default, Headphone
+  buttons); Learning (Learning language, FSRS scheduling, Thinking);
+  Storage and backup (Models & storage, Backup & migrate, Jobs); This
+  reader (Switch reader, What you've built); About (version, Open-source
+  licences). A top bar's ⋮ holds only that screen's own actions: Select
+  first where the screen lists things, then the screen's own rare
+  actions. A screen with none has no ⋮ (Queue, Library, Courses,
+  Settings). The reader, which hides the bottom bar, ends its ⋮ with
+  Reading settings, the same rows as Settings' Reading group. A row's ⋮
+  starts with the work's shared items in one order, then the list's own
+  (`features/settings/menu_rule_test.dart`,
+  `features/settings/settings_tab_test.dart`,
+  `features/settings/settings_screen_test.dart`).
 - **Wide screens.** Every screen is a centred column of at most 640 dp
   (the reader keeps its own chosen text width).
 - **Errors.** Failures are a plain sentence; raw exception text only

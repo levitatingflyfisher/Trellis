@@ -7,6 +7,13 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.6.6 — 2026-11-11
+
+- **Settings is on the bottom bar**, always there, beside Latest, Queue, Library and Courses. Every app-wide setting lives there now: theme, reading, voices, listening, learning language, storage and backup. Each screen’s ⋮ menu holds only that screen’s own actions, in the same order everywhere.
+- **On this phone**: a chip on Latest shows only the episodes whose audio is on your phone, each with its size and the total at the top. Remove one episode’s audio, or several at once; the episode, its transcript, your place and your cards stay. An episode playing or being transcribed keeps its audio, and Trellis says so before you confirm. Models & storage links to the same list.
+- **This episode in other languages**: an episode’s page lists the original and every version made in another language, with whether its audio is on the phone. Tap one with audio and it opens and plays. Reading a translation with no audio says so, with a button to make it.
+- **Learning language** is in Settings, and “Change” on an episode’s page always shows, even with one language to choose.
+
 ## 1.6.5 — 2026-11-11
 
 1.6.4 was built but never published; everything it had is here.

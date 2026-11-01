@@ -695,44 +695,6 @@ void main() {
     expect((await db.feedsDao.feedById(feedId))!.dspEnabled, isNull);
   });
 
-  group('the household DSP default (Campaign 6)', () {
-    testWidgets(
-        'starts unchecked (off), and tapping it flips the household '
-        'default on', (tester) async {
-      await pumpFeeds(tester,
-          fetcher: ScriptedFetcher((u, h) => textResponse(_rss)));
-
-      await tester.tap(find.byKey(const Key('opml-menu')));
-      await tester.pumpAndSettle();
-      final before = tester.widget<CheckedPopupMenuItem<String>>(
-          find.byKey(const Key('dsp-global-default-toggle')));
-      expect(before.checked, isFalse);
-
-      await tester.tap(find.byKey(const Key('dsp-global-default-toggle')));
-      await tester.pumpAndSettle();
-
-      expect(await db.profilesDao.dspGlobalDefault(profile.id), isTrue);
-    });
-
-    testWidgets('shows checked once the household default is already on, '
-        'and tapping it flips back off', (tester) async {
-      await db.profilesDao.setDspGlobalDefault(profile.id, true);
-      await pumpFeeds(tester,
-          fetcher: ScriptedFetcher((u, h) => textResponse(_rss)));
-
-      await tester.tap(find.byKey(const Key('opml-menu')));
-      await tester.pumpAndSettle();
-      final before = tester.widget<CheckedPopupMenuItem<String>>(
-          find.byKey(const Key('dsp-global-default-toggle')));
-      expect(before.checked, isTrue);
-
-      await tester.tap(find.byKey(const Key('dsp-global-default-toggle')));
-      await tester.pumpAndSettle();
-
-      expect(await db.profilesDao.dspGlobalDefault(profile.id), isFalse);
-    });
-  });
-
   group('a big import', () {
     late StatementCounter counter;
     late AppDatabase big;

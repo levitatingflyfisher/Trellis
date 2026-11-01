@@ -43,7 +43,6 @@ void main() {
         home: LibraryScreen(
             db: db,
             profile: profile,
-            onSwitchProfile: () {},
             fetcher: fetcher)));
     await tester.pumpAndSettle();
     return fetcher;

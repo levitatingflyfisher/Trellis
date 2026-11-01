@@ -177,10 +177,13 @@ void main() {
       expect(r.height, greaterThanOrEqualTo(48));
     }
 
-    // Nothing twice: the original is a column of the group, not also a
-    // button in a Language section, and there is no second bar.
-    expect(find.byKey(const Key('lang-original')), findsNothing);
+    // Nothing twice: the learning language's text is in the group, not
+    // also a row below, and there is no second bar. The original's row
+    // below says where the episode stands among its languages
+    // (board-0130).
+    expect(find.byKey(const Key('lang-es')), findsNothing);
     expect(find.text('Language'), findsNothing);
+    expect(find.text('This episode, the original'), findsOneWidget);
     expect(find.byTooltip('Listen in Spanish'), findsOneWidget);
     expect(find.bySemanticsLabel('Listen in Spanish'), findsOneWidget);
   });
@@ -275,6 +278,23 @@ void main() {
     expect(await db.deviceSettingsDao.read(learningLanguageKey), 'fr');
   });
 
+  // Board-0128: with one language offered, Change hid, and with it the
+  // list and its note on why the others are missing.
+  testWidgets('Change shows even when only one language is offered, and '
+      'opens the list', (tester) async {
+    await db.deviceSettingsDao.write(learningLanguageKey, 'es');
+    await pumpPage(tester, jobs(can: const ['es']));
+    await tester.pumpAndSettle();
+
+    final change = find.byKey(const Key('learning-language-change'));
+    expect(change, findsOneWidget);
+    expect(tester.getSize(change).height, greaterThanOrEqualTo(48));
+    await tester.tap(change);
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('learning-language-dialog')), findsOneWidget);
+    expect(find.byKey(const Key('learning-language-es')), findsOneWidget);
+  });
+
   testWidgets('with no learning language yet the second column says so, '
       'and its Listen asks which', (tester) async {
     await pumpPage(tester, jobs());
@@ -337,7 +357,7 @@ void main() {
   });
 
   testWidgets('a translation in some other language keeps its door, under '
-      'Other languages', (tester) async {
+      'This episode in other languages', (tester) async {
     await db.deviceSettingsDao.write(learningLanguageKey, 'es');
     await transcript();
     await translation('es');
@@ -345,7 +365,7 @@ void main() {
     await pumpPage(tester, jobs());
     await tester.pumpAndSettle();
 
-    expect(find.text('Other languages'), findsOneWidget);
+    expect(find.text('This episode in other languages'), findsOneWidget);
     expect(find.byKey(const Key('lang-de')), findsOneWidget);
     // The learning language is in the group above, not here again.
     expect(find.byKey(const Key('lang-es')), findsNothing);
@@ -353,8 +373,7 @@ void main() {
   });
 
   testWidgets('an episode that cannot be made in the learning language '
-      'keeps the page it had: two ways in, and the Language section',
-      (tester) async {
+      'keeps two ways in, and its languages below', (tester) async {
     await db.deviceSettingsDao.write(learningLanguageKey, 'es');
     await pumpPage(tester, jobs(can: const []));
     await tester.pumpAndSettle();
@@ -362,7 +381,7 @@ void main() {
     expect(find.byKey(listenLearning), findsNothing);
     expect(find.byKey(readLearning), findsNothing);
     expect(wordsOf(tester, listenOriginal), 'Listen');
-    expect(find.text('Language'), findsOneWidget);
+    expect(find.text('This episode in other languages'), findsOneWidget);
     expect(find.byKey(const Key('lang-original')), findsOneWidget);
   });
 

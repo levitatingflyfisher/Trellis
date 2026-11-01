@@ -1144,8 +1144,8 @@ void main() {
     Finder tab(String label) => find.descendant(
         of: find.byType(NavigationBar), matching: find.text(label));
 
-    testWidgets('the tabs read Latest, Queue, Library, Courses, and the '
-        'app opens on Latest', (tester) async {
+    testWidgets('the tabs read Latest, Queue, Library, Courses, Settings, '
+        'and the app opens on Latest', (tester) async {
       await seedProfile();
       await pumpApp(tester, ScriptedFetcher((u, h) => textResponse(_rssOne)));
 
@@ -1155,7 +1155,7 @@ void main() {
           .cast<NavigationDestination>()
           .map((d) => d.label)
           .toList();
-      expect(labels, ['Latest', 'Queue', 'Library', 'Courses']);
+      expect(labels, ['Latest', 'Queue', 'Library', 'Courses', 'Settings']);
       expect(
           find.descendant(
               of: find.byType(AppBar), matching: find.text('Latest')),
@@ -1202,15 +1202,6 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(find.byKey(Key('queue-item-$workId')), findsOneWidget);
-    });
-
-    testWidgets("the Latest menu no longer carries the queue: it's a tab",
-        (tester) async {
-      await seedProfile();
-      await pumpApp(tester, ScriptedFetcher((u, h) => textResponse(_rssOne)));
-      await tester.tap(find.byKey(const Key('river-more')));
-      await tester.pumpAndSettle();
-      expect(find.byKey(const Key('river-open-queue')), findsNothing);
     });
 
     testWidgets("the mini player's queue button switches to the Queue tab",

@@ -125,14 +125,7 @@ void main() {
         fetcher: ScriptedFetcher((u, h) => textResponse('')),
         createPlayer: () => FakeEpisodePlayer()));
     await tester.pumpAndSettle();
-    // A first launch opens straight into the new reader's Library.
-    await tester.tap(tabLabel('Library'));
-    await tester.pumpAndSettle();
-
-    await tester.tap(find.byKey(const Key('library-more')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('open-backup')));
-    await tester.pumpAndSettle();
+    await openSetting(tester, const Key('open-backup'));
     expect(find.text('Backup & migrate'), findsOneWidget);
   });
 

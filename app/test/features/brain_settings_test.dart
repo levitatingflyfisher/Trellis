@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/brain/brain_settings_screen.dart';
 import 'package:trellis/features/brain/brain_store.dart';
-import 'package:trellis/features/study/courses_screen.dart';
+import 'package:trellis/features/settings/settings_screen.dart';
 
 import 'brain_test_support.dart';
 
@@ -98,17 +98,21 @@ void main() {
     expect(find.byKey(const Key('tier-localStub')), findsOneWidget);
   });
 
-  testWidgets('the Courses tab offers the Thinking door', (tester) async {
+  testWidgets('Settings offers the Thinking door', (tester) async {
     final db = AppDatabase.forTesting(NativeDatabase.memory());
     addTearDown(db.close);
     await db.profilesDao.create('Ada');
     final profile = (await db.profilesDao.all()).single;
 
     await tester.pumpWidget(MaterialApp(
-        home: CoursesScreen(db: db, profile: profile, brainStore: store)));
+        home: SettingsScreen(
+            db: db,
+            profile: profile,
+            onSwitchProfile: () {},
+            brainStore: store)));
     await tester.pumpAndSettle();
 
-    await tester.tap(find.byKey(const Key('study-settings')));
+    await tester.ensureVisible(find.byKey(const Key('open-thinking')));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const Key('open-thinking')));
     await tester.pumpAndSettle();

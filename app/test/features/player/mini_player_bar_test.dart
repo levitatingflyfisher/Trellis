@@ -300,37 +300,6 @@ void main() {
         reason: 'Back 15 is on the bar, not repeated in the menu');
   });
 
-  testWidgets('Headphone buttons is in the bar’s menu, where the other '
-      'playback choices are (1.6.0)', (tester) async {
-    await controller.playWork(await seedEpisode());
-    var opened = 0;
-    await tester.pumpWidget(MaterialApp(
-      home: Scaffold(
-        bottomNavigationBar: MiniPlayerBar(
-            controller: controller, onOpenHeadsetKeys: () => opened++),
-      ),
-    ));
-    await tester.pump();
-
-    await tester.tap(find.byKey(const Key('player-menu')));
-    await tester.pumpAndSettle();
-    expect(find.text('Headphone buttons'), findsOneWidget);
-    await tester.tap(find.byKey(const Key('open-headset-keys')));
-    await tester.pumpAndSettle();
-
-    expect(opened, 1);
-  });
-
-  testWidgets('with nowhere to open it, the menu has no Headphone buttons',
-      (tester) async {
-    await controller.playWork(await seedEpisode());
-    await pumpBar(tester, controller);
-
-    await tester.tap(find.byKey(const Key('player-menu')));
-    await tester.pumpAndSettle();
-    expect(find.text('Headphone buttons'), findsNothing);
-  });
-
   testWidgets('Back 15 on the bar skips back', (tester) async {
     await controller.playWork(await seedEpisode());
     player.emitDuration(const Duration(minutes: 10));

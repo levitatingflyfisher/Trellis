@@ -33,7 +33,7 @@ import '../works/device_hooks.dart' show openExternalLink;
 import '../works/link_confirm.dart';
 import 'reader_logic.dart';
 import 'reader_prefs.dart';
-import 'reader_typography_settings_screen.dart';
+import '../settings/reading_settings.dart';
 import 'recap_sheet.dart';
 import '../player/speed_control.dart';
 import 'speech/just_audio_speech_queue.dart';
@@ -48,6 +48,21 @@ import 'translation/sentence_units.dart';
 import 'translation/translation_job.dart';
 import 'translation/translation_route.dart';
 import 'translation/translation_service.dart';
+
+/// A sentence the opener puts at the top of the reader, with at most one
+/// action (board-0130): reading a translation of an episode says whether
+/// that language has audio, and offers the tap that makes or plays it.
+class ReaderNote {
+  final String text;
+
+  /// The action's words; null for a note with no action.
+  final String? action;
+
+  /// Run with the reader's own context, so what it says shows there.
+  final Future<void> Function(BuildContext context)? onAction;
+
+  const ReaderNote(this.text, {this.action, this.onAction});
+}
 
 /// The hearth red — the heritage ORP pivot color carried from both donors,
 /// which is the fleet's own hearth500 (C1: from the tokens, not retyped).
@@ -204,6 +219,9 @@ class ReaderScreen extends StatefulWidget {
   /// episode's Read and from the player.
   final bool openOnPage;
 
+  /// Shown at the top until dismissed; null for none.
+  final ReaderNote? note;
+
   /// Opens a link met in the text, once the reader agreed (1.6.2). The
   /// browser by default; tests stand in for it.
   final Future<void> Function(Uri uri) openLink;
@@ -238,6 +256,7 @@ class ReaderScreen extends StatefulWidget {
       this.layerLang,
       this.openTranslatePicker = false,
       this.openOnPage = false,
+      this.note,
       this.openLink = openExternalLink,
       this.session = const NoPlaybackSession()});
 
@@ -1771,25 +1790,6 @@ class _ReaderScreenState extends State<ReaderScreen>
         .catchError((Object _) {}));
   }
 
-  /// The settings escape (ADR-0006): flips the persisted preference and
-  /// takes effect on the NEXT speak run — a run already under way keeps
-  /// speaking with whatever engine it started with (no engine hot-swap
-  /// mid-sentence).
-  Future<void> _toggleVoicePreference() async {
-    final next = !_preferSystemVoice;
-    setState(() => _preferSystemVoice = next);
-    await widget.db.profilesDao.setPreferSystemVoice(widget.profileId, next);
-  }
-
-  /// Citations in or out of read aloud (1.6.0). Like the voice choice,
-  /// it holds from the next run: one under way finishes as it began.
-  Future<void> _toggleSpeakCitations() async {
-    final next = !_speakCitations;
-    setState(() => _speakCitations = next);
-    await widget.db.deviceSettingsDao
-        .write(speakCitationsKey, next ? 'on' : 'off');
-  }
-
   // ───── translation (ADR-0008 "Babel"; Campaign 8 "Babel widens"; any
   // registered language, downloaded on demand and via English, 1.5.5) ─────
 
@@ -2041,7 +2041,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   void _cancelTranslation() => _translationJob?.cancel();
 
   /// The scroll-mode dual-display toggle: persisted through the DAO (not
-  /// local-only state), same law [_toggleVoicePreference] follows. With
+  /// local-only state), same law the system-voice switch follows. With
   /// it off Read aloud reads the original only, whatever
   /// [_speakTranslation] says: that choice is about Both.
   Future<void> _toggleShowTranslation() async {
@@ -2053,7 +2053,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     await widget.db.spineDao.setShowTranslationLayer(widget.work.id, next);
   }
 
-  /// Reading the translation under Both: takes effect on the NEXT run, the same law [_toggleVoicePreference]
+  /// Reading the translation under Both: takes effect on the NEXT run, the same law the system-voice switch
   /// follows — a run already under way keeps speaking whatever it
   /// started with.
   void _toggleSpeakTranslation() =>
@@ -2239,7 +2239,7 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// Nothing wordy in [token] (edge punctuation only) opens nothing, the
   /// same silent no-op [_keepWord] already had.
   ///
-  /// Pauses first, matching [_openTypographySettings] and [_setMode]:
+  /// Pauses first, matching [_openReadingSettings] and [_setMode]:
   /// Phase 2's follow-along made scroll mode playable, which means a held
   /// word can now be on a document that's still advancing underneath the
   /// modal — an un-paused cursor would keep calling `_followAlongScroll`'s
@@ -2493,22 +2493,31 @@ class _ReaderScreenState extends State<ReaderScreen>
         store: widget.brain ?? BrainStore.production());
   }
 
-  /// Campaign 4 Phase 1: the print-reader typography settings, reached the
-  /// same way distill is — an overflow-menu gesture, both cursor-advancers
-  /// stopped first.
-  Future<void> _openTypographySettings() async {
+  /// Reading settings (board-0131): reading style, the system voice and
+  /// citations, the same rows as Settings' Reading group. Both cursor
+  /// advancers stop first, as for distill. On return the page and the
+  /// next read aloud take what changed: a run already under way would
+  /// finish as it began (ADR-0006), and none is under way here.
+  Future<void> _openReadingSettings() async {
     _pause();
     unawaited(_stopSpeak());
     await Navigator.of(context).push(MaterialPageRoute<void>(
-        builder: (_) => ReaderTypographySettingsScreen(
-            db: widget.db, profileId: widget.profileId)));
-    // Prefs may have changed while the settings screen was open; reload
-    // rather than re-derive so the scroll body picks up the new values on
-    // return.
+        builder: (_) => ReadingSettingsScreen(
+            db: widget.db,
+            profileId: widget.profileId,
+            offerSystemVoice: _synthEngineHolder != null)));
     if (!mounted) return;
     final prefs = await widget.db.profilesDao.readerPrefs(widget.profileId);
+    final preferSystemVoice =
+        await widget.db.profilesDao.preferSystemVoice(widget.profileId);
+    final speakCitations =
+        await widget.db.deviceSettingsDao.read(speakCitationsKey) == 'on';
     if (!mounted) return;
-    setState(() => _typography = prefs.typography);
+    setState(() {
+      _typography = prefs.typography;
+      _preferSystemVoice = preferSystemVoice;
+      _speakCitations = speakCitations;
+    });
   }
 
   // ───── Campaign 4 Phase 4: the "Catch me up?" recap ─────
@@ -2544,6 +2553,51 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// below). Living as the body `Column`'s first child instead sizes
   /// itself to whatever the chip and its label actually need at any text
   /// scale, no magic constant to keep in sync with anything.
+  bool _noteDismissed = false;
+
+  /// The opener's sentence, its action beside it while it fits and below
+  /// it at large text.
+  Widget _noteBar(BuildContext context, ReaderNote note) {
+    final theme = Theme.of(context);
+    final act = note.onAction;
+    return ColoredBox(
+      key: const Key('reader-note'),
+      color: theme.colorScheme.surfaceContainerHighest,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 4, 4, 4),
+        child: Row(
+          children: [
+            Expanded(
+              child: Wrap(
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 8,
+                children: [
+                  Text(note.text,
+                      key: const Key('reader-note-text'),
+                      style: theme.textTheme.bodyMedium),
+                  if (note.action case final label? when act != null)
+                    TextButton(
+                      key: const Key('reader-note-action'),
+                      style: TextButton.styleFrom(
+                          minimumSize: const Size(48, 48)),
+                      onPressed: () => unawaited(act(context)),
+                      child: Text(label),
+                    ),
+                ],
+              ),
+            ),
+            IconButton(
+              key: const Key('reader-note-dismiss'),
+              tooltip: 'Close this note',
+              icon: const Icon(Icons.close, size: 18),
+              onPressed: () => setState(() => _noteDismissed = true),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _recapOfferBar(BuildContext context) {
     final theme = Theme.of(context);
     return ColoredBox(
@@ -2661,11 +2715,7 @@ class _ReaderScreenState extends State<ReaderScreen>
             key: const Key('reader-overflow'),
             onSelected: (value) {
               if (value == 'distill') unawaited(_distill());
-              if (value == 'system-voice') unawaited(_toggleVoicePreference());
               if (value == 'voices') unawaited(_openReadAloudVoices());
-              if (value == 'speak-citations') {
-                unawaited(_toggleSpeakCitations());
-              }
               if (value == 'translate') unawaited(_openTranslatePicker());
               if (value == 'show-translation') {
                 unawaited(_toggleShowTranslation());
@@ -2677,7 +2727,9 @@ class _ReaderScreenState extends State<ReaderScreen>
               if (value == 'translation-both') {
                 unawaited(_setTranslationOnly(false));
               }
-              if (value == 'reading-style') unawaited(_openTypographySettings());
+              if (value == 'reading-settings') {
+                unawaited(_openReadingSettings());
+              }
               if (value == 'work-language') unawaited(_openWorkLanguagePicker());
               if (value == 'lang') _toggleLanguage();
               if (value == 'ledger') _openLedger();
@@ -2698,9 +2750,6 @@ class _ReaderScreenState extends State<ReaderScreen>
               const PopupMenuItem(
                   value: 'distill',
                   child: Text('Distill into a course')),
-              const PopupMenuItem(
-                  value: 'reading-style',
-                  child: Text('Reading style')),
               // Campaign 8 "Babel widens" Phase 1: the calm per-work
               // source-language selector — always offered (unlike the
               // translate/show/speak items below, which gate on there
@@ -2713,29 +2762,12 @@ class _ReaderScreenState extends State<ReaderScreen>
                   child: Text(_sourceLang == null
                       ? 'Language: not set'
                       : 'Language: ${languageDisplayName(_sourceLang!)}')),
-              // The settings escape (ADR-0006): only visible when there is
-              // a neural voice to escape FROM — no dead settings.
-              if (_synthEngineHolder != null)
-                CheckedPopupMenuItem<String>(
-                  key: const Key('voice-preference-toggle'),
-                  value: 'system-voice',
-                  checked: _preferSystemVoice,
-                  child: const Text('Use the system voice'),
-                ),
-              // A voice for each language (1.5.9): rare, so here, not on
-              // the bar.
+              // A voice for each language this text reads in (1.5.9):
+              // rare, so here, not on the bar.
               const PopupMenuItem(
                   key: Key('read-aloud-voices'),
                   value: 'voices',
                   child: Text('Read aloud voices')),
-              // Off until chosen (1.6.0): the voice skips citations,
-              // footnote marks and bare links; the page keeps them.
-              CheckedPopupMenuItem<String>(
-                key: const Key('speak-citations-toggle'),
-                value: 'speak-citations',
-                checked: _speakCitations,
-                child: const Text('Read citations aloud'),
-              ),
               // The model gate (ADR-0008; generalized to any pair,
               // Campaign 8 "Babel widens"): offered only once at least
               // one target pair for this work's source language is
@@ -2800,6 +2832,14 @@ class _ReaderScreenState extends State<ReaderScreen>
                       '${languageDisplayName(_activeTranslationLang!)} '
                       'aloud too'),
                 ),
+              // Last, as on no other ⋮: the reader hides the bottom bar,
+              // so its door to the reading settings is here (board-0131).
+              // The same rows as Settings' Reading group.
+              const PopupMenuDivider(),
+              const PopupMenuItem(
+                  key: Key('reading-settings'),
+                  value: 'reading-settings',
+                  child: Text('Reading settings')),
             ],
           ),
           ]),
@@ -2807,6 +2847,8 @@ class _ReaderScreenState extends State<ReaderScreen>
       ),
       body: Column(
         children: [
+          if (widget.note case final note? when !_noteDismissed)
+            _noteBar(context, note),
           if (_download != null) _downloadCard(),
           if (_translationJob != null) _translationProgressCard(),
           // Natural-height, not an AppBar.bottom fixed slot — see

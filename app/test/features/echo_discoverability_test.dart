@@ -2,6 +2,7 @@ import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
+import 'package:trellis/features/settings/settings_screen.dart';
 import 'package:trellis/features/study/courses_screen.dart';
 
 /// Campaign 9 Phase 1 — user: "the sparkles meaning echo? what's an echo?"
@@ -23,7 +24,7 @@ void main() {
     await db.ledgerDao.add(profileId: profile.id, word: 'saudade', nowMs: 1);
 
     await tester.pumpWidget(MaterialApp(
-        home: CoursesScreen(db: db, profile: profile, onOpenEcho: () {})));
+        home: CoursesScreen(db: db, profile: profile)));
     await tester.pumpAndSettle();
 
     final chipIcon = tester
@@ -53,19 +54,16 @@ void main() {
     addTearDown(tester.platformDispatcher.clearAllTestValues);
 
     await tester.pumpWidget(MaterialApp(
-        home: CoursesScreen(
+        home: SettingsScreen(
             db: db,
             profile: profile,
+            onSwitchProfile: () {},
             onOpenEcho: () {})));
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull,
-        reason: 'no RenderFlex overflow with every AppBar action wired at '
-            '320dp/2x');
-    // The door lives in the worded More menu (fleet ruling on top bars:
-    // rarer doors in a worded menu), where it arrives as a word.
-    await tester.tap(find.byKey(const Key('study-settings')));
-    await tester.pumpAndSettle();
+        reason: 'no RenderFlex overflow at 320dp/2x');
+    // The door lives in Settings (board-0131), where it arrives as a word.
     expect(find.byKey(const Key('open-echo')), findsOneWidget);
     expect(find.text('What you’ve built'), findsOneWidget,
         reason: 'the door names itself — a word, not just a glyph');

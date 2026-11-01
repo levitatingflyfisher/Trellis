@@ -41,7 +41,6 @@ void main() {
       home: LibraryScreen(
         db: db,
         profile: await profile(),
-        onSwitchProfile: () {},
         onImportAudiobook: onImportAudiobook,
         onDeleteAudiobookFiles: onDeleteAudiobookFiles,
         player: player,

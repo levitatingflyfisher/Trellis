@@ -356,6 +356,8 @@ void main() {
 
       await tester.tap(find.byKey(const Key('reader-overflow')));
       await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('reading-settings')));
+      await tester.pumpAndSettle();
 
       expect(find.byKey(const Key('voice-preference-toggle')), findsNothing);
     });
@@ -373,15 +375,19 @@ void main() {
       expect(engine.calls, isEmpty);
     });
 
-    testWidgets('toggling the control from the overflow menu switches the '
+    testWidgets('toggling the control in Reading settings switches the '
         'NEXT run and persists the choice', (tester) async {
       await pumpReader(tester,
           resolveSpeechEngine: ({lang}) async => engine);
 
       await tester.tap(find.byKey(const Key('reader-overflow')));
       await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('reading-settings')));
+      await tester.pumpAndSettle();
       expect(find.byKey(const Key('voice-preference-toggle')), findsOneWidget);
       await tester.tap(find.byKey(const Key('voice-preference-toggle')));
+      await tester.pumpAndSettle();
+      await tester.pageBack();
       await tester.pumpAndSettle();
 
       await tester.tap(find.byKey(const Key('speak-toggle')));

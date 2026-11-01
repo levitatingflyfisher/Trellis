@@ -90,10 +90,7 @@ void main() {
       'reader\'s own private year-in-review (never PIN-gated -- that\'s '
       'the parent dashboard\'s door)', (tester) async {
     await pumpToCourses(tester);
-    await tester.tap(find.byKey(const Key('study-settings')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('open-echo')));
-    await tester.pumpAndSettle();
+    await openSetting(tester, const Key('open-echo'));
     expect(find.text('What you’ve built'), findsWidgets);
     expect(find.textContaining('Nothing built yet'), findsOneWidget);
   });

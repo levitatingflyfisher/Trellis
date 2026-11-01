@@ -107,6 +107,12 @@ class EpisodeBulk {
 
   Future<void> _reload() async => selection.reload?.call();
 
+  /// Set while the list shows what is on this phone (boards 0127, 0131):
+  /// taking the audio off is what that list is for, so it leads the bar
+  /// in place of Mark played, and asks first.
+  Future<void> Function(BuildContext context, List<EpisodeEntry> chosen)?
+      removeAudio;
+
   /// The contextual bar that replaces a screen's own while selecting.
   PreferredSizeWidget bar(BuildContext context) {
     final n = selection.count;
@@ -128,18 +134,32 @@ class EpisodeBulk {
             label: 'Select all',
             onPressed: selection.selectAll,
           ),
-          OhBarAction(
-            key: const Key('bulk-mark-played'),
-            icon: Icons.done_all,
-            label: 'Mark played',
-            onPressed:
-                some ? () => run(context, BulkAction.markPlayed) : null,
-          ),
+          if (removeAudio case final remove?)
+            OhBarAction(
+              key: const Key('bulk-remove-audio'),
+              icon: Icons.delete_outline,
+              label: 'Remove audio',
+              onPressed:
+                  some ? () => remove(context, selection.selected) : null,
+            )
+          else
+            OhBarAction(
+              key: const Key('bulk-mark-played'),
+              icon: Icons.done_all,
+              label: 'Mark played',
+              onPressed:
+                  some ? () => run(context, BulkAction.markPlayed) : null,
+            ),
           OhBarOverflow<BulkAction>(
             key: const Key('selection-more'),
             enabled: some,
             onSelected: (a) => run(context, a),
             itemBuilder: (_) => [
+              if (removeAudio != null)
+                const PopupMenuItem(
+                    key: Key('bulk-mark-played'),
+                    value: BulkAction.markPlayed,
+                    child: Text('Mark played')),
               const PopupMenuItem(
                   key: Key('bulk-mark-unplayed'),
                   value: BulkAction.markUnplayed,
@@ -152,7 +172,7 @@ class EpisodeBulk {
                   key: Key('bulk-up-next'),
                   value: BulkAction.addToQueue,
                   child: Text('Add to Queue')),
-              if (actions.canDownload)
+              if (actions.canDownload && removeAudio == null)
                 const PopupMenuItem(
                     key: Key('bulk-remove-download'),
                     value: BulkAction.removeDownload,

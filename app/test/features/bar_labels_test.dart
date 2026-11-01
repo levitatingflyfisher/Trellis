@@ -79,22 +79,24 @@ void main() {
     }
   }
 
-  const more = ('More', 'More');
-
   testWidgets('360 dp at 1.3x: every tab bar and the reader name their '
       'commands', (tester) async {
     await pumpAt(tester, const Size(360, 780), 1.3);
     await toTab(tester, 'Library');
     seen('Filter');
     barHolds(tester, 'Library',
-        [('Filter', 'Filter'), ('Subscriptions', 'Subscriptions'), more]);
+        [('Filter', 'Filter'), ('Subscriptions', 'Subscriptions')]);
     await toTab(tester, 'Latest');
     seen('Subscriptions');
-    barHolds(tester, 'Latest', [('Subscriptions', 'Subscriptions'), more]);
+    // Latest has nothing to select here, so no ⋮ (board-0131); Queue,
+    // Courses and Settings have no rare actions of their own.
+    barHolds(tester, 'Latest', [('Subscriptions', 'Subscriptions')]);
     await toTab(tester, 'Queue');
-    barHolds(tester, 'Queue', [more]);
+    barHolds(tester, 'Queue', []);
     await toTab(tester, 'Courses');
-    barHolds(tester, 'Courses', [more]);
+    barHolds(tester, 'Courses', []);
+    await toTab(tester, 'Settings');
+    barHolds(tester, 'Settings', []);
     await toTab(tester, 'Library');
     await tester.tap(find.text('A Rather Longer Title Than Any Bar Would Prefer'));
     await tester.pumpAndSettle();
@@ -128,16 +130,16 @@ void main() {
   testWidgets('320 dp at 3.0x: the bars do not overflow and keep their '
       'titles whole', (tester) async {
     await pumpAt(tester, const Size(320, 640), 3.0);
-    for (final tab in ['Latest', 'Queue', 'Courses', 'Library']) {
+    for (final tab in ['Latest', 'Queue', 'Courses', 'Settings', 'Library']) {
       await toTab(tester, tab);
       expect(tester.takeException(), isNull, reason: tab);
     }
     // The house floor: titles stay whole at 320 x 3.0, commands named.
     await toTab(tester, 'Library');
     barHolds(tester, 'Library',
-        [('Filter', 'Filter'), ('Subscriptions', 'Subscriptions'), more]);
+        [('Filter', 'Filter'), ('Subscriptions', 'Subscriptions')]);
     await toTab(tester, 'Latest');
-    barHolds(tester, 'Latest', [('Subscriptions', 'Subscriptions'), more]);
+    barHolds(tester, 'Latest', [('Subscriptions', 'Subscriptions')]);
     await toTab(tester, 'Library');
     await tester.tap(find.text('A Rather Longer Title Than Any Bar Would Prefer'));
     await tester.pumpAndSettle();

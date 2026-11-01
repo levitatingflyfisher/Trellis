@@ -10,6 +10,7 @@ import 'package:trellis/main.dart';
 
 import '../support/fake_player.dart';
 import '../support/scripted_fetcher.dart';
+import '../support/tabs.dart';
 
 /// A widget host with a hand on it: taps waiting before the app is up (the
 /// widget opened it) and taps arriving while it runs.
@@ -196,12 +197,7 @@ void main() {
     await db.deviceSettingsDao.setLastProfileId(profileId);
     await boot(tester);
     expect(host.pushed.last.reading?.workId, text);
-    await tester.tap(find.text('Library'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('library-more')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('profile-switcher')));
-    await tester.pumpAndSettle();
+    await openSetting(tester, const Key('profile-switcher'));
     expect(find.text('Who’s reading?'), findsOneWidget);
     final last = host.pushed.last;
     expect(last.audio, isNull);

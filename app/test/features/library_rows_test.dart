@@ -57,7 +57,6 @@ void main() {
             key: UniqueKey(),
             db: db,
             profile: (await db.profilesDao.all()).single,
-            onSwitchProfile: () {},
             player: player)));
     await tester.pumpAndSettle();
   }

@@ -100,6 +100,11 @@ class ModelsScreen extends StatefulWidget {
   final int? profileId;
   final EpisodeActions? actions;
 
+  /// Shows the episodes whose audio is on this phone, under Latest's chip
+  /// (board-0131): the episode-audio row's first choice, before Clear all.
+  /// Null leaves the row with Clear all only.
+  final VoidCallback? onShowEpisodesOnPhone;
+
   const ModelsScreen({
     super.key,
     required this.store,
@@ -110,6 +115,7 @@ class ModelsScreen extends StatefulWidget {
     this.db,
     this.profileId,
     this.actions,
+    this.onShowEpisodesOnPhone,
   });
 
   @override
@@ -433,6 +439,15 @@ class _ModelsScreenState extends State<ModelsScreen> {
       _cacheTile(
         rowKey: const Key('storage-audio'),
         clearKey: const Key('storage-audio-clear'),
+        clearLabel: 'Clear all',
+        first: widget.onShowEpisodesOnPhone == null
+            ? null
+            : TextButton(
+                key: const Key('storage-audio-episodes'),
+                style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                onPressed: widget.onShowEpisodesOnPhone,
+                child: const Text('See episodes'),
+              ),
         title: 'Episode audio',
         bytes: _audioBytes,
         onClear: () => _clearCache(
@@ -610,6 +625,8 @@ class _ModelsScreenState extends State<ModelsScreen> {
     required String title,
     required int bytes,
     required Future<void> Function() onClear,
+    String clearLabel = 'Clear',
+    Widget? first,
   }) {
     final theme = Theme.of(context);
     return Card(
@@ -625,10 +642,17 @@ class _ModelsScreenState extends State<ModelsScreen> {
             Text(formatBytes(bytes), style: theme.textTheme.bodySmall),
             Align(
               alignment: Alignment.centerRight,
-              child: TextButton(
-                key: clearKey,
-                onPressed: bytes == 0 ? null : onClear,
-                child: const Text('Clear'),
+              child: Wrap(
+                alignment: WrapAlignment.end,
+                spacing: 8,
+                children: [
+                  ?first,
+                  TextButton(
+                    key: clearKey,
+                    onPressed: bytes == 0 ? null : onClear,
+                    child: Text(clearLabel),
+                  ),
+                ],
               ),
             ),
           ],

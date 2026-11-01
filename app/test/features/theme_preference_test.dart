@@ -55,9 +55,10 @@ void main() {
   // The app-bar "Auto" button read as a mystery until tapped (user: "I
   // clicked it to learn it was about dark mode"), and a worded item that
   // opened a chooser made it three taps. The fleet ruling is one or two:
-  // the three named choices sit in each tab's menu, the one in use checked.
+  // from every tab, Settings on the bottom bar, then the named choice
+  // (board-0132 moved it there from each tab's ⋮).
   for (final tab in ['Latest', 'Queue', 'Library', 'Courses']) {
-    testWidgets('$tab: dark is two taps from the menu, and sticks',
+    testWidgets('$tab: dark is two taps, Settings then Dark, and sticks',
         (tester) async {
       await db.profilesDao.create('Ada');
       await pumpApp(tester);
@@ -67,31 +68,24 @@ void main() {
       expect(find.byKey(const Key('theme-toggle')), findsNothing,
           reason: 'no unexplained theme button on the bar');
 
-      Future<void> openMenu() async {
-        await tester.tap(find.descendant(
-            of: find.byType(AppBar), matching: find.byIcon(Icons.more_vert)));
-        await tester.pumpAndSettle();
-      }
+      bool picked(String name) => tester
+          .widget<RadioGroup<OhThemeModePreference>>(
+              find.byType(RadioGroup<OhThemeModePreference>))
+          .groupValue
+          ?.name == name;
 
-      bool checked(String label) => tester
-          .widget<CheckedPopupMenuItem<String>>(
-              find.widgetWithText(CheckedPopupMenuItem<String>, label))
-          .checked;
-
-      await openMenu();
-      expect(find.text('Theme'), findsOneWidget, reason: 'the group says what it is');
-      expect(checked('Follow phone'), isTrue);
-      expect(checked('Light'), isFalse);
-      expect(checked('Dark'), isFalse);
-      await tester.tap(find.text('Dark'));
+      await tester.tap(tabLabel('Settings'));
+      await tester.pumpAndSettle();
+      expect(find.text('Theme'), findsOneWidget,
+          reason: 'the group says what it is');
+      expect(picked('system'), isTrue);
+      await tester.tap(find.byKey(const Key('theme-choice-dark')));
       await tester.pumpAndSettle();
 
       expect(appMode(tester), ThemeMode.dark);
       expect(await ThemePreferenceController.read(db),
           OhThemeModePreference.dark);
-      await openMenu();
-      expect(checked('Dark'), isTrue);
-      expect(checked('Follow phone'), isFalse);
+      expect(picked('dark'), isTrue);
     });
   }
 

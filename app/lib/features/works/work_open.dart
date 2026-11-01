@@ -9,6 +9,7 @@ import '../../db/database.dart' hide Alignment;
 import '../episodes/episode_actions.dart';
 import '../player/player_controller.dart';
 import '../reader/reader_doors.dart';
+import '../reader/reader_screen.dart' show ReaderNote;
 import 'device_hooks.dart';
 import 'work_page.dart';
 import 'work_row.dart';
@@ -80,6 +81,7 @@ class WorkDoors {
     String? layerLang,
     bool openTranslatePicker = false,
     bool openOnPage = false,
+    ReaderNote? note,
   }) async {
     final work = e.work;
     if (e.episode != null) {
@@ -107,6 +109,7 @@ class WorkDoors {
       layerLang: layerLang,
       openTranslatePicker: openTranslatePicker,
       openOnPage: openOnPage,
+      note: note,
     );
   }
 

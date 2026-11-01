@@ -118,12 +118,14 @@ void main() {
     expect(wrap.alignment, WrapAlignment.start);
   });
 
-  testWidgets('the overflow menu opens the reading-style settings screen',
+  testWidgets('the menu’s Reading settings open the reading-style screen',
       (tester) async {
     await seed('Zero One Two Three.');
     await openReaderInScroll(tester);
 
     await tester.tap(find.byKey(const Key('reader-overflow')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('reading-settings')));
     await tester.pumpAndSettle();
     await tester.tap(find.text('Reading style'));
     await tester.pumpAndSettle();

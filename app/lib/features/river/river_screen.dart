@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:openhearth_design/openhearth_design.dart';
 
 import '../../db/database.dart' hide Alignment;
-import '../settings/theme_preference.dart';
 import '../dsp/dsp_coordinator.dart';
 import '../episodes/episode_actions.dart';
 import '../works/work_menu.dart';
@@ -19,7 +18,9 @@ import '../feeds/feed_detail_screen.dart';
 import '../feeds/feeds_screen.dart';
 import '../feeds/subscribe_screen.dart';
 import '../player/player_controller.dart';
-import '../../services/device_services.dart' show TtsSpeaker;
+import '../../services/device_services.dart'
+    show DeviceServices, TtsSpeaker;
+import '../models/format.dart' show formatBytes;
 import '../reader/reader_doors.dart';
 import '../reader/speech/speech_engine.dart';
 import '../search/search_entry.dart';
@@ -30,6 +31,7 @@ import '../transcribe/job_cards.dart';
 import '../transcribe/transcribe_coordinator.dart';
 import 'river_triage.dart';
 import '../shared/capped_body.dart';
+import '../storage/on_phone.dart';
 
 /// The River (ADR-0003 law 1): ONE reverse-chronological list across every
 /// feed. The order comes from the DAO's single query and is never touched
@@ -89,6 +91,10 @@ class RiverScreen extends StatefulWidget {
   /// screen (a share); a change re-reads the list in place.
   final int changes;
 
+  /// Bumped by the shell when Models & storage asks for the episodes
+  /// whose audio is on this phone: Latest shows them, under its chip.
+  final int onPhoneAsks;
+
   /// Told when a row is opened, before its page shows: a shared link
   /// that was never read gets its page tried again.
   final void Function(int workId)? onOpenWork;
@@ -104,6 +110,7 @@ class RiverScreen extends StatefulWidget {
       {super.key,
       this.active = true,
       this.changes = 0,
+      this.onPhoneAsks = 0,
       this.onOpenWork,
       this.feedCheck,
       required this.db,
@@ -125,7 +132,10 @@ class RiverScreen extends StatefulWidget {
   State<RiverScreen> createState() => _RiverScreenState();
 }
 
-enum _RiverFilter { all, text, audio }
+/// Latest's chips. [onPhone] is the episodes whose audio is on this
+/// phone (boards 0127, 0131): a filter on the list, kept beside the
+/// others so it is one tap away, not in a menu.
+enum _RiverFilter { all, text, audio, onPhone }
 
 class _RiverScreenState extends State<RiverScreen>
     with WidgetsBindingObserver {
@@ -152,6 +162,15 @@ class _RiverScreenState extends State<RiverScreen>
   int _generation = 0;
 
   _RiverFilter _filter = _RiverFilter.all;
+
+  /// What each listed episode takes on the phone, while [_RiverFilter.onPhone]
+  /// is showing.
+  Map<int, int> _onPhoneBytes = const {};
+
+  DeviceServices? get _services => widget.repository.services;
+
+  /// The chip is offered where audio is kept on the device.
+  bool get _offersOnPhone => _services != null && _actions.canDownload;
   late final RiverTriage _triage = RiverTriage(widget.db);
   late final EpisodeActions _actions = EpisodeActions(
     db: widget.db,
@@ -219,7 +238,11 @@ class _RiverScreenState extends State<RiverScreen>
     super.didUpdateWidget(old);
     // Back from another tab, where any loaded row may have changed (kept,
     // played, queued); the re-read keeps the list's length, so its place.
-    if ((widget.active && !old.active) || widget.changes != old.changes) {
+    if (widget.onPhoneAsks != old.onPhoneAsks && _offersOnPhone) {
+      _selection.exit();
+      _setFilter(_RiverFilter.onPhone);
+    } else if ((widget.active && !old.active) ||
+        widget.changes != old.changes) {
       _reloadLoaded();
     }
   }
@@ -258,14 +281,80 @@ class _RiverScreenState extends State<RiverScreen>
   /// bulk action never reaches rows the listener can't see.
   void _setFilter(_RiverFilter filter) {
     setState(() => _filter = filter);
+    _bulk.removeAudio =
+        filter == _RiverFilter.onPhone ? _removeChosenAudio : null;
     _load();
   }
 
   RiverKind get _kind => switch (_filter) {
         _RiverFilter.all => RiverKind.all,
         _RiverFilter.text => RiverKind.text,
-        _RiverFilter.audio => RiverKind.audio,
+        _RiverFilter.audio || _RiverFilter.onPhone => RiverKind.audio,
       };
+
+  bool get _onPhone => _filter == _RiverFilter.onPhone;
+
+  /// The episodes whose audio is on this phone, biggest first, with what
+  /// each takes. Read from the disk, so it is the whole list at once.
+  Future<List<RiverEntry>> _loadOnPhone() async {
+    final services = _services;
+    if (services == null) return const [];
+    final found = await loadOnPhone(widget.db,
+        services: services, profileId: widget.profile.id);
+    _onPhoneBytes = {for (final e in found) e.entry.work.id: e.bytes};
+    return [for (final e in found) e.entry];
+  }
+
+  List<OnPhoneEntry> _onPhoneOf(Iterable<EpisodeEntry> chosen) => [
+        for (final e in _entries ?? const <RiverEntry>[])
+          if (chosen.any((c) => c.work.id == e.work.id))
+            (entry: e, bytes: _onPhoneBytes[e.work.id] ?? 0),
+      ];
+
+  /// Takes the audio off [chosen] after one confirm, keeps every other
+  /// part of each episode, and says what happened.
+  Future<void> _removeChosenAudio(
+      BuildContext context, List<EpisodeEntry> chosen) async {
+    final services = _services;
+    final entries = _onPhoneOf(chosen);
+    if (services == null || entries.isEmpty) return;
+    final messenger = ScaffoldMessenger.of(context);
+    // An episode playing, transcribing or processing keeps its audio: it is
+    // said so now, and its space is not promised in the confirm.
+    final busy = await _actions.busyWorkIds();
+    final free = [
+      for (final e in entries)
+        if (!busy.contains(e.entry.work.id)) e,
+    ];
+    if (free.isEmpty) {
+      messenger
+        ..clearSnackBars()
+        ..showSnackBar(SnackBar(
+            key: const Key('on-phone-kept'),
+            persist: false,
+            content: Text(entries.length == 1
+                ? 'This episode is playing, being transcribed or processed, '
+                    'so it keeps its audio for now.'
+                : 'These episodes are playing, being transcribed or '
+                    'processed, so they keep their audio for now.')));
+      return;
+    }
+    if (!context.mounted) return;
+    if (!await confirmRemoveAudio(context, free,
+        kept: entries.length - free.length)) {
+      return;
+    }
+    final message = await removeOnPhoneAudio(entries,
+        db: widget.db, services: services, actions: _actions);
+    _selection.exit();
+    await _load();
+    messenger
+      ..clearSnackBars()
+      ..showSnackBar(SnackBar(
+          key: const Key('on-phone-removed'),
+          persist: false,
+          content: Text(message)));
+  }
 
   /// Whether "Mark everything older as played" has anything to reach.
   /// Older means published strictly earlier: the podcast page's rule, so
@@ -303,15 +392,16 @@ class _RiverScreenState extends State<RiverScreen>
   /// a refresh brings new items.
   Future<void> _load() async {
     final generation = ++_generation;
-    final entries = await widget.db.feedsDao
-        .riverItems(widget.profile.id, kind: _kind);
+    final entries = _onPhone
+        ? await _loadOnPhone()
+        : await widget.db.feedsDao.riverItems(widget.profile.id, kind: _kind);
     final rowState = await WorkListState.load(widget.db, widget.profile.id,
         entries: _entriesOf(entries));
     if (!mounted || generation != _generation) return;
     _actions.forgetArtwork();
     setState(() {
       _entries = entries;
-      _hasMore = entries.length == riverPageSize;
+      _hasMore = !_onPhone && entries.length == riverPageSize;
       _moreFailed = false;
       _rowState = rowState;
     });
@@ -323,7 +413,7 @@ class _RiverScreenState extends State<RiverScreen>
   /// its place.
   Future<void> _reloadLoaded() async {
     final loaded = _entries;
-    if (loaded == null || loaded.isEmpty) return _load();
+    if (loaded == null || loaded.isEmpty || _onPhone) return _load();
     final generation = ++_generation;
     final entries = await widget.db.feedsDao.riverItems(widget.profile.id,
         kind: _kind, through: _cursorOf(loaded.last), limit: null);
@@ -388,6 +478,8 @@ class _RiverScreenState extends State<RiverScreen>
 
   /// Re-reads one row after an action on it, in place.
   Future<void> _patch(int workId) async {
+    // What is on the phone may have changed with any act on a row.
+    if (_onPhone) return _load();
     final entry = await widget.db.feedsDao.riverEntryOf(workId);
     final rowState = await WorkListState.load(widget.db, widget.profile.id,
         entries: [if (entry != null) (work: entry.work, episode: entry.episode)],
@@ -554,7 +646,6 @@ class _RiverScreenState extends State<RiverScreen>
   @override
   Widget build(BuildContext context) {
     final entries = _entries;
-    final theme = ThemePreferenceScope.maybeOf(context);
     return Scaffold(
       bottomSheet: OhUndoBar(controller: _undo),
       appBar: _selection.active ? _bulk.bar(context) : AppBar(
@@ -569,33 +660,27 @@ class _RiverScreenState extends State<RiverScreen>
               label: 'Subscriptions',
               onPressed: _manageFeeds,
             ),
-            OhBarOverflow<String>(
-              key: const Key('river-more'),
-              onSelected: (choice) => switch (choice) {
-                final v when isThemeMenuValue(v) =>
-                  chooseThemeFromMenu(theme!, v),
-                _ => _selection.enter(),
-              },
-              itemBuilder: (_) => [
-                if (_entries?.isNotEmpty ?? false)
-                  const PopupMenuItem(
+            // Latest's own: Select. App-wide things are in Settings
+            // (board-0131); with nothing to select there is no ⋮.
+            if (_entries?.isNotEmpty ?? false)
+              OhBarOverflow<String>(
+                key: const Key('river-more'),
+                onSelected: (_) => _selection.enter(),
+                itemBuilder: (_) => const [
+                  PopupMenuItem(
                     key: Key('river-select'),
                     value: 'select',
                     child: Text('Select'),
                   ),
-                // Jobs is app-wide, not Latest's: the strip above the
-                // tabs is its door while any job exists (1.5.8 ⋮ rule).
-                if (theme != null)
-                  ...themeMenuItems(theme,
-                      divided: _entries?.isNotEmpty ?? false),
-              ],
-            ),
+                ],
+              ),
           ]),
         ],
       ),
       body: CappedBody(child: _bulk.scope(child: switch (entries) {
         null => const Center(child: CircularProgressIndicator()),
-        [] => Column(
+        // An empty filter keeps its chips, so the way back is there.
+        [] when !_onPhone => Column(
           children: [
             SearchEntry(
                 key: const Key('river-search'), onPressed: _openSearch),
@@ -636,6 +721,7 @@ class _RiverScreenState extends State<RiverScreen>
                 coordinator: widget.coordinator,
                 onOpenJobs: widget.onOpenJobs),
         _filterChips(),
+        if (_onPhone) _onPhoneHeader(visible),
         Expanded(
           child: RefreshIndicator(
             onRefresh: _refresh,
@@ -667,6 +753,32 @@ class _RiverScreenState extends State<RiverScreen>
     );
   }
 
+  /// The total, and what removing audio keeps.
+  Widget _onPhoneHeader(List<RiverEntry> visible) {
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 4, 16, 4),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            onPhoneTotalLine([
+              for (final e in visible)
+                (entry: e, bytes: _onPhoneBytes[e.work.id] ?? 0),
+            ]),
+            key: const Key('on-phone-total'),
+            style: theme.textTheme.titleSmall,
+          ),
+          Text(
+            'Removing audio keeps the episode, its transcript, your place '
+            'and your study cards.',
+            style: theme.textTheme.bodySmall,
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _filterChips() {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
@@ -693,6 +805,19 @@ class _RiverScreenState extends State<RiverScreen>
             selected: _filter == _RiverFilter.audio,
             onSelected: (_) => _setFilter(_RiverFilter.audio),
           ),
+          if (_offersOnPhone) ...[
+            const SizedBox(width: 8),
+            Tooltip(
+              message: 'Only episodes whose audio is on this phone',
+              child: ChoiceChip(
+                key: const Key('chip-on-phone'),
+                avatar: const Icon(Icons.phone_android, size: 18),
+                label: const Text('On this phone'),
+                selected: _onPhone,
+                onSelected: (_) => _setFilter(_RiverFilter.onPhone),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -731,7 +856,19 @@ class _RiverScreenState extends State<RiverScreen>
         if (isAudio && widget.downloadCoordinator != null)
           _RowDownload(
               coordinator: widget.downloadCoordinator!, workId: e.work.id),
+        if (_onPhone)
+          Text('${formatBytes(_onPhoneBytes[e.work.id] ?? 0)} on this phone',
+              key: Key('on-phone-size-${e.work.id}'),
+              style: Theme.of(context).textTheme.bodySmall),
       ],
+      trailing: _onPhone
+          ? IconButton(
+              key: Key('on-phone-remove-${e.work.id}'),
+              tooltip: 'Remove this episode’s audio',
+              icon: const Icon(Icons.delete_outline),
+              onPressed: () => _removeChosenAudio(context, [entry]),
+            )
+          : null,
       // Every row gets the menu, audio or not: Keep and Let it pass live
       // there.
       onMenu: (choice) => switch (choice) {

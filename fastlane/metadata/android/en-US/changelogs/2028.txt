@@ -1,0 +1,1 @@
+Settings on the bottom bar, every app-wide setting in one place. "On this phone" shows the episodes whose audio is on your phone, with sizes, to free space. An episode page links its versions in other languages, and the one with audio plays.

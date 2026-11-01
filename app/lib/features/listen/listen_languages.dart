@@ -61,15 +61,20 @@ ListenLanguages sortListenLanguages({
 
 /// One or two plain sentences under the dialog's list, saying why the
 /// languages a listener may look for are missing; null when none is.
+/// [source] is the episode's language, or null when the list is for no
+/// one episode (the setting).
 String? listenMissingNote(ListenLanguages languages,
-    {required String source}) {
+    {required String? source}) {
   final sentences = [
     if (languages.noVoice.isNotEmpty)
       'There is no voice on this phone for ${_names(languages.noVoice)}: '
           'add one in Android’s Settings, under Text-to-speech output.',
     if (languages.noTranslator.isNotEmpty)
-      'Trellis has no translator from ${languageDisplayName(source)} into '
-          '${_names(languages.noTranslator)} yet.',
+      source == null
+          ? 'Trellis has no translator into '
+              '${_names(languages.noTranslator)} yet.'
+          : 'Trellis has no translator from ${languageDisplayName(source)} '
+              'into ${_names(languages.noTranslator)} yet.',
   ];
   return sentences.isEmpty ? null : sentences.join(' ');
 }

@@ -1,15 +1,10 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:openhearth_design/openhearth_design.dart';
 import 'package:study_core/study_core.dart' as study;
 
 import '../../db/database.dart';
-import '../brain/brain_settings_screen.dart';
-import '../brain/brain_store.dart';
 import '../intake/paste_intake.dart' show epochDayUtcNow;
-import '../settings/theme_preference.dart';
 import 'course_import.dart';
 import 'course_map_screen.dart';
 import 'daily_review_screen.dart';
@@ -24,30 +19,10 @@ class CoursesScreen extends StatefulWidget {
   final AppDatabase db;
   final Profile profile;
 
-  /// Campaign 4 Phase 5: opens Trellis Echo, the reader's own private
-  /// year-in-review — the tab offers the door, the shell owns the
-  /// navigation (the LibraryScreen `onOpenModels` pattern).
-  /// Never PIN-gated: that's ParentDashboardScreen's, a different
-  /// audience (a parent reviewing a household, not a reader reviewing
-  /// themselves).
-  final VoidCallback? onOpenEcho;
-
-  /// The Thinking door's store. Tests inject in-memory secrets; the app
-  /// default is the production wiring (secure storage + real Anthropic).
-  final BrainStore? brainStore;
-
-  /// Gates the local-model tier row on the Thinking screen. Defaults to
-  /// "not the web" — the same truth bootstrap_web encodes in
-  /// DeviceServices.localMlAvailable, which this tab cannot reach (the
-  /// shell passes the shell's services nowhere near here).
-  final bool? localMlAvailable;
   const CoursesScreen(
       {super.key,
       required this.db,
-      required this.profile,
-      this.onOpenEcho,
-      this.brainStore,
-      this.localMlAvailable});
+      required this.profile});
 
   @override
   State<CoursesScreen> createState() => _CoursesScreenState();
@@ -65,8 +40,6 @@ class _CoursesScreenState extends State<CoursesScreen> {
   /// the study crown's toggle. Loaded once per [_load]; grading itself
   /// reads it fresh from the database (study_session_screen.dart), so this
   /// field only drives the settings menu's own checkmark.
-  String _scheduler = 'fsrs';
-
   @override
   void initState() {
     super.initState();
@@ -86,12 +59,10 @@ class _CoursesScreenState extends State<CoursesScreen> {
     }
     final due = await widget.db.dailyReviewDao
         .dueCount(widget.profile.id, epochDayUtcNow());
-    final scheduler = await widget.db.profilesDao.scheduler(widget.profile.id);
     if (!mounted) return;
     setState(() {
       _entries = entries;
       _dailyReviewDue = due;
-      _scheduler = scheduler;
     });
   }
 
@@ -100,40 +71,6 @@ class _CoursesScreenState extends State<CoursesScreen> {
         builder: (_) =>
             DailyReviewScreen(db: widget.db, profileId: widget.profile.id)));
     await _load(); // the due count moved
-  }
-
-  /// The study crown's toggle (ADR-0009). Switching to FSRS explains, once,
-  /// what FSRS is and that progress carries over; the screen is where the
-  /// jargon gets its one-line explanation. Switching to Classic flips with
-  /// no dialog, matching the reader's settings-escape idiom (ADR-0006's
-  /// `_toggleVoicePreference`).
-  Future<void> _toggleScheduler() async {
-    final next = _scheduler == 'fsrs' ? 'classic' : 'fsrs';
-    if (next == 'fsrs') {
-      final confirmed = await showDialog<bool>(
-        context: context,
-        builder: (dialog) => AlertDialog(
-          title: const Text('Use FSRS for grading?'),
-          content: const Text(
-              'Classic is SM-2, the long-standing spaced-repetition schedule. '
-              'FSRS learns each card’s own difficulty and memory curve to '
-              'schedule reviews more precisely than Classic’s fixed steps. '
-              'Your progress carries over when you switch, either way.'),
-          actions: [
-            TextButton(
-                onPressed: () => Navigator.pop(dialog, false),
-                child: const Text('Not now')),
-            FilledButton(
-                onPressed: () => Navigator.pop(dialog, true),
-                child: const Text('Use FSRS')),
-          ],
-        ),
-      );
-      if (confirmed != true) return;
-    }
-    await widget.db.profilesDao.setScheduler(widget.profile.id, next);
-    if (!mounted) return;
-    setState(() => _scheduler = next);
   }
 
   Future<void> _paste() async {
@@ -199,16 +136,6 @@ class _CoursesScreenState extends State<CoursesScreen> {
     );
   }
 
-  /// The Thinking door (proposal-2 §7): brain tier + BYOK key settings.
-  void _openThinking() {
-    Navigator.of(context).push(MaterialPageRoute<void>(
-      builder: (_) => BrainSettingsScreen(
-        store: widget.brainStore ?? BrainStore.production(),
-        localMlAvailable: widget.localMlAvailable ?? !kIsWeb,
-      ),
-    ));
-  }
-
   Future<void> _open(_Entry e) async {
     await Navigator.of(context).push(MaterialPageRoute<void>(
       builder: (_) => CourseMapScreen(
@@ -220,49 +147,11 @@ class _CoursesScreenState extends State<CoursesScreen> {
   @override
   Widget build(BuildContext context) {
     final entries = _entries;
-    final theme = ThemePreferenceScope.maybeOf(context);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Courses'),
-        // Icon + word for what matters here; rarer doors in a worded menu
-        // (fleet ruling on top bars; audit rank 3).
-        actions: [
-          OhBarActions(children: [
-            OhBarOverflow<String>(
-              key: const Key('study-settings'),
-              onSelected: (value) {
-                if (value == 'scheduler') unawaited(_toggleScheduler());
-                if (value == 'thinking') _openThinking();
-                if (value == 'echo') widget.onOpenEcho?.call();
-                if (isThemeMenuValue(value) && theme != null) {
-                  unawaited(chooseThemeFromMenu(theme, value));
-                }
-              },
-              itemBuilder: (_) => [
-                const PopupMenuItem<String>(
-                  key: Key('open-thinking'),
-                  value: 'thinking',
-                  child: Text('Thinking (AI helper)'),
-                ),
-                if (widget.onOpenEcho != null)
-                  const PopupMenuItem<String>(
-                    key: Key('open-echo'),
-                    value: 'echo',
-                    child: Text("What you’ve built"),
-                  ),
-                CheckedPopupMenuItem<String>(
-                  key: const Key('scheduler-toggle'),
-                  value: 'scheduler',
-                  checked: _scheduler == 'fsrs',
-                  child: const Text(
-                      'FSRS scheduling: learns each card’s memory curve. '
-                      'Off uses Classic (SM-2) fixed steps.'),
-                ),
-                if (theme != null) ...themeMenuItems(theme),
-              ],
-            ),
-          ]),
-        ],
+        // No ⋮: Thinking, What you’ve built and FSRS are app-wide and
+        // live in Settings (board-0131).
       ),
       floatingActionButton: (entries == null || entries.isEmpty)
           ? null

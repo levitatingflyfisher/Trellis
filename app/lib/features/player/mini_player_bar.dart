@@ -52,10 +52,6 @@ class MiniPlayerBar extends StatefulWidget {
   /// promise-never-dangled law [onOpenSyncedText] follows.
   final VoidCallback? onOpenChapters;
 
-  /// Opens the Headphone buttons sheet (1.6.0); the shell wires it. Null
-  /// where there is no media session for a headset to drive.
-  final VoidCallback? onOpenHeadsetKeys;
-
   const MiniPlayerBar(
       {super.key,
       required this.controller,
@@ -65,8 +61,7 @@ class MiniPlayerBar extends StatefulWidget {
       this.onCapture,
       this.onOpenCaptures,
       this.onOpenQueue,
-      this.onOpenChapters,
-      this.onOpenHeadsetKeys});
+      this.onOpenChapters});
 
   @override
   State<MiniPlayerBar> createState() => _MiniPlayerBarState();
@@ -435,9 +430,6 @@ class _MiniPlayerBarState extends State<MiniPlayerBar> {
               ? Icons.bedtime_outlined
               : Icons.bedtime,
           controller.sleepTimerMode == null ? 'Sleep timer' : 'Sleep timer (on)'),
-      if (widget.onOpenHeadsetKeys != null)
-        item(_BarAction.headsetKeys, 'open-headset-keys',
-            Icons.headphones_outlined, 'Headphone buttons'),
     ];
   }
 
@@ -475,8 +467,6 @@ class _MiniPlayerBarState extends State<MiniPlayerBar> {
         onOpenChapters?.call();
       case _BarAction.queue:
         onOpenQueue?.call();
-      case _BarAction.headsetKeys:
-        widget.onOpenHeadsetKeys?.call();
       case _BarAction.fwd30:
         await controller.seekBy(const Duration(seconds: 30));
       case _BarAction.sleep:
@@ -498,7 +488,6 @@ enum _BarAction {
   queue,
   fwd30,
   sleep,
-  headsetKeys,
 }
 
 /// The show's art, or, when none is on disk, a glyph for what is playing:

@@ -4,7 +4,6 @@ import 'package:openhearth_design/openhearth_design.dart';
 import '../../db/database.dart';
 import '../episodes/episode_actions.dart';
 import '../reader/reader_doors.dart';
-import '../settings/theme_preference.dart';
 import '../shared/capped_body.dart';
 import '../works/work_menu.dart';
 import '../works/work_open.dart';
@@ -145,7 +144,6 @@ class _QueueScreenState extends State<QueueScreen> {
   @override
   Widget build(BuildContext context) {
     final entries = _entries;
-    final theme = ThemePreferenceScope.maybeOf(context);
     return Scaffold(
       appBar: AppBar(
         title: const Text('Queue'),
@@ -162,13 +160,6 @@ class _QueueScreenState extends State<QueueScreen> {
                   // Playing from History may have moved the queue.
                   await _load();
                 },
-              ),
-            // A tab like the others, so the theme is in its menu too.
-            if (theme != null)
-              OhBarOverflow<String>(
-                key: const Key('queue-more'),
-                onSelected: (v) => chooseThemeFromMenu(theme, v),
-                itemBuilder: (_) => themeMenuItems(theme, divided: false),
               ),
           ]),
         ],

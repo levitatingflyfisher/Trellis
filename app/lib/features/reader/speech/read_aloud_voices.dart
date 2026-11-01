@@ -240,8 +240,8 @@ class _ReadAloudVoicesSheetState extends State<ReadAloudVoicesSheet> {
                 key: Key('voices-system-voice-on'),
                 padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
                 child: Text('“Use the system voice” is on, so the '
-                    'downloaded voice is set aside. Turn it off in the menu '
-                    'to choose the downloaded voice.'),
+                    'downloaded voice is set aside. Turn it off in Reading '
+                    'settings to choose the downloaded voice.'),
               ),
             if (widget.langs.isEmpty)
               const Padding(

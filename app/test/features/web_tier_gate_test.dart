@@ -106,11 +106,7 @@ void main() {
       (t) async {
     await seedEpisode();
     await pumpApp(t, localMlAvailable: false);
-    await toTab(t, 'Library');
-    await t.tap(find.byKey(const Key('library-more')));
-    await t.pumpAndSettle();
-    await t.tap(find.byKey(const Key('open-models')));
-    await t.pumpAndSettle();
+    await openSetting(t, const Key('open-models'));
 
     expect(find.byKey(const Key('web-tier-notice')), findsOneWidget);
     expect(find.byType(ModelsScreen), findsNothing);
@@ -122,8 +118,8 @@ void main() {
       (t) async {
     await seedEpisode();
     await pumpApp(t, localMlAvailable: true);
-    await toTab(t, 'Library');
-    await t.tap(find.byKey(const Key('library-more')));
+    await toTab(t, 'Settings');
+    await t.ensureVisible(find.byKey(const Key('open-models')));
     await t.pumpAndSettle();
     expect(
         find.descendant(

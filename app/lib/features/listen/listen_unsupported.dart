@@ -32,6 +32,7 @@ class ListenOffer {
 /// Never made on the web: nothing there can be made, so no row and no
 /// page is ever offered a button.
 class ListenJobs extends ChangeNotifier {
+  Future<void> get ready => Future.value();
   String? get language => null;
   Future<void> refresh() async {}
   Future<void> refreshVoices() async {}
@@ -40,9 +41,14 @@ class ListenJobs extends ChangeNotifier {
   ListenOffer? offerFor(Work work, Episode? episode, {String? feedLang}) =>
       null;
   Future<String?> pickLanguage(BuildContext context, List<String> languages,
-          {({String? workLang, String? feedLang})? of}) async =>
+          {({String? workLang, String? feedLang})? of,
+          bool anyEpisode = false}) async =>
       null;
+  Future<String?> chooseLearningLanguage(BuildContext context) async => null;
   Future<void> tap(BuildContext context, Work work, Episode episode,
+      {String? feedLang}) async {}
+  Future<void> makeIn(
+      BuildContext context, Work work, Episode episode, String lang,
       {String? feedLang}) async {}
   void stop(int workId) {}
   Future<void> makeAheadPass() async {}

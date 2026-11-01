@@ -44,12 +44,13 @@ import '../player/queue_screen.dart';
 import '../reader/reader_doors.dart';
 import '../river/river_screen.dart';
 import '../search/search_screen.dart';
+import '../settings/settings_screen.dart';
 import '../study/courses_screen.dart';
 import '../transcribe/transcribe_coordinator.dart';
 import '../works/work_open.dart';
 
-/// One reader's shell: Latest, Queue, Library and Courses tabs over a single
-/// persistent mini-player bar. The player, the feeds repository and the
+/// One reader's shell: Latest, Queue, Library, Courses and Settings tabs
+/// over a single persistent mini-player bar. The player, the feeds repository and the
 /// transcription coordinator live here so playback and running jobs
 /// survive tab switches — and reopening the app finds its resumable job
 /// cards (the coordinator restores them from the jobs table on init).
@@ -105,6 +106,11 @@ class HomeShell extends StatefulWidget {
 class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   static const _queueTab = 1;
   static const _libraryTab = 2;
+  static const _coursesTab = 3;
+
+  /// Settings, always on the bottom bar (board-0132): every app-wide
+  /// setting and door is there, and none hides in a tab's ⋮.
+  static const _tabCount = 5;
 
   /// Latest first, and where a reader lands: what arrived is the usual
   /// reason to open a podcast app.
@@ -115,9 +121,10 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   /// it, under the same top and bottom bars, and each tab keeps its own
   /// pages while another is in view. Only the reader takes the whole
   /// screen, on the app's Navigator.
-  final _tabNavigators = List.generate(4, (_) => GlobalKey<NavigatorState>());
+  final _tabNavigators =
+      List.generate(_tabCount, (_) => GlobalKey<NavigatorState>());
   late final _tabRoutes =
-      List.generate(4, (_) => _TabRoutes()..addListener(_onTabRoutesChanged));
+      List.generate(_tabCount, (_) => _TabRoutes()..addListener(_onTabRoutesChanged));
 
   /// Tabs are built on first visit and then kept, so their pages survive
   /// a trip elsewhere; launch still builds only Latest.
@@ -126,7 +133,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   /// Bumped when a tab other than Latest is revisited at its root, so its
   /// screen reads its data again, as it did when tabs were built per
   /// visit (a Keep in Latest, a Library removal show at once).
-  final List<int> _tabEpochs = [0, 0, 0, 0];
+  final List<int> _tabEpochs = List.filled(_tabCount, 0);
 
   // canPop below changes as pages come and go.
   void _onTabRoutesChanged() {
@@ -608,12 +615,11 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         onOpenCaptures: _openCaptures,
         onOpenQueue: _openQueue,
         onOpenChapters: _openChapters,
-        // A browser tab has no media session for a headset to drive.
-        onOpenHeadsetKeys: kIsWeb ? null : _openHeadsetKeys,
       );
 
   /// What the headset's Next and Previous buttons do (1.6.0): the
-  /// device's settings, in a sheet over whatever page is up.
+  /// device's settings, in a sheet, opened from Settings (board-0131; it
+  /// sat in the player bar's ⋮ before).
   void _openHeadsetKeys() {
     unawaited(showModalBottomSheet<void>(
       context: context,
@@ -657,13 +663,25 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
             db: widget.db,
             profileId: widget.profile.id,
             actions: _episodeActions,
+            onShowEpisodesOnPhone: _showEpisodesOnPhone,
           )
         : const WebTierModelsNotice();
     unawaited(_pushPage<void>(screen));
   }
 
-  /// Backup & migrate, offered from the Library ⋮ (the _openModels
-  /// pattern). A restore is full-replace, so the profile this shell holds
+  /// Asked by Models & storage: Latest, with its On this phone chip on.
+  /// The page that asked closes, so Back does not return to it on a tab
+  /// that is no longer in view.
+  int _onPhoneAsks = 0;
+
+  void _showEpisodesOnPhone() {
+    _popTabToRoot(_tab);
+    if (_tab != 0) _goToTab(0);
+    _popTabToRoot(0);
+    setState(() => _onPhoneAsks++);
+  }
+
+  /// Backup & migrate, offered from Settings and the setup reminder. A restore is full-replace, so the profile this shell holds
   /// may not exist afterwards — the screen pops `true` and we walk back to
   /// the profile picker rather than sit on a dangling id.
   Future<void> _openBackup() async {
@@ -894,6 +912,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         0 => RiverScreen(
             active: _tab == 0,
             changes: _latestChanges,
+            onPhoneAsks: _onPhoneAsks,
             onOpenWork: (id) => unawaited(_refetchOnOpen(id)),
             feedCheck: _feedCheckOffered,
             db: widget.db,
@@ -920,9 +939,6 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         _libraryTab => LibraryScreen(
             db: widget.db,
             profile: widget.profile,
-            onSwitchProfile: widget.onSwitchProfile,
-            onOpenModels: _openModels,
-            onOpenBackup: _openBackup,
             onSubscribe: _subscribe,
             onOpenSubscriptions: _openSubscriptions,
             fetcher: widget.fetcher,
@@ -939,11 +955,28 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
             onDeleteAudiobookFiles: widget.services.localMlAvailable
                 ? _deleteAudiobookFiles
                 : null),
-        _ => CoursesScreen(
+        _coursesTab =>
+          CoursesScreen(db: widget.db, profile: widget.profile),
+        _ => SettingsScreen(
             db: widget.db,
             profile: widget.profile,
-            onOpenEcho: _openEcho,
+            onSwitchProfile: widget.onSwitchProfile,
+            actions: _episodeActions,
+            feedCheck: _feedCheckOffered,
             localMlAvailable: widget.services.localMlAvailable,
+            hasDownloadedVoice: widget.services.localMlAvailable
+                ? () async =>
+                    await widget.services.resolveSpeechEngine() != null
+                : null,
+            listVoices: widget.services.localMlAvailable
+                ? widget.services.tts.voices
+                : null,
+            onOpenModels: _openModels,
+            onOpenBackup: _openBackup,
+            onOpenJobs: _openJobs,
+            onOpenEcho: _openEcho,
+            // A browser tab has no media session for a headset to drive.
+            onOpenHeadsetKeys: kIsWeb ? null : _openHeadsetKeys,
           ),
       };
 
@@ -969,7 +1002,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
     return Scaffold(
       // System back closes the page in view in the tab in view; at that
       // tab's root it leaves the app as before. One handler for all tabs,
-      // since all four share this route: a hidden tab's pages are left be.
+      // since all five share this route: a hidden tab's pages are left be.
       body: PopScope(
         canPop: !_tabCanPop,
         onPopInvokedWithResult: (didPop, _) {
@@ -977,7 +1010,7 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
         },
         child: IndexedStack(
           index: _tab,
-          children: [for (var i = 0; i < 4; i++) _tabStack(i)],
+          children: [for (var i = 0; i < _tabCount; i++) _tabStack(i)],
         ),
       ),
       bottomNavigationBar: Column(
@@ -998,7 +1031,14 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
             )
           else
             _miniPlayerBar(),
-          NavigationBar(
+          // Five plain labels, always (owner: plain labels, never icons
+          // alone). The bar draws its labels at up to 1.3x; at 320 dp that
+          // leaves 64 dp for "Settings", which needs 65 with the theme's
+          // 0.2 letter spacing and 63 with none. So the bar's labels set
+          // none, and every label stays whole on one line.
+          Theme(
+            data: _barTheme(Theme.of(context)),
+            child: NavigationBar(
             selectedIndex: _tab,
             onDestinationSelected: _selectTab,
             destinations: const [
@@ -1028,13 +1068,25 @@ class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
                 selectedIcon: Icon(Icons.school),
                 label: 'Courses',
               ),
+              NavigationDestination(
+                icon: Icon(Icons.settings_outlined),
+                selectedIcon: Icon(Icons.settings),
+                label: 'Settings',
+              ),
             ],
+          ),
           ),
         ],
       ),
     );
   }
 }
+
+/// The bottom bar's theme: its labels without letter spacing, so all
+/// five fit whole at 320 dp and the bar's 1.3x text cap.
+ThemeData _barTheme(ThemeData theme) => theme.copyWith(
+    textTheme: theme.textTheme.copyWith(
+        labelMedium: theme.textTheme.labelMedium?.copyWith(letterSpacing: 0)));
 
 /// Tells the shell when a tab's pages change, so system back knows
 /// whether the tab in view has a page to close.

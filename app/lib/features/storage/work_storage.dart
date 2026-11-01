@@ -370,6 +370,24 @@ String deleteFailedMessage(Object error) {
   return 'Kept: it couldn’t be deleted, so nothing changed.';
 }
 
+/// Each work's downloaded audio on this device, by work id: the bytes
+/// of its complete files, a partial download left out. One look at the
+/// folder for every episode.
+Map<int, int> audioOnDisk(DeviceServices services) {
+  final out = <int, int>{};
+  _scan(services.audioFileFor(0, '').parent, (id, name, bytes) {
+    if (name.endsWith('.part') || name.endsWith('.validator')) return;
+    out[id] = (out[id] ?? 0) + bytes;
+  });
+  return out;
+}
+
+/// Deletes work [id]'s complete audio files, whatever address they were
+/// fetched under; returns how many. The caller has made sure nothing is
+/// using them.
+int deleteAudioFilesOf(DeviceServices services, int id) =>
+    _deleteNamed(services.audioFileFor(0, '').parent, id);
+
 /// Deletes [id]'s complete files in [dir]; returns how many.
 int _deleteNamed(Directory dir, int id) {
   if (!dir.existsSync()) return 0;

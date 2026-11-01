@@ -47,11 +47,12 @@ void main() {
     await pumpApp(tester);
     await toTab(tester, 'Library');
     expect(find.text('Who’s reading?'), findsNothing);
-    await tester.tap(find.byKey(const Key('library-more')));
-    await tester.pumpAndSettle();
-    expect(find.text('Switch reader (Blaise)'), findsOneWidget);
-    await tester.tapAt(const Offset(5, 5));
-    await tester.pumpAndSettle();
+    await toTab(tester, 'Settings');
+    expect(
+        find.descendant(
+            of: find.byKey(const Key('profile-switcher')),
+            matching: find.text('Blaise')),
+        findsOneWidget);
 
     // Blaise removed elsewhere (or a restore replaced everyone): the
     // remembered id is stale, and two readers remain a real choice.
@@ -235,10 +236,7 @@ void main() {
     await toTab(tester, 'Library');
     expect(find.text('Nothing on the trellis yet.'), findsOneWidget);
 
-    await tester.tap(find.byKey(const Key('library-more')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('profile-switcher')));
-    await tester.pumpAndSettle();
+    await openSetting(tester, const Key('profile-switcher'));
     expect(find.text('Who’s reading?'), findsOneWidget);
     expect(find.text('Ada'), findsOneWidget);
   });

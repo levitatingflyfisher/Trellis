@@ -12,3 +12,13 @@ Future<void> toTab(WidgetTester tester, String label) async {
   await tester.tap(tabLabel(label));
   await tester.pumpAndSettle();
 }
+
+/// Opens Settings and taps its row [key]: every app-wide setting and door
+/// lives there (board-0131), none in a tab's ⋮.
+Future<void> openSetting(WidgetTester tester, Key key) async {
+  await toTab(tester, 'Settings');
+  await tester.ensureVisible(find.byKey(key));
+  await tester.pumpAndSettle();
+  await tester.tap(find.byKey(key));
+  await tester.pumpAndSettle();
+}

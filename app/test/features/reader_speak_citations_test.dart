@@ -80,15 +80,26 @@ void main() {
     expect(find.textContaining('[12]', findRichText: true), findsWidgets);
   });
 
-  testWidgets('“Read citations aloud” in the menu turns them back on, and '
-      'is remembered', (tester) async {
-    await pumpReader(tester);
+  Future<void> openReadingSettings(WidgetTester tester) async {
     await tester.tap(find.byKey(const Key('reader-overflow')));
     await tester.pumpAndSettle();
-    final item = find.byKey(const Key('speak-citations-toggle'));
+    await tester.tap(find.byKey(const Key('reading-settings')));
+    await tester.pumpAndSettle();
+  }
+
+  bool switchOn(WidgetTester tester) => tester
+      .widget<SwitchListTile>(find.byKey(const Key('speak-citations-toggle')))
+      .value;
+
+  testWidgets('“Read citations aloud” in Reading settings turns them back '
+      'on for this reader at once, and is remembered', (tester) async {
+    await pumpReader(tester);
+    await openReadingSettings(tester);
     expect(find.text('Read citations aloud'), findsOneWidget);
-    expect(tester.widget<CheckedPopupMenuItem<String>>(item).checked, isFalse);
-    await tester.tap(item);
+    expect(switchOn(tester), isFalse);
+    await tester.tap(find.byKey(const Key('speak-citations-toggle')));
+    await tester.pumpAndSettle();
+    await tester.pageBack();
     await tester.pumpAndSettle();
 
     expect(await db.deviceSettingsDao.read(speakCitationsKey), 'on');
@@ -99,13 +110,7 @@ void main() {
     // A reader opened afresh starts with it on.
     await tester.pumpWidget(const SizedBox());
     await pumpReader(tester);
-    await tester.tap(find.byKey(const Key('reader-overflow')));
-    await tester.pumpAndSettle();
-    expect(
-        tester
-            .widget<CheckedPopupMenuItem<String>>(
-                find.byKey(const Key('speak-citations-toggle')))
-            .checked,
-        isTrue);
+    await openReadingSettings(tester);
+    expect(switchOn(tester), isTrue);
   });
 }

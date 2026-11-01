@@ -1382,6 +1382,18 @@ class ProfilesDao extends DatabaseAccessor<AppDatabase>
 class SpineDao extends DatabaseAccessor<AppDatabase> with _$SpineDaoMixin {
   SpineDao(super.db);
 
+  /// Every language a work of [profileId]'s, or a show it follows, names:
+  /// the languages Settings offers a read-aloud voice for.
+  Future<Set<String>> langsInUse(int profileId) async {
+    final rows = await customSelect(
+      'SELECT lang AS l FROM works WHERE profile_id = ?1 AND lang IS NOT NULL '
+      'UNION SELECT language AS l FROM feeds '
+      'WHERE profile_id = ?1 AND language IS NOT NULL',
+      variables: [Variable.withInt(profileId)],
+    ).get();
+    return {for (final r in rows) r.read<String>('l')};
+  }
+
   Future<int> insertWork({
     required int profileId,
     required String kind,
