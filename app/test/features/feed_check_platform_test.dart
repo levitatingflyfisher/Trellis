@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/features/feeds/background/feed_check_platform_io.dart';
 import 'package:trellis/features/feeds/background/feed_check_settings.dart';
@@ -66,6 +67,44 @@ void main() {
         expect(src, contains('args["$k"]'), reason: k);
       }
       expect(src, contains('"update"'));
+    });
+
+    test('answers whether the network is metered from the connectivity '
+        'service (1.6.0)', () {
+      final src = scheduler.readAsStringSync();
+      expect(src, contains('"isMetered"'));
+      expect(src, contains('isActiveNetworkMetered'));
+    });
+  });
+
+  group('whether the network is metered (1.6.0)', () {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    const channel = MethodChannel('com.openhearth.trellis/feed_check');
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    tearDown(() => messenger.setMockMethodCallHandler(channel, null));
+
+    test('asks Android, and says what it says', () async {
+      messenger.setMockMethodCallHandler(channel, (call) async {
+        expect(call.method, 'isMetered');
+        return true;
+      });
+      expect(await const ChannelFeedCheckScheduler().isMetered(), isTrue);
+
+      messenger.setMockMethodCallHandler(channel, (_) async => false);
+      expect(await const ChannelFeedCheckScheduler().isMetered(), isFalse);
+    });
+
+    test('when Android cannot say, the network counts as metered: a '
+        'download told to wait for Wi-Fi is not started on a guess',
+        () async {
+      messenger.setMockMethodCallHandler(
+          channel, (_) async => throw PlatformException(code: 'unavailable'));
+      expect(await const ChannelFeedCheckScheduler().isMetered(), isTrue);
+    });
+
+    test('where it cannot be known at all, nothing is made to wait', () async {
+      expect(await const UnknownNetworkMeter().isMetered(), isFalse);
     });
   });
 }

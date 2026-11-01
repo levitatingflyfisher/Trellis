@@ -20,7 +20,9 @@ import '../intake/paste_intake.dart' show epochDayUtcNow;
 import '../models/consent.dart';
 import '../models/format.dart';
 import '../models/model_store.dart';
+import '../player/media_item_mapping.dart';
 import '../player/mini_player_host.dart';
+import '../player/playback_session.dart';
 import '../player/player_controller.dart';
 import '../transcribe/transcript_writer.dart' show decodeWordTimingBlob;
 import 'dictionary_sheet.dart';
@@ -37,6 +39,7 @@ import 'speech/speech_audio_queue.dart';
 import 'speech/speech_engine.dart';
 import 'speech/speech_playback_pipeline.dart';
 import 'speech/speech_temp_files.dart';
+import 'speech/spoken_text.dart';
 import 'speech/read_aloud_voices.dart';
 import 'translation/language_names.dart';
 import 'translation/sentence_units.dart';
@@ -199,6 +202,15 @@ class ReaderScreen extends StatefulWidget {
   /// episode's Read and from the player.
   final bool openOnPage;
 
+  /// The media session read aloud takes while it reads (1.6.0, user: "it
+  /// stops when the screen goes dark, I would like it treated just like
+  /// media/podcast playing"): the session brings the playback service,
+  /// the notification and the lock-screen buttons, and with it read aloud
+  /// goes on behind the screen. With none (the web build, tests that
+  /// don't ask) read aloud stops when the app leaves the screen, as it
+  /// always did, since nothing would keep it alive there.
+  final PlaybackSession session;
+
   const ReaderScreen(
       {super.key,
       required this.db,
@@ -219,7 +231,8 @@ class ReaderScreen extends StatefulWidget {
       this.speakTranslation = false,
       this.layerLang,
       this.openTranslatePicker = false,
-      this.openOnPage = false});
+      this.openOnPage = false,
+      this.session = const NoPlaybackSession()});
 
   @override
   State<ReaderScreen> createState() => _ReaderScreenState();
@@ -330,6 +343,11 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// [_load]; true pins this profile to the system voice on purpose even
   /// when a neural voice is on-device.
   bool _preferSystemVoice = false;
+
+  /// Whether read aloud says citations, footnote marks and bare links
+  /// (1.6.0). Off until chosen: the voice skips them and the page keeps
+  /// them ([spokenText]). A device setting, read in [_load].
+  bool _speakCitations = false;
 
   SpeechAudioQueue? _queueHolder;
   SpeechAudioQueue get _queue => _queueHolder ??= _openSpeechQueue();
@@ -590,6 +608,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     // needs stopping (fake-async law 1: fire-and-forget, never await here).
     _speakGen++;
     _speaking = false;
+    _sessionGone();
     final tts = _ttsHolder;
     if (tts != null) unawaited(tts.stop().catchError((_) {}));
     // The synthesis-path trio, torn down in the same fire-and-forget spirit
@@ -618,7 +637,17 @@ class _ReaderScreenState extends State<ReaderScreen>
         state == AppLifecycleState.hidden ||
         state == AppLifecycleState.paused) {
       _pause();
-      unawaited(_stopSpeak());
+      if (_speaking && _inSession) {
+        // In the media session read aloud goes on behind the screen
+        // (1.6.0, user: "it stops when the screen goes dark"). Nobody
+        // watches the sweep there: the cursor rests at the sentence's
+        // start, where a stop would leave it.
+        final sentenceStart = _sweepStart;
+        _stopSweep();
+        if (sentenceStart != null) setState(() => _wordIdx = sentenceStart);
+      } else {
+        unawaited(_stopSpeak());
+      }
       unawaited(_savePosition().catchError((_) {}));
     }
     // The per-frame poll is for eyes on the page: off-screen the podcast
@@ -685,6 +714,8 @@ class _ReaderScreenState extends State<ReaderScreen>
     // first use, ADR-0007).
     final preferSystemVoice =
         await widget.db.profilesDao.preferSystemVoice(widget.profileId);
+    final speakCitations =
+        await widget.db.deviceSettingsDao.read(speakCitationsKey) == 'on';
     final resolver = widget.resolveSpeechEngine;
     final synthEngine =
         resolver == null ? null : await resolver(lang: workLang);
@@ -746,6 +777,7 @@ class _ReaderScreenState extends State<ReaderScreen>
           saved?.updatedAtMs ?? DateTime.now().millisecondsSinceEpoch;
       _scrollAnchor = doc.words.isEmpty ? 0 : cursorAt(doc, wordIdx).segment;
       _preferSystemVoice = preferSystemVoice;
+      _speakCitations = speakCitations;
       _synthEngineHolder = synthEngine;
       _hasAlignedAudio = hasAlignedAudio;
       _workLang = workLang;
@@ -1133,6 +1165,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     if (_pauseAudioThen(_startSpeak, anyWork: true)) return;
     _pause();
     setState(() => _speaking = true);
+    _sessionPlaying();
     if (widget.offerNeuralVoice && !_offeredNeuralVoice) {
       _offeredNeuralVoice = true;
       ScaffoldMessenger.of(context)
@@ -1153,6 +1186,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       _speaking = false;
       if (sentenceStart != null) _wordIdx = sentenceStart;
     });
+    _sessionPaused();
     await _tts.stop();
     // Only touch the pipeline if speech ever actually created one — never
     // spin up the queue's platform player just to stop it.
@@ -1191,7 +1225,13 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// (`core.splitSentences` over [_original]), the numbering the stored
   /// translations were written under. Sentinel blocks (code/table/
   /// figure) and blank ones say nothing.
+  ///
+  /// Unless the listener turned them back on, citations, footnote marks
+  /// and bare links are left out of what is said ([spokenText]), and a
+  /// sentence that was nothing else is not said at all. The sweep still
+  /// runs over the words the page shows.
   List<_SpeechUnit> _blockUnits(int seg) {
+    String say(String text) => _speakCitations ? text : spokenText(text);
     final blocks = _blocks!;
     final block = blocks[seg];
     final speakable = block.kind == core.SegmentKind.prose ||
@@ -1216,11 +1256,13 @@ class _ReaderScreenState extends State<ReaderScreen>
       for (var i = 0; i < sentences.length; i++) {
         if (sentences[i].text.trim().isEmpty) continue;
         final translated = translationOf(original, sentences, i);
+        final said = say(translated ?? sentences[i].text);
+        if (said.isEmpty) continue;
         units.add(_SpeechUnit(
             seg: seg,
             from: i < starts.length ? starts[i] : 0,
             to: i + 1 < starts.length ? starts[i + 1] : null,
-            text: translated ?? sentences[i].text,
+            text: said,
             lang: translated != null ? target : source));
       }
       return units;
@@ -1232,16 +1274,20 @@ class _ReaderScreenState extends State<ReaderScreen>
       if (sentences[i].text.trim().isEmpty) continue;
       final from = sentences[i].firstWordIdx;
       final to = i + 1 < sentences.length ? sentences[i + 1].firstWordIdx : null;
-      units.add(_SpeechUnit(
-          seg: seg, from: from, to: to, text: sentences[i].text, lang: source));
+      final said = say(sentences[i].text);
+      if (said.isNotEmpty) {
+        units.add(_SpeechUnit(
+            seg: seg, from: from, to: to, text: said, lang: source));
+      }
       final translated =
           alsoTranslation ? translationOf(block, sentences, i) : null;
-      if (translated != null) {
+      final saidTranslated = translated == null ? '' : say(translated);
+      if (saidTranslated.isNotEmpty) {
         units.add(_SpeechUnit(
             seg: seg,
             from: from,
             to: to,
-            text: translated,
+            text: saidTranslated,
             lang: target,
             sweep: false));
       }
@@ -1295,6 +1341,7 @@ class _ReaderScreenState extends State<ReaderScreen>
     }
     if (plan.missing.isNotEmpty) {
       setState(() => _speaking = false);
+      _sessionGone();
       // The translation's language first: the one most likely missing,
       // and the one the listener is asking for. Under Both the original
       // can still be heard alone, and the message says how.
@@ -1494,6 +1541,9 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// Sweeps the cursor over words [from, to) — see [_sweep].
   void _sweepSentence(core.TokenizedDocument doc, int from, int to) {
     _stopSweep();
+    // Behind the screen (read aloud in the media session) there is nobody
+    // to sweep for: sixty rebuilds a second would be wasted battery.
+    if (!_onScreen) return;
     if (to - from < 1) return;
     _sweepStart = from;
     final ends = <int>[];
@@ -1650,7 +1700,7 @@ class _ReaderScreenState extends State<ReaderScreen>
       case SpeechInterruption.ended:
         final resume = _resumeAfterInterruption;
         _resumeAfterInterruption = false;
-        if (resume && !_speaking && _onScreen) _startSpeak();
+        if (resume && !_speaking && (_onScreen || _inSession)) _startSpeak();
     }
   }
 
@@ -1658,8 +1708,52 @@ class _ReaderScreenState extends State<ReaderScreen>
     _stopSweep();
     if (live()) {
       setState(() => _speaking = false);
+      _sessionGone();
       unawaited(_savePosition(modality: 'speak').catchError((_) {}));
     }
+  }
+
+  // ───── the media session (1.6.0) ─────
+  //
+  // The owner: "I am having an essay read aloud to me but it stops when
+  // the screen goes dark, I would like it treated just like media/podcast
+  // playing." While it reads, read aloud is what the app's media session
+  // shows, as an episode is while it plays: that is what brings the
+  // playback service (so Android leaves the app running behind the
+  // screen), the notification, and the lock-screen and headset buttons.
+  // A stop leaves it there paused, so Play on the lock screen picks it
+  // up; the end of the text, or leaving the reader, lets it go.
+
+  late final _ReadAloudClient _sessionClient = _ReadAloudClient(this);
+
+  /// Read aloud is in the session (reading or paused). Never true with no
+  /// session to be in.
+  bool _inSession = false;
+
+  void _sessionPlaying() {
+    final session = widget.session;
+    if (session is NoPlaybackSession) return;
+    session.attach(
+        _sessionClient,
+        LockScreenTag(
+            id: 'read-aloud-${widget.work.id}',
+            title: widget.work.title,
+            album: 'Read aloud'));
+    _inSession = true;
+    session.report(_sessionClient,
+        const SessionState(playing: true, phase: SessionPhase.ready));
+  }
+
+  void _sessionPaused() {
+    if (!_inSession) return;
+    widget.session
+        .report(_sessionClient, const SessionState(phase: SessionPhase.ready));
+  }
+
+  void _sessionGone() {
+    if (!_inSession) return;
+    _inSession = false;
+    widget.session.detach(_sessionClient);
   }
 
   static SpeechTempFiles _fallbackSpeechTempFiles() => DiskSpeechTempFiles(
@@ -1709,6 +1803,15 @@ class _ReaderScreenState extends State<ReaderScreen>
     final next = !_preferSystemVoice;
     setState(() => _preferSystemVoice = next);
     await widget.db.profilesDao.setPreferSystemVoice(widget.profileId, next);
+  }
+
+  /// Citations in or out of read aloud (1.6.0). Like the voice choice,
+  /// it holds from the next run: one under way finishes as it began.
+  Future<void> _toggleSpeakCitations() async {
+    final next = !_speakCitations;
+    setState(() => _speakCitations = next);
+    await widget.db.deviceSettingsDao
+        .write(speakCitationsKey, next ? 'on' : 'off');
   }
 
   // ───── translation (ADR-0008 "Babel"; Campaign 8 "Babel widens"; any
@@ -2575,6 +2678,9 @@ class _ReaderScreenState extends State<ReaderScreen>
               if (value == 'distill') unawaited(_distill());
               if (value == 'system-voice') unawaited(_toggleVoicePreference());
               if (value == 'voices') unawaited(_openReadAloudVoices());
+              if (value == 'speak-citations') {
+                unawaited(_toggleSpeakCitations());
+              }
               if (value == 'translate') unawaited(_openTranslatePicker());
               if (value == 'show-translation') {
                 unawaited(_toggleShowTranslation());
@@ -2637,6 +2743,14 @@ class _ReaderScreenState extends State<ReaderScreen>
                   key: Key('read-aloud-voices'),
                   value: 'voices',
                   child: Text('Read aloud voices')),
+              // Off until chosen (1.6.0): the voice skips citations,
+              // footnote marks and bare links; the page keeps them.
+              CheckedPopupMenuItem<String>(
+                key: const Key('speak-citations-toggle'),
+                value: 'speak-citations',
+                checked: _speakCitations,
+                child: const Text('Read citations aloud'),
+              ),
               // The model gate (ADR-0008; generalized to any pair,
               // Campaign 8 "Babel widens"): offered only once at least
               // one target pair for this work's source language is
@@ -3602,12 +3716,12 @@ class _ReaderScreenState extends State<ReaderScreen>
     return Wrap(
       spacing: space,
       runSpacing: 0,
-      // Ragged-right by default; justified distributes each line's words
-      // across the full measure INCLUDING the last line (this is a
-      // per-word Wrap, not Flutter's TextAlign.justify, which special-
-      // cases the last line — the honest ceiling ADR-0010 records).
-      alignment:
-          _typography.justified ? WrapAlignment.spaceBetween : WrapAlignment.start,
+      // Always ragged-right (1.6.0). A per-word Wrap can only "justify"
+      // by spreading each line's words across the whole measure, the last
+      // line included: wide, uneven gaps that made the page hard to read
+      // and no different in use from Line. Justified text is Line's, where
+      // Flutter's own justification leaves the last line alone.
+      alignment: WrapAlignment.start,
       // The drop-cap word stands taller than its run; bottom-aligning keeps
       // the rest of the line sitting on (near) its baseline.
       crossAxisAlignment: WrapCrossAlignment.end,
@@ -3874,4 +3988,28 @@ class _SpeechUnit {
       required this.text,
       required this.lang,
       this.sweep = true});
+}
+
+/// Read aloud, as the media session's buttons reach it: Play reads on
+/// from the sentence it stopped at, Pause and Stop stop there. There is
+/// no place to seek to in a voice that is made as it goes.
+class _ReadAloudClient implements SessionClient {
+  _ReadAloudClient(this._reader);
+  final _ReaderScreenState _reader;
+
+  @override
+  Future<void> play() async {
+    if (_reader.mounted && !_reader._speaking) _reader._startSpeak();
+  }
+
+  @override
+  Future<void> pause() async {
+    if (_reader.mounted) await _reader._stopSpeak();
+  }
+
+  @override
+  Future<void> stop() => pause();
+
+  @override
+  Future<void> seek(Duration position) async {}
 }

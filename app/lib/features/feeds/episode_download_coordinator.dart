@@ -30,19 +30,23 @@ String downloadJobId(int workId) => 'download-$workId';
 
 /// A download row's payload. Auto-downloads (ADR-0018) carry `auto`, and
 /// `queued` while the next auto-download pass owns them: picked but not
-/// started, or stopped by the system rather than by the listener.
+/// started, or stopped by the system rather than by the listener. `hand`
+/// marks one the listener started that waits for Wi-Fi (1.6.0): the pass
+/// owns it like any queued row, but it was asked for, not picked.
 String downloadPayload(
         {required int workId,
         required String title,
         required String url,
         bool auto = false,
-        bool queued = false}) =>
+        bool queued = false,
+        bool hand = false}) =>
     jsonEncode({
       'workId': workId,
       'title': title,
       'url': url,
       if (auto) 'auto': true,
       if (queued) 'queued': true,
+      if (hand) 'hand': true,
     });
 
 enum DownloadOutcome { done, paused, failed }
@@ -64,6 +68,10 @@ class EpisodeDownloadState {
   /// next launch carries on without a tap.
   final bool retriesOnLaunch;
 
+  /// Started by hand on a metered network with "Download only on Wi-Fi"
+  /// on (1.6.0): paused, and the next Wi-Fi pass will fetch it.
+  final bool waitingForWifi;
+
   const EpisodeDownloadState({
     this.title = 'Episode',
     this.downloading = false,
@@ -72,6 +80,7 @@ class EpisodeDownloadState {
     this.totalBytes,
     this.error,
     this.retriesOnLaunch = false,
+    this.waitingForWifi = false,
   });
 
   bool get failed => error != null;
@@ -88,7 +97,13 @@ class _Entry {
   /// Fetched by an auto-download pass, which only runs on an unmetered
   /// network: never resumed by a launch, which may be on mobile data.
   final bool auto;
-  _Entry(this.url, this.state, {this.interrupted = false, this.auto = false});
+
+  /// Started by the listener and left to the Wi-Fi pass ("Download only
+  /// on Wi-Fi"). Kept through the pass's own fetch, so a pass the system
+  /// stops hands it back still marked as asked for.
+  final bool hand;
+  _Entry(this.url, this.state,
+      {this.interrupted = false, this.auto = false, this.hand = false});
 }
 
 class EpisodeDownloadCoordinator extends ChangeNotifier {
@@ -155,6 +170,7 @@ class EpisodeDownloadCoordinator extends ChangeNotifier {
       final part = _partOf(workId, url);
       final failed = row.state == JobState.failed.name;
       final auto = payload['auto'] == true;
+      final hand = payload['hand'] == true;
       final killed = row.state == JobState.running.name;
       if (auto && killed) {
         // Whatever stopped it, the next pass (unmetered) carries it on.
@@ -173,7 +189,8 @@ class EpisodeDownloadCoordinator extends ChangeNotifier {
                 title: payload['title'] as String? ?? 'Episode',
                 url: url,
                 auto: true,
-                queued: true));
+                queued: true,
+                hand: hand));
       }
       _entries[workId] = _Entry(
         url,
@@ -185,9 +202,14 @@ class EpisodeDownloadCoordinator extends ChangeNotifier {
           error: failed
               ? row.failureReason ?? genericFailureReason
               : null,
+          // Handed to the pass and not failed: still waiting for Wi-Fi.
+          waitingForWifi: hand &&
+              !failed &&
+              (killed || payload['queued'] == true),
         ),
         interrupted: killed && !auto,
         auto: auto,
+        hand: hand,
       );
     }
     notifyListeners();
@@ -203,10 +225,111 @@ class EpisodeDownloadCoordinator extends ChangeNotifier {
     await Future.wait([for (final id in killed) resume(id)]);
   }
 
-  /// Continue a known download from its partial.
-  Future<DownloadOutcome> resume(int workId) {
+  /// "Download only on Wi-Fi" (1.6.0, user: "download on WiFi or not" was
+  /// missing). Set by the app: whether a download the listener starts
+  /// must wait right now (the setting is on and the network is metered).
+  /// Null, as in tests, the worker and the web build, nothing ever waits.
+  Future<bool> Function()? mustWaitForWifi;
+
+  /// Asks the system for a pass, which it runs once the network is
+  /// unmetered. The same pass auto-downloads use.
+  Future<void> Function()? requestWifiPass;
+
+  Future<bool> _mustWait() async {
+    try {
+      return await mustWaitForWifi?.call() ?? false;
+    } catch (e) {
+      debugPrint('Download: could not tell whether to wait for Wi-Fi: $e');
+      return false;
+    }
+  }
+
+  /// Whether a download of [workId] asked for now would wait for Wi-Fi
+  /// instead of starting: what [startByHand] decides by, for a caller
+  /// (Play with "Download first") that has to know before it waits on
+  /// the fetch.
+  Future<bool> waitsForWifi(int workId, String url) async =>
+      !_inFlight.containsKey(workId) &&
+      !isDownloaded(workId, url) &&
+      await _mustWait();
+
+  /// A download the listener asks for. Where it must wait for Wi-Fi it
+  /// becomes a queued row the next pass fetches, and nothing is fetched
+  /// now; otherwise it is [start].
+  Future<DownloadOutcome> startByHand(
+      {required int workId,
+      required String url,
+      String title = 'Episode'}) async {
+    if (await waitsForWifi(workId, url)) {
+      return _waitForWifi(workId, url, title);
+    }
+    return start(workId: workId, url: url, title: title);
+  }
+
+  /// Leaves [workId] to the next Wi-Fi pass: a queued row (kept if there
+  /// is one, with whatever it has fetched), and a pass asked for.
+  Future<DownloadOutcome> _waitForWifi(
+      int workId, String url, String title) async {
+    final jobId = downloadJobId(workId);
+    final row = await db.jobsDao.load(jobId);
+    await db.jobsDao.save(row?.copyWith(state: JobState.cancelled) ??
+        Job(
+          id: jobId,
+          kind: 'download',
+          state: JobState.cancelled,
+          checkpoint: null,
+          totalUnits: 0,
+          doneUnits: 0,
+          createdAtMs: _now().millisecondsSinceEpoch,
+        ));
+    await db.jobsDao.setPayload(
+        jobId,
+        downloadPayload(
+            workId: workId,
+            title: title,
+            url: url,
+            auto: true,
+            queued: true,
+            hand: true));
+    final part = _partOf(workId, url);
+    _entries[workId] = _Entry(
+        url,
+        EpisodeDownloadState(
+            title: title,
+            paused: true,
+            waitingForWifi: true,
+            receivedBytes: part.existsSync() ? part.lengthSync() : 0,
+            totalBytes: _entries[workId]?.state.totalBytes),
+        auto: true,
+        hand: true);
+    notifyListeners();
+    try {
+      await requestWifiPass?.call();
+    } catch (e) {
+      // The row stands; the next launch asks again.
+      debugPrint('Download: asking for a Wi-Fi pass failed: $e');
+    }
+    return DownloadOutcome.paused;
+  }
+
+  /// "Download now": this one download, whatever the network.
+  Future<DownloadOutcome> startNow(int workId) {
     final entry = _entries[workId];
     if (entry == null) return Future.value(DownloadOutcome.failed);
+    return start(workId: workId, url: entry.url, title: entry.state.title);
+  }
+
+  /// Continue a known download from its partial. Where a download by
+  /// hand must wait for Wi-Fi, a resume waits too: the launch that
+  /// resumes interrupted downloads may be on mobile data.
+  Future<DownloadOutcome> resume(int workId) async {
+    final entry = _entries[workId];
+    if (entry == null) return DownloadOutcome.failed;
+    if (!_inFlight.containsKey(workId) &&
+        !isDownloaded(workId, entry.url) &&
+        await _mustWait()) {
+      return _waitForWifi(workId, entry.url, entry.state.title);
+    }
     return start(
         workId: workId,
         url: entry.url,
@@ -253,7 +376,16 @@ class EpisodeDownloadCoordinator extends ChangeNotifier {
             title: entry.state.title,
             url: entry.url,
             auto: true,
-            queued: true));
+            queued: true,
+            hand: entry.hand));
+    if (entry.hand) {
+      _set(workId, (s) => EpisodeDownloadState(
+          title: s.title,
+          paused: true,
+          waitingForWifi: true,
+          receivedBytes: s.receivedBytes,
+          totalBytes: s.totalBytes));
+    }
   }
 
   /// Fetches [url] to `services.audioFileFor(workId, url)`. Already on
@@ -272,6 +404,8 @@ class EpisodeDownloadCoordinator extends ChangeNotifier {
     _tokens[workId] = token;
     final part = _partOf(workId, url);
     final known = _entries[workId]?.state;
+    // A pass fetching what the listener left waiting: still theirs.
+    final hand = auto && (_entries[workId]?.hand ?? false);
     _entries[workId] = _Entry(
       url,
       EpisodeDownloadState(
@@ -281,9 +415,10 @@ class EpisodeDownloadCoordinator extends ChangeNotifier {
         totalBytes: known?.totalBytes,
       ),
       auto: auto,
+      hand: hand,
     );
     notifyListeners();
-    final future = _run(workId, url, title, token, auto: auto);
+    final future = _run(workId, url, title, token, auto: auto, hand: hand);
     _inFlight[workId] = future;
     return future;
   }
@@ -298,7 +433,7 @@ class EpisodeDownloadCoordinator extends ChangeNotifier {
 
   Future<DownloadOutcome> _run(
       int workId, String url, String title, dio.CancelToken token,
-      {bool auto = false}) async {
+      {bool auto = false, bool hand = false}) async {
     final jobId = downloadJobId(workId);
     final gate = services.foregroundGate;
     var totalSaved = false;
@@ -315,8 +450,10 @@ class EpisodeDownloadCoordinator extends ChangeNotifier {
         doneUnits: 0,
         createdAtMs: existing?.createdAtMs ?? _now().millisecondsSinceEpoch,
       ));
-      await db.jobsDao.setPayload(jobId,
-          downloadPayload(workId: workId, title: title, url: url, auto: auto));
+      await db.jobsDao.setPayload(
+          jobId,
+          downloadPayload(
+              workId: workId, title: title, url: url, auto: auto, hand: hand));
       await gate.jobStarted(title, 'Downloading…');
       holdsGate = true;
 
@@ -385,7 +522,8 @@ class EpisodeDownloadCoordinator extends ChangeNotifier {
                   title: title,
                   url: url,
                   auto: true,
-                  queued: true));
+                  queued: true,
+                  hand: hand));
         } else if (row != null && !transient) {
           await db.jobsDao.save(row.copyWith(state: JobState.failed));
           await db.jobsDao.setFailureReason(jobId, reason);
@@ -397,6 +535,7 @@ class EpisodeDownloadCoordinator extends ChangeNotifier {
         _set(workId, (s) => EpisodeDownloadState(
             title: s.title,
             paused: true,
+            waitingForWifi: hand,
             receivedBytes: s.receivedBytes,
             totalBytes: s.totalBytes));
         return DownloadOutcome.paused;

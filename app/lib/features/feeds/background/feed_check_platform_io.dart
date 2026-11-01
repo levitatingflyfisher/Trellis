@@ -55,11 +55,23 @@ Map<String, Object> autoDownloadRequest() => const {
       'charging': false,
     };
 
-class ChannelFeedCheckScheduler implements FeedCheckScheduler {
+class ChannelFeedCheckScheduler implements FeedCheckScheduler, NetworkMeter {
   const ChannelFeedCheckScheduler();
 
   @override
   bool get available => true;
+
+  /// Android's own word on the network in use. When it cannot say, the
+  /// network counts as metered: a download told to wait for Wi-Fi is not
+  /// started on a guess, and the Wi-Fi pass starts it when Wi-Fi is real.
+  @override
+  Future<bool> isMetered() async {
+    try {
+      return await _schedulerChannel.invokeMethod<bool>('isMetered') ?? true;
+    } on Exception {
+      return true;
+    }
+  }
 
   @override
   Future<void> schedulePeriodic(FeedCheckConstraints c,

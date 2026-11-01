@@ -104,6 +104,33 @@ void main() {
     expect(started, hasLength(1));
   });
 
+  test('a download waiting for Wi-Fi by the listener’s own hand asks for a '
+      'pass even with background checks off, and that pass picks nothing '
+      'new (1.6.0)', () async {
+    final ada = await db.profilesDao.create('Ada');
+    final id =
+        await db.feedsDao.insertFeed(profileId: ada, url: 'https://a.test/feed');
+    listings['https://a.test/feed'] = ['old'];
+    final r = runner();
+    await r.run(FeedCheckTask.check);
+    await setFeedAutoDownload(db, id, true);
+    listings['https://a.test/feed'] = ['old', 'new'];
+    await db.deviceSettingsDao.write(FeedCheckSettings.backgroundKey, 'off');
+    await r.run(FeedCheckTask.check);
+    expect(scheduler.calls, isEmpty, reason: 'switched off: no pass');
+
+    await recordQueuedAutoDownload(
+        db, (workId: 900, url: 'https://cast.test/hand.mp3', title: 'Mine'), 1,
+        hand: true);
+    await r.requestAutoDownloadIfPending();
+    expect(scheduler.calls, ['auto-download']);
+
+    await r.run(FeedCheckTask.autoDownload);
+    expect(started, [900],
+        reason: 'only what was asked for by hand; the show’s new episode '
+            'waits until checks are back on');
+  });
+
   test('asked to stop, a check leaves the remaining readers for next time',
       () async {
     final ada = await db.profilesDao.create('Ada');

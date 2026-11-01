@@ -54,6 +54,7 @@ class _QueueScreenState extends State<QueueScreen> {
   WorkListState _rowState = WorkListState.empty;
 
   int? _playingId;
+  int _queueRevision = 0;
 
   late final EpisodeActions _actions = widget.actions ??
       EpisodeActions(
@@ -69,6 +70,7 @@ class _QueueScreenState extends State<QueueScreen> {
   void initState() {
     super.initState();
     _playingId = widget.player?.current?.id;
+    _queueRevision = widget.player?.queueRevision ?? 0;
     widget.player?.addListener(_onPlayer);
     _load();
   }
@@ -79,12 +81,16 @@ class _QueueScreenState extends State<QueueScreen> {
     super.dispose();
   }
 
-  // The player notifies on every tick; only a change of work can have
-  // moved the queue.
+  // The player notifies on every tick; only a change of work, or the
+  // player taking a finished episode off the queue, can have moved it.
+  // The last entry ends with nothing new playing, so the work alone
+  // isn't enough (1.6.0: its row stayed until the tab was left).
   void _onPlayer() {
     final id = widget.player?.current?.id;
-    if (id == _playingId) return;
+    final revision = widget.player?.queueRevision ?? 0;
+    if (id == _playingId && revision == _queueRevision) return;
     _playingId = id;
+    _queueRevision = revision;
     _load();
   }
 

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../bootstrap/bootstrap.dart' show playbackSession;
 import '../../db/database.dart' hide Alignment;
 import '../../services/device_services.dart';
 import '../intake/paste_intake.dart' show epochDayUtcNow;
@@ -85,7 +86,10 @@ class ReaderDoors {
           speakTranslation: speakTranslation,
           layerLang: layerLang,
           openTranslatePicker: openTranslatePicker,
-          openOnPage: openOnPage),
+          openOnPage: openOnPage,
+          // The app's one media session (nothing in tests and on the web):
+          // every door opens a reader that can read on behind the screen.
+          session: playbackSession),
     ));
   }
 

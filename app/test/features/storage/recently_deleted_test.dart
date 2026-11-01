@@ -660,13 +660,15 @@ void main() {
 
     testWidgets('survives 320 dp at twice the text size', (tester) async {
       await tester.runAsync(() => delete(StoredKind.translation, 'ru'));
-      tester.view.physicalSize = const Size(320, 3000);
+      // Tall enough for the whole page at this text size: it grew a
+      // section (Transcription quality, 1.6.0).
+      tester.view.physicalSize = const Size(320, 6000);
       tester.view.devicePixelRatio = 1.0;
       addTearDown(tester.view.reset);
       await tester.pumpWidget(MaterialApp(
           home: MediaQuery(
               data: const MediaQueryData(
-                  size: Size(320, 3000), textScaler: TextScaler.linear(2)),
+                  size: Size(320, 6000), textScaler: TextScaler.linear(2)),
               child: ModelsScreen(
                   store: FakeModelStore(),
                   registry: ModelRegistry.starter(),

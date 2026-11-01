@@ -1,4 +1,5 @@
-/// Document intake for PrimingTrellis — EPUB, article-by-URL, Gutenberg text.
+/// Document intake for PrimingTrellis — EPUB, article-by-URL, Gutenberg text,
+/// PDF pages.
 ///
 /// Ported from ohPrimer's `index.html` (the donor JS is the spec). Pure Dart:
 /// bytes and strings in, plain typed block structures out. No HTTP happens
@@ -14,3 +15,4 @@ export 'src/gutenberg_cleaner.dart';
 export 'src/gutendex.dart';
 export 'src/m4b_chapters.dart';
 export 'src/notes_sanitizer.dart';
+export 'src/pdf_blocks.dart';

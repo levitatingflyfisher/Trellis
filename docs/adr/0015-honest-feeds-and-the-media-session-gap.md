@@ -162,6 +162,32 @@ white-on-transparent) ahead of this work landing; it is no longer an
 orphan — `initAudioBackground()`'s `androidNotificationIcon` parameter
 references it by name.
 
+**Third call, 1.6.0 (2026-11-09)**: the package is replaced by the app's
+own handler on `audio_service`, the package `just_audio_background` was
+built on. The history above stands; three things the plugin's handler
+could not do forced the change, and the owner ruled it be done first
+and alone:
+
+- It told the playback service "not playing" the moment a file ended.
+  The service left the foreground, and behind another app or a dark
+  screen Android refused to let it back, so the next queued episode
+  started unprotected and the app was frozen ten seconds in (seen on the
+  Android 16 emulator).
+- Its handler is private, so a headset key could only ever mean "next
+  track", which does nothing on a single episode.
+- It serves one player, so read aloud could not have a session.
+
+What changed is Dart only: `playback_session.dart` (the seam, plain
+types), `trellis_audio_handler.dart` (the one place `audio_service`'s
+types are used), and `just_audio_player.dart`, which now reports to the
+session and answers its buttons. The manifest, the host activity, the
+notification channel and its icon are as they were. The single-player
+law above no longer binds, though nothing uses a second player yet.
+Gated on the emulator against the plugin's own behaviour, line for
+line: play, pause and resume from outside the app, the skip keys, the
+headset button, the notification's Stop, the bar's X, the widget, and
+the queue advancing behind the screen.
+
 ## Consequences
 
 - Decision 3's own history is the record of a deferral being overruled,

@@ -5,8 +5,11 @@ import 'package:trellis/db/database.dart';
 import 'package:trellis/features/feeds/auto_download.dart';
 import 'package:trellis/features/feeds/background/feed_check_settings.dart';
 import 'package:trellis/features/feeds/feed_settings_screen.dart';
+import 'package:trellis/features/feeds/feeds_repository.dart';
+import 'package:trellis/features/feeds/feeds_screen.dart';
 import 'package:trellis/features/models/models_screen.dart';
 
+import '../support/scripted_fetcher.dart';
 import 'feed_check_settings_test.dart' show FakeScheduler;
 
 void main() {
@@ -92,5 +95,72 @@ void main() {
     await tester.tap(background);
     await tester.pumpAndSettle();
     expect(scheduler.calls.last, 'schedule unmetered=true replace=false');
+  });
+
+  Future<void> pumpSubscriptions(WidgetTester tester,
+      {FeedCheckSettings? feedCheck}) async {
+    await tester.pumpWidget(MaterialApp(
+        home: FeedsScreen(
+            db: db,
+            repository: FeedsRepository(
+                db: db, fetcher: ScriptedFetcher((u, h) => textResponse(''))),
+            profile: (await db.profilesDao.all()).single,
+            feedCheck: feedCheck)));
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('Subscriptions has a visible door to the Wi-Fi switches '
+      '(1.6.0, user: "update on WiFi or not" was "missing": it sat only '
+      'under Models & storage)', (tester) async {
+    final scheduler = FakeScheduler();
+    await pumpSubscriptions(tester,
+        feedCheck: FeedCheckSettings(db, scheduler));
+
+    final door = find.byKey(const Key('feeds-wifi-and-data'));
+    expect(door, findsOneWidget);
+    expect(find.text('Wi-Fi and data'), findsOneWidget);
+    await tester.tap(door);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('feed-check-background')), findsOneWidget);
+    final wifiOnly = find.byKey(const Key('feed-check-wifi-only'));
+    expect(tester.widget<SwitchListTile>(wifiOnly).value, isTrue);
+    await tester.tap(wifiOnly);
+    await tester.pumpAndSettle();
+    expect(scheduler.calls, ['schedule unmetered=false replace=true']);
+  });
+
+  testWidgets('on a narrow phone with large text the door wraps under the '
+      'last-checked line, never off the edge', (tester) async {
+    tester.view.physicalSize = const Size(320, 640);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(MaterialApp(
+        builder: (context, child) => MediaQuery(
+            data: MediaQuery.of(context)
+                .copyWith(textScaler: const TextScaler.linear(2)),
+            child: child!),
+        home: FeedsScreen(
+            db: db,
+            repository: FeedsRepository(
+                db: db, fetcher: ScriptedFetcher((u, h) => textResponse(''))),
+            profile: (await db.profilesDao.all()).single,
+            feedCheck: FeedCheckSettings(db, FakeScheduler()))));
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    final door = tester.getRect(find.byKey(const Key('feeds-wifi-and-data')));
+    final line = tester.getRect(find.byKey(const Key('feeds-last-checked')));
+    expect(door.right, lessThanOrEqualTo(320));
+    expect(door.left, greaterThanOrEqualTo(0));
+    expect(door.top, greaterThanOrEqualTo(line.bottom),
+        reason: 'under the line, not squeezed beside it');
+  });
+
+  testWidgets('where nothing can run in the background, Subscriptions '
+      'offers no such door', (tester) async {
+    await pumpSubscriptions(tester);
+    expect(find.byKey(const Key('feeds-wifi-and-data')), findsNothing);
+    expect(find.byKey(const Key('feeds-last-checked')), findsOneWidget);
   });
 }

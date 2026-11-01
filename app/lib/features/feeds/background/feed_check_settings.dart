@@ -110,6 +110,29 @@ class UnavailableFeedCheckScheduler implements FeedCheckScheduler {
   Future<void> cancelAutoDownload() async {}
 }
 
+/// Whether the network in use is metered (mobile data, a metered
+/// hotspot), behind a seam so tests decide.
+abstract class NetworkMeter {
+  Future<bool> isMetered();
+}
+
+/// Where it cannot be known (the web build, other platforms, tests):
+/// never metered, so nothing is ever made to wait.
+class UnknownNetworkMeter implements NetworkMeter {
+  const UnknownNetworkMeter();
+  @override
+  Future<bool> isMetered() async => false;
+}
+
+/// Whether a download the listener starts must wait for Wi-Fi right now:
+/// "Download only on Wi-Fi" is on and the network is metered. The switch
+/// is read each time, so a change holds from the next tap.
+Future<bool> Function() downloadMustWaitForWifi(
+        AppDatabase db, NetworkMeter meter) =>
+    () async =>
+        await FeedCheckSettings.downloadsWifiOnlyOn(db) &&
+        await meter.isMetered();
+
 /// The two switches, kept in [DeviceSettings]: the device checks, not a
 /// reader. Both default on.
 class FeedCheckSettings extends ChangeNotifier {
@@ -120,15 +143,52 @@ class FeedCheckSettings extends ChangeNotifier {
 
   static const backgroundKey = 'feed_check_background';
   static const wifiOnlyKey = 'feed_check_wifi_only';
+  static const downloadsWifiOnlyKey = 'downloads_wifi_only';
 
   bool _background = true;
   bool _wifiOnly = true;
   bool get background => _background;
   bool get wifiOnly => _wifiOnly;
 
+  /// "Download only on Wi-Fi" (1.6.0): a download the listener starts on
+  /// a metered network waits for the next Wi-Fi pass. Off until chosen,
+  /// so a tapped download starts at once, as it always has. Automatic
+  /// downloads wait for Wi-Fi whatever this says.
+  bool _downloadsWifiOnly = false;
+  bool get downloadsWifiOnly => _downloadsWifiOnly;
+
+  Future<void> setDownloadsWifiOnly(bool on) async {
+    _downloadsWifiOnly = on;
+    notifyListeners();
+    await db.deviceSettingsDao.write(downloadsWifiOnlyKey, on ? 'on' : 'off');
+  }
+
+  static Future<bool> downloadsWifiOnlyOn(AppDatabase db) async =>
+      await db.deviceSettingsDao.read(downloadsWifiOnlyKey) == 'on';
+
+  /// "Play on an episode that isn't downloaded" (1.6.0, user: "Play for
+  /// download then play"): `download` fetches it first and plays once it
+  /// has landed; anything else streams at once, as Play always has.
+  static const playUndownloadedKey = 'play_undownloaded';
+
+  bool _downloadFirst = false;
+  bool get downloadFirst => _downloadFirst;
+
+  Future<void> setDownloadFirst(bool on) async {
+    _downloadFirst = on;
+    notifyListeners();
+    await db.deviceSettingsDao
+        .write(playUndownloadedKey, on ? 'download' : 'stream');
+  }
+
+  static Future<bool> downloadFirstOn(AppDatabase db) async =>
+      await db.deviceSettingsDao.read(playUndownloadedKey) == 'download';
+
   Future<void> load() async {
     _background = await _readFlag(backgroundKey);
     _wifiOnly = await _readFlag(wifiOnlyKey);
+    _downloadsWifiOnly = await downloadsWifiOnlyOn(db);
+    _downloadFirst = await downloadFirstOn(db);
     notifyListeners();
   }
 

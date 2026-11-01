@@ -9,7 +9,8 @@ import 'package:openhearth_design/openhearth_design.dart';
 import '../../db/database.dart' hide Alignment;
 import '../../net/io_fetcher.dart';
 import '../../services/device_services.dart';
-import '../intake/epub_intake.dart';
+import '../intake/document_intake.dart';
+import '../intake/pdf_reader.dart' show PdfUnreadableException;
 import '../intake/gutenberg_screen.dart';
 import '../intake/paste_intake.dart';
 import '../intake/url_intake.dart';
@@ -322,19 +323,24 @@ class _LibraryScreenState extends State<LibraryScreen> {
     if (workId != null) await _load();
   }
 
-  Future<void> _importEpub() async {
+  Future<void> _importFile() async {
     try {
-      final workId =
-          await pickAndImportEpub(db: widget.db, profileId: widget.profile.id);
+      final workId = await pickAndImportDocument(
+          db: widget.db, profileId: widget.profile.id);
       if (workId != null) await _load();
     } on EpubTooLargeException catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text(e.message)));
+    } on PdfUnreadableException catch (e) {
+      // Its own words: a locked file, or one that is pictures of pages.
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+          .showSnackBar(SnackBar(content: Text(e.message)));
     } on FormatException {
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-          content: Text("That file couldn’t be read as an EPUB.")));
+      ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('That file couldn’t be read.')));
     }
   }
 
@@ -377,8 +383,12 @@ class _LibraryScreenState extends State<LibraryScreen> {
     showModalBottomSheet<void>(
       context: context,
       useRootNavigator: true,
+      // As tall as its entries need, and scrolling where the screen is
+      // shorter than that (a small phone, large text).
+      isScrollControlled: true,
       builder: (sheet) => SafeArea(
-        child: Column(
+        child: SingleChildScrollView(
+            child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             if (widget.onSubscribe != null)
@@ -400,10 +410,11 @@ class _LibraryScreenState extends State<LibraryScreen> {
             ),
             ListTile(
               leading: const Icon(Icons.menu_book_outlined),
-              title: const Text('Import an EPUB'),
+              title: const Text('Import a file'),
+              subtitle: const Text(importableKindsWords),
               onTap: () {
                 Navigator.pop(sheet);
-                _importEpub();
+                _importFile();
               },
             ),
             ListTile(
@@ -432,7 +443,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
                 },
               ),
           ],
-        ),
+        )),
       ),
     );
   }
@@ -573,7 +584,7 @@ class _LibraryScreenState extends State<LibraryScreen> {
         [] => _EmptyState(
             onSubscribe: widget.onSubscribe != null ? _subscribe : null,
             onPaste: _pasteText,
-            onEpub: _importEpub,
+            onFile: _importFile,
             onWeb: _fromWeb,
             onGutenberg: _fromGutenberg,
             onAudiobook:
@@ -694,14 +705,14 @@ class _LibraryScreenState extends State<LibraryScreen> {
 class _EmptyState extends StatelessWidget {
   final VoidCallback? onSubscribe;
   final VoidCallback onPaste;
-  final VoidCallback onEpub;
+  final VoidCallback onFile;
   final VoidCallback onWeb;
   final VoidCallback onGutenberg;
   final VoidCallback? onAudiobook;
   const _EmptyState(
       {this.onSubscribe,
       required this.onPaste,
-      required this.onEpub,
+      required this.onFile,
       required this.onWeb,
       required this.onGutenberg,
       this.onAudiobook});
@@ -734,9 +745,9 @@ class _EmptyState extends StatelessWidget {
                   label: const Text('Paste text')),
               const SizedBox(height: 12),
               OutlinedButton.icon(
-                  onPressed: onEpub,
+                  onPressed: onFile,
                   icon: const Icon(Icons.menu_book_outlined),
-                  label: const Text('Import an EPUB')),
+                  label: const Text('Import a file')),
               const SizedBox(height: 12),
               OutlinedButton.icon(
                   onPressed: onWeb,

@@ -68,6 +68,35 @@ class _Piece {
   _Piece(this.charStart, this.charEnd, this.t0, this.t1);
 }
 
+/// The engine's own notes that nothing was said: `[BLANK_AUDIO]`,
+/// `[MUSIC PLAYING]`, `(music)`, `[ Silence ]`. Whisper writes them into
+/// its text; they are not words, and must never reach the page, the
+/// translator or the voice. Anything in square brackets written all in
+/// capitals, and a short list of lower-case ones in either bracket. A
+/// speaker's own brackets ("[sic]", "(about 5%)") are left alone.
+final _engineNote = RegExp(
+    r'\[\s*[A-Z][A-Z_ ]{2,}\s*\]'
+    r'|[\[(]\s*(?:blank[_ ]audio|music(?: playing)?|silence|applause|'
+    r'laughter|laughs|inaudible|no speech|noise|sound)\s*[\])]',
+    caseSensitive: false);
+
+// Case matters for the first form only, so it is checked by hand: the
+// pattern above is case-insensitive for the second.
+final _capsNote = RegExp(r'^\[\s*[A-Z][A-Z_ ]{2,}\s*\]$');
+final _listedNote = RegExp(
+    r'^[\[(]\s*(?:blank[_ ]audio|music(?: playing)?|silence|applause|'
+    r'laughter|laughs|inaudible|no speech|noise|sound)\s*[\])]$',
+    caseSensitive: false);
+final _manySpaces = RegExp(r'\s+');
+
+String _withoutEngineNotes(String text) => text
+    .replaceAllMapped(_engineNote, (m) {
+      final note = m.group(0)!;
+      return _capsNote.hasMatch(note) || _listedNote.hasMatch(note) ? '' : note;
+    })
+    .replaceAll(_manySpaces, ' ')
+    .trim();
+
 List<TimedSegment> segmentize(
   List<TranscriptChunk> chunks, {
   int minChars = 8,
@@ -89,7 +118,7 @@ List<TimedSegment> segmentize(
   final buffer = StringBuffer();
   final pieces = <_Piece>[];
   for (final c in chunks) {
-    final text = c.text.trim();
+    final text = _withoutEngineNotes(c.text);
     if (text.isEmpty) continue;
     if (buffer.isNotEmpty) buffer.write(' ');
     final start = buffer.length;

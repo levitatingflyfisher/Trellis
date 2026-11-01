@@ -31,6 +31,8 @@ import 'audiobook_import.dart';
 import 'audiobook_picker_gateway.dart' show audiobookExtensions;
 import 'epub_intake.dart';
 import 'paste_intake.dart' show storePastedText;
+import 'pdf_intake.dart';
+import 'pdf_reader.dart';
 
 /// One file another app shared, already copied into app storage by the
 /// platform side; [path] is that copy, which the intake removes when done.
@@ -246,13 +248,14 @@ const maxSharedTextBytes = 8 * 1024 * 1024;
 /// A double tap on Share, or a bot that sends twice, is one share.
 const _sameTextWindow = Duration(minutes: 1);
 
-enum _FileKind { epub, audio, text, html, other }
+enum _FileKind { epub, pdf, audio, text, html, other }
 
 _FileKind _kindOf(SharedFile f) {
   final mime = (f.mimeType ?? '').toLowerCase();
   final dot = f.name.lastIndexOf('.');
   final ext = dot < 0 ? '' : f.name.substring(dot + 1).toLowerCase();
   if (mime == 'application/epub+zip' || ext == 'epub') return _FileKind.epub;
+  if (mime == 'application/pdf' || ext == 'pdf') return _FileKind.pdf;
   if (mime.startsWith('audio/') || audiobookExtensions.contains(ext)) {
     return _FileKind.audio;
   }
@@ -298,11 +301,13 @@ class ShareIntake {
     int Function(String path)? sizeOf,
     void Function(String path)? discard,
     Future<int> Function(String path, String name)? importBook,
+    Future<int> Function(String path, String name)? importPdf,
   }) : _now = now ?? DateTime.now,
        _readText = readText ?? _readFileText,
        _sizeOf = sizeOf ?? _fileSize,
        _discard = discard ?? _deleteCopy,
-       _importBook = importBook;
+       _importBook = importBook,
+       _importPdf = importPdf;
 
   final AppDatabase db;
   final int profileId;
@@ -316,6 +321,9 @@ class ShareIntake {
   final int Function(String path) _sizeOf;
   final void Function(String path) _discard;
   final Future<int> Function(String path, String name)? _importBook;
+
+  /// The PDF import; tests stand in for PDFium here.
+  final Future<int> Function(String path, String name)? _importPdf;
 
   /// Link rows whose page is being read right now: a second share or an
   /// open of the same row doesn't fetch it twice.
@@ -582,6 +590,9 @@ class ShareIntake {
     final saved = <ShareSaved>[];
     final audio = <SharedFile>[];
     var failed = 0;
+    // Why a PDF could not be opened, in words fit to show: the one kind
+    // of file whose refusal is more than "can't open that".
+    String? why;
     try {
       for (final f in p.files) {
         try {
@@ -591,6 +602,17 @@ class ShareIntake {
               final id = importBook != null
                   ? await importBook(f.path, f.name)
                   : await importEpubFile(
+                      db: db,
+                      profileId: profileId,
+                      path: f.path,
+                      sourceName: f.name,
+                    );
+              saved.add(ShareSaved(id, inLatest: false));
+            case _FileKind.pdf:
+              final importPdf = _importPdf;
+              final id = importPdf != null
+                  ? await importPdf(f.path, f.name)
+                  : await importPdfFile(
                       db: db,
                       profileId: profileId,
                       path: f.path,
@@ -616,6 +638,9 @@ class ShareIntake {
             case _FileKind.other:
               failed++;
           }
+        } on PdfUnreadableException catch (e) {
+          why ??= e.message;
+          failed++;
         } catch (e) {
           failed++;
         }
@@ -650,7 +675,7 @@ class ShareIntake {
       }
     }
     if (saved.isEmpty) {
-      return const ShareRefused('Trellis can’t open that kind of file.');
+      return ShareRefused(why ?? 'Trellis can’t open that kind of file.');
     }
     final last = saved.last;
     return ShareSaved(

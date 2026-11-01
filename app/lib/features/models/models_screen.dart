@@ -15,6 +15,7 @@
 /// (1.5.9), each with a Restore.
 library;
 
+import 'asr_choice_section.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -25,6 +26,7 @@ import 'package:ml_runtime/ml_runtime.dart';
 import '../../db/database.dart' show AppDatabase;
 import '../../services/device_services.dart';
 import '../episodes/episode_actions.dart';
+import '../feeds/background/feed_check_section.dart';
 import '../feeds/background/feed_check_settings.dart';
 import '../reader/translation/language_names.dart';
 import '../reader/translation/translation_service.dart';
@@ -35,10 +37,13 @@ import '../shared/capped_body.dart';
 import '../storage/recently_deleted.dart';
 import '../storage/storage_by_item_screen.dart';
 
+export '../feeds/background/feed_check_section.dart' show FeedCheckSection;
+
 /// Human names for the registry ids; unknown ids fall back to the id.
 const Map<String, String> kModelLabels = {
   'whisper-tiny-ggml': 'Whisper Tiny: speech to text, multilingual',
   'whisper-base-ggml': 'Whisper Base: speech to text, multilingual',
+  'whisper-small-ggml': 'Whisper Small: speech to text, multilingual',
   'silero-vad': 'Silence filter: voice activity detection',
   'supertonic-en-m1': 'Supertonic voice (English): read aloud, offline',
   'wiktionary-en-en-stardict': 'Wiktionary dictionary (English): word lookups, offline',
@@ -349,6 +354,14 @@ class _ModelsScreenState extends State<ModelsScreen> {
           ),
           for (final spec in widget.registry.specs)
             if (spec.task != ModelTask.translation) _modelTile(spec),
+          // Which whisper model transcribes (1.6.0): the listener's own
+          // choice, where there is a device to run one and a place to
+          // keep the choice.
+          if (widget.db != null && widget.services != null)
+            AsrChoiceSection(
+                db: widget.db!,
+                registry: widget.registry,
+                tier: widget.services!.tier),
           if (_translationSpecs.isNotEmpty) _translationSection(),
           if (widget.feedCheck case final feedCheck?)
             FeedCheckSection(settings: feedCheck),
@@ -761,61 +774,6 @@ class _ModelsScreenState extends State<ModelsScreen> {
           ],
         ),
       ),
-    );
-  }
-}
-
-/// "Checking feeds": the device's two background-check switches. New
-/// episodes wait in Latest; nothing here ever notifies (ADR-0003).
-class FeedCheckSection extends StatefulWidget {
-  const FeedCheckSection({super.key, required this.settings});
-  final FeedCheckSettings settings;
-
-  @override
-  State<FeedCheckSection> createState() => _FeedCheckSectionState();
-}
-
-class _FeedCheckSectionState extends State<FeedCheckSection> {
-  @override
-  void initState() {
-    super.initState();
-    widget.settings.load();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return ListenableBuilder(
-      listenable: widget.settings,
-      builder: (context, _) {
-        final s = widget.settings;
-        return Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 24, 16, 4),
-              child: Text('Checking feeds', style: theme.textTheme.titleMedium),
-            ),
-            SwitchListTile(
-              key: const Key('feed-check-background'),
-              title: const Text('Check feeds in the background'),
-              subtitle: const Text(
-                  'About every 4 hours, when the battery isn’t low. New '
-                  'episodes wait in Latest; you won’t get a notification.'),
-              value: s.background,
-              onChanged: s.setBackground,
-            ),
-            SwitchListTile(
-              key: const Key('feed-check-wifi-only'),
-              title: const Text('Only on Wi-Fi'),
-              subtitle: const Text(
-                  'Episode downloads always wait for Wi-Fi.'),
-              value: s.wifiOnly,
-              onChanged: s.background ? s.setWifiOnly : null,
-            ),
-          ],
-        );
-      },
     );
   }
 }

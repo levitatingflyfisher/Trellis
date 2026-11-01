@@ -4,6 +4,8 @@
 /// still exactly one download consent path (ADR-0003 law 6).
 library;
 
+import '../listen/listen_chain.dart';
+import '../listen/listen_device.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -79,6 +81,15 @@ class EpisodeActions {
        _nowMs = nowMs ?? (() => DateTime.now().millisecondsSinceEpoch);
 
   bool get canDownload => localMlAvailable && downloader != null;
+
+  /// One tap to an episode in the learning language (1.6.0): transcribe,
+  /// translate, speak and save as one job. Null where this tier can't.
+  /// One for the life of these actions, so a run survives leaving the
+  /// episode's page.
+  late final ListenChain? listen = services != null && transcriber != null
+      ? deviceListenChain(
+          db: db, services: services!, transcriber: transcriber!)
+      : null;
 
   /// Disk truth; false, never a throw, where there is nothing to check.
   /// Remembered until the downloader changes or [forgetArtwork], so a
@@ -192,7 +203,21 @@ class EpisodeActions {
       ],
     );
     if (!ok) return false;
-    await d.start(workId: e.work.id, url: url, title: e.work.title);
+    await d.startByHand(workId: e.work.id, url: url, title: e.work.title);
+    if (d.stateOf(e.work.id).waitingForWifi) {
+      // "Download only on Wi-Fi" is on and this is mobile data (1.6.0):
+      // said at once, where the tap was; the row and Jobs say it after.
+      if (context.mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(const SnackBar(
+            persist: false,
+            content:
+                Text('Waiting for Wi-Fi. It downloads when Wi-Fi is back.'),
+          ));
+      }
+      return false;
+    }
     await _maybeProcess(e, url);
     return true;
   }

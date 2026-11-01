@@ -19,6 +19,7 @@ import '../works/work_open.dart';
 import '../works/work_row.dart';
 import '../reader/reader_doors.dart';
 import '../search/search_screen.dart';
+import 'background/feed_check_section.dart';
 import 'background/feed_check_settings.dart';
 import 'episode_download_coordinator.dart';
 import 'feed_detail_screen.dart';
@@ -90,11 +91,17 @@ class FeedsScreen extends StatefulWidget {
   /// recap and translation behave the same from either door.
   final ReaderDoors readerDoors;
 
+  /// The device's feed-check switches, behind "Wi-Fi and data" here as
+  /// well as under Models & storage; null where nothing can run in the
+  /// background (the web build, widget tests), and then no door is shown.
+  final FeedCheckSettings? feedCheck;
+
   const FeedsScreen({
     super.key,
     required this.db,
     required this.repository,
     required this.profile,
+    this.feedCheck,
     this.localMlAvailable = true,
     this.playerController,
     this.downloadCoordinator,
@@ -491,15 +498,32 @@ class _FeedsScreenState extends State<FeedsScreen> {
           if (feeds != null && !empty) _findField(),
           if (feeds != null && !empty)
             Padding(
-              padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-              child: Align(
-                alignment: AlignmentDirectional.centerStart,
-                child: Text(
-                  lastCheckedLabel(
-                      lastMs: _lastCheckedMs,
-                      nowMs: DateTime.now().millisecondsSinceEpoch),
-                  key: const Key('feeds-last-checked'),
-                  style: Theme.of(context).textTheme.bodySmall,
+              padding: const EdgeInsets.fromLTRB(16, 0, 4, 4),
+              child: SizedBox(
+                width: double.infinity,
+                // The door wraps under the line when both don't fit.
+                child: Wrap(
+                  alignment: WrapAlignment.spaceBetween,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Text(
+                      lastCheckedLabel(
+                          lastMs: _lastCheckedMs,
+                          nowMs: DateTime.now().millisecondsSinceEpoch),
+                      key: const Key('feeds-last-checked'),
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                    if (widget.feedCheck != null)
+                      // Beside what it governs, in plain sight (1.6.0,
+                      // user: "update on WiFi or not" was "missing"; the
+                      // switches sat only under Models & storage).
+                      TextButton.icon(
+                        key: const Key('feeds-wifi-and-data'),
+                        onPressed: _openWifiAndData,
+                        icon: const Icon(Icons.wifi),
+                        label: const Text('Wi-Fi and data'),
+                      ),
+                  ],
                 ),
               ),
             ),
@@ -511,6 +535,23 @@ class _FeedsScreenState extends State<FeedsScreen> {
             _ => _shelfList(feeds),
           }),
         ])),
+      ),
+    );
+  }
+
+  /// The device's Wi-Fi switches, in a sheet over this page.
+  Future<void> _openWifiAndData() async {
+    final settings = widget.feedCheck;
+    if (settings == null) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (_) => SafeArea(
+        child: SingleChildScrollView(
+          key: const Key('wifi-and-data-sheet'),
+          child: FeedCheckSection(settings: settings),
+        ),
       ),
     );
   }

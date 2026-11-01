@@ -134,8 +134,11 @@ Future<List<({int feedId, int newestWorkId, List<AutoDownloadPick> picks})>>
 /// Writes [pick] as a paused, queued auto-download row, unless the
 /// episode already has one. The coordinator's [queueAuto] is this plus its
 /// in-memory card; tests and a pass share the row shape through here.
+/// [hand]: the listener started it and it is waiting for Wi-Fi
+/// ("Download only on Wi-Fi", 1.6.0), not picked by a pass.
 Future<bool> recordQueuedAutoDownload(
-    AppDatabase db, AutoDownloadPick pick, int nowMs) async {
+    AppDatabase db, AutoDownloadPick pick, int nowMs,
+    {bool hand = false}) async {
   final jobId = downloadJobId(pick.workId);
   if (await db.jobsDao.load(jobId) != null) return false;
   await db.jobsDao.save(Job(
@@ -154,8 +157,31 @@ Future<bool> recordQueuedAutoDownload(
           title: pick.title,
           url: pick.url,
           auto: true,
-          queued: true));
+          queued: true,
+          hand: hand));
   return true;
+}
+
+/// Whether a download the listener started is waiting for Wi-Fi. Such a
+/// row earns a pass even with background checks switched off: it is the
+/// listener's own request, not something the app does unasked.
+Future<bool> handDownloadsWaiting(AppDatabase db,
+    {required bool Function(int workId, String url) onDisk}) async {
+  for (final row in await db.jobsDao.unfinished()) {
+    if (row.kind != 'download' || row.state != JobState.cancelled.name) {
+      continue;
+    }
+    final p = jsonDecode(row.payloadJson);
+    if (p case {
+          'workId': final int workId,
+          'url': final String url,
+          'queued': true,
+          'hand': true,
+        } when !onDisk(workId, url)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /// The rows the next pass owns, oldest first: picked and not started, or
@@ -200,6 +226,9 @@ Future<bool> autoDownloadsPending(AppDatabase db,
 /// fetched, one at a time, politely. [shouldStop] ends the pass between
 /// downloads; one it stopped mid-fetch goes back in the queue. Returns
 /// false while queued rows remain, which tells the system to try again.
+/// [planNew] false picks nothing new and only fetches what is queued: a
+/// pass asked for by a download waiting for Wi-Fi while background checks
+/// are switched off.
 Future<bool> runAutoDownloadPass(
   AppDatabase db, {
   required bool Function(int workId, String url) onDisk,
@@ -207,8 +236,11 @@ Future<bool> runAutoDownloadPass(
   required Future<Object?> Function(AutoDownloadPick pick) start,
   required Future<void> Function(int workId) requeue,
   bool Function() shouldStop = _never,
+  bool planNew = true,
 }) async {
-  final plan = await planAutoDownloads(db, onDisk: onDisk);
+  final plan = planNew
+      ? await planAutoDownloads(db, onDisk: onDisk)
+      : const <({int feedId, int newestWorkId, List<AutoDownloadPick> picks})>[];
   for (final pick in [for (final show in plan) ...show.picks]) {
     await queue(pick);
   }

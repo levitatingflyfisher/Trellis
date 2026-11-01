@@ -1,6 +1,5 @@
 import 'dart:io';
 
-import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
 import 'package:intake_core/intake_core.dart';
 
@@ -58,26 +57,3 @@ _ParsedEpub _parseBytes(({List<int> bytes, String? name}) m) {
 
 _ParsedEpub _parseFile(({String path, String? name}) m) =>
     _parseBytes((bytes: File(m.path).readAsBytesSync(), name: m.name));
-
-/// The thin file_picker wrapper: pick one .epub, delegate to
-/// [importEpubFile] (native) or [importEpubBytes] (web, where a picked
-/// file has no path). Returns null when the picker is dismissed.
-Future<int?> pickAndImportEpub(
-    {required AppDatabase db, required int profileId}) async {
-  final result = await FilePicker.platform.pickFiles(
-    type: FileType.custom,
-    allowedExtensions: ['epub'],
-    // Natively the bytes would cross the platform channel only to be read
-    // again; the path is enough.
-    withData: kIsWeb,
-  );
-  final file = result?.files.firstOrNull;
-  if (file == null) return null;
-  final path = kIsWeb ? null : file.path;
-  if (path != null) {
-    return importEpubFile(
-        db: db, profileId: profileId, path: path, sourceName: file.name);
-  }
-  return importEpubBytes(
-      db: db, profileId: profileId, bytes: file.bytes!, sourceName: file.name);
-}

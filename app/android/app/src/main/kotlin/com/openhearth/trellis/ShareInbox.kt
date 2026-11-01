@@ -150,6 +150,7 @@ object ShareInbox {
         val ext = name.substringAfterLast('.', "").lowercase()
         return when {
             m == "application/epub+zip" || ext == "epub" -> MAX_MEDIA_BYTES
+            m == "application/pdf" || ext == "pdf" -> MAX_MEDIA_BYTES
             m.startsWith("audio/") ||
                 ext in setOf("mp3", "m4a", "m4b", "ogg", "opus", "flac") -> MAX_MEDIA_BYTES
             m in setOf("text/plain", "text/markdown", "text/x-markdown", "text/html") ||

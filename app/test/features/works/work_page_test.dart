@@ -10,6 +10,7 @@ import 'package:trellis/features/player/player_controller.dart';
 import 'package:trellis/features/reader/reader_doors.dart';
 import 'package:trellis/features/reader/reader_screen.dart';
 import 'package:trellis/features/transcribe/transcribe_coordinator.dart';
+import 'package:trellis/features/works/notes_view.dart';
 import 'package:trellis/features/works/work_open.dart';
 import 'package:trellis/features/works/work_page.dart';
 import 'package:trellis/main.dart';
@@ -331,6 +332,10 @@ void main() {
 
     testWidgets('a timestamp in the notes plays from there', (tester) async {
       await pumpPage(tester, episode);
+      // The page grew a line (Listen in another language, 1.6.0): the
+      // notes may start below the fold.
+      await tester.ensureVisible(find.byType(NotesView));
+      await tester.pumpAndSettle();
       await tester.tapOnText(find.textRange.ofSubstring('12:34'));
       await tester.pumpAndSettle();
       expect(controller.current?.id, episode);
@@ -344,6 +349,8 @@ void main() {
 
     testWidgets('a link in the notes asks before it opens', (tester) async {
       await pumpPage(tester, episode);
+      await tester.ensureVisible(find.byType(NotesView));
+      await tester.pumpAndSettle();
       await tester.tapOnText(find.textRange.ofSubstring('sky map'));
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('link-confirm')), findsOneWidget);

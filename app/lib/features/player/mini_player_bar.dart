@@ -52,6 +52,10 @@ class MiniPlayerBar extends StatefulWidget {
   /// promise-never-dangled law [onOpenSyncedText] follows.
   final VoidCallback? onOpenChapters;
 
+  /// Opens the Headphone buttons sheet (1.6.0); the shell wires it. Null
+  /// where there is no media session for a headset to drive.
+  final VoidCallback? onOpenHeadsetKeys;
+
   const MiniPlayerBar(
       {super.key,
       required this.controller,
@@ -61,7 +65,8 @@ class MiniPlayerBar extends StatefulWidget {
       this.onCapture,
       this.onOpenCaptures,
       this.onOpenQueue,
-      this.onOpenChapters});
+      this.onOpenChapters,
+      this.onOpenHeadsetKeys});
 
   @override
   State<MiniPlayerBar> createState() => _MiniPlayerBarState();
@@ -153,73 +158,85 @@ class _MiniPlayerBarState extends State<MiniPlayerBar> {
         return Material(
           key: const Key('mini-player'),
           color: theme.colorScheme.surfaceContainerHigh,
-          child: SafeArea(
-            top: false,
-            child: Stack(
-              clipBehavior: Clip.none,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(8, 7, 0, 4),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: _openWorkArea(context, work,
-                            restoredMs: restoredMs,
-                            scrubLabel: scrubLabel,
-                            canScrub: total != null),
-                      ),
-                      IconButton(
-                        key: const Key('player-back15'),
-                        tooltip: 'Back 15 seconds',
-                        icon: const Icon(Icons.replay),
-                        onPressed: () =>
-                            controller.seekBy(const Duration(seconds: -15)),
-                      ),
-                      OhIconButton.filled(
-                        key: const Key('player-toggle'),
-                        tooltip: controller.playing ? 'Pause' : 'Play',
-                        // Glyph contrast (Campaign 9 Phase 0's "blank
-                        // circles") is pinned by OhIconButton, not here.
-                        icon: Icon(controller.playing
-                            ? Icons.pause
-                            : Icons.play_arrow),
-                        onPressed: controller.toggle,
-                      ),
-                      SpeedControl(
-                        key: const Key('player-speed'),
-                        speed: controller.speed,
-                        onChanged: controller.setSpeed,
-                      ),
-                      IconButton(
-                        key: const Key('player-close'),
-                        tooltip: 'Close',
-                        icon: const Icon(Icons.close),
-                        onPressed: controller.stop,
-                      ),
-                      Builder(
-                        builder: (buttonContext) => IconButton(
-                          key: const Key('player-menu'),
-                          tooltip: 'More',
-                          icon: Icon(controller.sleepTimerMode == null
-                              ? Icons.more_vert
-                              // The menu holds the sleep timer; its state
-                              // still shows on the bar.
-                              : Icons.bedtime),
-                          onPressed: () => _openMenu(buttonContext),
+          // The whole bar opens the episode, not only the art and title
+          // (1.6.0, user: "tapping the episode play bar doesn't open the
+          // episode"). On a phone the title is cut to a few letters, and
+          // the strip the bar pads above the gesture bar did nothing. The
+          // buttons are inside and win their own taps; for a screen
+          // reader the door is still the title's button alone.
+          child: GestureDetector(
+            key: const Key('player-open-work-bar'),
+            behavior: HitTestBehavior.opaque,
+            excludeFromSemantics: true,
+            onTap: widget.onOpenWork,
+            child: SafeArea(
+              top: false,
+              child: Stack(
+                clipBehavior: Clip.none,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(8, 7, 0, 4),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: _openWorkArea(context, work,
+                              restoredMs: restoredMs,
+                              scrubLabel: scrubLabel,
+                              canScrub: total != null),
                         ),
-                      ),
-                    ],
+                        IconButton(
+                          key: const Key('player-back15'),
+                          tooltip: 'Back 15 seconds',
+                          icon: const Icon(Icons.replay),
+                          onPressed: () =>
+                              controller.seekBy(const Duration(seconds: -15)),
+                        ),
+                        OhIconButton.filled(
+                          key: const Key('player-toggle'),
+                          tooltip: controller.playing ? 'Pause' : 'Play',
+                          // Glyph contrast (Campaign 9 Phase 0's "blank
+                          // circles") is pinned by OhIconButton, not here.
+                          icon: Icon(controller.playing
+                              ? Icons.pause
+                              : Icons.play_arrow),
+                          onPressed: controller.toggle,
+                        ),
+                        SpeedControl(
+                          key: const Key('player-speed'),
+                          speed: controller.speed,
+                          onChanged: controller.setSpeed,
+                        ),
+                        IconButton(
+                          key: const Key('player-close'),
+                          tooltip: 'Close',
+                          icon: const Icon(Icons.close),
+                          onPressed: controller.stop,
+                        ),
+                        Builder(
+                          builder: (buttonContext) => IconButton(
+                            key: const Key('player-menu'),
+                            tooltip: 'More',
+                            icon: Icon(controller.sleepTimerMode == null
+                                ? Icons.more_vert
+                                // The menu holds the sleep timer; its state
+                                // still shows on the bar.
+                                : Icons.bedtime),
+                            onPressed: () => _openMenu(buttonContext),
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
-                ),
-                // Over the row's top padding, so thickening while
-                // scrubbing never moves the row.
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  child: _progressLine(theme, scrub: scrub, total: total),
-                ),
-              ],
+                  // Over the row's top padding, so thickening while
+                  // scrubbing never moves the row.
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: _progressLine(theme, scrub: scrub, total: total),
+                  ),
+                ],
+              ),
             ),
           ),
         );
@@ -418,6 +435,9 @@ class _MiniPlayerBarState extends State<MiniPlayerBar> {
               ? Icons.bedtime_outlined
               : Icons.bedtime,
           controller.sleepTimerMode == null ? 'Sleep timer' : 'Sleep timer (on)'),
+      if (widget.onOpenHeadsetKeys != null)
+        item(_BarAction.headsetKeys, 'open-headset-keys',
+            Icons.headphones_outlined, 'Headphone buttons'),
     ];
   }
 
@@ -455,6 +475,8 @@ class _MiniPlayerBarState extends State<MiniPlayerBar> {
         onOpenChapters?.call();
       case _BarAction.queue:
         onOpenQueue?.call();
+      case _BarAction.headsetKeys:
+        widget.onOpenHeadsetKeys?.call();
       case _BarAction.fwd30:
         await controller.seekBy(const Duration(seconds: 30));
       case _BarAction.sleep:
@@ -476,6 +498,7 @@ enum _BarAction {
   queue,
   fwd30,
   sleep,
+  headsetKeys,
 }
 
 /// The show's art, or, when none is on disk, a glyph for what is playing:

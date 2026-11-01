@@ -106,6 +106,22 @@ void main() {
     });
   });
 
+  test('the media session is the app’s own: audio_service directly, and '
+      'not the plugin whose handler it replaced (1.6.0)', () {
+    // just_audio_background would take the engine's one platform slot
+    // back and put its own handler in the session: the one that dropped
+    // the playback service between queued episodes.
+    final pubspec = File('pubspec.yaml').readAsStringSync();
+    bool depends(String name) =>
+        RegExp('^\\s{2}$name:', multiLine: true).hasMatch(pubspec);
+    expect(depends('audio_service'), isTrue);
+    expect(depends('just_audio_background'), isFalse);
+    final boot = File('lib/bootstrap/bootstrap_io.dart').readAsStringSync();
+    expect(boot, contains('AudioService.init<TrellisAudioHandler>'));
+    expect(boot, contains("'com.openhearth.trellis.channel.audio'"),
+        reason: 'the notification channel phones already have');
+  });
+
   test('Android Auto Backup is off: the app has its own encrypted backup '
       '(ADR-0017)', () {
     // Left on, Android copies the database (listening history, the

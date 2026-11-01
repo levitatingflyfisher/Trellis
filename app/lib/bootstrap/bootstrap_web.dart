@@ -32,6 +32,8 @@ import 'package:ml_runtime/ml_runtime.dart';
 import '../db/database.dart';
 import '../features/backup/backup_custody.dart';
 import '../features/models/model_store.dart';
+import '../features/player/headset_keys.dart';
+import '../features/player/playback_session.dart';
 import '../features/transcribe/audio_fetcher.dart';
 import '../features/transcribe/decoder.dart';
 import '../features/transcribe/foreground_gate.dart';
@@ -93,12 +95,18 @@ DeviceServices detachedServices() => webServices();
 HttpFetcher createFetcher({WebFetchLane lane = WebFetchLane.direct}) =>
     DioHttpFetcher(lane: lane);
 
-/// Campaign 9 Phase 2e (ADR-0015 Decision 3): a no-op on this tier —
-/// just_audio_background's native media-session service is Android/iOS
-/// only. This stub exists so `main()` can call `initAudioBackground()`
-/// unconditionally, the same conditional-export shape every other name
-/// in this file already follows.
+/// Campaign 9 Phase 2e (ADR-0015 Decision 3): a no-op on this tier — the
+/// native media-session service is Android/iOS only. This stub exists so
+/// `main()` can call `initAudioBackground()` unconditionally, the same
+/// conditional-export shape every other name in this file already
+/// follows.
 Future<void> initAudioBackground() async {}
+
+/// No media session in a browser tab: players report to nothing.
+PlaybackSession get playbackSession => const NoPlaybackSession();
+
+/// Nothing to bind them to here.
+void bindHeadsetKeys(Future<HeadsetKeys> Function() read) {}
 
 /// The daemon's own marker for a response IT originated (refused URL, cap
 /// trip, unreachable upstream) as opposed to one proxied byte-for-byte

@@ -11,6 +11,7 @@ import '../works/work_menu.dart';
 import '../works/work_open.dart';
 import '../works/work_row.dart';
 import '../episodes/episode_selection.dart';
+import '../feeds/background/feed_check_settings.dart';
 import '../feeds/episode_download_coordinator.dart';
 import '../jobs/jobs_screen.dart' show downloadFraction, downloadStatus;
 import '../feeds/feeds_repository.dart';
@@ -92,11 +93,16 @@ class RiverScreen extends StatefulWidget {
   /// that was never read gets its page tried again.
   final void Function(int workId)? onOpenWork;
 
+  /// Handed on to Subscriptions for its "Wi-Fi and data" door; null where
+  /// nothing can run in the background.
+  final FeedCheckSettings? feedCheck;
+
   const RiverScreen(
       {super.key,
       this.active = true,
       this.changes = 0,
       this.onOpenWork,
+      this.feedCheck,
       required this.db,
       required this.profile,
       required this.repository,
@@ -435,6 +441,7 @@ class _RiverScreenState extends State<RiverScreen>
           db: widget.db,
           repository: widget.repository,
           profile: widget.profile,
+          feedCheck: widget.feedCheck,
           localMlAvailable: widget.localMlAvailable,
           playerController: widget.playerController,
           downloadCoordinator: widget.downloadCoordinator,
@@ -909,6 +916,12 @@ class _RowDownload extends StatelessWidget {
                       key: Key('row-download-pause-$workId'),
                       onPressed: () => coordinator.cancel(workId),
                       child: const Text('Pause'),
+                    )
+                  else if (s.waitingForWifi)
+                    TextButton(
+                      key: Key('row-download-now-$workId'),
+                      onPressed: () => coordinator.startNow(workId),
+                      child: const Text('Download now'),
                     )
                   else
                     TextButton(

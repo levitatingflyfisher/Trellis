@@ -10,6 +10,8 @@ library;
 
 export '../transcribe/job_cards.dart' show transcribeEstimate;
 
+import '../listen/listen_device.dart';
+import '../listen/listen_in_language_bar.dart';
 import 'dart:async';
 import 'dart:io';
 
@@ -812,8 +814,66 @@ class _WorkPageState extends State<WorkPage> {
                       )
                     : const SizedBox.shrink(),
           ),
+        // One tap to the episode in the learning language (1.6.0). Not on
+        // an episode that is itself a spoken translation.
+        if (_actions case final a?)
+          if (a.listen != null &&
+              a.services != null &&
+              a.transcriber != null &&
+              _isAudio &&
+              !_isAudiobook &&
+              _episode != null &&
+              !_episode!.guid.startsWith('spoken:'))
+            ListenInLanguageBar(
+              db: _db,
+              chain: a.listen!,
+              work: _work,
+              languages: savableListenLanguages(),
+              downloadsFor: (lang) => listenDownloads(
+                  db: _db,
+                  services: a.services!,
+                  transcriber: a.transcriber!,
+                  work: _work,
+                  episode: _episode!,
+                  lang: lang),
+              onPlay: _playSpoken,
+            ),
       ],
     );
+  }
+
+  /// Plays the spoken translation, which is an episode of its own, and
+  /// says where it now lives.
+  Future<void> _playSpoken(int spokenWorkId, {required bool justMade}) async {
+    final spoken = await _db.spineDao.workById(spokenWorkId);
+    final player = _doors.player;
+    if (spoken == null || player == null) return;
+    // The job can run for half an hour. If the listener has left this
+    // page, or is in the middle of something else, it does not cut in:
+    // the episode is there, and the same button now plays it.
+    final elsewhere = player.playing && player.current?.id != spoken.id;
+    // Nor does it try from behind a dark screen or another app: Android
+    // refuses to let playback start there (seen on the emulator), and a
+    // refused start leaves the bar saying it plays when nothing does.
+    final inFront = WidgetsBinding.instance.lifecycleState == null ||
+        WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
+    if (justMade && (!mounted || elsewhere || !inFront)) {
+      if (mounted) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(SnackBar(
+              content: Text('“${spoken.title}” is ready. It is kept beside '
+                  'the original in this show.')));
+      }
+      return;
+    }
+    await player.playWork(spoken);
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(
+          content: Text('Playing “${spoken.title}”. It is kept beside the '
+              'original in this show.')));
   }
 
   Widget _languages(BuildContext context) {

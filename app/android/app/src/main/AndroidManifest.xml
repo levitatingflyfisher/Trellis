@@ -64,6 +64,7 @@
                 <data android:mimeType="text/x-markdown"/>
                 <data android:mimeType="text/html"/>
                 <data android:mimeType="application/epub+zip"/>
+                <data android:mimeType="application/pdf"/>
                 <data android:mimeType="audio/*"/>
             </intent-filter>
             <intent-filter>
@@ -74,6 +75,7 @@
                 <data android:mimeType="text/x-markdown"/>
                 <data android:mimeType="text/html"/>
                 <data android:mimeType="application/epub+zip"/>
+                <data android:mimeType="application/pdf"/>
                 <data android:mimeType="audio/*"/>
             </intent-filter>
         </activity>

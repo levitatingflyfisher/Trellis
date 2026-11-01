@@ -196,6 +196,43 @@ void main() {
     expect(opened, 2);
   });
 
+  testWidgets('a tap on the bar anywhere but a button opens the episode: '
+      'the strip under the buttons and the edge are not dead (1.6.0, user: '
+      '"tapping the episode play bar doesn\'t open the episode")',
+      (tester) async {
+    await controller.playWork(await seedEpisode());
+    var opened = 0;
+    await tester.pumpWidget(MaterialApp(
+      home: Builder(
+        // A phone's gesture bar: the bar pads itself above it, and that
+        // padding is bar too.
+        builder: (context) => MediaQuery(
+          data: MediaQuery.of(context)
+              .copyWith(padding: const EdgeInsets.only(bottom: 24)),
+          child: Scaffold(
+            body: const SizedBox.expand(),
+            bottomNavigationBar: MiniPlayerBar(
+                controller: controller, onOpenWork: () => opened++),
+          ),
+        ),
+      ),
+    ));
+    await tester.pump();
+    final bar = tester.getRect(find.byKey(const Key('mini-player')));
+
+    await tester.tapAt(Offset(bar.center.dx, bar.bottom - 6));
+    await tester.pump();
+    expect(opened, 1, reason: 'under the row of buttons');
+    await tester.tapAt(Offset(bar.left + 3, bar.top + 30));
+    await tester.pump();
+    expect(opened, 2, reason: 'the left edge, beside the art');
+
+    await tester.tap(find.byKey(const Key('player-toggle')));
+    await tester.pump();
+    expect(opened, 2, reason: 'a button does only its own thing');
+    expect(player.playing, isFalse);
+  });
+
   testWidgets('show page is in the bar\'s menu', (tester) async {
     await controller.playWork(await seedEpisode());
     var shown = 0;
@@ -261,6 +298,37 @@ void main() {
     }
     expect(find.byKey(const Key('player-back15')), findsOneWidget,
         reason: 'Back 15 is on the bar, not repeated in the menu');
+  });
+
+  testWidgets('Headphone buttons is in the bar’s menu, where the other '
+      'playback choices are (1.6.0)', (tester) async {
+    await controller.playWork(await seedEpisode());
+    var opened = 0;
+    await tester.pumpWidget(MaterialApp(
+      home: Scaffold(
+        bottomNavigationBar: MiniPlayerBar(
+            controller: controller, onOpenHeadsetKeys: () => opened++),
+      ),
+    ));
+    await tester.pump();
+
+    await tester.tap(find.byKey(const Key('player-menu')));
+    await tester.pumpAndSettle();
+    expect(find.text('Headphone buttons'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('open-headset-keys')));
+    await tester.pumpAndSettle();
+
+    expect(opened, 1);
+  });
+
+  testWidgets('with nowhere to open it, the menu has no Headphone buttons',
+      (tester) async {
+    await controller.playWork(await seedEpisode());
+    await pumpBar(tester, controller);
+
+    await tester.tap(find.byKey(const Key('player-menu')));
+    await tester.pumpAndSettle();
+    expect(find.text('Headphone buttons'), findsNothing);
   });
 
   testWidgets('Back 15 on the bar skips back', (tester) async {

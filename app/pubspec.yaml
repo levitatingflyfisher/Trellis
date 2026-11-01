@@ -18,7 +18,7 @@ publish_to: 'none' # Remove this line if you wish to publish to pub.dev
 # of the product and file versions while build-number is used as the build suffix.
 # Build number >2003: the fusion supersedes the original Trellis
 # (versionCode 2003 era) and must install over it as an upgrade.
-version: 1.5.10+2021
+version: 1.6.0+2022
 
 environment:
   sdk: ^3.10.7
@@ -76,17 +76,27 @@ dependencies:
   # localMlAvailable's callers already follow.
   share_plus: ^11.0.0
   file_picker: ^10.3.8
+  # PDF intake (1.6.0): PDFium, called through dart:ffi from
+  # features/intake/pdf_reader_native.dart, as whisper is from whisper_ffi.
+  # This plugin only bundles libpdfium.so (BSD-3-Clause and Apache-2.0;
+  # bblanchon/pdfium-binaries, chromium/7520) with its generated bindings.
+  # The viewer package (pdfrx) and its two web files are not used. Pinned
+  # exactly, because the plugin downloads the binary while the app builds:
+  # the release recipe checks its sha256.
+  pdfium_flutter: 0.1.9
+  ffi: ^2.1.4
   just_audio: ^0.10.5
   # Lock-screen/pull-down-tray transport controls (Campaign 9 Phase 2e,
-  # ADR-0015 Decision 3): the official just_audio companion — one
-  # JustAudioBackground.init() call in bootstrap_io.dart (Android/iOS
-  # only, never on web) plus a MediaItem tag on every AudioSource this
-  # app's single player loads.
-  just_audio_background: ^0.0.1-beta.17
-  # Read aloud's own player (1.5.9): just_audio_background serves one
-  # player, the episode's, so the neural voice reaches the native plugin
-  # through its platform interface and asks for audio focus itself. Both
-  # were already here under just_audio (same author, MIT); now imported.
+  # ADR-0015 Decision 3). Since 1.6.0 the app has its own handler
+  # (features/player/trellis_audio_handler.dart) on audio_service, the
+  # package just_audio_background was built on and brought in: the
+  # plugin's handler could not keep the service up between queued
+  # episodes, map a headset key, or give read aloud a session. Same
+  # author, MIT; the version is the one already resolved.
+  audio_service: ^0.18.19
+  # Read aloud's own player (1.5.9): reaches the native plugin through
+  # its platform interface and asks for audio focus itself. Both were
+  # already here under just_audio (same author, MIT); now imported.
   just_audio_platform_interface: ^4.6.0
   audio_session: ^0.2.4
   # System TTS for the reader's speak mode — always behind the app's
@@ -168,6 +178,10 @@ flutter:
     # The Trellis starter course, registered as an importable sample —
     # never auto-imported (the user's hand does the importing, ADR-0003).
     - assets/courses/kalman.ohcourse
+    # PDFium's licence texts (1.6.0): the prebuilt binary's own LICENSE
+    # and licenses/ folder, joined. Shown on the licence list
+    # (features/intake/pdf_licenses.dart); Flutter cannot gather them.
+    - assets/licenses/pdfium.txt
 
   # The fleet's type (proposal-2 §12): Lora for display, Nunito for body,
   # bundled as package fonts by openhearth_design (0.7.1+). C7 checks every

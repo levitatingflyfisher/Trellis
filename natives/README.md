@@ -140,3 +140,32 @@ applies to test fixtures too.
   its own.
 - CPU-only (`use_gpu=false` in the shim as well): GPU offload would be an
   explicit later decision, never a silent default.
+
+## PDFium (PDF intake, 1.6.0)
+
+PDFium is not built here. The `pdfium_flutter` plugin (pinned to 0.1.9 in
+`app/pubspec.yaml`) downloads a prebuilt `libpdfium.so` from
+`bblanchon/pdfium-binaries`, release `chromium/7520` (PDFium 144.0.7520.0),
+while the app builds, and checks nothing. So the pin lives here:
+
+- `natives/pdfium-arm64.sha256` holds the sha256 of the arm64
+  `libpdfium.so`, and `natives/check-release-apk.sh` fails any release APK
+  that lacks the library or carries a different one. The check fails closed
+  if the pin file is missing.
+- Verified on 2026-11-10: `pdfium-android-arm64.tgz` downloaded fresh has
+  sha256 `785d4804656f42199c9bb2f5c69a6f3e07a1514cc251d1e12d425cf87b4982f8`,
+  the digest GitHub publishes for that release asset, and the
+  `lib/libpdfium.so` inside it is the pinned
+  `956f2684d697396ef7d201509005d123d0367b1f619cdd23c94e1430811984bf`.
+  (x86_64, used only on the emulator: archive `ad0988f7…10d31`, library
+  `a21a3194…3928e`.)
+- The build's `args.gn` has `pdf_enable_v8 = false` and
+  `pdf_enable_xfa = false`: no JavaScript engine and no XFA forms are in
+  the binary.
+- Its licence texts (its `LICENSE` and the 17 files of `licenses/`) are
+  carried in `app/assets/licenses/pdfium.txt` and registered on the
+  licence list by `app/lib/features/intake/pdf_licenses.dart`.
+
+To move to another PDFium build: change the plugin version, download the
+new release archive, check it against GitHub's published digest, replace
+the pin and the licence asset from that archive, and say so in the commit.

@@ -2,17 +2,18 @@
 /// player (ExoPlayer on Android) the podcast player uses, reached one
 /// layer lower than `just_audio_player.dart` does.
 ///
-/// Why not an `AudioPlayer`: just_audio_background (the lock-screen
-/// controls, bootstrap_io.dart) takes over [JustAudioPlatform.instance]
-/// and serves ONE player, the episode player. Any second `AudioPlayer`
-/// fails its init with "supports only a single player instance". 1.5.8
-/// read aloud with the neural voice through one, so wherever the episode
+/// Why not an `AudioPlayer`: until 1.5.10 just_audio_background (the
+/// lock-screen controls then) took over [JustAudioPlatform.instance] and
+/// served ONE player, the episode player. Any second `AudioPlayer` failed
+/// its init with "supports only a single player instance". 1.5.8 read
+/// aloud with the neural voice through one, so wherever the episode
 /// player had started first (always, on a podcast transcript) the voice
 /// never sounded; and when the voice started first, the episode could
-/// not play. Speech has no business on the lock screen anyway, so this
-/// talks to the native plugin directly ([MethodChannelJustAudio], the
-/// platform the background plugin itself wraps): its own player id, its
-/// own channel, never the background slot.
+/// not play. So this talks to the native plugin directly
+/// ([MethodChannelJustAudio]): its own player id, its own channel. Since
+/// 1.6.0 the app has its own media session and that plugin is gone, so a
+/// second `AudioPlayer` would work; this stays as it is, proven, until
+/// read aloud is given its place in the session.
 ///
 /// Talking to the plugin directly means sending what `AudioPlayer` would
 /// have sent; the Android side unboxes and looks up without null checks

@@ -495,6 +495,17 @@ void main() {
       expect(starter.pickModel(ModelTask.vad, DeviceTier.t1)?.id, 'silero-vad');
     });
 
+    test('whisper small is on offer but is nobody’s default on a phone: it '
+        'is registered above the phone tiers, so only a choice reaches it',
+        () {
+      expect(starter.byId('whisper-small-ggml')!.minTier, DeviceTier.t3);
+      expect(starter.byId('whisper-small-ggml')!.licenses, ['MIT']);
+      expect(starter.pickModel(ModelTask.asr, DeviceTier.t1)?.id,
+          'whisper-tiny-ggml');
+      expect(starter.pickModel(ModelTask.asr, DeviceTier.t2)?.id,
+          'whisper-base-ggml');
+    });
+
     test('the neural voice is picked at t1, the tier the app runs at '
         '(1.5.8: at t2 it downloaded and never played)', () {
       expect(starter.byId('supertonic-en-m1')!.minTier, DeviceTier.t1);
@@ -552,6 +563,15 @@ void main() {
             'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-base-q8_0.bin',
             'c577b9a86e7e048a0b7eada054f4dd79a56bbfa911fbdacf900ac5b567cbb7d9',
             81768585,
+          ),
+        ],
+        // Verified 2026-11-10: downloaded and hashed, and equal to the
+        // hash Hugging Face publishes for the file.
+        'whisper-small-ggml': [
+          (
+            'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q8_0.bin',
+            '49c8fb02b65e6049d5fa6c04f81f53b867b5ec9540406812c643f177317f779f',
+            264464607,
           ),
         ],
         'silero-vad': [

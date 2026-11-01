@@ -119,6 +119,20 @@ class _HomeFlowState extends State<HomeFlow> {
   }
 
   Future<void> _boot() async {
+    // "Download only on Wi-Fi" (1.6.0): set before any job resumes, so a
+    // download a kill interrupted waits too when this launch is on mobile
+    // data. Only where the system can run the Wi-Fi pass that ends the
+    // wait.
+    final scheduler = widget.feedCheckScheduler;
+    final downloads = _jobs.downloads;
+    if (downloads != null && scheduler.available) {
+      downloads.mustWaitForWifi = downloadMustWaitForWifi(
+          widget.db,
+          scheduler is NetworkMeter
+              ? scheduler as NetworkMeter
+              : const UnknownNetworkMeter());
+      downloads.requestWifiPass = scheduler.requestAutoDownload;
+    }
     // The readers render at once; only what writes waits for the hand-over.
     unawaited(_load());
     unawaited(_searchBackfill.run(after: _writesReady.future));

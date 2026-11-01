@@ -8,8 +8,11 @@ import 'db/database.dart';
 import 'features/feeds/background/feed_check_platform.dart';
 import 'features/feeds/background/feed_check_settings.dart';
 import 'features/home_widget/home_widget_host.dart';
+import 'features/intake/pdf_licenses.dart';
+import 'features/intake/pdf_reader.dart' show pdfReadingAvailable;
 import 'features/intake/share_source.dart';
 import 'features/player/episode_player.dart';
+import 'features/player/headset_keys.dart';
 import 'features/player/just_audio_player.dart';
 import 'features/player/mini_player_host.dart';
 import 'features/profiles/home_flow.dart';
@@ -32,6 +35,10 @@ Future<void> main() async {
   // fail, loudly and visibly, but it may not take the boot with it
   // (bootstrap/boot_guard.dart).
   final bootNotes = <String>[];
+
+  // PDFium is a prebuilt binary Flutter's licence gathering cannot see.
+  // Nothing is read here; the text loads when the list is shown.
+  if (pdfReadingAvailable) registerPdfiumLicenses();
 
   // Campaign 9 Phase 2e (ADR-0015 Decision 3): must run before the app's
   // single AudioPlayer is ever constructed — a real call on Android/iOS,
@@ -62,6 +69,8 @@ Future<void> main() async {
   // open must not keep the first frame from painting (1.4.0). On a slow
   // start this is null and TrellisApp applies the choice when it arrives.
   final db = createDb();
+  // A headset key pressed from now on does what its setting says (1.6.0).
+  bindHeadsetKeys(() => HeadsetKeysStore(db).read());
   final theme = await ThemePreferenceController.readBeforeFirstFrame(db);
 
   runApp(TrellisApp(
@@ -119,7 +128,10 @@ class TrellisApp extends StatefulWidget {
       this.shareSource = const UnavailableShareSource(),
       this.homeWidget = const UnavailableHomeWidgetHost()})
       : fetcher = fetcher ?? IoHttpFetcher(),
-        createPlayer = createPlayer ?? (() => JustAudioEpisodePlayer()),
+        // Each player reports to the app's media session, read when the
+        // player is made: by then main() has started the session.
+        createPlayer = createPlayer ??
+            (() => JustAudioEpisodePlayer(session: playbackSession)),
         services = services ?? DeviceServices.detached();
 
   @override

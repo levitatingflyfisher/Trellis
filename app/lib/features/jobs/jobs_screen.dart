@@ -79,6 +79,11 @@ String bytesProgress(int? received, int? total) {
 String downloadStatus(EpisodeDownloadState s) {
   if (s.failed) return 'Download didn’t finish. ${s.error}';
   final bytes = bytesProgress(s.receivedBytes, s.totalBytes);
+  if (s.waitingForWifi) {
+    return (s.receivedBytes ?? 0) == 0
+        ? 'Waiting for Wi-Fi'
+        : 'Waiting for Wi-Fi: $bytes so far';
+  }
   if (s.paused) {
     return (s.receivedBytes ?? 0) == 0
         ? 'Download paused'
@@ -123,11 +128,20 @@ class DownloadJobCard extends StatelessWidget {
             onPressed: () => coordinator.dismiss(workId),
             child: const Text('Discard'),
           ),
-          TextButton(
-            key: Key('download-retry-$workId'),
-            onPressed: () => coordinator.resume(workId),
-            child: Text(state.failed ? 'Try again' : 'Resume'),
-          ),
+          if (state.waitingForWifi)
+            // The one way past "Download only on Wi-Fi": this download,
+            // now, on whatever network there is.
+            TextButton(
+              key: Key('download-now-$workId'),
+              onPressed: () => coordinator.startNow(workId),
+              child: const Text('Download now'),
+            )
+          else
+            TextButton(
+              key: Key('download-retry-$workId'),
+              onPressed: () => coordinator.resume(workId),
+              child: Text(state.failed ? 'Try again' : 'Resume'),
+            ),
         ],
       ],
     );

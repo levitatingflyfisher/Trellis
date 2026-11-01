@@ -18,6 +18,8 @@ import 'package:sanctuary_backup_ui/sanctuary_backup_ui.dart'
 import 'package:trellis/bootstrap/bootstrap_web.dart' as web;
 import 'package:trellis/features/backup/backup_custody.dart';
 import 'package:trellis/features/models/model_store.dart';
+import 'package:trellis/features/player/headset_keys.dart';
+import 'package:trellis/features/player/playback_session.dart';
 import 'package:trellis/features/transcribe/decoder.dart';
 import 'package:trellis/features/transcribe/foreground_gate.dart';
 import 'package:trellis/features/transcribe/transcribe_executor.dart';
@@ -98,6 +100,17 @@ void main() {
       'web initAudioBackground is a no-op that resolves cleanly (Campaign '
       '9 Phase 2e) — just_audio_background is Android/iOS only', () async {
     await web.initAudioBackground();
+  });
+
+  test('web has no media session, and binding the headset keys to it does '
+      'nothing (1.6.0)', () {
+    expect(web.playbackSession, isA<NoPlaybackSession>());
+    var read = 0;
+    web.bindHeadsetKeys(() async {
+      read++;
+      return const HeadsetKeys();
+    });
+    expect(read, 0);
   });
 
   test('web fetcher returns non-2xx as a FetchResponse, headers lowercased',

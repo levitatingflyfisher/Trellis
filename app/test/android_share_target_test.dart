@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 /// Share to Trellis (1.5.5): the manifest half, which no widget test can
 /// see. Trellis appears in the share sheet for exactly what it can take,
 /// and nothing broader: a `*/*` filter would offer Trellis for every
-/// photo and PDF only to refuse it.
+/// photo and archive only to refuse it.
 void main() {
   final manifest = File('android/app/src/main/AndroidManifest.xml');
   final activity = File(
@@ -53,6 +53,7 @@ void main() {
       'text/x-markdown',
       'text/html',
       'application/epub+zip',
+      'application/pdf',
       'audio/*',
     });
     expect(hasDefaultCategory('SEND'), isTrue,
@@ -66,18 +67,19 @@ void main() {
       'text/x-markdown',
       'text/html',
       'application/epub+zip',
+      'application/pdf',
       'audio/*',
     });
     expect(hasDefaultCategory('SEND_MULTIPLE'), isTrue);
   });
 
-  test('nothing broader: no wildcard, and no PDF, which the reader can’t '
-      'open', () {
+  test('nothing broader: no wildcard. PDF is named on its own since 1.6.0, '
+      'when the reader learned to open it', () {
     final all = {...mimesFor('SEND'), ...mimesFor('SEND_MULTIPLE')};
     expect(all, isNot(contains('*/*')));
     expect(all, isNot(contains('text/*')));
     expect(all, isNot(contains('application/*')));
-    expect(all, isNot(contains('application/pdf')));
+    expect(all, contains('application/pdf'));
   });
 
   test('the launcher filter is still there', () {

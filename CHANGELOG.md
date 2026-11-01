@@ -7,6 +7,21 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.6.0 — 2026-11-10
+
+- **Listen in the language you’re learning, in one tap.** On an episode’s page, “Listen in Spanish” transcribes the episode, translates it, speaks the translation and plays it. The first time it asks which language you’re learning and, once, what it needs to download. It says which stage it is at, keeps going behind a dark screen, and picks up where it stopped if it is cut off. Spanish is the language Trellis can save as audio today; others can still be translated and read aloud from an episode’s Read page.
+- **The spoken translation is a real audio file.** It is made once and kept (Opus, about 11 MB an hour) as an episode of its own beside the original, named for its language. It plays, queues and downloads like any episode, without running the voice again. Its page says the voice is machine made, and so does the file’s own tag.
+- **The words light as they are said, in the translation too.** The saved episode’s text is the translation, and the page lights each sentence at its real time and each word within it.
+- Follow along no longer stretches the gaps between words. “Justified text” applies to the Line highlight, where the last line is left alone.
+- Read aloud skips citations by default: author and year in round brackets, a year after a name, numbers, keys and source notes in square brackets, footnote marks and bare links. The page keeps them. “Read citations aloud” in the reader’s menu turns them back on.
+- PDFs with a text layer can be brought in as books: “Import a file” in the Library takes EPUB or PDF, and a PDF can be shared in from another app. Headings, paragraphs, two columns and right-to-left text are rebuilt; running heads and page numbers are left out. A PDF that is only pictures of pages, or is locked, is refused in plain words.
+- Play on an episode that isn’t downloaded can download it first: “Download first, then play”, under Subscriptions, Wi-Fi and data. Off until chosen.
+- “Download only on Wi-Fi” for downloads started by hand, and a door to the Wi-Fi settings on Subscriptions.
+- A headset’s Next and Previous buttons do what you choose (skip forward 30 seconds by default).
+- Read aloud goes on behind a dark screen and shows on the lock screen, like a podcast.
+- Fix: the next queued episode starts behind the screen, a finished episode leaves the Queue at once, the whole player bar opens the episode, and Play on a played-out episode starts it over.
+- Size: PDF reading adds PDFium, about 5 MB. The release check now fails an APK whose PDFium is not the pinned build.
+
 ## 1.5.10 — 2026-11-08
 
 - Fix: downloads and transcriptions keep going when you leave the app. Their progress notification now really holds the app awake; before, Android could pause a job as soon as Trellis was out of sight and nothing was playing.

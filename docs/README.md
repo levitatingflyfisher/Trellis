@@ -28,5 +28,9 @@
   drift again.)
 - **Personas**: [explanation/personas.md](explanation/personas.md), who agents
   play when they test the UI, with scenarios.
+- **The founding request**:
+  [explanation/founding-request.md](explanation/founding-request.md), the
+  post that started the translation work, and the flow it makes the main
+  case to judge against.
 - **Provenance** — [research/](research/): the 12-agent design panel's donor
   inventories, cited ML/UX research, four rival proposals, three judgments.

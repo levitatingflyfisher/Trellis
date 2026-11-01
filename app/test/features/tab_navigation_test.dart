@@ -190,7 +190,7 @@ void main() {
     await tester.pumpAndSettle();
     for (final entry in [
       'Subscribe to a feed',
-      'Import an EPUB',
+      'Import a file',
       'Paste text',
       'Open a link',
     ]) {

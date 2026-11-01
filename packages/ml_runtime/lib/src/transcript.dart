@@ -11,6 +11,8 @@
 ///  * **Adjacency.** Distinct chunks with ragged overlapping edges split the
 ///    contested interval at its midpoint; each word timing follows its own
 ///    midpoint to whichever side it lands on.
+///    The words both windows heard at the seam are kept once: the later
+///    chunk drops the run its text shares with the end of the earlier one.
 ///
 /// Timestamps are integer milliseconds, matching `loom_core`'s `Alignment`
 /// (`tStartMs`/`tEndMs`). Word-level timing is best-effort by contract
@@ -138,8 +140,22 @@ List<TranscriptChunk> mergeOverlap(List<TranscriptChunk> chunks) {
         cur = cur.durationMs >= prev.durationMs ? cur : prev;
         // The winner may still overlap what came before `prev` — loop.
       } else {
-        // Distinct speech with ragged edges: cut the contested interval at
-        // its midpoint.
+        // Distinct speech with ragged edges. First the words: what both
+        // windows heard at the seam is in both texts, and cutting the
+        // times alone would leave it said twice. The later chunk gives
+        // up the words the earlier one already ends with.
+        final shared = _sharedWords(prev.text, cur.text);
+        if (shared > 0) {
+          cur = cur.copyWith(text: _withoutFirstWords(cur.text, shared));
+          if (cur.text.trim().isEmpty) {
+            // It only repeated: the earlier chunk stands, over both
+            // their times. It may still overlap what came before — loop.
+            cur = prev.copyWith(
+                tEndMs: cur.tEndMs > prev.tEndMs ? cur.tEndMs : prev.tEndMs);
+            continue;
+          }
+        }
+        // Then the times: cut the contested interval at its midpoint.
         final lo = cur.tStartMs > prev.tStartMs ? cur.tStartMs : prev.tStartMs;
         final hi = cur.tEndMs < prev.tEndMs ? cur.tEndMs : prev.tEndMs;
         final cut = (lo + hi) ~/ 2;
@@ -152,6 +168,37 @@ List<TranscriptChunk> mergeOverlap(List<TranscriptChunk> chunks) {
   }
   return List.unmodifiable(out);
 }
+
+final _wordGap = RegExp(r'\s+');
+final _notWord = RegExp(r'[^\p{L}\p{N}]', unicode: true);
+
+List<String> _wordsOf(String text) => [
+      for (final w in text.trim().split(_wordGap))
+        if (w.isNotEmpty) w,
+    ];
+
+String _plain(String word) => word.toLowerCase().replaceAll(_notWord, '');
+
+/// How many words [later] begins with that [earlier] already ends with:
+/// the longest such run, compared without capitals or punctuation. A run
+/// of one word is not counted ("that that" is ordinary speech); zero when
+/// there is none.
+int _sharedWords(String earlier, String later) {
+  final a = [for (final w in _wordsOf(earlier)) _plain(w)];
+  final b = [for (final w in _wordsOf(later)) _plain(w)];
+  final most = a.length < b.length ? a.length : b.length;
+  for (var k = most; k >= 2; k--) {
+    var same = true;
+    for (var i = 0; i < k && same; i++) {
+      same = a[a.length - k + i] == b[i] && b[i].isNotEmpty;
+    }
+    if (same) return k;
+  }
+  return 0;
+}
+
+String _withoutFirstWords(String text, int n) =>
+    _wordsOf(text).skip(n).join(' ');
 
 /// Two chunks describe the same audio when each one's midpoint lies inside
 /// the other's range — slight edge overlaps between *distinct* chunks never

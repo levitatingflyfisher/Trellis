@@ -35,6 +35,95 @@ void main() {
     });
   });
 
+  // Seen on the emulator, 1.6.0: a sentence that crossed a window seam
+  // came out as "…over $100 million into two measures designed to $100
+  // million into two measures designed to cancel out the wealth tax."
+  // The seam rule cut the two chunks' TIMES at the midpoint and kept both
+  // TEXTS whole, so the words both windows heard were said twice, then
+  // translated twice and spoken twice.
+  group('mergeOverlap — words both windows heard are said once', () {
+    String said(List<TranscriptChunk> out) =>
+        out.map((x) => x.text.trim()).join(' ');
+
+    test('the later chunk drops the words the earlier one already has', () {
+      final out = mergeOverlap([
+        c('Google co-founder Sergei Brin funneled over \$100 million into '
+            'two measures designed to', 20000, 27000),
+        c('\$100 million into two measures designed to cancel out the '
+            'wealth tax.', 25500, 31000),
+      ]);
+
+      expect(said(out),
+          'Google co-founder Sergei Brin funneled over \$100 million into '
+          'two measures designed to cancel out the wealth tax.');
+      expect(out, hasLength(2));
+      expect(out.first.tEndMs, out.last.tStartMs, reason: 'still tiled');
+    });
+
+    test('a join that starts mid-phrase is found too', () {
+      final out = mergeOverlap([
+        c('funneled over \$100 million into two measures', 20000, 27000),
+        c('million into two measures designed to cancel out the wealth '
+            'tax.', 25500, 31000),
+      ]);
+
+      expect(said(out),
+          'funneled over \$100 million into two measures designed to '
+          'cancel out the wealth tax.');
+    });
+
+    test('capitals and punctuation do not hide the repeat', () {
+      final out = mergeOverlap([
+        c('He put it into two Measures,', 0, 5000),
+        c('two measures designed to cancel it.', 4000, 8000),
+      ]);
+
+      expect(said(out), 'He put it into two Measures, designed to cancel it.');
+    });
+
+    test('one shared word is not taken for a repeat', () {
+      final out = mergeOverlap([
+        c('I said that', 0, 5000),
+        c('that was all.', 4000, 8000),
+      ]);
+
+      expect(said(out), 'I said that that was all.');
+    });
+
+    test('chunks with no words in common are left as they were', () {
+      final out = mergeOverlap([
+        c('The tax has failed.', 0, 5000),
+        c('Opponents were pleased.', 4000, 8000),
+      ]);
+
+      expect(said(out), 'The tax has failed. Opponents were pleased.');
+    });
+
+    test('a later chunk that only repeats is absorbed, and its time kept',
+        () {
+      final out = mergeOverlap([
+        c('the wealth tax has failed', 0, 5000),
+        c('tax has failed', 4000, 5600),
+      ]);
+
+      expect(out, hasLength(1));
+      expect(out.single.text, 'the wealth tax has failed');
+      expect(out.single.tStartMs, 0);
+      expect(out.single.tEndMs, 5600);
+    });
+
+    test('merging again changes nothing', () {
+      final once = mergeOverlap([
+        c('over \$100 million into two measures designed to', 20000, 27000),
+        c('\$100 million into two measures designed to cancel it.', 25500,
+            31000),
+        c('For NPR News.', 31000, 33000),
+      ]);
+
+      expect(mergeOverlap(once), once);
+    });
+  });
+
   group('mergeOverlap — the exact-boundary case', () {
     test('chunks that touch exactly (tEnd == tStart) are NOT an overlap', () {
       final a = c('first sentence', 0, 2000);

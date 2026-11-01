@@ -796,6 +796,91 @@ void main() {
     });
   });
 
+  group('Play on something that has played to its end (1.6.0, user: '
+      '"clicking play on the widget doesn\'t always work")', () {
+    Future<Work> playedOut({int? skipIntroSeconds}) async {
+      if (skipIntroSeconds != null) {
+        await db.feedsDao.updatePlaybackSettings(feedId,
+            skipIntroSeconds: skipIntroSeconds);
+      }
+      final work = await seedEpisode();
+      await controller.playWork(work);
+      player.emitDuration(const Duration(minutes: 5));
+      player.emitPosition(const Duration(minutes: 5));
+      player.emitCompleted();
+      await pumpEventQueue();
+      expect(controller.playing, isFalse);
+      player.log.clear();
+      return work;
+    }
+
+    test('starts it again from the beginning, where it used to seek to '
+        'the end and play nothing', () async {
+      await playedOut();
+
+      await controller.toggle();
+
+      expect(player.log, containsAllInOrder(['seek:0', 'play']));
+      expect(player.position, Duration.zero);
+      expect(controller.playing, isTrue);
+    });
+
+    test('the fresh start skips the intro, as any fresh start does',
+        () async {
+      await playedOut(skipIntroSeconds: 20);
+
+      await controller.toggle();
+
+      expect(player.log, containsAllInOrder(['seek:20000', 'play']));
+    });
+
+    test('its second ending is a finish again: the engine is not left '
+        'playing on nothing', () async {
+      await playedOut();
+      await controller.toggle();
+      player.log.clear();
+
+      player.emitPosition(const Duration(minutes: 5));
+      player.emitCompleted();
+      await pumpEventQueue();
+
+      expect(player.log, contains('pause'));
+      expect(controller.playing, isFalse);
+    });
+
+    test('after the app restarts, Play on it starts again too, not at its '
+        'last moment', () async {
+      final work = await seedEpisode();
+      await db.feedsDao.setDuration(work.id, 300000);
+      await db.feedsDao.savePlayerPosition(
+          profileId: profileId, workId: work.id, tMs: 300000);
+      await db.profilesDao.recordLastPlayed(profileId, work.id);
+      await controller.rehydrateLastPlayed();
+
+      await controller.toggle();
+
+      expect(player.log, isNot(contains('seek:300000')));
+      expect(player.position, Duration.zero);
+      expect(player.playing, isTrue);
+    });
+
+    test('a pause ten seconds from the end still resumes there', () async {
+      final work = await seedEpisode();
+      await controller.playWork(work);
+      player.emitDuration(const Duration(minutes: 5));
+      player.emitPosition(const Duration(minutes: 4, seconds: 50));
+      await controller.toggle();
+      player.log.clear();
+
+      await controller.toggle();
+
+      expect(player.log, isNot(contains('seek:0')));
+      expect(player.position, const Duration(minutes: 4, seconds: 48),
+          reason: 'the usual two-second step back, not a restart');
+      expect(controller.playing, isTrue);
+    });
+  });
+
   group('Queue auto-advance', () {
     test('finishing removes the episode from the queue by default, then '
         'auto-advances to the new head', () async {
@@ -817,6 +902,148 @@ void main() {
       expect(remaining.map((r) => r.workId), [second.id],
           reason: 'the finished episode is gone; the one it advanced to '
               'is still there, waiting for ITS turn to finish');
+    });
+
+    test('nothing pauses the engine between one episode and the next: a '
+        'pause takes the playback service out of the foreground, and from '
+        'behind the screen Android won\'t let it back (1.6.0)', () async {
+      final first = await seedEpisode(title: 'One');
+      final second = await seedEpisode(
+          title: 'Two', enclosure: 'https://cast.test/2.mp3');
+      await db.queueDao
+          .playLast(profileId: profileId, workId: first.id, nowMs: 1);
+      await db.queueDao
+          .playLast(profileId: profileId, workId: second.id, nowMs: 2);
+      await controller.playWork(first);
+      player.log.clear();
+
+      player.emitCompleted();
+      await pumpEventQueue();
+
+      expect(controller.current?.id, second.id);
+      expect(player.log, isNot(contains('pause')));
+      expect(player.playing, isTrue);
+    });
+
+    test('with another episode queued, an episode still plays to its very '
+        'end: the hand-over comes when the engine says it has ended, and '
+        'the session says "playing" across it (1.6.0, user: "it doesn\'t '
+        'autoplay the next episode")', () async {
+      final first = await seedEpisode(title: 'One');
+      final second = await seedEpisode(
+          title: 'Two', enclosure: 'https://cast.test/2.mp3');
+      await db.queueDao
+          .playLast(profileId: profileId, workId: first.id, nowMs: 1);
+      await db.queueDao
+          .playLast(profileId: profileId, workId: second.id, nowMs: 2);
+      await controller.playWork(first);
+      player.emitDuration(const Duration(minutes: 10));
+      player.log.clear();
+
+      player.emitPosition(
+          const Duration(minutes: 9, seconds: 59, milliseconds: 900));
+      await pumpEventQueue();
+      expect(controller.current?.id, first.id,
+          reason: 'a tenth of a second to go is not the end');
+      expect((await db.spineDao.workById(first.id))!.persistence, 'ephemeron');
+
+      player.emitCompleted();
+      await pumpEventQueue();
+
+      expect(controller.current?.id, second.id);
+      expect(player.loadedUrl, 'https://cast.test/2.mp3');
+      expect(player.log, isNot(contains('pause')));
+      expect((await db.queueDao.queueOf(profileId)).map((r) => r.workId),
+          [second.id]);
+    });
+
+    test('with nothing queued, an episode plays to its very end', () async {
+      final only = await seedEpisode(title: 'One');
+      await controller.playWork(only);
+      player.emitDuration(const Duration(minutes: 10));
+      player.log.clear();
+
+      player.emitPosition(
+          const Duration(minutes: 9, seconds: 59, milliseconds: 900));
+      await pumpEventQueue();
+
+      expect(player.log, isNot(contains('pause')));
+      expect(player.playing, isTrue);
+      expect((await db.spineDao.worksOf(profileId)).single.persistence,
+          'ephemeron',
+          reason: 'not finished until it ends');
+    });
+
+    test('with nothing to follow, the engine is paused at the end',
+        () async {
+      final only = await seedEpisode(title: 'One');
+      await db.queueDao
+          .playLast(profileId: profileId, workId: only.id, nowMs: 1);
+      await controller.playWork(only);
+
+      player.emitCompleted();
+      await pumpEventQueue();
+
+      expect(player.log, contains('pause'));
+      expect(controller.playing, isFalse);
+    });
+
+    test('the outro cutoff with nothing to follow stops the sound',
+        () async {
+      final only = await seedEpisode(title: 'One');
+      await db.feedsDao
+          .updatePlaybackSettings(feedId, skipOutroSeconds: 30);
+      await controller.playWork(only);
+      player.emitDuration(const Duration(minutes: 10));
+
+      player.emitPosition(const Duration(minutes: 9, seconds: 30));
+      await pumpEventQueue();
+
+      expect(controller.playing, isFalse);
+    });
+
+    test('a next episode that won\'t load leaves the engine paused, not '
+        'held playing on nothing', () async {
+      final first = await seedEpisode(title: 'One');
+      final second = await seedEpisode(
+          title: 'Two', enclosure: 'https://cast.test/2.mp3');
+      await db.queueDao
+          .playLast(profileId: profileId, workId: second.id, nowMs: 1);
+      await controller.playWork(first);
+      player.failNextLoad = true;
+
+      player.emitCompleted();
+      await pumpEventQueue();
+
+      expect(controller.playing, isFalse);
+    });
+
+    test('a tick still reporting the episode before, while the next one '
+        'loads, does not finish the next one', () async {
+      final first = await seedEpisode(title: 'One');
+      final second = await seedEpisode(
+          title: 'Two', enclosure: 'https://cast.test/2.mp3');
+      await db.feedsDao
+          .updatePlaybackSettings(feedId, skipOutroSeconds: 30);
+      await db.queueDao
+          .playLast(profileId: profileId, workId: second.id, nowMs: 1);
+      await controller.playWork(first);
+      player.emitDuration(const Duration(minutes: 10));
+      final gate = Completer<void>();
+      player.loadGate = gate;
+
+      player.emitPosition(const Duration(minutes: 9, seconds: 30));
+      await pumpEventQueue();
+      expect(controller.current?.id, second.id);
+      // The engine has not let go of the old source yet.
+      player.emitPosition(const Duration(minutes: 9, seconds: 31));
+      await pumpEventQueue();
+      gate.complete();
+      await pumpEventQueue();
+
+      expect((await db.feedsDao.episodeOf(second.id))!.finishedAtMs, isNull);
+      expect((await db.queueDao.queueOf(profileId)).map((r) => r.workId),
+          [second.id]);
     });
 
     test('the household setting keeps a finished episode in the queue '
@@ -1211,6 +1438,237 @@ void main() {
       shakes.add(const AccelerationSample(30, 0, 0));
 
       expect(shaky.sleepTimerMode, isNull);
+    });
+  });
+
+  group('Play on an episode that isn’t downloaded (1.6.0, user: "Play for '
+      'download then play")', () {
+    late Directory dir;
+    late bool downloadFirst;
+    late bool mustWait;
+    late Completer<FetchEnd> landing;
+    late List<int> fetched;
+    late List<PlayNotice> notices;
+
+    setUp(() {
+      dir = Directory.systemTemp.createTempSync('trellis-play-fetch');
+      downloadFirst = true;
+      mustWait = false;
+      landing = Completer<FetchEnd>();
+      fetched = [];
+      notices = [];
+    });
+    tearDown(() => dir.deleteSync(recursive: true));
+
+    File fileOf(Work w) => File('${dir.path}/${w.id}.mp3');
+
+    PlayerController make() {
+      final c = PlayerController(
+          db: db,
+          profileId: profileId,
+          createPlayer: nextPlayer,
+          now: () => DateTime.fromMillisecondsSinceEpoch(clockMs),
+          localAudioFileFor: (id, url) => File('${dir.path}/$id.mp3'),
+          downloadFirst: () async => downloadFirst,
+          beginFetch: (work, url) async {
+            fetched.add(work.id);
+            return mustWait ? null : landing.future;
+          })
+        ..onNotice = notices.add;
+      addTearDown(c.dispose);
+      return c;
+    }
+
+    void land(Work w) {
+      fileOf(w).writeAsStringSync('bytes');
+      landing.complete(FetchEnd.landed);
+    }
+
+    test('set to Stream (as it is until chosen), Play streams at once and '
+        'fetches nothing', () async {
+      downloadFirst = false;
+      final c = make();
+      final work = await seedEpisode();
+
+      await c.playWork(work);
+
+      expect(player.loadedUrl, 'https://cast.test/1.mp3');
+      expect(fetched, isEmpty);
+      expect(notices, isEmpty);
+    });
+
+    test('set to Download first, Play fetches it, says so, and plays the '
+        'file once it has landed', () async {
+      final c = make();
+      final work = await seedEpisode();
+
+      final played = c.playWork(work);
+      await pumpEventQueue();
+      expect(fetched, [work.id]);
+      expect(notices, [PlayNotice.downloadingFirst]);
+      expect(player.loadedUrl, isNull, reason: 'nothing streams meanwhile');
+      expect(c.current, isNull);
+
+      land(work);
+      await played;
+
+      expect(player.loadedFilePath, fileOf(work).path);
+      expect(player.loadedUrl, isNull);
+      expect(player.playing, isTrue);
+      expect(c.current?.id, work.id);
+    });
+
+    test('already downloaded: it plays at once and nothing is fetched',
+        () async {
+      final c = make();
+      final work = await seedEpisode();
+      fileOf(work).writeAsStringSync('bytes');
+
+      await c.playWork(work);
+
+      expect(player.loadedFilePath, fileOf(work).path);
+      expect(fetched, isEmpty);
+      expect(notices, isEmpty);
+    });
+
+    test('what was playing plays on while the next one downloads',
+        () async {
+      final c = make();
+      final first = await seedEpisode(title: 'One');
+      final second = await seedEpisode(
+          title: 'Two', enclosure: 'https://cast.test/2.mp3');
+      fileOf(first).writeAsStringSync('bytes');
+      await c.playWork(first);
+      player.log.clear();
+
+      final played = c.playWork(second);
+      await pumpEventQueue();
+      expect(c.current?.id, first.id);
+      expect(player.playing, isTrue);
+      expect(player.log, isNot(contains('pause')));
+
+      land(second);
+      await played;
+      expect(c.current?.id, second.id);
+      expect(player.loadedFilePath, fileOf(second).path);
+    });
+
+    test('a Play somewhere else meanwhile wins: the first does not start '
+        'when its download lands', () async {
+      final c = make();
+      final first = await seedEpisode(title: 'One');
+      final second = await seedEpisode(
+          title: 'Two', enclosure: 'https://cast.test/2.mp3');
+      fileOf(second).writeAsStringSync('bytes');
+
+      final pending = c.playWork(first);
+      await pumpEventQueue();
+      await c.playWork(second);
+      land(first);
+      await pending;
+
+      expect(c.current?.id, second.id);
+      expect(player.loadedFilePath, fileOf(second).path);
+    });
+
+    test('X meanwhile wins too: nothing starts under a closed bar',
+        () async {
+      final c = make();
+      final work = await seedEpisode();
+
+      final pending = c.playWork(work);
+      await pumpEventQueue();
+      await c.stop();
+      land(work);
+      await pending;
+
+      expect(c.current, isNull);
+      expect(player.loadedFilePath, isNull);
+    });
+
+    test('where it must wait for Wi-Fi, nothing plays and it says so',
+        () async {
+      mustWait = true;
+      final c = make();
+      final work = await seedEpisode();
+
+      await c.playWork(work);
+
+      expect(notices, [PlayNotice.waitingForWifi]);
+      expect(player.loadedUrl, isNull);
+      expect(player.loadedFilePath, isNull);
+      expect(c.current, isNull);
+    });
+
+    test('a download that fails says so and plays nothing', () async {
+      final c = make();
+      final work = await seedEpisode();
+
+      final played = c.playWork(work);
+      await pumpEventQueue();
+      landing.complete(FetchEnd.failed);
+      await played;
+
+      expect(notices, [PlayNotice.downloadingFirst, PlayNotice.downloadFailed]);
+      expect(c.current, isNull);
+    });
+
+    test('a download the listener paused plays nothing and says nothing '
+        'more', () async {
+      final c = make();
+      final work = await seedEpisode();
+
+      final played = c.playWork(work);
+      await pumpEventQueue();
+      landing.complete(FetchEnd.paused);
+      await played;
+
+      expect(notices, [PlayNotice.downloadingFirst]);
+      expect(c.current, isNull);
+    });
+
+    test('the queue moving on meanwhile does not call off the Play that '
+        'is downloading', () async {
+      final c = make();
+      final first = await seedEpisode(title: 'One');
+      final second = await seedEpisode(
+          title: 'Two', enclosure: 'https://cast.test/2.mp3');
+      final third = await seedEpisode(
+          title: 'Three', enclosure: 'https://cast.test/3.mp3');
+      fileOf(first).writeAsStringSync('bytes');
+      await db.queueDao
+          .playLast(profileId: profileId, workId: third.id, nowMs: 1);
+      await c.playWork(first);
+
+      final pending = c.playWork(second);
+      await pumpEventQueue();
+      player.emitCompleted();
+      await pumpEventQueue();
+      expect(c.current?.id, third.id);
+
+      land(second);
+      await pending;
+      expect(c.current?.id, second.id);
+      expect(player.loadedFilePath, fileOf(second).path);
+    });
+
+    test('the queue moving on by itself streams, whatever the setting: '
+        'Download first is for a Play the listener presses', () async {
+      final c = make();
+      final first = await seedEpisode(title: 'One');
+      final second = await seedEpisode(
+          title: 'Two', enclosure: 'https://cast.test/2.mp3');
+      fileOf(first).writeAsStringSync('bytes');
+      await db.queueDao
+          .playLast(profileId: profileId, workId: second.id, nowMs: 1);
+      await c.playWork(first);
+
+      player.emitCompleted();
+      await pumpEventQueue();
+
+      expect(c.current?.id, second.id);
+      expect(player.loadedUrl, 'https://cast.test/2.mp3');
+      expect(fetched, isEmpty);
     });
   });
 

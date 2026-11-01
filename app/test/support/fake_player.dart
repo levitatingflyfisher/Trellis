@@ -89,9 +89,20 @@ class FakeEpisodePlayer implements EpisodePlayer {
     _durationCtrl.add(d);
   }
 
+  /// The source played to its end. just_audio's `playing` stays true there
+  /// (it means "plays when it can"), so the app must pause it or load what
+  /// comes next; this fake leaves it true as well.
   void emitCompleted() {
-    _playing = false;
     _completedCtrl.add(null);
+  }
+
+  /// The next [setUrl] or [setFilePath] throws: a source that won't load.
+  bool failNextLoad = false;
+
+  void _maybeFailLoad() {
+    if (!failNextLoad) return;
+    failNextLoad = false;
+    throw StateError('load failed');
   }
 
   /// Simulates the underlying engine silently advancing to playlist entry
@@ -151,6 +162,7 @@ class FakeEpisodePlayer implements EpisodePlayer {
   @override
   Future<void> setUrl(String url, {LockScreenTag? mediaItem}) async {
     _live('setUrl');
+    _maybeFailLoad();
     // A real engine starts a new source at zero; the saved place is only
     // reached by the seek that follows the load.
     _position = Duration.zero;
@@ -164,6 +176,7 @@ class FakeEpisodePlayer implements EpisodePlayer {
   @override
   Future<void> setFilePath(String path, {LockScreenTag? mediaItem}) async {
     _live('setFilePath');
+    _maybeFailLoad();
     _position = Duration.zero;
     _idle = false;
     loadedFilePath = path;

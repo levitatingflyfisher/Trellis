@@ -1,6 +1,7 @@
 package com.openhearth.trellis
 
 import android.content.Context
+import android.net.ConnectivityManager
 import androidx.work.Constraints
 import androidx.work.Data
 import androidx.work.ExistingPeriodicWorkPolicy
@@ -60,6 +61,14 @@ object FeedCheckScheduler {
                 "cancelAutoDownload" -> {
                     work.cancelUniqueWork(AUTO_DOWNLOAD)
                     result.success(null)
+                }
+                // "Download only on Wi-Fi" (1.6.0): whether the network in
+                // use now is metered. No network at all reads as metered,
+                // so a download told to wait is not started on nothing.
+                "isMetered" -> {
+                    val net = app.getSystemService(Context.CONNECTIVITY_SERVICE)
+                        as? ConnectivityManager
+                    result.success(net?.isActiveNetworkMetered ?: true)
                 }
                 else -> result.notImplemented()
             }

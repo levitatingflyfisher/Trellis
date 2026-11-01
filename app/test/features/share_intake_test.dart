@@ -4,6 +4,8 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/intake/audiobook_import.dart';
+import 'package:trellis/features/intake/pdf_intake.dart';
+import 'package:trellis/features/intake/pdf_reader.dart';
 import 'package:trellis/features/intake/share_intake.dart';
 import 'package:trellis/features/search/search_store.dart';
 
@@ -37,6 +39,8 @@ void main() {
   late List<String> audioCopies;
   late Map<String, int> sizes;
   late Set<String> failingBooks;
+  late List<String> pdfs;
+  late Set<String> scannedPdfs;
 
   setUp(() async {
     db = AppDatabase.forTesting(NativeDatabase.memory());
@@ -57,6 +61,8 @@ void main() {
     audioCopies = [];
     sizes = {};
     failingBooks = {};
+    pdfs = [];
+    scannedPdfs = {};
   });
   tearDown(() => db.close());
 
@@ -71,6 +77,19 @@ void main() {
     importBook: (path, name) async {
       if (failingBooks.contains(name)) throw const FormatException('bad');
       books.add(name);
+      return db.spineDao.insertWork(
+        profileId: profileId,
+        kind: 'book',
+        title: name,
+        persistence: 'work',
+        firstSeenEpochDay: 1,
+      );
+    },
+    importPdf: (path, name) async {
+      if (scannedPdfs.contains(name)) {
+        throw const PdfUnreadableException(pdfNoTextMessage);
+      }
+      pdfs.add(name);
       return db.spineDao.insertWork(
         profileId: profileId,
         kind: 'book',
@@ -366,6 +385,33 @@ void main() {
       expect(discarded, ['/cache/b.epub']);
     });
 
+    test('a PDF goes through the PDF import, into the Library, whether '
+        'the sender named its kind or only its ending', () async {
+      final saved = await intake().take(const SharedPayload(files: [
+        SharedFile(
+            path: '/cache/p.pdf', name: 'p.pdf', mimeType: 'application/pdf'),
+        SharedFile(path: '/cache/Q.PDF', name: 'Q.PDF'),
+      ])) as ShareSaved;
+      expect(pdfs, ['p.pdf', 'Q.PDF']);
+      expect(saved.inLatest, isFalse);
+      expect(saved.count, 2);
+      expect(discarded, ['/cache/p.pdf', '/cache/Q.PDF']);
+    });
+
+    test('a PDF that is pictures of pages is refused in its own words',
+        () async {
+      scannedPdfs.add('scan.pdf');
+      final out = await intake().take(const SharedPayload(files: [
+        SharedFile(
+            path: '/cache/scan.pdf',
+            name: 'scan.pdf',
+            mimeType: 'application/pdf'),
+      ]));
+      expect(out, isA<ShareRefused>());
+      expect((out as ShareRefused).message, pdfNoTextMessage);
+      expect(discarded, ['/cache/scan.pdf']);
+    });
+
     test('one file failing doesn’t lose the others', () async {
       failingBooks.add('bad.epub');
       files['/cache/r.md'] = 'A note';
@@ -396,10 +442,10 @@ void main() {
     test('a kind Trellis can’t open is refused and its copy removed',
         () async {
       final out = await intake().take(const SharedPayload(files: [
-        SharedFile(path: '/cache/x.pdf', name: 'x.pdf', mimeType: 'application/pdf'),
+        SharedFile(path: '/cache/x.zip', name: 'x.zip', mimeType: 'application/zip'),
       ]));
       expect(out, isA<ShareRefused>());
-      expect(discarded, ['/cache/x.pdf']);
+      expect(discarded, ['/cache/x.zip']);
     });
 
     test('a file the platform refused says why', () async {

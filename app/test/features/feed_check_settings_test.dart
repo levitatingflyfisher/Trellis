@@ -22,6 +22,13 @@ class FakeScheduler implements FeedCheckScheduler {
   Future<void> cancelAutoDownload() async => calls.add('cancel-auto');
 }
 
+class _Meter implements NetworkMeter {
+  _Meter(this.answer);
+  final bool Function() answer;
+  @override
+  Future<bool> isMetered() async => answer();
+}
+
 void main() {
   late AppDatabase db;
   setUp(() => db = AppDatabase.forTesting(NativeDatabase.memory()));
@@ -86,6 +93,42 @@ void main() {
     expect(s.calls, isEmpty);
     await settings.load();
     expect(settings.wifiOnly, isTrue);
+  });
+
+  test('Download only on Wi-Fi is off until chosen, is remembered, and asks '
+      'the scheduler nothing (1.6.0)', () async {
+    final s = FakeScheduler();
+    final settings = FeedCheckSettings(db, s);
+    await settings.load();
+    expect(settings.downloadsWifiOnly, isFalse,
+        reason: 'a tapped download starts at once until the listener says '
+            'otherwise, as it always has');
+    expect(await FeedCheckSettings.downloadsWifiOnlyOn(db), isFalse);
+
+    await settings.setDownloadsWifiOnly(true);
+
+    expect(await FeedCheckSettings.downloadsWifiOnlyOn(db), isTrue);
+    final again = FeedCheckSettings(db, FakeScheduler());
+    await again.load();
+    expect(again.downloadsWifiOnly, isTrue);
+    expect(s.calls, isEmpty);
+  });
+
+  test('a download by hand must wait only with the switch on AND a metered '
+      'network; with it off the network is not even asked (1.6.0)', () async {
+    var asked = 0;
+    final metered = _Meter(() {
+      asked++;
+      return true;
+    });
+    final mustWait = downloadMustWaitForWifi(db, metered);
+    expect(await mustWait(), isFalse);
+    expect(asked, 0);
+
+    await FeedCheckSettings(db, FakeScheduler()).setDownloadsWifiOnly(true);
+    expect(await mustWait(), isTrue);
+    expect(await downloadMustWaitForWifi(db, _Meter(() => false))(), isFalse,
+        reason: 'on Wi-Fi nothing waits');
   });
 
   test('where nothing can run in the background, nothing is asked',

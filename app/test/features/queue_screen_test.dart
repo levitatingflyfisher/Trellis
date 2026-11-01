@@ -102,6 +102,38 @@ void main() {
     expect(find.text('Aurora season'), findsNothing);
   });
 
+  testWidgets('the last queued episode leaves the tab when it ends, though '
+      'nothing else starts playing (1.6.0, user: "it doesn\'t autoclear '
+      'after play")', (tester) async {
+    final a = await db.spineDao.insertWork(
+        profileId: profileId,
+        kind: 'episode',
+        title: 'Aurora season',
+        persistence: 'ephemeron',
+        firstSeenEpochDay: 100,
+        sourceUrl: 'https://cast.test/a.mp3');
+    final engine = FakeEpisodePlayer();
+    final player = PlayerController(
+        db: db, profileId: profileId, createPlayer: () => engine);
+    addTearDown(player.dispose);
+    await db.queueDao.playLast(profileId: profileId, workId: a, nowMs: 1);
+    await tester.pumpWidget(MaterialApp(
+        home: QueueScreen(
+            db: db,
+            profile: (await db.profilesDao.all()).single,
+            player: player)));
+    await tester.pumpAndSettle();
+    await player.playWork((await db.spineDao.workById(a))!);
+    await tester.pumpAndSettle();
+    expect(find.text('Aurora season'), findsOneWidget);
+
+    engine.emitCompleted();
+    await tester.pumpAndSettle();
+
+    expect(find.text('Aurora season'), findsNothing);
+    expect(find.text('Nothing queued yet.'), findsOneWidget);
+  });
+
   group('the shared row', () {
     late int feedId;
     setUp(() async {

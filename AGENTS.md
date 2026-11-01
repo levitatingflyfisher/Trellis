@@ -21,7 +21,8 @@ packages/
                 Pure Dart, TDD from scratch.
   comms_core/   Feed/network hygiene: SSRF guard (stricter than donor),
                 conditional GET, RSS/Atom, OPML, breaker. HTTP behind a seam.
-  intake_core/  EPUB / article-extraction / Gutenberg parsers.
+  intake_core/  EPUB / article-extraction / Gutenberg parsers, and PDF
+                pages rebuilt into reading order (PDFium itself is the app's).
   jobs_core/    Checkpointed-job engine; byte-identical resume law.
   ml_runtime/   Transcriber/Synthesizer/Vad seams, overlap-merge law,
                 PINNED model registry (sha256 fail-closed).

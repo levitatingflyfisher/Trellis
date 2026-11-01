@@ -1,10 +1,10 @@
 /// Campaign 9 Phase 2e (ADR-0015 Decision 3): what the lock screen and
 /// pull-down tray show for whatever is playing.
 ///
-/// [LockScreenTag] is a plain, plugin-free value — [JustAudioEpisodePlayer]
-/// is the only place that ever turns it into just_audio_background's own
-/// MediaItem type, the same way [EpisodePlayer] itself stays free of
-/// just_audio's own types. [lockScreenTagFor] is a pure function of [Work]
+/// [LockScreenTag] is a plain, plugin-free value — the app's own handler
+/// (trellis_audio_handler.dart) is the only place that ever turns it into
+/// audio_service's MediaItem type, the same way [EpisodePlayer] itself
+/// stays free of just_audio's own types. [lockScreenTagFor] is a pure function of [Work]
 /// plus two caller-supplied hints, so it is testable without a platform
 /// channel in reach — the honest boundary this phase draws: what reaches
 /// the tag is provable here; how the lock screen RENDERS it is device-only

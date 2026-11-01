@@ -6,7 +6,9 @@ import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:jobs_core/jobs_core.dart';
 import 'package:trellis/db/database.dart';
+import 'package:trellis/features/feeds/auto_download.dart';
 import 'package:trellis/features/feeds/episode_download_coordinator.dart';
+import 'package:trellis/features/jobs/jobs_screen.dart' show downloadStatus;
 import 'package:trellis/features/transcribe/audio_fetcher.dart';
 import 'package:trellis/features/transcribe/foreground_gate.dart';
 import 'package:trellis/services/device_services.dart';
@@ -408,6 +410,134 @@ void main() {
 
       await coordinator.requeue(workId);
       expect(await payload(), containsPair('queued', true));
+    });
+  });
+
+  group('Download only on Wi-Fi (1.6.0, user: "download on WiFi or not" '
+      'was missing)', () {
+    Future<Map<String, dynamic>> payload() async =>
+        jsonDecode(await db.jobsDao.payloadOf(jobId)) as Map<String, dynamic>;
+
+    test('started by hand on mobile data, a download waits: nothing is '
+        'fetched, the row goes to the next Wi-Fi pass, and a pass is asked '
+        'for', () async {
+      final fetcher = FakeAudioFetcher();
+      final coordinator = coordinatorWith(fetcher);
+      var passes = 0;
+      coordinator.mustWaitForWifi = () async => true;
+      coordinator.requestWifiPass = () async => passes++;
+
+      final outcome = await coordinator.startByHand(
+          workId: workId, url: url, title: 'Episode one');
+
+      expect(outcome, DownloadOutcome.paused);
+      expect(fetcher.fetched, isEmpty);
+      expect(coordinator.stateOf(workId).waitingForWifi, isTrue);
+      expect(coordinator.stateOf(workId).title, 'Episode one');
+      expect((await db.jobsDao.load(jobId))!.state, JobState.cancelled);
+      expect(
+          await payload(),
+          allOf(containsPair('queued', true), containsPair('auto', true),
+              containsPair('hand', true)));
+      expect((await queuedAutoDownloads(db)).map((q) => q.workId), [workId],
+          reason: 'the pass fetches whatever is queued');
+      expect(passes, 1);
+    });
+
+    test('on Wi-Fi it starts at once, and so it does where nothing was set '
+        'to decide', () async {
+      final fetcher = FakeAudioFetcher();
+      final coordinator = coordinatorWith(fetcher);
+      expect(await coordinator.startByHand(workId: workId, url: url),
+          DownloadOutcome.done,
+          reason: 'no rule set: the web build, tests, the worker');
+
+      File(services.audioFileFor(workId, url).path).deleteSync();
+      coordinator.mustWaitForWifi = () async => false;
+      expect(await coordinator.startByHand(workId: workId, url: url),
+          DownloadOutcome.done);
+      expect(fetcher.fetched, [url, url]);
+    });
+
+    test('Resume on mobile data waits too, and keeps what was fetched',
+        () async {
+      final fetcher = ControllableAudioFetcher();
+      final coordinator = coordinatorWith(fetcher);
+      final first = coordinator.start(workId: workId, url: url, title: 'E');
+      await pumpEventQueue();
+      seedPartial(400);
+      coordinator.cancel(workId);
+      expect(await first, DownloadOutcome.paused);
+      var passes = 0;
+      coordinator.mustWaitForWifi = () async => true;
+      coordinator.requestWifiPass = () async => passes++;
+
+      expect(await coordinator.resume(workId), DownloadOutcome.paused);
+
+      expect(fetcher.fetched, hasLength(1), reason: 'not fetched again');
+      expect(coordinator.stateOf(workId).waitingForWifi, isTrue);
+      expect(coordinator.stateOf(workId).receivedBytes, 400);
+      expect(await payload(), containsPair('queued', true));
+      expect(passes, 1);
+    });
+
+    test('"Download now" overrides the wait for that one download',
+        () async {
+      final fetcher = FakeAudioFetcher();
+      final coordinator = coordinatorWith(fetcher);
+      coordinator.mustWaitForWifi = () async => true;
+      await coordinator.startByHand(workId: workId, url: url);
+      expect(fetcher.fetched, isEmpty);
+
+      expect(await coordinator.startNow(workId), DownloadOutcome.done);
+
+      expect(fetcher.fetched, [url]);
+      expect(services.audioFileFor(workId, url).existsSync(), isTrue);
+    });
+
+    test('a waiting download is still waiting after the app restarts, and a '
+        'launch does not start it', () async {
+      final fetcher = FakeAudioFetcher();
+      final before = coordinatorWith(fetcher);
+      before.mustWaitForWifi = () async => true;
+      await before.startByHand(workId: workId, url: url, title: 'E');
+
+      final after = coordinatorWith(fetcher);
+      await after.restore();
+      await after.resumeInterrupted();
+
+      expect(after.stateOf(workId).waitingForWifi, isTrue);
+      expect(fetcher.fetched, isEmpty);
+    });
+
+    test('the Wi-Fi pass fetches it, and the wait is over', () async {
+      final fetcher = FakeAudioFetcher();
+      final coordinator = coordinatorWith(fetcher);
+      coordinator.mustWaitForWifi = () async => true;
+      await coordinator.startByHand(workId: workId, url: url);
+
+      // What a pass does with a queued row.
+      expect(await coordinator.start(workId: workId, url: url, auto: true),
+          DownloadOutcome.done);
+
+      expect(fetcher.fetched, [url]);
+      expect(coordinator.stateOf(workId).waitingForWifi, isFalse);
+      expect(await db.jobsDao.load(jobId), isNull);
+    });
+
+    test('the row says it is waiting for Wi-Fi, with what it has so far',
+        () {
+      expect(
+          downloadStatus(const EpisodeDownloadState(
+              paused: true, waitingForWifi: true)),
+          'Waiting for Wi-Fi');
+      expect(
+          downloadStatus(const EpisodeDownloadState(
+              paused: true,
+              waitingForWifi: true,
+              receivedBytes: 2 * 1024 * 1024,
+              totalBytes: 8 * 1024 * 1024)),
+          startsWith('Waiting for Wi-Fi: '));
     });
   });
 }

@@ -73,6 +73,54 @@ void main() {
     });
   });
 
+  // Seen on the emulator, 1.6.0: "[BLANK_AUDIO]" in a transcript made
+  // with a larger whisper model. It is the engine's note that nothing
+  // was said, not something that was said, so it must never reach the
+  // page, the translator or the voice.
+  group('the engine’s own notes are not words', () {
+    test('a chunk that is only a silence note adds nothing', () {
+      final segs = segmentize([
+        chunk('Hello there.', 0, 1000),
+        chunk('[BLANK_AUDIO]', 1000, 4000),
+        chunk('Goodbye now.', 4000, 5000),
+      ], minChars: 1);
+
+      expect(segs.map((s) => s.text), ['Hello there.', 'Goodbye now.']);
+    });
+
+    test('a note inside a chunk is taken out and the words close up', () {
+      final segs = segmentize(
+        [chunk('Before the break [MUSIC PLAYING] and after it.', 0, 4000)],
+        minChars: 1,
+      );
+
+      expect(segs.map((s) => s.text), ['Before the break and after it.']);
+    });
+
+    test('the common lower-case notes go too', () {
+      final segs = segmentize([
+        chunk('(music) Welcome back. [ Silence ] (applause) Thank you.', 0,
+            4000),
+      ], minChars: 1);
+
+      expect(segs.map((s) => s.text), ['Welcome back.', 'Thank you.']);
+    });
+
+    test('a speaker’s own brackets are kept', () {
+      final segs = segmentize(
+        [chunk('He wrote their [sic] money (about 5%) twice.', 0, 4000)],
+        minChars: 1,
+      );
+
+      expect(segs.map((s) => s.text),
+          ['He wrote their [sic] money (about 5%) twice.']);
+    });
+
+    test('a transcript of nothing but silence is empty', () {
+      expect(segmentize([chunk(' [BLANK_AUDIO] ', 0, 30000)]), isEmpty);
+    });
+  });
+
   group('chunk boundaries', () {
     test('a sentence spanning two chunks becomes one segment', () {
       final segs = segmentize(

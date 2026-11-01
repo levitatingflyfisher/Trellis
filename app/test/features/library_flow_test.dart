@@ -27,7 +27,7 @@ void main() {
     // The calm empty state invites intake (ADR-0003: no guilt, an offer).
     expect(find.text('Nothing on the trellis yet.'), findsOneWidget);
     expect(find.text('Paste text'), findsOneWidget);
-    expect(find.text('Import an EPUB'), findsOneWidget);
+    expect(find.text('Import a file'), findsOneWidget);
 
     final created = await db.profilesDao.all();
     expect(created.single.name, 'Reader');

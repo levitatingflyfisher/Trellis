@@ -15,6 +15,7 @@
 /// the user's hand began.
 library;
 
+import 'asr_choice.dart';
 import 'dart:async';
 import 'dart:convert';
 
@@ -200,11 +201,15 @@ class TranscribeCoordinator extends ChangeNotifier {
     }
   }
 
+  /// The model a transcription uses: the listener's choice on the Models
+  /// page when there is one, else this device's default (1.6.0).
+  Future<ModelSpec?> _asrModel() async => asrModelFor(services.registry,
+      services.tier, await db.deviceSettingsDao.read(asrModelKey));
+
   /// The ASR model this device would use, and what starting would download.
   Future<TranscribePlan> planFor(
       {required int workId, required String enclosureUrl}) async {
-    final model = services.registry
-        .pickModel(ModelTask.asr, services.tier, langHint: null);
+    final model = await _asrModel();
     if (model == null) {
       throw StateError('no ASR model in the registry for ${services.tier}');
     }
@@ -363,8 +368,7 @@ class TranscribeCoordinator extends ChangeNotifier {
       holdsGate = true;
 
       // 1. The model (sha-pinned, resumable, cancel keeps the .part).
-      final model = services.registry
-          .pickModel(ModelTask.asr, services.tier, langHint: null);
+      final model = await _asrModel();
       if (model == null) {
         throw StateError('no ASR model in the registry for ${services.tier}');
       }

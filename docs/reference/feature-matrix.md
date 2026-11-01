@@ -67,7 +67,7 @@ land, entries gain a `✅ shipped` mark; until then this is the plan of record.
   §Context) — the audiobook door below is the app's first real bulk/folder
   import, for audio, not text.
 - EPUB parser ported pure-Dart (archive+xml): spine walk, nav/NCX TOC, figure blobs, front-matter skip, charset quirks — donor heuristics as test fixtures
-- PDF text extraction on native via pdfium (pdfrx) with column/footnote heuristics ported
+- PDF with a text layer, native tiers (1.6.0): PDFium through dart:ffi behind a seam (`app/lib/features/intake/pdf_reader*.dart`; the `pdfium_flutter` binary plugin only, not the `pdfrx` viewer), and a pure rebuild of reading order in `intake_core` (`pdf_blocks.dart`): paragraphs, headings by type size, two columns, running heads and page numbers dropped, words broken at a line end made whole. Lands as a book through "Import a file" or the share sheet. **Degraded, honestly:** pages set in more than two columns keep the file's order and are named on the work's page; footnotes are not kept apart from the body; tables are not rebuilt; a file that is only pictures of pages is refused in plain words (OCR is the next step); not on the web tier, which has no PDFium.
 - Plain-text/MD heuristics (chapter headings, dividers, code blocks, pipe tables)
 - Tokenizer ported with donor tests (hyphen split, URL abbreviation, >30-char placeholder, per-token pacing, block start map)
 - URL article reader: readability-style container scoring in Dart html; feed-XML detection offers subscribe; direct fetch on native

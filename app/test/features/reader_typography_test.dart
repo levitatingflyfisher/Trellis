@@ -102,7 +102,13 @@ void main() {
     expect(padding.bottom, 32);
   });
 
-  testWidgets('justified alignment reaches the Wrap; ragged-right is default',
+  // 1.6.0, owner: Follow along "still sucks with the weird spacing of the
+  // words to fill the page". Justifying a per-word Wrap can only spread
+  // each line's words across the whole measure, the last line too, so
+  // Follow along never does it. Line still justifies, with real text
+  // justification that leaves the last line alone.
+  testWidgets('Follow along never stretches the gaps between words, even '
+      'with Justified on',
       (tester) async {
     final (profileId, _) = await seed('Zero One Two Three.');
     await openReaderInScroll(tester);
@@ -125,7 +131,7 @@ void main() {
     await tester.tap(find.byKey(const Key('mode-item-page')));
     await tester.pumpAndSettle();
     wrap = tester.widget<Wrap>(find.byType(Wrap).first);
-    expect(wrap.alignment, WrapAlignment.spaceBetween);
+    expect(wrap.alignment, WrapAlignment.start);
   });
 
   testWidgets('the overflow menu opens the reading-style settings screen',

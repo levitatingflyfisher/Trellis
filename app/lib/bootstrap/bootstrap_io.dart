@@ -14,14 +14,17 @@ import 'dart:io';
 import 'package:comms_core/comms_core.dart';
 import 'package:drift/drift.dart' show DatabaseConnection;
 import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:audio_service/audio_service.dart';
 import 'package:drift/native.dart';
-import 'package:just_audio_background/just_audio_background.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/common.dart' show CommonDatabase;
 import 'package:sqlite3/sqlite3.dart' show sqlite3;
 
 import '../db/database.dart';
+import '../features/player/headset_keys.dart';
+import '../features/player/playback_session.dart';
+import '../features/player/trellis_audio_handler.dart';
 import '../features/reader/speech/speech_temp_files.dart';
 import '../net/io_fetcher.dart';
 import '../services/device_services.dart';
@@ -129,13 +132,13 @@ HttpFetcher createFetcher({WebFetchLane lane = WebFetchLane.direct}) =>
     IoHttpFetcher();
 
 /// Campaign 9 Phase 2e (ADR-0015 Decision 3): the lock-screen/pull-down-
-/// tray media session — must run before the app's own single AudioPlayer
-/// is ever constructed (just_audio_background's own documented ordering;
-/// [PlayerController] never builds one until playback first starts, well
-/// after this call, so `main()` calling this ahead of `runApp` is early
-/// enough). `androidNotificationIcon` names Phase 8's own asset
-/// (`drawable-*dpi/ic_notification.png`) — generated ahead of this work
-/// landing, an orphan until now.
+/// tray media session. Since 1.6.0 it is Trellis's own audio_service
+/// handler (features/player/trellis_audio_handler.dart), where it was the
+/// just_audio_background plugin's: same service, same channel, same
+/// icon, so nothing changes in the manifest or the host activity.
+/// `main()` calls this ahead of `runApp`, before any player exists.
+/// `androidNotificationIcon` names Phase 8's own asset
+/// (`drawable-*dpi/ic_notification.png`).
 ///
 /// Android/iOS only; the web side's own [createServices]-adjacent stub
 /// (bootstrap_web.dart) is a no-op, so `main()` can call this name
@@ -144,12 +147,36 @@ HttpFetcher createFetcher({WebFetchLane lane = WebFetchLane.direct}) =>
 /// shrinker strips it and the first playback notification kills the app.
 const audioNotificationIcon = 'drawable/ic_notification';
 
-Future<void> initAudioBackground() => JustAudioBackground.init(
-  androidNotificationChannelId: 'com.openhearth.trellis.channel.audio',
-  androidNotificationChannelName: 'Trellis playback',
-  androidNotificationIcon: audioNotificationIcon,
-  androidNotificationOngoing: true,
-);
+/// The same channel the notification has had since 1.5.0: a new id would
+/// leave the old channel orphaned in the phone's settings.
+const audioNotificationChannelId = 'com.openhearth.trellis.channel.audio';
+
+PlaybackSession _playbackSession = const NoPlaybackSession();
+
+/// The media session players report to: nothing until
+/// [initAudioBackground] has run, and still nothing if it failed, in
+/// which case sound plays with no lock-screen controls (boot_guard.dart).
+PlaybackSession get playbackSession => _playbackSession;
+
+/// Lets the media session read what the headset's keys do (1.6.0), once
+/// there is a database to read them from. Before this, and where the
+/// session never started, the keys do their defaults or nothing.
+void bindHeadsetKeys(Future<HeadsetKeys> Function() read) {
+  final session = _playbackSession;
+  if (session is TrellisAudioHandler) session.headsetKeys = read;
+}
+
+Future<void> initAudioBackground() async {
+  _playbackSession = await AudioService.init<TrellisAudioHandler>(
+    builder: TrellisAudioHandler.new,
+    config: const AudioServiceConfig(
+      androidNotificationChannelId: audioNotificationChannelId,
+      androidNotificationChannelName: 'Trellis playback',
+      androidNotificationIcon: audioNotificationIcon,
+      androidNotificationOngoing: true,
+    ),
+  );
+}
 
 /// Lets go of deleted transcripts and translations kept 30 days. Never
 /// throws: a failure here would fall back to the detached services, and

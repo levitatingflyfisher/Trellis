@@ -392,6 +392,26 @@ class ModelRegistry {
           licenses: const ['MIT'],
           minTier: DeviceTier.t2,
         ),
+        // By choice only (1.6.0): whisper small, for a phone that can
+        // carry it. Registered at t3 so that no phone tier ever picks it
+        // by itself; the app's "Transcription quality" choice reaches it
+        // by id. Hash computed from a download on 2026-11-10 and equal to
+        // the one Hugging Face publishes.
+        ModelSpec(
+          id: 'whisper-small-ggml',
+          task: ModelTask.asr,
+          files: [
+            ModelFile(
+              url:
+                  'https://huggingface.co/ggerganov/whisper.cpp/resolve/main/ggml-small-q8_0.bin',
+              sha256:
+                  '49c8fb02b65e6049d5fa6c04f81f53b867b5ec9540406812c643f177317f779f',
+              bytes: 264464607,
+            ),
+          ],
+          licenses: const ['MIT'],
+          minTier: DeviceTier.t3,
+        ),
         // T1 VAD — gates silent windows ahead of whisper (the "Careless
         // Whisper" hallucination mitigation). Language-agnostic.
         ModelSpec(

@@ -221,7 +221,8 @@ class _ReaderTypographySettingsScreenState
       subtitle: const Text(
           'Lines stretch edge to edge. This reader justifies without '
           'hyphenation, so wide gaps can appear on narrow screens or '
-          'short lines. Ragged-right avoids that.'),
+          'short lines. Ragged-right avoids that. The Follow along '
+          'highlight is always ragged-right.'),
     );
   }
 }

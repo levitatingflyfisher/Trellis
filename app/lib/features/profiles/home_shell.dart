@@ -32,8 +32,11 @@ import '../player/audiobook_chapters.dart';
 import '../player/captures_screen.dart';
 import '../player/chapters_screen.dart';
 import '../player/episode_player.dart';
+import '../player/headset_keys.dart';
+import '../player/headset_keys_sheet.dart';
 import '../player/mini_player_bar.dart';
 import '../player/mini_player_host.dart';
+import '../player/play_fetch.dart';
 import '../player/player_controller.dart';
 import '../player/queue_screen.dart';
 import '../reader/reader_doors.dart';
@@ -200,7 +203,21 @@ class _HomeShellState extends State<HomeShell> {
     artworkFileFor: widget.services.localMlAvailable
         ? widget.services.artworkFileFor
         : null,
-  );
+    // "Play on an episode that isn't downloaded" (1.6.0): read at each
+    // Play, so a change holds from the next one. Only where there are
+    // downloads at all; elsewhere Play streams.
+    downloadFirst: () => FeedCheckSettings.downloadFirstOn(widget.db),
+    beginFetch: widget.jobs.downloads == null
+        ? null
+        : (work, url) =>
+            beginEpisodeFetch(widget.jobs.downloads!, work, url),
+  )..onNotice = _onPlayNotice;
+
+  /// A Play that could not simply play says so where the listener is.
+  void _onPlayNotice(PlayNotice notice) {
+    if (mounted) _toast(playNoticeWords(notice));
+  }
+
   TranscribeCoordinator get _coordinator => widget.jobs.transcribe;
 
   /// Null on the web tier (see JobCenter.forDevice).
@@ -583,7 +600,20 @@ class _HomeShellState extends State<HomeShell> {
         onOpenCaptures: _openCaptures,
         onOpenQueue: _openQueue,
         onOpenChapters: _openChapters,
+        // A browser tab has no media session for a headset to drive.
+        onOpenHeadsetKeys: kIsWeb ? null : _openHeadsetKeys,
       );
+
+  /// What the headset's Next and Previous buttons do (1.6.0): the
+  /// device's settings, in a sheet over whatever page is up.
+  void _openHeadsetKeys() {
+    unawaited(showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      isScrollControlled: true,
+      builder: (_) => HeadsetKeysSheet(store: HeadsetKeysStore(widget.db)),
+    ));
+  }
 
   /// The bar's title and art: the playing episode's page, inside the tab
   /// in view, so the bottom bar stays (1.5.9, user: tapping the bar
@@ -599,6 +629,13 @@ class _HomeShellState extends State<HomeShell> {
     if (feed != null) await _openShow(_pageContext, feed);
   }
 
+  /// The background-check switches, only where the system can run a
+  /// check: shown under Models & storage and on Subscriptions.
+  FeedCheckSettings? get _feedCheckOffered =>
+      (widget.feedCheck?.scheduler.available ?? false)
+          ? widget.feedCheck
+          : null;
+
   void _openModels() {
     // The web tier gets the honest explanation, never a manager whose
     // file operations would throw there.
@@ -608,9 +645,7 @@ class _HomeShellState extends State<HomeShell> {
             registry: widget.services.registry,
             services: widget.services,
             databaseFile: widget.services.databaseFile,
-            feedCheck: (widget.feedCheck?.scheduler.available ?? false)
-                ? widget.feedCheck
-                : null,
+            feedCheck: _feedCheckOffered,
             db: widget.db,
             profileId: widget.profile.id,
             actions: _episodeActions,
@@ -759,6 +794,7 @@ class _HomeShellState extends State<HomeShell> {
               db: widget.db,
               repository: _repository,
               profile: widget.profile,
+              feedCheck: _feedCheckOffered,
               localMlAvailable: widget.services.localMlAvailable,
               playerController: _player,
               downloadCoordinator: _downloadCoordinator,
@@ -819,6 +855,7 @@ class _HomeShellState extends State<HomeShell> {
             active: _tab == 0,
             changes: _latestChanges,
             onOpenWork: (id) => unawaited(_refetchOnOpen(id)),
+            feedCheck: _feedCheckOffered,
             db: widget.db,
             profile: widget.profile,
             repository: _repository,

@@ -25,6 +25,13 @@ import 'sleep_timer.dart';
 import 'smart_resume.dart';
 import 'speed_control.dart' show clampSpeed, maxSpeed, minSpeed;
 
+/// How a fetch begun for Play ended (1.6.0); see
+/// [PlayerController.playWork].
+enum FetchEnd { landed, failed, paused }
+
+/// What the player has to say about a Play that could not simply play.
+enum PlayNotice { downloadingFirst, waitingForWifi, downloadFailed }
+
 class PlayerController extends ChangeNotifier {
   PlayerController({
     required this.db,
@@ -35,7 +42,11 @@ class PlayerController extends ChangeNotifier {
     Stream<AccelerationSample> Function()? accelerometerSamples,
     File Function(int workId, String url)? localAudioFileFor,
     File Function(int feedId)? artworkFileFor,
+    Future<bool> Function()? downloadFirst,
+    Future<Future<FetchEnd>?> Function(Work work, String url)? beginFetch,
   }) : _createPlayer = createPlayer,
+       _downloadFirst = downloadFirst,
+       _beginFetch = beginFetch,
        _now = now ?? DateTime.now,
        _haptic = haptic ?? HapticFeedback.mediumImpact,
        _accelerometerSamples = accelerometerSamples,
@@ -44,6 +55,25 @@ class PlayerController extends ChangeNotifier {
 
   final AppDatabase db;
   final int profileId;
+
+  /// "Play on an episode that isn't downloaded" (1.6.0, user: "Play for
+  /// download then play"): whether the listener chose Download first.
+  /// Null, as in tests and on the web, Play streams as it always has.
+  final Future<bool> Function()? _downloadFirst;
+
+  /// Starts fetching [work]'s audio for a Play. Null back means it
+  /// cannot start now (it waits for Wi-Fi, and is queued for it);
+  /// otherwise how the fetch ended.
+  final Future<Future<FetchEnd>?> Function(Work work, String url)? _beginFetch;
+
+  /// Told when a Play could not simply play, for the shell to say so in
+  /// words where the listener is looking.
+  void Function(PlayNotice notice)? onNotice;
+
+  /// Bumped by every Play the listener presses and by X, so a fetch
+  /// that lands after they asked for something else does not start
+  /// playing.
+  int _playIntent = 0;
   final EpisodePlayer Function() _createPlayer;
   final DateTime Function() _now;
 
@@ -462,6 +492,9 @@ class PlayerController extends ChangeNotifier {
   /// SAME hand as playing all the way to the true end, just early enough
   /// to skip whatever outro the feed's owner set aside.
   Future<void> _tickOutroCutoff() async {
+    // Mid-switch the engine still reports the last episode's place and
+    // length: past its cutoff, which would finish the next one unheard.
+    if (!_placeKnown) return;
     final outroSeconds = _currentFeed?.skipOutroSeconds;
     if (outroSeconds == null || outroSeconds <= 0) return;
     final p = _player;
@@ -573,10 +606,26 @@ class PlayerController extends ChangeNotifier {
   /// no longer proof that toggling (rather than loading) is the right verb.
   /// [startAt], when given, replaces the resume point and the intro skip,
   /// so the first sound is from there: see [playWorkAt].
-  Future<void> playWork(Work work, {Duration? startAt}) async {
+  ///
+  /// With "Download first" chosen, a Play the listener presses on an
+  /// episode that isn't on disk fetches it and plays once it has landed;
+  /// what was playing plays on meanwhile. [auto] is the queue moving on
+  /// by itself, which streams whatever the setting: nobody pressed
+  /// anything, and a fetch that had to wait would leave the queue silent.
+  Future<void> playWork(Work work,
+      {Duration? startAt, bool auto = false}) async {
     if (_current?.id == work.id && _player != null) return toggle();
     final url = work.sourceUrl;
     if (url == null || url.isEmpty) return;
+    // The queue moving on is nobody's new wish: it leaves a Play that
+    // is still downloading to start when it lands.
+    if (!auto) {
+      final intent = ++_playIntent;
+      if (!await _fetchedFirst(work, url, intent)) return;
+      // Asking is itself a wait, even when nothing is fetched: an X or
+      // another Play pressed during it has already won.
+      if (intent != _playIntent) return;
+    }
 
     final gen = ++_loadGen;
     if (_current != null) await saveProgress();
@@ -647,9 +696,12 @@ class PlayerController extends ChangeNotifier {
     final resumeMs = await _resumeMs(work.id);
     if (gen != _loadGen) return;
     final introSeconds = _currentFeed?.skipIntroSeconds;
+    // A place at the very end is nowhere to resume: see [playedOutWithin].
+    final playedOut = _playedOut(
+        resumeMs, p.duration?.inMilliseconds ?? episode?.durationMs);
     if (startAt != null) {
       await p.seek(startAt);
-    } else if (resumeMs > 0) {
+    } else if (resumeMs > 0 && !playedOut) {
       await p.seek(Duration(milliseconds: resumeMs));
     } else if (introSeconds != null && introSeconds > 0) {
       // Only on a fresh start — never re-applied on a resume, so pausing
@@ -665,6 +717,36 @@ class PlayerController extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Whether [work] may load now. False when Download first applies and
+  /// the fetch is waiting for Wi-Fi, failed, was paused, or landed after
+  /// the listener asked for something else ([intent] is no longer the
+  /// newest).
+  Future<bool> _fetchedFirst(Work work, String url, int intent) async {
+    final begin = _beginFetch;
+    final local = _localAudioFileFor?.call(work.id, url);
+    if (begin == null || local == null || local.existsSync()) return true;
+    if (!(await _downloadFirst?.call() ?? false)) return true;
+    if (intent != _playIntent) return false;
+    final landing = await begin(work, url);
+    if (intent != _playIntent) return false;
+    if (landing == null) {
+      onNotice?.call(PlayNotice.waitingForWifi);
+      return false;
+    }
+    onNotice?.call(PlayNotice.downloadingFirst);
+    final end = await landing;
+    if (intent != _playIntent) return false;
+    switch (end) {
+      case FetchEnd.landed:
+        return true;
+      case FetchEnd.failed:
+        onNotice?.call(PlayNotice.downloadFailed);
+        return false;
+      case FetchEnd.paused:
+        return false;
+    }
+  }
+
   /// Play (or, if already current, toggle) an audiobook — the multi-file
   /// counterpart to [playWork] (Campaign 7, ADR-0013). Loads the WHOLE
   /// file list as one gapless playlist ([EpisodePlayer.setFilePaths]);
@@ -672,8 +754,9 @@ class PlayerController extends ChangeNotifier {
   /// method's own doc comment for what that means for [position]/
   /// [duration]/[completedStream]. Resumes from the stored (fileIdx, tMs)
   /// position, or file 0 offset 0 for a book never opened before.
-  Future<void> playAudiobook(Work work) async {
+  Future<void> playAudiobook(Work work, {bool auto = false}) async {
     if (_current?.id == work.id && _player != null) return toggle();
+    if (!auto) _playIntent++;
     final gen = ++_loadGen;
     final files = await db.audiobooksDao.filesOf(work.id);
     if (files.isEmpty || gen != _loadGen) return;
@@ -682,12 +765,20 @@ class PlayerController extends ChangeNotifier {
       profileId: profileId,
       workId: work.id,
     );
+    var startFileIdx = resume?.fileIdx ?? 0;
+    var startMs = resume?.tMs ?? 0;
+    // Played to the end of its last file: Play starts the book again.
+    if (startFileIdx >= files.length - 1 &&
+        _playedOut(startMs, files.last.durationMs)) {
+      startFileIdx = 0;
+      startMs = 0;
+    }
     await _loadAudiobook(
       gen,
       work,
       files,
-      startFileIdx: resume?.fileIdx ?? 0,
-      startMs: resume?.tMs ?? 0,
+      startFileIdx: startFileIdx,
+      startMs: startMs,
     );
   }
 
@@ -878,6 +969,10 @@ class PlayerController extends ChangeNotifier {
       _pausedAtMs = _nowMs;
     } else {
       final place = Duration(milliseconds: _placeMs(p));
+      if (_playedOut(place.inMilliseconds, p.duration?.inMilliseconds) &&
+          _atLastFile) {
+        return _startOver(p);
+      }
       final pausedAt = _pausedAtMs;
       if (pausedAt != null) {
         final rewind = smartResumeRewind(
@@ -892,6 +987,40 @@ class PlayerController extends ChangeNotifier {
       }
       await p.play();
     }
+    notifyListeners();
+  }
+
+  /// How close to the end a place counts as played out. Play there starts
+  /// the work again (1.6.0, user: "clicking play on the widget doesn't
+  /// always work"): it used to step two seconds back, play that tail and
+  /// stop, which on the widget looked like a Play that did nothing.
+  static const playedOutWithin = Duration(seconds: 1);
+
+  bool _playedOut(int placeMs, int? totalMs) =>
+      totalMs != null &&
+      totalMs > playedOutWithin.inMilliseconds &&
+      placeMs >= totalMs - playedOutWithin.inMilliseconds;
+
+  /// A book's end is its last file's.
+  bool get _atLastFile {
+    final files = _currentAudiobookFiles;
+    return files == null || (_currentFileIdx ?? 0) >= files.length - 1;
+  }
+
+  /// Play on a work that has played out: from the beginning, past the
+  /// intro as any fresh start is. Its next ending is a finish again.
+  Future<void> _startOver(EpisodePlayer p) async {
+    final work = _current;
+    if (work == null) return;
+    _pausedAtMs = null;
+    if (isAudiobook) {
+      return playAudiobookAt(work, fileIdx: 0, positionMs: 0);
+    }
+    _finishHandled = false;
+    final intro = _currentFeed?.skipIntroSeconds;
+    await _seek(p, Duration(seconds: intro != null && intro > 0 ? intro : 0));
+    await saveProgress();
+    await p.play();
     notifyListeners();
   }
 
@@ -1020,7 +1149,9 @@ class PlayerController extends ChangeNotifier {
   /// tapped meanwhile starts a fresh load (which waits for the release)
   /// instead of toggling the player being let go.
   Future<void> stop() async {
-    // Even with nothing shown yet, a load just begun is called off.
+    // Even with nothing shown yet, a load just begun is called off, and
+    // so is a fetch that would have played when it landed.
+    _playIntent++;
     final gen = ++_loadGen;
     if (_current == null && _player == null) return;
     final p = _player;
@@ -1125,12 +1256,21 @@ class PlayerController extends ChangeNotifier {
   /// double promotion.
   ///
   /// An X (or another load) during its awaits wins: nothing advances.
+  ///
+  /// The engine is not paused first (1.6.0, user: "it doesn't autoplay
+  /// the next episode"). It used to be, and a pause takes the playback
+  /// service out of the foreground; behind another app or a dark screen
+  /// Android then refuses to let it back, so the next episode started
+  /// unprotected and the app was frozen ten seconds in. The app's own
+  /// media session keeps saying "playing" from the end of one file
+  /// through the load of the next (trellis_audio_handler.dart), so the
+  /// service never leaves. The engine is paused only when nothing
+  /// follows.
   Future<void> _finish() async {
     if (_finishHandled) return;
     _finishHandled = true;
     final gen = _loadGen;
     final p = _player;
-    if (p != null && p.playing) await p.pause();
     final work = _current;
     if (work != null) {
       await db.spineDao.promoteWork(work.id);
@@ -1150,9 +1290,33 @@ class PlayerController extends ChangeNotifier {
       await p?.setVolume(1.0);
       cancelSleepTimer();
     }
-    if (work != null) await _advanceQueue(work.id);
+    var carriedOn = false;
+    var failed = false;
+    try {
+      if (work != null) carriedOn = await _advanceQueue(work.id);
+    } catch (e) {
+      // Only a load that is still the newest throws (a superseded one
+      // gives up quietly), so the engine here is still this one's.
+      failed = true;
+      debugPrint('Player: the next in the queue would not play: $e');
+    }
+    // Nothing follows: now the engine stops. Not when another load began
+    // meanwhile; that one owns the engine.
+    if (!carriedOn &&
+        (failed || gen == _loadGen) &&
+        p != null &&
+        identical(p, _player) &&
+        p.playing) {
+      await p.pause();
+    }
     notifyListeners();
   }
+
+  /// Counts the times the player itself changed the queue (a finished
+  /// episode leaving it), so the Queue tab can reload even when nothing
+  /// new starts playing.
+  int get queueRevision => _queueRevision;
+  int _queueRevision = 0;
 
   /// The queue's law (P4 mercy #3): finishing removes the episode from the
   /// queue by default — a household setting can keep it instead — then
@@ -1160,37 +1324,46 @@ class PlayerController extends ChangeNotifier {
   /// through the ordinary [playWork], so the next episode's own per-feed
   /// settings (speed, skip-intro/outro) apply exactly as they would if the
   /// reader had tapped Play themselves.
-  Future<void> _advanceQueue(int finishedWorkId) async {
+  ///
+  /// True when something was handed to the player to carry on with.
+  Future<bool> _advanceQueue(int finishedWorkId) async {
     final keep = await db.profilesDao.keepFinishedInQueue(profileId);
     if (!keep) {
       await db.queueDao.remove(profileId: profileId, workId: finishedWorkId);
+      _queueRevision++;
+      notifyListeners();
     }
-    // A kept episode stays in the queue, possibly behind things queued
-    // while it played, so position says nothing. Next is the first entry
-    // that isn't this one and isn't already played; kept played ones are
-    // skipped, or two kept episodes would loop forever.
-    final queue = await db.queueDao.queueOf(profileId);
-    QueueRow? upcoming;
-    for (final r in queue) {
+    final upcoming = await _upcomingAfter(finishedWorkId, keep: keep);
+    if (upcoming == null) return false;
+    final next = await db.spineDao.workById(upcoming.workId);
+    if (next == null) return false;
+    // Campaign 7 (ADR-0013): an audiobook work carries no sourceUrl for
+    // playWork's single-file law to stream — it needs the multi-file
+    // door instead.
+    if (next.kind == 'audiobook') {
+      await playAudiobook(next, auto: true);
+    } else {
+      await playWork(next, auto: true);
+    }
+    return true;
+  }
+
+  /// What the queue plays after [finishedWorkId], or null. A kept episode
+  /// stays in the queue, possibly behind things queued while it played,
+  /// so position says nothing: next is the first entry that isn't this
+  /// one and isn't already played. Kept played ones are skipped, or two
+  /// kept episodes would loop forever.
+  Future<QueueRow?> _upcomingAfter(int finishedWorkId,
+      {required bool keep}) async {
+    for (final r in await db.queueDao.queueOf(profileId)) {
       if (r.workId == finishedWorkId) continue;
       if (keep) {
         final ep = await db.feedsDao.episodeOf(r.workId);
         if (ep?.finishedAtMs != null) continue;
       }
-      upcoming = r;
-      break;
+      return r;
     }
-    if (upcoming == null) return;
-    final next = await db.spineDao.workById(upcoming.workId);
-    if (next == null) return;
-    // Campaign 7 (ADR-0013): an audiobook work carries no sourceUrl for
-    // playWork's single-file law to stream — it needs the multi-file
-    // door instead.
-    if (next.kind == 'audiobook') {
-      await playAudiobook(next);
-    } else {
-      await playWork(next);
-    }
+    return null;
   }
 
   @override

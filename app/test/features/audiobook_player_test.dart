@@ -351,6 +351,57 @@ void main() {
       expect(controller.isAudiobook, isTrue);
       expect(player.loadedFilePaths, ['/b/0.mp3']);
     });
+
+    test('Play on a book that has played to its end starts it again from '
+        'its first file (1.6.0)', () async {
+      final work = await seedAudiobook();
+      await controller.playAudiobook(work);
+      player.emitCurrentIndex(1);
+      player.emitDuration(const Duration(minutes: 20));
+      player.emitPosition(const Duration(minutes: 20));
+      player.emitCompleted();
+      await pumpEventQueue();
+      expect(controller.playing, isFalse);
+      player.log.clear();
+
+      await controller.toggle();
+
+      expect(player.log.where((l) => l.startsWith('setFilePaths:')).single,
+          endsWith('@0+0'),
+          reason: 'the playlist is loaded again, at its start');
+      expect(controller.currentFileIdx, 0);
+      expect(controller.playing, isTrue);
+    });
+
+    test('the end of a file that is not the last is no hand-over, and '
+        'the last file plays to its very end: the queue waits for the end '
+        'of the book (1.6.0)', () async {
+      final first = await seedAudiobook(title: 'First');
+      final second =
+          await seedAudiobook(title: 'Second', paths: const ['/b/0.mp3']);
+      await db.queueDao
+          .playNext(profileId: profileId, workId: second.id, nowMs: nowMs);
+      await controller.playAudiobook(first);
+      player.emitDuration(const Duration(minutes: 30));
+
+      player.emitPosition(
+          const Duration(minutes: 29, seconds: 59, milliseconds: 800));
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.current?.id, first.id);
+
+      player.emitCurrentIndex(1);
+      player.emitDuration(const Duration(minutes: 20));
+      player.emitPosition(
+          const Duration(minutes: 19, seconds: 59, milliseconds: 800));
+      await pumpEventQueue();
+      expect(controller.current?.id, first.id,
+          reason: 'the last file plays to its very end too');
+
+      player.emitCompleted();
+      await pumpEventQueue();
+      expect(controller.current?.id, second.id,
+          reason: 'the last file\'s end is the book\'s');
+    });
   });
 
   group('duration lands in AudiobookFiles, never Episodes', () {

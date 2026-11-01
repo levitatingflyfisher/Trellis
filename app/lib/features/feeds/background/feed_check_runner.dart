@@ -85,6 +85,9 @@ class FeedCheckRunner {
         return runAutoDownloadPass(db,
             onDisk: onDisk,
             shouldStop: stopping,
+            // Switched off, a pass still runs for a download the
+            // listener left waiting for Wi-Fi, but picks nothing itself.
+            planNew: await FeedCheckSettings.backgroundOn(db),
             queue: queueDownload,
             requeue: (id) async => requeueDownload?.call(id),
             start: (pick) async {
@@ -112,7 +115,14 @@ class FeedCheckRunner {
   /// mobile data never spends it on audio.
   Future<void> requestAutoDownloadIfPending() async {
     if (!scheduler.available) return;
-    // Switched off means nothing runs in the background, passes included.
+    // A download the listener started and left waiting for Wi-Fi is
+    // their own request, whatever the switch says (1.6.0).
+    if (await handDownloadsWaiting(db, onDisk: onDisk)) {
+      await scheduler.requestAutoDownload();
+      return;
+    }
+    // Switched off means nothing else runs in the background, passes
+    // included.
     if (!await FeedCheckSettings.backgroundOn(db)) return;
     if (await autoDownloadsPending(db, onDisk: onDisk)) {
       await scheduler.requestAutoDownload();
