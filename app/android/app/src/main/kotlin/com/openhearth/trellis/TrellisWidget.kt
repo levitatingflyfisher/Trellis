@@ -32,9 +32,11 @@ import org.json.JSONObject
 ///    the foreground. Loading a stream can take seconds, long enough for a
 ///    background start of the playback service to be refused and the app
 ///    to crash out of sight, so it never happens behind the screen.
-/// Pause needs no such care. The taps go to WidgetTapReceiver, which no
-/// other app can reach; only this provider is exported, for the
-/// launcher's APPWIDGET_UPDATE.
+/// Pause needs no such care. Play is always an activity launch, the one
+/// launch Android always allows from a widget: WidgetPlayActivity plays,
+/// or opens the app if the card went stale. Other taps go to
+/// WidgetTapReceiver, which no other app can reach; only this provider is
+/// exported, for the launcher's APPWIDGET_UPDATE.
 class TrellisWidget : AppWidgetProvider() {
 
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) {
@@ -93,7 +95,6 @@ class TrellisWidget : AppWidgetProvider() {
     }
 
     companion object {
-        const val TAP_PLAY = "com.openhearth.trellis.widget.TAP_PLAY"
         const val TAP_PAUSE = "com.openhearth.trellis.widget.TAP_PAUSE"
         const val TAP_BACK = "com.openhearth.trellis.widget.TAP_BACK"
         const val TAP_FORWARD = "com.openhearth.trellis.widget.TAP_FORWARD"
@@ -212,7 +213,12 @@ class TrellisWidget : AppWidgetProvider() {
                     R.id.widget_play,
                     when {
                         playing -> broadcast(context, TAP_PAUSE, 2)
-                        ready -> broadcast(context, TAP_PLAY, 1)
+                        ready -> PendingIntent.getActivity(
+                            context, 1,
+                            Intent(context, WidgetPlayActivity::class.java)
+                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                            FLAGS,
+                        )
                         // Not ready to play headless (see the class note):
                         // open the app, the one launch Android always
                         // allows from a widget, and resume there.

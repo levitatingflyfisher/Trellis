@@ -50,6 +50,45 @@ void main() {
         contains('Intent(context, WidgetTapReceiver::class.java)'));
   });
 
+  group('Play on the card can never be refused quietly (owner, 9 Nov: '
+      '"Clicking play on the widget doesn\'t always work")', () {
+    const kotlin = 'android/app/src/main/kotlin/com/openhearth/trellis';
+    String source(String name) => File('$kotlin/$name').readAsStringSync();
+
+    test('a card drawn ready sends Play to an activity: the one launch '
+        'Android always allows from a widget', () {
+      final widget = source('TrellisWidget.kt');
+      expect(widget, isNot(contains('broadcast(context, TAP_PLAY')));
+      expect(widget, contains('Intent(context, WidgetPlayActivity::class.java)'));
+      final play = RegExp(
+              r'<activity\s[^>]*android:name="\.WidgetPlayActivity"[^>]*/>',
+              dotAll: true)
+          .firstMatch(manifest.readAsStringSync())
+          ?.group(0);
+      expect(play, isNotNull);
+      expect(play, contains('android:exported="false"'));
+      expect(play, contains('android:theme="@android:style/Theme.NoDisplay"'),
+          reason: 'nothing flashes on the screen when a Play can play');
+      expect(play, contains('android:excludeFromRecents="true"'));
+      expect(play, contains('android:taskAffinity=""'),
+          reason: 'it must not bring the app\'s own task forward');
+    });
+
+    test('it plays when the app holds the audio, and otherwise opens the app',
+        () {
+      final activity = source('WidgetPlayActivity.kt');
+      expect(activity, contains('WidgetBridge.deliver("play"'));
+      expect(activity, contains('startActivity(TrellisWidget.playIntent('));
+      expect(activity, contains('finish()'));
+    });
+
+    test('the receiver no longer tries a launch Android may refuse', () {
+      final receiver = source('WidgetTapReceiver.kt');
+      expect(receiver, isNot(contains('startActivity')));
+      expect(receiver, isNot(contains('TAP_PLAY')));
+    });
+  });
+
   test('a fresh process redraws the card, so a killed app leaves no '
       'stale Play', () {
     expect(manifest.readAsStringSync(),

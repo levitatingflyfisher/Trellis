@@ -7,6 +7,7 @@ import 'package:openhearth_design/openhearth_design.dart';
 import '../../db/database.dart';
 import '../dsp/dsp_coordinator.dart';
 import '../episodes/episode_actions.dart';
+import '../listen/listen.dart';
 import '../transcribe/transcribe_coordinator.dart';
 import '../works/work_menu.dart';
 import '../works/work_open.dart';
@@ -132,6 +133,8 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
         ? widget.repository.services?.artworkFileFor(_feed.id)
         : null;
     _selection.universe = episodes;
+    // How much the show's made-ahead audio takes, read again with its rows.
+    _actions.listenJobs?.refresh();
     setState(() {
       _episodes = episodes;
       _rowState = rowState;
@@ -338,6 +341,8 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
               ),
             ],
           ),
+          if (!isSharedFeed(_feed) && _actions.listenJobs != null)
+            MakeAheadTile(jobs: _actions.listenJobs!, feed: _feed),
           const SizedBox(height: 8),
           Wrap(
             spacing: 8,
@@ -379,6 +384,8 @@ class _FeedDetailScreenState extends State<FeedDetailScreen> {
           ? () => _selection.toggle(e.work.id)
           : () => _selection.enter(e.work.id),
       player: widget.playerController,
+      second:
+          _actions.listenButton(e, feedLang: _rowState.feedLangs[_feed.id]),
       onPlay: canPlay
           ? () async {
               await _actions.play(e.work);

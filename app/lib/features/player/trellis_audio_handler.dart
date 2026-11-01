@@ -32,8 +32,9 @@ class TrellisAudioHandler extends BaseAudioHandler implements PlaybackSession {
   /// defaults.
   Future<HeadsetKeys> Function()? headsetKeys;
 
-  /// "Next episode" and "Previous episode", for whoever runs the queue.
-  /// Null until wired: the key then does nothing.
+  /// "Next episode" and "Previous episode": the shell's player, bound once
+  /// there is a reader (bindEpisodeKeys). Null before that and after the
+  /// shell goes: the key then does nothing.
   Future<void> Function()? onNextEpisode;
   Future<void> Function()? onPreviousEpisode;
 

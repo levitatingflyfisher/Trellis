@@ -13,7 +13,10 @@ import 'job_center.dart';
 
 class JobsScreen extends StatelessWidget {
   final JobCenter jobs;
-  const JobsScreen({super.key, required this.jobs});
+
+  /// What was made ahead and the room it takes (ADR-0021).
+  final Widget? aheadLine;
+  const JobsScreen({super.key, required this.jobs, this.aheadLine});
 
   @override
   Widget build(BuildContext context) {
@@ -35,10 +38,17 @@ class JobsScreen extends StatelessWidget {
               if (dsp != null)
                 for (final c in dsp.cards) _DspJobCard(coordinator: dsp, card: c),
             ];
-            if (children.isEmpty) return const _NothingRunning();
-            return ListView(
-              padding: const EdgeInsets.only(bottom: 16),
-              children: children,
+            final list = children.isEmpty
+                ? const _NothingRunning()
+                : ListView(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    children: children,
+                  );
+            final line = aheadLine;
+            if (line == null) return list;
+            return Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [line, Expanded(child: list)],
             );
           },
         ),

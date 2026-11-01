@@ -201,7 +201,8 @@ class EpisodeBulk {
     final BulkChange change;
     try {
       change = switch (action) {
-        BulkAction.markPlayed => await _store.markPlayed(ids, nowMs: _nowMs),
+        BulkAction.markPlayed => await _store.markPlayed(ids,
+            nowMs: _nowMs, leaveQueueOf: actions.profileId),
         BulkAction.markUnplayed => await _store.markUnplayed(ids,
             profileId: actions.profileId),
         BulkAction.letPass => await _store
@@ -315,7 +316,8 @@ class EpisodeBulk {
     final BulkChange change;
     try {
       change = await _store
-          .markPlayed([for (final e in older) e.work.id], nowMs: _nowMs);
+          .markPlayed([for (final e in older) e.work.id],
+              nowMs: _nowMs, leaveQueueOf: actions.profileId);
     } catch (_) {
       _failed(messenger, 'Couldn’t mark these played. Nothing was changed.');
       return;

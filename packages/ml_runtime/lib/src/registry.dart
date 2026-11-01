@@ -233,6 +233,12 @@ class ModelSpec {
   /// extraction code branches on which of these is set.
   final DictionaryArchiveLayout? dictionaryArchiveLayout;
 
+  /// Set only for a model Trellis converted itself (ADR-0014's amendment
+  /// of 2026-11-11): the upstream model it was made from, by name and
+  /// where it lives, for the Models screen's “Converted by Trellis from”
+  /// line. Null for a model taken as its maker published it.
+  final String? convertedFrom;
+
   ModelSpec({
     required this.id,
     required this.task,
@@ -245,6 +251,7 @@ class ModelSpec {
     this.supertonicLayout,
     this.marianLayout,
     this.dictionaryArchiveLayout,
+    this.convertedFrom,
   })  : files = List.unmodifiable(files),
         licenses = List.unmodifiable(licenses),
         langs = langs == null ? null : Set.unmodifiable(langs) {

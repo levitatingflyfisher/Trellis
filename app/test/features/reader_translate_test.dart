@@ -10,6 +10,7 @@ import 'package:trellis/features/reader/reader_screen.dart';
 import 'package:trellis/features/reader/translation/translation_service.dart';
 import 'package:trellis/features/reader/translation/translator.dart';
 
+import '../support/fake_services.dart';
 import '../support/fake_translation_service.dart';
 
 /// Translate, wired into the reader (ADR-0008 "Babel"; Campaign 8 "Babel
@@ -291,6 +292,33 @@ void main() {
   });
 
   group('running', () {
+    testWidgets('a run started in the reader holds the same foreground '
+        'service transcription does, until it ends', (tester) async {
+      final gate = _Gate();
+      final hold = RecordingForegroundGate();
+      final fake = FakeTranslation(installed: {'opus-mt-en-es'});
+      final service = TranslationService(
+          registry: fakeTranslationRegistry,
+          tier: DeviceTier.t2,
+          store: fake.store,
+          openSpec: (_) async => gate,
+          foreground: hold);
+      await pumpReader(tester, translation: service);
+      await pick(tester, 'es');
+      await tester.pump();
+
+      expect(hold.events.first, 'start:A Story');
+      expect(hold.events, isNot(contains('finished')));
+      for (final s in ['a', 'b', 'c']) {
+        gate.next('ES $s');
+        await tester.pump();
+        await tester.pump();
+      }
+      await tester.pumpAndSettle();
+
+      expect(hold.events.last, 'finished');
+    });
+
     testWidgets('a calm progress card while it runs; Cancel keeps what is '
         'done', (tester) async {
       final gate = _Gate();

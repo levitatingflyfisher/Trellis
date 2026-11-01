@@ -91,8 +91,6 @@ class _ReaderTypographySettingsScreenState
                   onChanged: (v) => _apply(_t.copyWith(maxTextWidth: v)),
                 ),
                 _paragraphSpacingStepper(),
-                const SizedBox(height: 16),
-                _justifiedSwitch(),
                 const SizedBox(height: 24),
                 // The field's real terms, kept here in the detail view with
                 // a line each (operator jargon ruling); the reader itself
@@ -128,7 +126,6 @@ class _ReaderTypographySettingsScreenState
         'The quick brown fox reads this paragraph at the settings you '
         'choose below. This is exactly how your books will look.',
         key: const Key('typography-preview'),
-        textAlign: _t.justified ? TextAlign.justify : TextAlign.start,
         style: base?.copyWith(
           fontFamily: readerTypefaceFontFamily(_t.typeface),
           package: kReaderFontPackage,
@@ -209,20 +206,6 @@ class _ReaderTypographySettingsScreenState
           icon: const Icon(Icons.add_circle_outline),
         ),
       ],
-    );
-  }
-
-  Widget _justifiedSwitch() {
-    return SwitchListTile(
-      key: const Key('justified-switch'),
-      value: _t.justified,
-      onChanged: (v) => _apply(_t.copyWith(justified: v)),
-      title: const Text('Justified text'),
-      subtitle: const Text(
-          'Lines stretch edge to edge. This reader justifies without '
-          'hyphenation, so wide gaps can appear on narrow screens or '
-          'short lines. Ragged-right avoids that. The Follow along '
-          'highlight is always ragged-right.'),
     );
   }
 }

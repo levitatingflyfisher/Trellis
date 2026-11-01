@@ -61,13 +61,20 @@ final Map<String, String> _translationLabels = {
 String modelLabel(String id) =>
     kModelLabels[id] ?? _translationLabels[id] ?? id;
 
-/// The credit the OPUS-MT license asks for, shown with the translation
-/// models.
-const String opusMtCredit =
+/// The credit the translation models' licences ask for, shown with them:
+/// OPUS-MT for every pair but one, and ElanMT-BT for English to Japanese,
+/// which Trellis converted itself (ADR-0014's amendment).
+const String translationModelsCredit =
     'Translation models: OPUS-MT by Helsinki-NLP (University of Helsinki), '
     'each under CC-BY 4.0 or Apache-2.0 as its row says. Converted to ONNX '
     'by Xenova and onnx-community. Source and licences: '
-    'https://github.com/Helsinki-NLP/Opus-MT';
+    'https://github.com/Helsinki-NLP/Opus-MT\n'
+    'English to Japanese: ElanMT-BT by ELAN MITSUA Project / Abstract '
+    'Engine, under CC BY-SA 4.0, converted to ONNX by Trellis. Source and '
+    'licence: https://huggingface.co/Mitsua/elan-mt-bt-en-ja. The '
+    'converted files, the licence text and the export recipe are kept at '
+    'https://github.com/levitatingflyfisher/Trellis/releases/tag/'
+    'models-enja-1, which is never deleted.';
 
 class ModelsScreen extends StatefulWidget {
   final ModelStore store;
@@ -654,7 +661,7 @@ class _ModelsScreenState extends State<ModelsScreen> {
       children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
-          child: Text(opusMtCredit,
+          child: Text(translationModelsCredit,
               key: const Key('opus-mt-credit'),
               style: theme.textTheme.bodySmall),
         ),
@@ -733,6 +740,12 @@ class _ModelsScreenState extends State<ModelsScreen> {
               '${formatBytes(spec.sizeBytes)} · ${spec.licenses.join(', ')}',
               style: theme.textTheme.bodySmall,
             ),
+            if (spec.convertedFrom case final from?)
+              Text(
+                'Converted by Trellis from $from',
+                key: Key('model-converted-${spec.id}'),
+                style: theme.textTheme.bodySmall,
+              ),
             const SizedBox(height: 8),
             stateLine,
             Align(

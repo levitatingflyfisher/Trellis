@@ -33,6 +33,11 @@ import '../shared/capped_body.dart';
 
 typedef _Entry = ({Work work, Episode? episode, String? feedTitle});
 
+/// Trellis opens files you already have; it does nothing about locks.
+const copyProtectionNote =
+    'Trellis discourages using tools that strip copy protection in '
+    'violation of the DMCA, such as Calibre’s DeDRM or Libation.';
+
 /// One reader's works: pinned first, then newest, each in the shared row
 /// every list of works uses; progress is the cursor law's numerator over
 /// the segment count. The empty state is an invitation,
@@ -442,6 +447,17 @@ class _LibraryScreenState extends State<LibraryScreen> {
                   _importAudiobook();
                 },
               ),
+            // The owner's words (28 Oct), small and at the foot: not a
+            // banner. Names two tools for clarity, and no link on purpose.
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 16, 12),
+              child: Text(
+                copyProtectionNote,
+                key: const Key('add-copy-protection-note'),
+                style: Theme.of(sheet).textTheme.bodySmall?.copyWith(
+                    color: Theme.of(sheet).colorScheme.onSurfaceVariant),
+              ),
+            ),
           ],
         )),
       ),
@@ -662,6 +678,8 @@ class _LibraryScreenState extends State<LibraryScreen> {
       artwork: episode == null ? null : _actions.artworkFor(episode),
       onTap: () => _open(e),
       player: widget.player,
+      second: _actions.listenButton(entry,
+          feedLang: _rowState.feedLangs[episode?.feedId]),
       onPlay: isAudio && widget.player != null
           ? () async {
               await _doors.play(work);

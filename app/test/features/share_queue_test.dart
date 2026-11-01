@@ -1,5 +1,7 @@
+import 'dart:async';
+
 import 'package:drift/native.dart';
-import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/intake/share_intake.dart';
@@ -11,8 +13,13 @@ class _Shares implements ShareSource {
   VoidCallback? arrival;
   Set<String>? swept;
 
+  /// False while Android runs the app with no screen: the share channel
+  /// lives on the activity, so a call then has nobody to answer it.
+  bool attached = true;
+
   @override
   Future<List<SharedPayload>> takePending() async {
+    if (!attached) throw MissingPluginException('takePending');
     final all = [...waiting];
     waiting.clear();
     return all;
@@ -22,7 +29,10 @@ class _Shares implements ShareSource {
   set onArrival(VoidCallback? callback) => arrival = callback;
 
   @override
-  Future<void> sweep(Set<String> keep) async => swept = keep;
+  Future<void> sweep(Set<String> keep) async {
+    if (!attached) throw MissingPluginException('sweep');
+    swept = keep;
+  }
 }
 
 /// Shares wait on disk, each bound to the reader who was open when it
@@ -171,5 +181,39 @@ void main() {
     expect((await q.nextFor(ada))!.payload.text, 'still arrives');
     expect(await db.deviceSettingsDao.read('share_pending_unreadable'),
         '{"not": "a list"}');
+  });
+
+  // Seen on the emulator: media resumption after a boot starts the audio
+  // service with no screen, the whole start-up runs, and takePending
+  // failed with MissingPluginException. The share must still be taken
+  // once the app opens.
+  test('started with no screen, the queue waits for the app to open and '
+      'then takes the share', () async {
+    source.attached = false;
+    source.waiting.add(const SharedPayload(text: 'from before'));
+    final opened = StreamController<void>.broadcast();
+    final q = ShareQueue(
+        db: db,
+        source: source,
+        activeProfileId: () => active,
+        discard: discarded.add,
+        hostResumed: () => opened.stream.first);
+    Object? failed;
+    var started = false;
+    unawaited(q.start().then((_) => started = true, onError: (Object e) {
+      failed = e;
+    }));
+    await pumpEventQueue();
+    expect(failed, isNull);
+    expect(started, isFalse, reason: 'it waits for the app to open');
+    expect(source.waiting, hasLength(1), reason: 'nothing taken yet');
+
+    source.attached = true;
+    opened.add(null);
+    await pumpEventQueue();
+    expect(failed, isNull);
+    expect(started, isTrue);
+    expect((await q.nextFor(ada))!.payload.text, 'from before');
+    expect(source.swept, isNotNull);
   });
 }

@@ -12,9 +12,12 @@
 /// there — no separate job-tracking row, nothing to garbage-collect.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../../../db/database.dart';
+import '../../transcribe/foreground_gate.dart';
 import 'marian_types.dart';
 import 'sentence_units.dart';
 import 'translator.dart';
@@ -296,6 +299,8 @@ class TranslationRun extends ChangeNotifier {
     required this.units,
     required this.target,
     required this.steps,
+    this.foreground,
+    this.title = 'Translating',
   }) : _state = TranslationJobState(
             phase: TranslationJobPhase.idle,
             doneUnits: 0,
@@ -334,10 +339,30 @@ class TranslationRun extends ChangeNotifier {
     cancel();
   }
 
+  /// Keeps a run going out of focus, as transcription does (the owner:
+  /// "discontinues downloads / transcribes when not focused"). Held for
+  /// the whole run. Null for a caller already holding one of its own.
+  final JobForegroundGate? foreground;
+
+  /// What the notification calls the work.
+  final String title;
+  bool _held = false;
+
+  /// One notification update in this many sentences: a long book would
+  /// otherwise send the system thousands.
+  static const _notifyEvery = 10;
+
   void _set(TranslationJobPhase phase, int done) {
     _state = TranslationJobState(
         phase: phase, doneUnits: done, totalUnits: _state.totalUnits);
     notifyListeners();
+    if (_held && done % _notifyEvery == 0) {
+      unawaited(foreground!
+          .jobProgress(title, '$done of ${_state.totalUnits} sentences done')
+          .catchError((Object e) {
+        debugPrint('Translation: progress notice failed: $e');
+      }));
+    }
   }
 
   /// The runs between [start] and its last write, by work: what a delete
@@ -356,11 +381,34 @@ class TranslationRun extends ChangeNotifier {
   Future<void> start() async {
     final langs = {target, for (final s in steps) s.lang};
     (_live[workId] ??= []).add(langs);
+    await _hold();
     try {
       await _run();
     } finally {
       final runs = _live[workId]!..remove(langs);
       if (runs.isEmpty) _live.remove(workId);
+      await _letGo();
+    }
+  }
+
+  /// A refused hold leaves the run to go on while the reader is open:
+  /// better a translation that may stop than none at all.
+  Future<void> _hold() async {
+    try {
+      await foreground?.jobStarted(title, 'Translating…');
+      _held = foreground != null;
+    } catch (e) {
+      debugPrint('Translation: no foreground hold: $e');
+    }
+  }
+
+  Future<void> _letGo() async {
+    if (!_held) return;
+    _held = false;
+    try {
+      await foreground!.jobFinished();
+    } catch (e) {
+      debugPrint('Translation: letting go of the hold failed: $e');
     }
   }
 

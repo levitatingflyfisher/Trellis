@@ -176,8 +176,12 @@ void main() {
     await tester.pump();
     expect(cursorWordText(tester), 'Second');
 
-    // No stamps: the word moves evenly across the segment's span.
-    fakePlayer.emitPosition(const Duration(seconds: 15));
+    // No stamps: the segment's time is shared by word length. "Second"
+    // takes 7 of 12 shares, so "beta." starts at 15833.
+    fakePlayer.emitPosition(const Duration(milliseconds: 15500));
+    await tester.pump();
+    expect(cursorWordText(tester), 'Second');
+    fakePlayer.emitPosition(const Duration(milliseconds: 16000));
     await tester.pump();
     expect(cursorWordText(tester), 'beta.');
   });
@@ -255,8 +259,8 @@ void main() {
     await tester.tap(find.text('beta.'));
     await tester.pumpAndSettle();
 
-    expect(fakePlayer.log, contains('seek:15000'),
-        reason: "beta. is the second half of segment 1's span");
+    expect(fakePlayer.log, contains('seek:15833'),
+        reason: '"beta." starts 7 of 12 length shares into segment 1');
     expect(backToAudio, findsNothing);
 
     fakePlayer.emitPosition(const Duration(milliseconds: 500));
@@ -275,7 +279,7 @@ void main() {
     await tester.tap(find.byKey(const Key('segment-tile-1')));
     await tester.pumpAndSettle();
 
-    expect(fakePlayer.log, contains('seek:15000'));
+    expect(fakePlayer.log, contains('seek:15833'));
     expect(backToAudio, findsNothing);
   });
 
@@ -324,7 +328,8 @@ void main() {
       expect(backToAudio, findsNothing);
       if (mode == 'rsvp') {
         expect(rsvpWord(tester), 'Para');
-        fakePlayer.emitPosition(const Duration(milliseconds: 25600));
+        // "Para" takes 5 of 8 length shares: "25." starts at 25625.
+        fakePlayer.emitPosition(const Duration(milliseconds: 25700));
         await tester.pump();
         expect(rsvpWord(tester), '25.', reason: 'following again');
       } else {
@@ -342,6 +347,62 @@ void main() {
       }
     });
   }
+
+  // The owner, 26 Oct: "we lost the perfect word by word karaoke motion
+  // that the transcript page had", and he listens at up to 4x. One long
+  // segment (a paragraph-long whisper segment, an article read aloud)
+  // runs far below the screen; the page must keep the lit word's line in
+  // view as it goes, not only when a new segment starts.
+  testWidgets('at 4x through one long segment, the lit word stays on screen '
+      'all the way down', (tester) async {
+    const n = 400;
+    final workId = await db.spineDao.insertWork(
+        profileId: profileId,
+        kind: 'episode',
+        title: 'One long segment',
+        persistence: 'ephemeron',
+        firstSeenEpochDay: 100,
+        sourceUrl: 'https://cast.test/one.mp3');
+    await db.spineDao.insertSegments(workId, [
+      (
+        idx: 0,
+        kind: 'prose',
+        text: [for (var i = 0; i < n; i++) 'w$i'].join(' ')
+      ),
+    ]);
+    await db.spineDao.insertAlignments(
+        workId, const [(segmentIdx: 0, tStartMs: 0, tEndMs: n * 1000)]);
+    await db.customStatement(
+        'UPDATE alignments SET word_timings = CAST(? AS BLOB) '
+        'WHERE work_id = ?',
+        [
+          '[${[
+            for (var i = 0; i < n; i++) '["w$i",${i * 1000},${i * 1000 + 900}]'
+          ].join(',')}]',
+          workId
+        ]);
+    final work = (await db.spineDao.worksOf(profileId))
+        .firstWhere((w) => w.id == workId);
+    await controller.playWork(work);
+    await controller.setSpeed(4.0);
+    await openInScroll(tester, work);
+    final screen = tester.view.physicalSize / tester.view.devicePixelRatio;
+
+    // At 4x a word lasts a quarter of a second: sixteen frames.
+    for (var w = 1; w < n; w++) {
+      for (var f = 0; f < 16; f++) {
+        fakePlayer
+            .movePositionQuietly(Duration(milliseconds: w * 1000 + f * 62));
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      expect(cursorWordText(tester), 'w$w');
+      final r = tester.getRect(find.byKey(const Key('cursor-word')));
+      expect(r.top >= 0 && r.bottom <= screen.height, isTrue,
+          reason: 'w$w at $r is off a ${screen.height} high screen');
+    }
+    expect(backToAudio, findsNothing,
+        reason: "the page's own scrolling is not the hand");
+  });
 
   testWidgets('while following, the page scrolls along with the voice',
       (tester) async {

@@ -346,6 +346,11 @@ class WorkRow extends StatelessWidget {
   /// Null where nothing plays.
   final PlayerController? player;
 
+  /// The screen's second way to listen, beside Play: the episode in the
+  /// learning language. It draws nothing where there is nothing to offer,
+  /// and the row is then laid out as if it were not here.
+  final Widget? second;
+
   /// Opens the text: a book or article in the reader, an episode's
   /// transcript. Shown only where [WorkRowFacts.readable], beside Play:
   /// reading and listening are equal ways in.
@@ -380,6 +385,7 @@ class WorkRow extends StatelessWidget {
     this.onTap,
     this.onPlay,
     this.player,
+    this.second,
     this.onRead,
     this.menuBuilder,
     this.onMenu,
@@ -517,6 +523,12 @@ class WorkRow extends StatelessWidget {
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         if (play) _playOrPlaying(style),
+        if (play && second != null)
+          // Its own button, in this row's colours: a played row is quiet.
+          TextButtonTheme(
+            data: TextButtonThemeData(style: style),
+            child: second!,
+          ),
         if (read)
           facts.audio
               ? Tooltip(

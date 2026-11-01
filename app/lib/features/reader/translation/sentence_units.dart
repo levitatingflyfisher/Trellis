@@ -66,3 +66,52 @@ String? translatedTextFor({
   if (row == null || row.sourceText != currentSourceText) return null;
   return row.body;
 }
+
+/// [original] with each sentence replaced by its stored translation in
+/// [stored] (the original where there is none yet), and, for each block
+/// position that has sentences, where each translated sentence starts.
+/// Sentences rejoin by `core.joinSentences`, so Japanese takes no space
+/// after its 。. Starts are counted by the tokenizer over each prefix, the same
+/// authority `core.splitSentences` trusts.
+(List<core.Segment>, Map<int, List<int>>) translatedProjection(
+    List<core.Segment> original,
+    Map<(int, int), TranslationSentence> stored) {
+  final blocks = <core.Segment>[];
+  final starts = <int, List<int>>{};
+  for (var bp = 0; bp < original.length; bp++) {
+    final b = original[bp];
+    final sentences = b.kind == core.SegmentKind.prose ||
+            b.kind == core.SegmentKind.heading
+        ? core.splitSentences(b.text)
+        : const <core.Sentence>[];
+    if (sentences.isEmpty) {
+      blocks.add(b);
+      continue;
+    }
+    final texts = [
+      for (var i = 0; i < sentences.length; i++)
+        translatedTextFor(
+                stored: stored,
+                segIdx: b.idx,
+                sentenceIdx: i,
+                currentSourceText: sentences[i].text) ??
+            sentences[i].text
+    ];
+    starts[bp] = [
+      for (var i = 0; i < texts.length; i++)
+        i == 0
+            ? 0
+            : core
+                .tokenizeDocument([
+                  core.Segment(
+                      idx: 0,
+                      kind: core.SegmentKind.prose,
+                      text: core.joinSentences(texts.sublist(0, i)))
+                ])
+                .words
+                .length
+    ];
+    blocks.add(core.Segment(idx: b.idx, kind: b.kind, text: core.joinSentences(texts)));
+  }
+  return (blocks, starts);
+}

@@ -39,4 +39,35 @@ void main() {
         reason: 'the second start must try the service again, not treat '
             'it as already running');
   });
+
+  test('a refused try holds no count, and the next try asks the service '
+      'again', () async {
+    final inner = RecordingForegroundGate()..allowStart = false;
+    final gate = SharedJobForegroundGate(inner);
+
+    expect(await gate.tryJobStarted('A', 'x'), isFalse);
+    inner.allowStart = true;
+    expect(await gate.tryJobStarted('B', 'x'), isTrue);
+
+    expect(inner.events, ['refused:A', 'start:B'],
+        reason: 'the refused one must not count as already running');
+    await gate.jobFinished();
+    expect(inner.events.last, 'finished',
+        reason: 'a refused try is never finished, so it must not hold the '
+            'service up');
+  });
+
+  test('a try while another job holds the service joins it, even behind '
+      'a dark screen', () async {
+    final inner = RecordingForegroundGate();
+    final gate = SharedJobForegroundGate(inner);
+    await gate.jobStarted('A', 'x');
+    inner.allowStart = false;
+
+    expect(await gate.tryJobStarted('B', 'y'), isTrue);
+    await gate.jobFinished();
+    expect(inner.events, isNot(contains('finished')));
+    await gate.jobFinished();
+    expect(inner.events.last, 'finished');
+  });
 }

@@ -114,3 +114,39 @@ List<String> segmentCjkRun(String text) {
   }
   return units;
 }
+
+/// Joins sentences that were split, translated or stored one at a time
+/// back into one paragraph. Latin-script sentences take a space between
+/// them; a sentence ending in 。！？ (closing brackets after it allowed)
+/// takes nothing, because CJK prose carries no space between sentences.
+/// Each sentence is trimmed first, and a blank one is left out.
+String joinSentences(Iterable<String> sentences) {
+  final out = StringBuffer();
+  var glue = '';
+  for (final raw in sentences) {
+    final s = raw.trim();
+    if (s.isEmpty) continue;
+    out
+      ..write(glue)
+      ..write(s);
+    glue = _endsCjkSentence(s) ? '' : ' ';
+  }
+  return out.toString();
+}
+
+/// True when [s] ends in 。！？, closing brackets after it allowed.
+bool _endsCjkSentence(String s) {
+  final runes = s.runes.toList();
+  var i = runes.length - 1;
+  while (i >= 0 && _isClosingBracket(runes[i])) {
+    i--;
+  }
+  return i >= 0 && isCjkSentenceTerminator(runes[i]);
+}
+
+/// Only the brackets [segmentCjkRun] folds onto the unit before them, so
+/// the joined text splits into exactly the units its sentences split into
+/// one by one (the reader counts where each sentence starts that way).
+bool _isClosingBracket(int cp) =>
+    cp == 0x300D || // 」
+    cp == 0x300F; // 』

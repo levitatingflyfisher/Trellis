@@ -47,6 +47,10 @@ class JobCenter extends ChangeNotifier {
   final EpisodeDownloadCoordinator? downloads;
   final DspCoordinator? dsp;
 
+  /// The app's make-ahead pass, once a reader's shell has one to give
+  /// (ADR-0021). A worker's hand-over reaches it through here.
+  Future<void> Function()? makeAheadPass;
+
   JobCenter({required this.transcribe, this.downloads, this.dsp}) {
     for (final c in _parts) {
       c.addListener(notifyListeners);
@@ -74,12 +78,23 @@ class JobCenter extends ChangeNotifier {
   /// carry on. Downloads go first so a transcription waiting on the same
   /// episode joins that download instead of starting another.
   Future<void> restoreAndResume() async {
-    await downloads?.restore();
-    await transcribe.restore();
-    await dsp?.restore();
-    unawaited(downloads?.resumeInterrupted());
-    unawaited(transcribe.resumeInterrupted());
+    try {
+      await downloads?.restore();
+      await transcribe.restore();
+      await dsp?.restore();
+      unawaited(downloads?.resumeInterrupted());
+      unawaited(transcribe.resumeInterrupted());
+    } finally {
+      if (!_restored.isCompleted) _restored.complete();
+    }
   }
+
+  final _restored = Completer<void>();
+
+  /// Completes when [restoreAndResume] has run. The one-tap line waits for
+  /// it: its transcription is one of these jobs, and it must join that run
+  /// and not begin a second.
+  Future<void> get restored => _restored.future;
 
   /// Before a backup restore: pause every job and wait until none is
   /// still writing, so nothing lands on a work whose id is about to mean

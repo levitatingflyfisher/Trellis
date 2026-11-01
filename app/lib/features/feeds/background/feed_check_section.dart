@@ -4,6 +4,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../../listen/make_ahead.dart'
+    show makeAheadDefaultLimitGb, makeAheadLimitChoicesGb;
 import 'feed_check_settings.dart';
 
 /// "Checking feeds": the device's two background-check switches. New
@@ -50,7 +52,7 @@ class _FeedCheckSectionState extends State<FeedCheckSection> {
             ),
             SwitchListTile(
               key: const Key('feed-check-wifi-only'),
-              title: const Text('Only on Wi-Fi'),
+              title: const Text('Refresh feeds on Wi-Fi only'),
               subtitle: const Text(
                   'Automatic downloads always wait for Wi-Fi.'),
               value: s.wifiOnly,
@@ -64,7 +66,7 @@ class _FeedCheckSectionState extends State<FeedCheckSection> {
             // until chosen, so a tapped download starts at once as before.
             SwitchListTile(
               key: const Key('downloads-wifi-only'),
-              title: const Text('Download only on Wi-Fi'),
+              title: const Text('Download on Wi-Fi only'),
               subtitle: const Text(
                   'On mobile data, a download you start waits and begins '
                   'when Wi-Fi is back. “Download now” on its row starts '
@@ -72,17 +74,55 @@ class _FeedCheckSectionState extends State<FeedCheckSection> {
               value: s.downloadsWifiOnly,
               onChanged: s.setDownloadsWifiOnly,
             ),
-            // 1.6.0, user: "Play for download then play". Off until
-            // chosen, so Play streams at once as before.
-            SwitchListTile(
-              key: const Key('play-download-first'),
-              title: const Text('Download first, then play'),
+            // ADR-0021: one setting, a few plain choices.
+            ListTile(
+              title: const Text('Room for episodes made ahead'),
               subtitle: const Text(
-                  'Play on an episode that isn’t downloaded fetches it, '
-                  'then plays it. Off, it streams at once. With “Download '
-                  'only on Wi-Fi” on, on mobile data it waits for Wi-Fi.'),
-              value: s.downloadFirst,
-              onChanged: s.setDownloadFirst,
+                  'When it’s full, the oldest goes first, played before '
+                  'unplayed. Audio you made by tapping or marked Keep stays.'),
+              trailing: DropdownButton<int>(
+                key: const Key('make-ahead-limit'),
+                value: s.makeAheadLimitGb,
+                onChanged: (v) => s.setMakeAheadLimitGb(v ?? makeAheadDefaultLimitGb),
+                items: [
+                  for (final gb in makeAheadLimitChoicesGb)
+                    DropdownMenuItem<int>(
+                      key: Key('make-ahead-limit-$gb'),
+                      value: gb,
+                      child: Text('$gb GB'),
+                    ),
+                ],
+              ),
+            ),
+            // 1.6.0, user: "Play for download then play", "stream vs play
+            // vs download ... more explicit". Stream until chosen, so Play
+            // starts at once as before.
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
+              child: Text('When an episode isn’t downloaded, Play will',
+                  style: theme.textTheme.titleSmall),
+            ),
+            RadioGroup<bool>(
+              key: const Key('play-choice'),
+              groupValue: s.downloadFirst,
+              onChanged: (v) => s.setDownloadFirst(v ?? false),
+              child: const Column(
+                children: [
+                  RadioListTile<bool>(
+                    key: Key('play-stream'),
+                    value: false,
+                    title: Text('Stream'),
+                    subtitle: Text('Starts at once, over the network.'),
+                  ),
+                  RadioListTile<bool>(
+                    key: Key('play-download-first'),
+                    value: true,
+                    title: Text('Download, then play'),
+                    subtitle: Text('Fetches it first. With “Download on '
+                        'Wi-Fi only” on, on mobile data it waits for Wi-Fi.'),
+                  ),
+                ],
+              ),
             ),
           ],
         );

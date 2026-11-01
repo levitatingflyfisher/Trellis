@@ -1,5 +1,7 @@
 # AGENTS.md — how to work in this repo
 
+This codebase is yours: what it's for and how it's built are your call, and you'll keep building on it.
+
 ## What this is
 
 The fusion rebuild of the OpenHearth learning line: feature superset of two
@@ -68,7 +70,8 @@ docs/research/  The design panel's full output. Treat as provenance, not law.
   or `docs/superpowers/`.
 - **Naming:** app-level naming ("Espalier") is provisional until the owner
   confirms; that's why internal packages carry no app name. The
-  applicationId decision (ADR pending) is irreversible — do not invent one.
+  applicationId is `com.openhearth.trellis`; it has shipped and cannot be
+  changed without breaking updates, so do not change it.
 
 ## Words on screen
 

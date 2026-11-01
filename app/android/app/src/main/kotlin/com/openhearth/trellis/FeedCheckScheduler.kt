@@ -1,7 +1,10 @@
 package com.openhearth.trellis
 
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.net.ConnectivityManager
+import android.os.BatteryManager
 import androidx.work.Constraints
 import androidx.work.Data
 import androidx.work.ExistingPeriodicWorkPolicy
@@ -23,6 +26,7 @@ object FeedCheckScheduler {
     const val TASK_KEY = "task"
     private const val PERIODIC = "trellis-feed-check"
     private const val AUTO_DOWNLOAD = "trellis-auto-download"
+    private const val MAKE_AHEAD = "trellis-make-ahead"
 
     fun attach(messenger: BinaryMessenger, context: Context) {
         val app = context.applicationContext
@@ -61,6 +65,31 @@ object FeedCheckScheduler {
                 "cancelAutoDownload" -> {
                     work.cancelUniqueWork(AUTO_DOWNLOAD)
                     result.success(null)
+                }
+                // ADR-0021: the system runs this once the phone is on Wi-Fi
+                // and charging. It can only start work Android lets the app
+                // start, so it hands over to a live app and does no work
+                // of its own.
+                "requestMakeAhead" -> {
+                    val request = OneTimeWorkRequest.Builder(FeedCheckWorker::class.java)
+                        .setConstraints(constraints(args))
+                        .setInputData(task("makeAhead"))
+                        .build()
+                    work.enqueueUniqueWork(MAKE_AHEAD, ExistingWorkPolicy.KEEP, request)
+                    result.success(null)
+                }
+                // Reading the sticky battery state needs no permission and
+                // no receiver of our own (ADR-0003 law 7).
+                "isCharging" -> {
+                    val battery = app.registerReceiver(
+                        null,
+                        IntentFilter(Intent.ACTION_BATTERY_CHANGED),
+                    )
+                    val status = battery?.getIntExtra(BatteryManager.EXTRA_STATUS, -1) ?: -1
+                    result.success(
+                        status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                            status == BatteryManager.BATTERY_STATUS_FULL,
+                    )
                 }
                 // "Download only on Wi-Fi" (1.6.0): whether the network in
                 // use now is metered. No network at all reads as metered,

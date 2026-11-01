@@ -15,10 +15,13 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:drift/drift.dart';
+import 'package:loom_core/loom_core.dart'
+    show containsCjk, joinSentences, segmentCjkRun;
 
 import '../../db/database.dart';
 import '../intake/paste_intake.dart' show epochDayUtcNow;
 import '../reader/speech/speech_engine.dart';
+import '../reader/speech/wav.dart' show resample;
 import '../reader/translation/language_names.dart';
 import '../transcribe/transcript_writer.dart' show encodeWordTimingBlob;
 
@@ -78,20 +81,22 @@ Future<SpokenRender> renderSpoken({
       }
       if (r != null && r.samples.isNotEmpty) {
         if (rate == 0) rate = r.sampleRate;
+        // One file has one rate; a voice may hand a sentence at another.
+        final sound = resample(r.samples, from: r.sampleRate, to: rate);
         if (said.isNotEmpty) {
           final gap = said.last.seg == s.seg ? sentenceGapMs : segmentGapMs;
           final silent = gap * rate ~/ 1000;
           await out.writeFrom(Uint8List(silent * 2));
           samples += silent;
         }
-        final pcm = ByteData(r.samples.length * 2);
-        for (var k = 0; k < r.samples.length; k++) {
-          pcm.setInt16(k * 2, (r.samples[k].clamp(-1.0, 1.0) * 32767).round(),
+        final pcm = ByteData(sound.length * 2);
+        for (var k = 0; k < sound.length; k++) {
+          pcm.setInt16(k * 2, (sound[k].clamp(-1.0, 1.0) * 32767).round(),
               Endian.little);
         }
         final start = samples;
         await out.writeFrom(pcm.buffer.asUint8List());
-        samples += r.samples.length;
+        samples += sound.length;
         said.add(
             (seg: s.seg, text: s.text, startMs: ms(start), endMs: ms(samples)));
       }
@@ -139,11 +144,13 @@ final _gaps = RegExp(r'\s+');
 /// `[[word, tStartMs, tEndMs], …]` for a sentence said from [startMs] to
 /// [endMs]: the voice gives no word times, so each word takes a share of
 /// the sentence by its length. An estimate, close enough to light the
-/// word being said; the sentence's own times are exact.
+/// word being said; the sentence's own times are exact. A Chinese or
+/// Japanese run is split into the units the page shows (`segmentCjkRun`),
+/// so each of those gets its own share too.
 List<List<Object>> estimateWordTimings(String text, int startMs, int endMs) {
   final words = [
     for (final w in text.trim().split(_gaps))
-      if (w.isNotEmpty) w
+      if (w.isNotEmpty) ...(containsCjk(w) ? segmentCjkRun(w) : [w])
   ];
   if (words.isEmpty) return const [];
   final weights = [for (final w in words) w.length + 1];
@@ -173,6 +180,18 @@ Future<int?> spokenEpisodeOf(AppDatabase db, int originalId, String lang) async 
         ..limit(1))
       .getSingleOrNull();
   return row?.workId;
+}
+
+/// Every spoken translation into [lang] that has been made, as its
+/// original's work id to its own: what a whole list asks at once, in one
+/// query rather than one a row.
+Future<Map<int, int>> spokenEpisodesIn(AppDatabase db, String lang) async {
+  final rows = await (db.select(db.episodes)
+        ..where((e) => e.guid.like('spoken:%:$lang')))
+      .get();
+  return {
+    for (final r in rows) ?int.tryParse(r.guid.split(':')[1]): r.workId,
+  };
 }
 
 /// Stores [render] as an episode of [original]'s show: its text is the
@@ -254,7 +273,7 @@ Future<int> storeSpokenEpisode({
         (
           idx: i,
           kind: 'prose',
-          text: [for (final s in bySeg[seg]!) s.text].join(' ')
+          text: joinSentences([for (final s in bySeg[seg]!) s.text])
         ),
     ]);
     await db.batch((b) => b.insertAll(db.alignments, [

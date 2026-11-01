@@ -77,9 +77,9 @@ void main() {
       final targets = {for (final r in routes) r.target};
       expect(targets,
           containsAll(['fr', 'de', 'es', 'it', 'pt', 'nl', 'ru', 'zh', 'ar',
-              'hi', 'uk']));
+              'hi', 'uk', 'ja']));
       expect(targets, isNot(contains('en')));
-      expect(targets, isNot(contains('ja')), reason: 'no en->ja pair');
+      expect(targets, isNot(contains('ko')), reason: 'no en->ko pair');
       final de = routes.firstWhere((r) => r.target == 'de');
       expect(de.missingBytes,
           ModelRegistry.starter().byId('opus-mt-en-de')!.sizeBytes);

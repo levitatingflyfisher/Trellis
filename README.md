@@ -17,14 +17,14 @@ every one of those claims is a test, not a promise.
 
 ## Status
 
-v1.0. Reader (four modes), EPUB/URL/paste/Gutenberg intake, feeds and
+Shipping, for Android and the web. Reader (four modes),
+EPUB/URL/paste/Gutenberg intake, feeds and
 podcasts with on-device multilingual transcription (whisper.cpp aboard
 the APK), courses on a course map, discourse study over a BYOK
 brain, encrypted backup with both-donor migration, and the household
-dashboard — all shipped, about 1,200 app tests plus the package suites
-green.
-See [VISION.md](VISION.md) for the honest scorecard (what is not in
-v1.0 is listed there just as plainly) and `docs/adr/` for the
+dashboard are all in, with test suites for the app and its packages.
+See [VISION.md](VISION.md) for the honest scorecard (what is not done
+yet is listed there just as plainly) and `docs/adr/` for the
 decisions.
 
 ## The compute ladder

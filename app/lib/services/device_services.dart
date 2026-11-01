@@ -23,6 +23,7 @@ import 'package:whisper_ffi/whisper_ffi.dart';
 import '../app_version.dart';
 import '../features/backup/backup_custody.dart';
 import '../features/models/model_store.dart';
+import '../features/reader/speech/phone_voice.dart';
 import '../features/reader/speech/speech_engine.dart';
 import '../features/reader/speech/supertonic_engine.dart';
 import '../features/reader/speech/supertonic_voice_handle.dart';
@@ -286,6 +287,12 @@ class DeviceServices {
   /// engine.
   final TtsSpeaker tts;
 
+  /// The phone's own voices, for speech that is saved to a file rather
+  /// than read aloud: which languages they speak, and the way to save
+  /// them. Empty, with nothing to save with, unless the platform wiring
+  /// passes one.
+  final PhoneVoiceCache phoneVoices;
+
   /// Names the engine the executor's far side should build for an
   /// installed model file. Tests substitute a scripted engine.
   final TranscribeEngineSpec Function(String modelPath) engineFor;
@@ -323,6 +330,7 @@ class DeviceServices {
     required this.foregroundGate,
     required this.engineFor,
     TtsSpeaker? tts,
+    PhoneVoiceCache? phoneVoices,
     DspEncoder? dspEncoder,
     this.databaseFile,
     this.localMlAvailable = true,
@@ -330,6 +338,7 @@ class DeviceServices {
     this.webFetchLane = WebFetchLane.direct,
     this.backupCustody,
   }) : tts = tts ?? NoopTtsSpeaker(),
+       phoneVoices = phoneVoices ?? PhoneVoiceCache(null),
        dspEncoder = dspEncoder ?? UnavailableDspEncoder();
 
   /// The platform wiring. [supportDir] is the app-support directory
@@ -348,6 +357,8 @@ class DeviceServices {
             ? SharedJobForegroundGate(AndroidJobForegroundGate())
             : NoopJobForegroundGate(),
         tts: FlutterTtsSpeaker(),
+        phoneVoices: PhoneVoiceCache(
+            _isAndroid ? MethodChannelPhoneSpeechSaver() : null),
         dspEncoder: _isAndroid ? FfmpegDspEncoder() : UnavailableDspEncoder(),
         databaseFile: databaseFile,
         backupCustody: SecureBackupCustody(),
@@ -562,6 +573,7 @@ class DeviceServices {
           tier: tier,
           store: modelStore,
           openSpec: translatorFor,
+          foreground: foregroundGate,
         )
       : null;
 

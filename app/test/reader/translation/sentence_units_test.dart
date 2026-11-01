@@ -282,4 +282,48 @@ void main() {
       }
     });
   });
+
+  group('translatedProjection', () {
+    TranslationSentence ja(int sentenceIdx, String sourceText, String body) =>
+        TranslationSentence(
+            workId: 1,
+            segmentIdx: 0,
+            sentenceIdx: sentenceIdx,
+            lang: 'ja',
+            sourceText: sourceText,
+            body: body);
+
+    test('Japanese sentences join with no space after each 。, and each '
+        'still starts at its own word', () {
+      const original = [
+        core.Segment(
+            idx: 0,
+            kind: core.SegmentKind.prose,
+            text: 'It is sunny today. It will rain tomorrow.'),
+      ];
+      final stored = {
+        (0, 0): ja(0, 'It is sunny today.', '今日は晴れです。'),
+        (0, 1): ja(1, 'It will rain tomorrow.', '明日は雨です。'),
+      };
+
+      final (blocks, starts) = translatedProjection(original, stored);
+
+      expect(blocks.single.text, '今日は晴れです。明日は雨です。');
+      // 今/日/は/晴/れ/で/す。 is seven words, so 明 is the eighth.
+      expect(starts[0], [0, 7]);
+      final words = core.tokenizeDocument(blocks).words;
+      expect(words[7], '明');
+    });
+
+    test('English sentences still take a space, and an untranslated '
+        'sentence keeps its English', () {
+      const original = [
+        core.Segment(
+            idx: 0, kind: core.SegmentKind.prose, text: 'One two. Three.'),
+      ];
+      final (blocks, starts) = translatedProjection(original, const {});
+      expect(blocks.single.text, 'One two. Three.');
+      expect(starts[0], [0, 2]);
+    });
+  });
 }

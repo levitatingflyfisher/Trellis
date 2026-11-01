@@ -2,8 +2,9 @@
 /// a podcast and translate it to Russian, but I can't get the Russian text
 /// to speech").
 ///
-/// Two kinds of voice: the downloaded one (Supertonic, ADR-0007: English
-/// and Spanish only; its character table has no Cyrillic or CJK at all,
+/// Two kinds of voice: the downloaded one (Supertonic, ADR-0007: English,
+/// Spanish, French and Portuguese; its character table has no Cyrillic or
+/// CJK at all,
 /// docs/reference/tts-voices.md) and the phone's own (flutter_tts over
 /// Android's text-to-speech engine, one or more voices per installed
 /// language). A run reads on ONE kind: the downloaded voice plays a
@@ -223,6 +224,17 @@ class _ReadAloudVoicesSheetState extends State<ReadAloudVoicesSheet> {
               child: Text('Read aloud voices',
                   style: theme.textTheme.titleMedium),
             ),
+            // One place to choose a voice, for hearing and for keeping:
+            // the one tap saves a language with the voice picked here
+            // (listen/saved_voice.dart). Nothing is kept in a browser.
+            if (!kIsWeb)
+              const Padding(
+                padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: Text(
+                    'Audio Trellis makes and keeps in a language uses the '
+                    'voice picked for it here.',
+                    key: Key('voices-also-saves')),
+              ),
             if (widget.systemVoiceOn)
               const Padding(
                 key: Key('voices-system-voice-on'),

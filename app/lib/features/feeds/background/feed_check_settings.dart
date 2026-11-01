@@ -5,6 +5,9 @@ library;
 import 'package:flutter/foundation.dart';
 
 import '../../../db/database.dart';
+import '../../../services/host_activity.dart';
+import '../../listen/make_ahead.dart'
+    show makeAheadDefaultLimitGb, makeAheadLimitKey;
 
 enum FeedCheckTask {
   /// The periodic check: every reader's feeds, then an auto-download
@@ -13,7 +16,11 @@ enum FeedCheckTask {
 
   /// One auto-download pass, which the system only starts on an
   /// unmetered network.
-  autoDownload;
+  autoDownload,
+
+  /// One make-ahead pass, which the system only starts on Wi-Fi while
+  /// charging. It only does anything in the app's own engine.
+  makeAhead;
 
   static FeedCheckTask? byName(String name) =>
       values.where((t) => t.name == name).firstOrNull;
@@ -93,6 +100,11 @@ abstract class FeedCheckScheduler {
 
   /// Drops a pass that is waiting for Wi-Fi.
   Future<void> cancelAutoDownload();
+
+  /// One make-ahead pass, run by the system once the phone is on Wi-Fi
+  /// and charging. It can only start work the app is allowed to start
+  /// (ADR-0021).
+  Future<void> requestMakeAhead();
 }
 
 class UnavailableFeedCheckScheduler implements FeedCheckScheduler {
@@ -108,12 +120,19 @@ class UnavailableFeedCheckScheduler implements FeedCheckScheduler {
   Future<void> requestAutoDownload() async {}
   @override
   Future<void> cancelAutoDownload() async {}
+  @override
+  Future<void> requestMakeAhead() async {}
 }
 
 /// Whether the network in use is metered (mobile data, a metered
 /// hotspot), behind a seam so tests decide.
 abstract class NetworkMeter {
   Future<bool> isMetered();
+}
+
+/// Whether the phone is on a charger; tests give their own answer.
+abstract class ChargingMeter {
+  Future<bool> isCharging();
 }
 
 /// Where it cannot be known (the web build, other platforms, tests):
@@ -136,10 +155,15 @@ Future<bool> Function() downloadMustWaitForWifi(
 /// The two switches, kept in [DeviceSettings]: the device checks, not a
 /// reader. Both default on.
 class FeedCheckSettings extends ChangeNotifier {
-  FeedCheckSettings(this.db, this.scheduler);
+  FeedCheckSettings(this.db, this.scheduler,
+      {this.hostResumed = appResumed});
 
   final AppDatabase db;
   final FeedCheckScheduler scheduler;
+
+  /// The app coming to the front: when the scheduler's channel has no
+  /// activity behind it yet (a start with no screen), launch waits for it.
+  final Future<void> Function() hostResumed;
 
   static const backgroundKey = 'feed_check_background';
   static const wifiOnlyKey = 'feed_check_wifi_only';
@@ -184,7 +208,20 @@ class FeedCheckSettings extends ChangeNotifier {
   static Future<bool> downloadFirstOn(AppDatabase db) async =>
       await db.deviceSettingsDao.read(playUndownloadedKey) == 'download';
 
+  /// How much room audio made ahead may take, in gigabytes (ADR-0021).
+  int _makeAheadLimitGb = makeAheadDefaultLimitGb;
+  int get makeAheadLimitGb => _makeAheadLimitGb;
+
+  Future<void> setMakeAheadLimitGb(int gb) async {
+    _makeAheadLimitGb = gb;
+    notifyListeners();
+    await db.deviceSettingsDao.write(makeAheadLimitKey, '$gb');
+  }
+
   Future<void> load() async {
+    _makeAheadLimitGb =
+        int.tryParse(await db.deviceSettingsDao.read(makeAheadLimitKey) ?? '') ??
+            makeAheadDefaultLimitGb;
     _background = await _readFlag(backgroundKey);
     _wifiOnly = await _readFlag(wifiOnlyKey);
     _downloadsWifiOnly = await downloadsWifiOnlyOn(db);
@@ -194,16 +231,20 @@ class FeedCheckSettings extends ChangeNotifier {
 
   /// At launch: the system may have dropped the work (an update, a force
   /// stop), and with boot receivers stripped this is when it comes back.
+  /// Started with no screen, it waits for the app to open (see
+  /// [onceHostAttached]): the scheduler's channel is the activity's.
   Future<void> applyAtLaunch() async {
     if (!scheduler.available) return;
     await load();
-    if (_background) {
-      await scheduler.schedulePeriodic(constraintsFor(wifiOnly: _wifiOnly),
-          replace: false);
-    } else {
-      await scheduler.cancelPeriodic();
-      await scheduler.cancelAutoDownload();
-    }
+    await onceHostAttached(() async {
+      if (_background) {
+        await scheduler.schedulePeriodic(constraintsFor(wifiOnly: _wifiOnly),
+            replace: false);
+      } else {
+        await scheduler.cancelPeriodic();
+        await scheduler.cancelAutoDownload();
+      }
+    }, resumed: hostResumed);
   }
 
   Future<void> setBackground(bool on) async {

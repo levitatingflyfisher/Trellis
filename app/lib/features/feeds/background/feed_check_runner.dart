@@ -6,6 +6,7 @@ library;
 import '../../../db/database.dart';
 import '../auto_download.dart';
 import '../episode_download_coordinator.dart';
+import '../../listen/make_ahead.dart' show makeAheadDue;
 import '../feeds_repository.dart';
 import 'feed_check_settings.dart';
 
@@ -19,6 +20,7 @@ class FeedCheckRunner {
     this.cancelDownload,
     Future<Object?> Function(AutoDownloadPick pick)? queueDownload,
     this.requeueDownload,
+    this.makeAhead,
   }) : queueDownload = queueDownload ??
             ((p) => recordQueuedAutoDownload(
                 db, p, DateTime.now().millisecondsSinceEpoch));
@@ -33,6 +35,7 @@ class FeedCheckRunner {
     required FeedsRepository repository,
     required FeedCheckScheduler scheduler,
     required EpisodeDownloadCoordinator downloads,
+    Future<void> Function()? makeAhead,
   }) {
     final runner = FeedCheckRunner(
       db: db,
@@ -45,6 +48,7 @@ class FeedCheckRunner {
       queueDownload: (p) =>
           downloads.queueAuto(workId: p.workId, url: p.url, title: p.title),
       requeueDownload: downloads.requeue,
+      makeAhead: makeAhead,
     );
     repository.afterCheck = runner.requestAutoDownloadIfPending;
     return runner;
@@ -69,6 +73,9 @@ class FeedCheckRunner {
 
   /// The coordinator's requeue, for a download this pass's stop paused.
   final Future<void> Function(int workId)? requeueDownload;
+
+  /// The app's make-ahead pass; null in the worker's own engine.
+  final Future<void> Function()? makeAhead;
 
   Future<bool> run(FeedCheckTask task, {StopSignal? stop}) async {
     bool stopping() => stop?.requested ?? false;
@@ -98,6 +105,11 @@ class FeedCheckRunner {
                 current = null;
               }
             });
+      case FeedCheckTask.makeAhead:
+        // Only the app's engine has a line to run. With no app, the rows
+        // the check brought in already say what is due (ADR-0021).
+        await makeAhead?.call();
+        return true;
     }
   }
 
@@ -115,6 +127,11 @@ class FeedCheckRunner {
   /// mobile data never spends it on audio.
   Future<void> requestAutoDownloadIfPending() async {
     if (!scheduler.available) return;
+    // Its own request, with its own conditions, whatever auto-download
+    // decides below. Only a show the person switched on can make this true.
+    if (await FeedCheckSettings.backgroundOn(db) && await makeAheadDue(db)) {
+      await scheduler.requestMakeAhead();
+    }
     // A download the listener started and left waiting for Wi-Fi is
     // their own request, whatever the switch says (1.6.0).
     if (await handDownloadsWaiting(db, onDisk: onDisk)) {

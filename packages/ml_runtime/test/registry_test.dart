@@ -675,8 +675,16 @@ void main() {
         expect(s.langs, hasLength(1), reason: s.id);
         expect(s.langs!.single, isNot(s.sourceLang), reason: s.id);
         expect(s.sizeBytes, greaterThan(50000000), reason: s.id);
-        for (final f in s.files) {
-          expect(f.url, startsWith('https://huggingface.co/'), reason: s.id);
+        for (final (i, f) in s.files.indexed) {
+          // A pair Trellis converted itself (ADR-0014's amendment) takes
+          // its two graphs from a Trellis release; everything else, and
+          // its own four small files, from Hugging Face.
+          expect(
+              f.url,
+              startsWith(s.convertedFrom != null && i < 2
+                  ? 'https://github.com/levitatingflyfisher/Trellis/releases/download/'
+                  : 'https://huggingface.co/'),
+              reason: s.id);
           expect(f.isPinned, isTrue, reason: '${s.id} ${f.url}');
           expect(f.bytes, greaterThan(0), reason: '${s.id} ${f.url}');
         }
@@ -698,7 +706,10 @@ void main() {
           reason: s.id,
         );
         expect(s.files, hasLength(6), reason: s.id);
-        for (final f in s.files) {
+        for (final (i, f) in s.files.indexed) {
+          // A release asset is pinned by its hash alone; ADR-0014's
+          // amendment requires it be downloaded back and matched first.
+          if (s.convertedFrom != null && i < 2) continue;
           expect(f.url, matches(RegExp(r'/resolve/[0-9a-f]{40}/')),
               reason: '${s.id}: pinned to a commit, never main');
         }
@@ -728,10 +739,67 @@ void main() {
         expect(route('en', lang), isNotNull, reason: 'en->$lang');
         expect(route(lang, 'en'), isNotNull, reason: '$lang->en');
       }
-      for (final lang in ['ja', 'ko', 'pl']) {
+      for (final lang in ['ko', 'pl']) {
         expect(route(lang, 'en'), isNotNull, reason: '$lang->en');
         expect(route('en', lang), isNull,
-            reason: 'no trusted en->$lang ONNX export (en-jap is incoherent)');
+            reason: 'no trusted en->$lang ONNX export');
+      }
+      expect(route('ja', 'en'), isNotNull, reason: 'ja->en');
+      expect(route('en', 'ja'), 'elanmt-bt-en-ja',
+          reason: 'converted by Trellis (ADR-0014 amendment)');
+    });
+
+    test('English to Japanese is ElanMT-BT, converted by Trellis: its two '
+        'graphs from the Trellis release, its small files from the upstream '
+        'commit, each pinned as the conversion made it', () {
+      final ja = starter.byId('elanmt-bt-en-ja')!;
+      expect(ja.sourceLang, 'en');
+      expect(ja.langs, {'ja'});
+      expect(ja.licenses, ['CC-BY-SA-4.0']);
+      expect(ja.convertedFrom, 'ElanMT-BT (Mitsua/elan-mt-bt-en-ja)');
+      expect(ja.marianLayout!.targetToken, isNull);
+      const hf = 'https://huggingface.co/Mitsua/elan-mt-bt-en-ja/resolve/'
+          '02c48e7031386cd2d41974b0ff1aaf52f010c5fa/';
+      const rel = 'https://github.com/levitatingflyfisher/Trellis/releases/download/models-enja-1/';
+      expect([for (final f in ja.files) (f.url, f.sha256, f.bytes)], [
+        (
+          '${rel}encoder_model_quantized.onnx',
+          'b8698e3dee264d0e71d4bdd7469933c33a0ca4e08fb377a10dee70e528d3a7cc',
+          35890766
+        ),
+        (
+          '${rel}decoder_model_merged_quantized.onnx',
+          '5ae7b58e2bfb69f67f0183fbb612a2145f902b5bc47567d844738c99c75b2463',
+          59457806
+        ),
+        (
+          '${hf}source.spm',
+          'a6824c2996a4877cae8a0240f11a112ab0e4ea1f22e54cd42179376fe558f4ff',
+          792751
+        ),
+        (
+          '${hf}vocab.json',
+          'f508b75734ee21cf16b3816b7b29dea400f1f5998f47b7695cef1979ca49e106',
+          881911
+        ),
+        (
+          '${hf}config.json',
+          '78298efb7b70a119900886b41de089e2543c1234bb7d767defa09ea494cb7ab7',
+          1075
+        ),
+        (
+          '${hf}tokenizer_config.json',
+          '3c4a72a28f4db53dbf21d87b35d0ebee03ea76304f95940a809f9e18ab5220aa',
+          854
+        ),
+      ]);
+      expect(ja.sizeBytes, 97025163);
+    });
+
+    test('only a converted pair names what it was converted from', () {
+      for (final s in pairs) {
+        if (s.id == 'elanmt-bt-en-ja') continue;
+        expect(s.convertedFrom, isNull, reason: s.id);
       }
     });
 

@@ -14,7 +14,6 @@ void main() {
       expect(t.maxTextWidth, 680);
       expect(t.paragraphSpacing, 8);
       expect(t.typeface, ReaderTypeface.lora);
-      expect(t.justified, false);
     });
 
     test('every field round-trips through JSON', () {
@@ -23,15 +22,13 @@ void main() {
           lineHeight: 2.0,
           maxTextWidth: 560,
           paragraphSpacing: 16,
-          typeface: ReaderTypeface.nunito,
-          justified: true);
+          typeface: ReaderTypeface.nunito);
       final back = ReaderTypography.fromJson(t.toJson());
       expect(back.fontScale, 1.25);
       expect(back.lineHeight, 2.0);
       expect(back.maxTextWidth, 560);
       expect(back.paragraphSpacing, 16);
       expect(back.typeface, ReaderTypeface.nunito);
-      expect(back.justified, true);
     });
 
     test('missing/corrupt JSON decodes to the honest defaults, never throws',
@@ -80,18 +77,18 @@ void main() {
 
     test('encode -> decode round-trips typography', () {
       const prefs = ReaderPrefs(
-          typography: ReaderTypography(fontScale: 1.4, justified: true));
+          typography: ReaderTypography(fontScale: 1.4, lineHeight: 2.0));
       final back = ReaderPrefs.decode(prefs.encode());
       expect(back.typography.fontScale, 1.4);
-      expect(back.typography.justified, true);
+      expect(back.typography.lineHeight, 2.0);
     });
 
     test('copyWith replaces only the given field', () {
       const prefs = ReaderPrefs(typography: ReaderTypography(fontScale: 1.2));
       final next = prefs.copyWith(
-          typography: const ReaderTypography(fontScale: 1.2, justified: true));
+          typography: const ReaderTypography(fontScale: 1.2, lineHeight: 2.0));
       expect(next.typography.fontScale, 1.2);
-      expect(next.typography.justified, true);
+      expect(next.typography.lineHeight, 2.0);
     });
   });
 

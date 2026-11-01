@@ -42,7 +42,7 @@ void main() {
     await tester.pumpAndSettle();
 
     final toggle = find.byKey(const Key('downloads-wifi-only'));
-    expect(find.text('Download only on Wi-Fi'), findsOneWidget);
+    expect(find.text('Download on Wi-Fi only'), findsOneWidget);
     expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
 
     await tester.tap(toggle);

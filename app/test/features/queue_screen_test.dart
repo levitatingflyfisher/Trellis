@@ -70,6 +70,42 @@ void main() {
     expect(await db.queueDao.queueOf(profileId), isEmpty);
   });
 
+  testWidgets('each row has a plain Remove beside its drag handle, 48 px '
+      'and named, and Undo puts the episode back in its place',
+      (tester) async {
+    final a = await seedWork('Aurora season');
+    final b = await seedWork('Perseid peak');
+    final c = await seedWork('Comet tail');
+    for (final (i, id) in [a, b, c].indexed) {
+      await db.queueDao.playLast(profileId: profileId, workId: id, nowMs: i);
+    }
+    await pump(tester);
+
+    final remove = find.byKey(Key('queue-row-remove-$b'));
+    expect(remove, findsOneWidget);
+    expect(tester.widget<IconButton>(remove).tooltip, 'Remove from Queue');
+    final size = tester.getSize(remove);
+    expect(size.width, greaterThanOrEqualTo(48));
+    expect(size.height, greaterThanOrEqualTo(48));
+    expect(tester.getCenter(remove).dx,
+        lessThan(tester.getCenter(find.byKey(Key('queue-handle-$b'))).dx));
+
+    await tester.tap(remove);
+    await tester.pumpAndSettle();
+
+    expect(find.text('Perseid peak'), findsNothing);
+    expect([for (final r in await db.queueDao.queueOf(profileId)) r.workId],
+        [a, c]);
+    expect(find.text('Removed from Queue'), findsOneWidget);
+
+    await tester.tap(find.text('Undo'));
+    await tester.pumpAndSettle();
+
+    expect([for (final r in await db.queueDao.queueOf(profileId)) r.workId],
+        [a, b, c]);
+    expect(find.text('Perseid peak'), findsOneWidget);
+  });
+
   testWidgets('a change of what is playing reloads the list: the tab can '
       'be on screen while an episode finishes and leaves the queue',
       (tester) async {

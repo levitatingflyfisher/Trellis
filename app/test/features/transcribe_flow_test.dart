@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:jobs_core/jobs_core.dart';
 import 'package:ml_runtime/ml_runtime.dart' show WhisperTask;
 import 'package:trellis/db/database.dart';
+import 'package:trellis/features/listen/listen_jobs.dart' show listenLineKey;
 import 'package:trellis/features/transcribe/decoder.dart';
 import 'package:trellis/features/transcribe/transcribe_coordinator.dart';
 import 'package:trellis/main.dart';
@@ -79,6 +80,13 @@ void main() {
     await tester.pumpAndSettle();
     await pickReader(tester, 'Ada');
     await tester.tap(tabLabel('Latest'));
+    await tester.pumpAndSettle();
+  }
+
+  /// Pause, Try again and Discard live on the Jobs page; Latest only says
+  /// what is going on.
+  Future<void> openJobs(WidgetTester tester) async {
+    await tester.tap(find.byKey(const Key('jobs-strip')));
     await tester.pumpAndSettle();
   }
 
@@ -261,17 +269,27 @@ void main() {
   testWidgets('pause mid-download keeps a resumable card; resume finishes '
       'the job', (tester) async {
     final seeded = await seedEpisode();
-    final store = FakeModelStore(beats: 5);
+    final store = FakeModelStore(beats: 12);
     final services = testServices(tmp, modelStore: store);
 
     await openRiver(tester, services);
     await chooseTranscribe(tester, seeded.workId);
     await tester.tap(find.byKey(const Key('consent-accept')));
 
-    // Two beats in: the card is up and telling the truth about progress.
+    // Two beats in: Latest has one short line, telling the truth about
+    // progress, and it is the way to the job's card.
     await tester.pump(const Duration(milliseconds: 250));
-    expect(find.byKey(Key('job-card-${seeded.workId}')), findsOneWidget);
+    final line = find.byKey(Key('job-line-${seeded.workId}'));
+    expect(line, findsOneWidget);
+    expect(find.byKey(Key('job-card-${seeded.workId}')), findsNothing);
     expect(find.textContaining('Getting the model'), findsOneWidget);
+    expect(tester.getSize(line).height, lessThanOrEqualTo(48));
+
+    await tester.tap(line);
+    for (var i = 0; i < 4; i++) {
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(find.byKey(Key('job-card-${seeded.workId}')), findsOneWidget);
 
     await tester.tap(find.byKey(Key('job-pause-${seeded.workId}')));
     await tester.pumpAndSettle();
@@ -287,7 +305,7 @@ void main() {
     // is deliberately calm — a determinate bar animates nothing — so
     // pumpAndSettle's frame-driven clock stops once the tap's ink ripple
     // fades. Drive the fake clock through the beats explicitly.
-    for (var i = 0; i < 12; i++) {
+    for (var i = 0; i < 20; i++) {
       await tester.pump(const Duration(milliseconds: 100));
     }
     await tester.pumpAndSettle();
@@ -349,6 +367,7 @@ void main() {
     final store = FakeModelStore(downloadedIds: {'whisper-tiny-ggml'});
     final services = testServices(tmp, modelStore: store);
     await openRiver(tester, services);
+    await openJobs(tester);
 
     expect(find.byKey(Key('job-card-${seeded.workId}')), findsOneWidget);
     expect(find.textContaining('Paused'), findsOneWidget);
@@ -376,6 +395,7 @@ void main() {
     await openRiver(tester, services);
     await chooseTranscribe(tester, seeded.workId);
     await tester.pumpAndSettle();
+    await openJobs(tester);
 
     expect(find.byKey(Key('job-status-${seeded.workId}')), findsOneWidget);
     expect(find.textContaining('couldn’t be read'), findsOneWidget);
@@ -576,6 +596,7 @@ void main() {
         }));
 
     await openRiver(tester, testServices(tmp));
+    await openJobs(tester);
     expect(find.byKey(Key('job-card-${seeded.workId}')), findsOneWidget);
 
     await tester.tap(find.byKey(Key('job-dismiss-${seeded.workId}')));
@@ -583,5 +604,49 @@ void main() {
 
     expect(find.byKey(Key('job-card-${seeded.workId}')), findsNothing);
     expect(await db.jobsDao.load(jobId), isNull);
+  });
+
+  testWidgets('a job that stopped takes no room on Latest: it is counted '
+      'in the jobs line, and Try again and Discard are on the Jobs page',
+      (tester) async {
+    final seeded = await seedEpisode();
+    await seedJob(seeded.workId, state: JobState.failed);
+
+    await openRiver(tester, testServices(tmp));
+
+    expect(find.byKey(Key('job-card-${seeded.workId}')), findsNothing);
+    expect(find.byKey(Key('job-line-${seeded.workId}')), findsNothing);
+    expect(find.text('Try again'), findsNothing);
+    expect(find.text('Discard'), findsNothing);
+    expect(find.textContaining('1 didn’t finish'), findsOneWidget);
+
+    await openJobs(tester);
+    expect(find.byKey(Key('job-card-${seeded.workId}')), findsOneWidget);
+    expect(find.text('Try again'), findsOneWidget);
+    expect(find.text('Discard'), findsOneWidget);
+  });
+
+  testWidgets('the launch picks up the one-tap job that was written down, '
+      'once every other job has been restored', (tester) async {
+    final seeded = await seedEpisode(transcribed: true);
+    await db.deviceSettingsDao.write(
+        listenLineKey,
+        jsonEncode([
+          {'workId': seeded.workId, 'lang': 'es'},
+        ]));
+
+    await openRiver(tester, testServices(tmp));
+    await tester.runAsync(() async {
+      // This transcript has no text, so the job ends with a reason, and
+      // the record going is what shows the launch ran it.
+      for (var i = 0;
+          i < 100 &&
+              await db.deviceSettingsDao.read(listenLineKey) != null;
+          i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+    });
+
+    expect(await db.deviceSettingsDao.read(listenLineKey), isNull);
   });
 }

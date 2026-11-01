@@ -43,6 +43,10 @@ double _num(Object? v, double fallback) => v is num ? v.toDouble() : fallback;
 /// Typography for the print reader (scroll mode). Defaults match the
 /// reader's pre-Campaign-4 hardcoded values exactly, so an unset/corrupt
 /// blob renders identically to before this pass.
+///
+/// The text is always ragged-right (1.6.0). Justified text stretched the
+/// gaps between words, and the owner ruled it out, so there is no setting
+/// for it; an old blob's `justified` key is ignored.
 class ReaderTypography {
   const ReaderTypography({
     this.fontScale = 1.0,
@@ -50,7 +54,6 @@ class ReaderTypography {
     this.maxTextWidth = 680,
     this.paragraphSpacing = 8,
     this.typeface = ReaderTypeface.lora,
-    this.justified = false,
   });
 
   /// Multiplies the print body's base font size (theme bodyLarge).
@@ -69,21 +72,12 @@ class ReaderTypography {
 
   final ReaderTypeface typeface;
 
-  /// Ragged-right (false, the default) or justified (true). Flutter
-  /// justifies without hyphenation and this reader justifies by
-  /// distributing space within each wrapped line — including, honestly,
-  /// its last line — so wide gaps can appear on narrow screens; the
-  /// settings copy says so (ADR-0010's honest ceiling, not silently
-  /// hidden).
-  final bool justified;
-
   ReaderTypography copyWith({
     double? fontScale,
     double? lineHeight,
     double? maxTextWidth,
     double? paragraphSpacing,
     ReaderTypeface? typeface,
-    bool? justified,
   }) =>
       ReaderTypography(
         fontScale: fontScale ?? this.fontScale,
@@ -91,7 +85,6 @@ class ReaderTypography {
         maxTextWidth: maxTextWidth ?? this.maxTextWidth,
         paragraphSpacing: paragraphSpacing ?? this.paragraphSpacing,
         typeface: typeface ?? this.typeface,
-        justified: justified ?? this.justified,
       );
 
   Map<String, Object?> toJson() => {
@@ -100,7 +93,6 @@ class ReaderTypography {
         'maxTextWidth': maxTextWidth,
         'paragraphSpacing': paragraphSpacing,
         'typeface': _typefaceToWire(typeface),
-        'justified': justified,
       };
 
   /// Lenient the way the house codecs are lenient (`decodeStudyCard`):
@@ -116,7 +108,6 @@ class ReaderTypography {
       maxTextWidth: _num(m['maxTextWidth'], d.maxTextWidth),
       paragraphSpacing: _num(m['paragraphSpacing'], d.paragraphSpacing),
       typeface: _typefaceFromWire(m['typeface']),
-      justified: m['justified'] is bool ? m['justified'] as bool : d.justified,
     );
   }
 
@@ -127,12 +118,11 @@ class ReaderTypography {
       other.lineHeight == lineHeight &&
       other.maxTextWidth == maxTextWidth &&
       other.paragraphSpacing == paragraphSpacing &&
-      other.typeface == typeface &&
-      other.justified == justified;
+      other.typeface == typeface;
 
   @override
   int get hashCode => Object.hash(
-      fontScale, lineHeight, maxTextWidth, paragraphSpacing, typeface, justified);
+      fontScale, lineHeight, maxTextWidth, paragraphSpacing, typeface);
 }
 
 /// How this reader last read: the mode, the Words speed, and the nearby-

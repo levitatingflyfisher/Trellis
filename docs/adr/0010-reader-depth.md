@@ -24,13 +24,12 @@ Typeface choice is restricted to the two faces actually bundled (Lora,
 Nunito); `docs/reference/feature-matrix.md` previously claimed a
 bundled OpenDyslexic face that was never true, fixed in Phase 6.
 
-**Honest ceiling: no hyphenation.** Justified text is
-`WrapAlignment.spaceBetween` on the reader's own per-word `Wrap` (not
-Flutter's `TextAlign.justify`, which special-cases the last line) —
-both distribute space without hyphenation, so wide gaps can appear on
-narrow screens or short lines. The settings screen's copy says so
-plainly rather than hiding it. A hyphenation engine is out of scope
-this pass.
+**Superseded in 1.6.0: no justified text.** Justified text was
+`WrapAlignment.spaceBetween` on the reader's own per-word `Wrap`, which
+spread every line's words across the measure, the last line too, with
+no hyphenation. The owner found the wide gaps unreadable ("don't do
+that"), so the switch and the `justified` preference are gone and every
+mode sets ragged-right.
 
 ### Phase 2 — the lost priming visuals
 

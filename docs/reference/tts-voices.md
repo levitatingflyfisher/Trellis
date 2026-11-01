@@ -371,6 +371,109 @@ already carries the identical unverified assumption — this campaign
 widens the same assumption to three more languages rather than
 introducing a new one).
 
+## French and Portuguese switched on (2026-11-10)
+
+For the one tap ("Listen in French"): `supertonicSupportedLangs` is now
+`{'en', 'es', 'fr', 'pt'}`. What was checked, and what was not.
+
+**Checked.**
+
+1. The model's own card. `https://huggingface.co/api/models/Supertone/supertonic-2`
+   (fetched 2026-11-10, repo commit `75e6727618a02f323c720cba9478152d4bc16ca4`)
+   reports `cardData.language` as `en, ko, es, pt, fr`. The file list is
+   unchanged: four ONNX graphs, `tts.json`, `unicode_indexer.json`, and ten
+   `voice_styles` files (F1-F5, M1-M5), none named for a language.
+2. How a language reaches the model. `_preprocessText` in
+   `supertonic_speech_engine.dart` wraps the sentence as `<fr>...</fr>` and
+   the characters are looked up one by one in `unicode_indexer.json`. There
+   is no phonemizer, no tokenizer and no per-language file. The clean-up
+   before it is the same for every language.
+3. The character table, again. `unicode_indexer.json` was downloaded and
+   matched the pin byte for byte (262,196 bytes, sha256 `b7662a73...c92df1`).
+   Every letter was run through the engine's own decomposition table and
+   looked up:
+   - Portuguese: all of `á à â ã ç é ê í ó ô õ ú ü` and their capitals are
+     written. Not written: the ordinal signs `º ª` (the same gap Spanish
+     already has).
+   - French: all of `à â ç é è ê ë î ï ô œ ù û ü`, their capitals except `Œ`,
+     and `« »` are written. Not written: `æ Æ Œ ÿ Ÿ`.
+   - The tag characters `< > /` are written.
+   A character the table lacks is not an error: it is looked up as slot 0
+   and said as a gap. So "Œuvre" loses its first letter, "cæcum" its `æ`.
+   These are rare; they are not fixed here.
+
+**Not checked.** Nobody has heard the M1 voice speak French or Portuguese
+on a phone, the same standing as Spanish. The clean-up step is upstream's
+and has two English habits in every language: `@` becomes " at ", and
+"e.g.," and "i.e.," are spelled out in English.
+
+**Korean stays off.** The model lists it, and the engine decomposes Hangul
+syllables into the jamo the table holds (66 of them). But 399 of the
+11,172 precomposed syllables decompose into a jamo the table lacks, and
+would be said with a gap; and no registered pair translates INTO Korean
+(`opus-mt-ko-en` only goes out of it), so there is nothing for the one tap
+to say.
+
+**What this changes besides the one tap.** The same set decides which
+languages Read aloud gives to the downloaded voice
+(`read_aloud_voices.dart`, `neuralLangsFor`). A French or Portuguese text
+or translation is now read by the downloaded voice when it is on the
+device, unless the listener picked a phone voice for that language in
+Read aloud voices.
+
+## The phone's own voice saves audio too (board-0126, 2026-11-11)
+
+The one tap and make ahead can now keep an episode in any language the
+phone has a text-to-speech voice for (Russian, German, Japanese and
+many more on a phone with Google's voices), where a translator reaches
+that language from the episode's.
+
+**How.** Android's `TextToSpeech.synthesizeToFile` writes one sentence
+at a time to a WAV file; `readWav` (`wav.dart`) reads it back and the
+sentences are stitched into the one saved file as before, any sentence
+at another rate brought to the file's rate. It runs through the app's
+own channel (`PhoneVoice.kt`), not flutter_tts's `synthesizeToFile`:
+in the pinned flutter_tts (4.2.5, read in its Android source) an engine
+error, or a sentence the engine refuses to queue, never answers the
+awaited call, and its one engine is shared with Read aloud.
+
+**Which voice.** The downloaded voice where it speaks the language and
+is on the device; else the phone's, which fetches nothing; else the
+downloaded voice, fetched once with the listener's yes. A voice picked
+for the language in Read aloud's voices overrides that, for kept audio
+as for reading aloud (`listen/saved_voice.dart`).
+
+**What the list offers.** A language with a translator from the
+episode's language AND a voice that can save it. The phone's voices are
+asked when the app starts and each time it comes back to the front, so
+a voice added in Android's settings shows up. The dialog names the
+languages it leaves out and why: no translator, or no voice on this
+phone, with a button to Android's text-to-speech settings.
+
+**The label.** The saved episode's page and its file's tag say
+"machine-made voice (the phone's own voice, <engine>)", with the
+engine's name as Android gives it (for example "Speech Services by
+Google").
+
+**The web cannot do this.** A browser speaks through `speechSynthesis`,
+and the Web Speech API hands the page no audio: `SpeechSynthesis` has
+only `speak`, `cancel`, `pause`, `resume` and `getVoices`, and no event
+carries sound, only timing (checked in the Draft Community Group Report
+of 27 October 2026). The browser passes the text to the system's own
+engine, so the sound never runs through the page's audio graph where
+it could be recorded. Proposals to route it to a `MediaStreamTrack`
+exist and have not shipped. So the PWA can read aloud with the
+browser's voices but cannot keep the result as a file; the one tap and
+make ahead are not offered there (`listen_unsupported.dart`).
+
+Sources:
+
+- [Web Speech API, Draft Community Group Report](https://webaudio.github.io/web-speech-api/)
+- [public-speech-api, 2017: the only way found to record speak() was the system's own speaker output, outside the browser](https://lists.w3.org/Archives/Public/public-speech-api/2017Jun/0001.html)
+- [public-webrtc, 2020: proposal for a text-to-speech MediaStreamTrack](https://lists.w3.org/Archives/Public/public-webrtc/2020Jan/0019.html)
+- [Soledad Penades, 2023: Web Speech to Web Audio?](https://soledadpenades.com/posts/2023/web-speech-to-web-audio/)
+- [Android TextToSpeech reference](https://developer.android.com/reference/android/speech/tts/TextToSpeech)
+
 ## Campaign 8 "Babel widens" Phase 3: CJK font-rendering verification (2026-08-15)
 
 The spec called for verifying whether CJK text actually renders on the

@@ -15,6 +15,11 @@ import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 abstract class JobForegroundGate {
   Future<void> jobStarted(String title, String text);
+
+  /// [jobStarted] for work nobody just tapped: true when the job now holds
+  /// the service. False when Android refused to start it, which it does
+  /// behind a dark screen; such a job must not run, and holds no count.
+  Future<bool> tryJobStarted(String title, String text);
   Future<void> jobProgress(String title, String text);
   Future<void> jobFinished();
 }
@@ -22,6 +27,8 @@ abstract class JobForegroundGate {
 class NoopJobForegroundGate implements JobForegroundGate {
   @override
   Future<void> jobStarted(String title, String text) async {}
+  @override
+  Future<bool> tryJobStarted(String title, String text) async => true;
   @override
   Future<void> jobProgress(String title, String text) async {}
   @override
@@ -67,6 +74,13 @@ class AndroidJobForegroundGate implements JobForegroundGate {
   }
 
   @override
+  Future<bool> tryJobStarted(String title, String text) async {
+    if (!_isAndroid) return true;
+    await jobStarted(title, text);
+    return _running;
+  }
+
+  @override
   Future<void> jobProgress(String title, String text) async {
     if (!_isAndroid || !_running) return;
     await FlutterForegroundTask.updateService(
@@ -99,6 +113,19 @@ class SharedJobForegroundGate implements JobForegroundGate {
       await inner.jobProgress(title, text);
     }
     _active++;
+  }
+
+  @override
+  Future<bool> tryJobStarted(String title, String text) async {
+    if (_active > 0) {
+      // The service is up already, so Android has nothing to refuse.
+      await inner.jobProgress(title, text);
+      _active++;
+      return true;
+    }
+    final ok = await inner.tryJobStarted(title, text);
+    if (ok) _active++;
+    return ok;
   }
 
   @override

@@ -574,6 +574,7 @@ onnx-community's carry none.
 | en->uk | `Xenova/opus-mt-en-uk` | 112.9 | none on card | apache-2.0 |  |
 | uk->en | `Xenova/opus-mt-uk-en` | 113.1 | none on card | apache-2.0 |  |
 | pl->en | `Xenova/opus-mt-pl-en` | 114.0 | none on card | apache-2.0 |  |
+| en->ja | `Mitsua/elan-mt-bt-en-ja`, converted by Trellis | 97.0 | CC BY-SA 4.0 (own card) | n/a, not OPUS-MT |  |
 
 Pt rides on the multi-target `en-ROMANCE` / `ROMANCE-en` models, with
 `>>pt<<` selecting the language. No bilingual pt ONNX export exists at a
@@ -584,7 +585,6 @@ Brazilian or European forms; `>>pt_BR<<` exists but wasn't evaluated.
 
 | Wanted | Why |
 |---|---|
-| en->ja | No `ja` export exists; `en-jap` (Xenova) is incoherent (see the Japanese section). ja->en is now registered from `onnx-community/opus-mt-ja-en`, a different, newer model than `jap-en`. Its quality has not been checked. |
 | en->ko | `Helsinki-NLP/opus-mt-tc-big-en-ko` exists upstream, but no ONNX conversion exists at onnx-community or Xenova. |
 | en->pl | No `opus-mt-en-pl`; `opus-mt-en-zlw` (West Slavic) exists upstream with no trusted ONNX conversion. |
 
@@ -611,3 +611,22 @@ license is unchanged: the same OPUS-MT weights (CC-BY 4.0), converted by
 Xenova, whose cards carry no license of their own, like the other
 Xenova pairs above.
 
+## English to Japanese: ElanMT-BT, converted by Trellis (2026-11-11)
+
+No OPUS-MT `en-ja` export exists (above), and the only en-ja ONNX
+exports on Hugging Face sit on individual accounts. ElanMT-BT
+(`Mitsua/elan-mt-bt-en-ja`, commit
+`02c48e7031386cd2d41974b0ff1aaf52f010c5fa`) is a Marian base model of the
+same shape as the OPUS-MT pairs, CC BY-SA 4.0, trained only on openly
+licensed text. Trellis converted it to the int8 ONNX pair the app runs,
+under ADR-0014's amendment of 2026-11-11. The recipe, pinned versions,
+file hashes and measured quality are in
+[convert-a-translation-model.md](../how-to/convert-a-translation-model.md).
+
+The two graphs are hosted as assets of the permanent Trellis release
+`models-enja-1`, which also keeps the licence text and the export
+recipe and is never deleted; the four small files come from the
+upstream commit.
+Credit on the Models screen: “English to Japanese: ElanMT-BT by ELAN
+MITSUA Project / Abstract Engine, under CC BY-SA 4.0, converted to ONNX by
+Trellis.”

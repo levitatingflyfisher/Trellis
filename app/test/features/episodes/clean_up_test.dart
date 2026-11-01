@@ -557,8 +557,8 @@ void main() {
       expect(find.text('Mark everything older as played'), findsNothing);
     });
 
-    testWidgets('Select from More, select all, swipes are off, filter '
-        'changes keep only rows on screen', (tester) async {
+    testWidgets('Select from More, select all, filter changes keep only '
+        'rows on screen', (tester) async {
       await pumpLatest(tester);
       await tester.tap(find.byKey(const Key('river-more')));
       await tester.pumpAndSettle();
@@ -569,10 +569,6 @@ void main() {
       await tester.tap(find.byKey(const Key('selection-all')));
       await tester.pumpAndSettle();
       expect(bar('5 selected'), findsOneWidget);
-      final swipe = tester.widget<Dismissible>(
-          find.byKey(Key('swipe-${ids['Newest']}')));
-      expect(swipe.direction, DismissDirection.none);
-
       await tester.tap(find.byKey(const Key('chip-audio')));
       await tester.pumpAndSettle();
       expect(bar('4 selected'), findsOneWidget);

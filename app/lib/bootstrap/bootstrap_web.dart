@@ -108,6 +108,13 @@ PlaybackSession get playbackSession => const NoPlaybackSession();
 /// Nothing to bind them to here.
 void bindHeadsetKeys(Future<HeadsetKeys> Function() read) {}
 
+/// No media session here, so no keys to bind.
+void bindEpisodeKeys(
+    {required Future<void> Function() next,
+    required Future<void> Function() previous}) {}
+
+void releaseEpisodeKeys(Future<void> Function() next) {}
+
 /// The daemon's own marker for a response IT originated (refused URL, cap
 /// trip, unreachable upstream) as opposed to one proxied byte-for-byte
 /// from the real upstream site. Mirrors `skeinErrorHeader` in

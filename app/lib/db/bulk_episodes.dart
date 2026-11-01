@@ -58,13 +58,21 @@ class BulkEpisodes {
   /// Undo can blank exactly the ones it filled. Like the single action it
   /// promotes nothing and leaves the finished day alone, so History
   /// (actually listened) is untouched.
-  Future<BulkChange> markPlayed(Iterable<int> workIds, {required int nowMs}) {
+  ///
+  /// With [leaveQueueOf], they also leave that reader's Queue, as hearing
+  /// them to the end would, unless the household keeps finished episodes.
+  /// Undo puts them back in their places.
+  Future<BulkChange> markPlayed(Iterable<int> workIds,
+      {required int nowMs, int? leaveQueueOf}) {
     final ids = workIds.toSet().toList();
     return db.transaction(() async {
       final unfinished = await _blank(ids, (e) => e.finishedAtMs);
       final unread = await _blank(ids, (e) => e.readAtMs);
       await _write(unfinished, EpisodesCompanion(finishedAtMs: Value(nowMs)));
       await _write(unread, EpisodesCompanion(readAtMs: Value(nowMs)));
+      final left = leaveQueueOf == null
+          ? const <QueueRow>[]
+          : await _leaveQueue(leaveQueueOf, ids);
       return BulkChange(
           unfinished.length,
           () => db.transaction(() async {
@@ -72,9 +80,36 @@ class BulkEpisodes {
                     const EpisodesCompanion(finishedAtMs: Value(null)));
                 await _write(
                     unread, const EpisodesCompanion(readAtMs: Value(null)));
+                await _backInQueue(left);
               }),
-          changed: unfinished.isNotEmpty || unread.isNotEmpty);
+          changed:
+              unfinished.isNotEmpty || unread.isNotEmpty || left.isNotEmpty);
     });
+  }
+
+  /// Takes [ids] off [profileId]'s queue under the household's setting;
+  /// the rows taken, front of the queue first.
+  Future<List<QueueRow>> _leaveQueue(int profileId, List<int> ids) async {
+    if (await db.profilesDao.keepFinishedInQueue(profileId)) return const [];
+    final wanted = ids.toSet();
+    final left = [
+      for (final r in await db.queueDao.queueOf(profileId))
+        if (wanted.contains(r.workId)) r,
+    ];
+    for (final r in left) {
+      await db.queueDao.remove(profileId: profileId, workId: r.workId);
+    }
+    return left;
+  }
+
+  /// Front first, so each row's old position is right when it goes back.
+  Future<void> _backInQueue(List<QueueRow> rows) async {
+    for (final r in rows) {
+      await db.queueDao.playLast(
+          profileId: r.profileId, workId: r.workId, nowMs: r.addedAtMs);
+      await db.queueDao.reorder(
+          profileId: r.profileId, workId: r.workId, newPosition: r.position);
+    }
   }
 
   /// "Let it pass" for many: marks seen where not yet seen. The single

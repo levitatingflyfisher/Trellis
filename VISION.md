@@ -18,7 +18,8 @@ attention — that is a design law with tests, not a promise.
 app. A feature belongs only if it serves learning: taking something in, paying
 attention to it, understanding it, keeping it, or finding it again. A podcast
 player, a feed reader and a lecture video pass; an endless feed or autoplay does
-not. Success is what you understood and still remember, never time spent — the
+not. A queue the person filled is not autoplay: it ends, and going on through it
+or clearing it as episodes finish is their own choice. Success is what you understood and still remember, never time spent — the
 app is glad when you put it down.
 
 ## The three loads it carries
@@ -27,7 +28,10 @@ app is glad when you put it down.
    EPUB/PDF/URL/paste intake, on-device transcription (multilingual) and
    translation, read-aloud. One canonical **content spine**: your position is
    a (segment, word) — never a format. Stop listening in the car; the reader
-   opens at the same sentence, possibly in another language.
+   opens at the same sentence, possibly in another language. And an episode
+   can be heard in the language you are learning: one tap transcribes it,
+   translates it, speaks the translation and keeps it as an audio file of
+   its own, with the words lit as they are said.
 2. **Distill** — any source becomes a typed course (`.ohcourse`): concepts on
    a prerequisite lattice, four kinds of recall item, discourse baked in at
    distillation time so even a zero-ML phone studies with construction and
@@ -61,6 +65,20 @@ carrying their sentence and audio span → the course lattice grows. Both donor
 apps failed her: one had no intake at all, the other's Whisper was
 English-only. This app is judged against her, end to end.
 
+The other direction is the founding request for translation
+([docs/explanation/founding-request.md](docs/explanation/founding-request.md)):
+a show she already loves, heard in the language she is learning. Tap play,
+hear the episode in that language.
+
+## The far picture
+
+A household's whole reading, listening and learning life in one library
+that lasts: every book, show and lecture, readable or hearable in any
+language, spoken in the voice of the person who first said it, with what
+each person understood and still remembers. Every engine runs on devices
+the household owns. There is no account and no server. The scorecard
+below says how far today is from that.
+
 ## Honest scorecard
 
 | Claim | Status |
@@ -74,7 +92,9 @@ English-only. This app is judged against her, end to end.
 | Backup/migration, .apkg, storage panel, course map, dashboard+PIN | ✅ |
 | Opens into the task; remembers the reader and how they read | ✅ every launch lands on Latest, what arrived being the usual reason to open the app (a fresh install's empty Latest points at adding a podcast and at Subscriptions); a first launch has no name to type; a cold launch reopens the last reader; mode, speed and nearby words come back on the next open (tests pin each) |
 | Neural TTS (Supertonic/Kokoro) | ◐ ADR-0006 shipped the sentence-unit spine everywhere (the paragraph-at-a-time stall is fixed on the zero-byte system rung, every platform); ADR-0007 replaced the sherpa-onnx/Piper rung with Supertonic (MIT, no phonemizer — the APK stays MIT-clean, unlike the rung it replaced) — one voice (English, OpenRAIL-M weights on the user's own download) through the models door; the gapless synthesis-ahead pipeline IS threaded into the speak loop (real fork, settings escape, generation fencing) and proven end to end through fakes — not yet proven on a real device (the ONNX Runtime sessions actually opening, actual audio). Kokoro and a web tier stay roadmap |
-| Cuttings (.ohparcel), offline MT, web ML tier, FSRS | ✗ roadmap (P6) |
+| On-device translation | ✅ 25 pairs with English on one end, each pinned by hash; any other pair goes by way of English (ADR-0008, ADR-0014, ADR-0020) |
+| Listen in the language you are learning, in one tap | ◐ one tap transcribes, translates, speaks and saves the episode as an audio file that plays like any other, labelled as a machine-made voice. The tap is the second button on an episode's row in every list, beside Play, and it is also on the episode's page: the button shows how far the making is and plays the episode when it is ready, and one episode is made at a time while the others wait their turn. It makes Spanish, French, Portuguese and English, 4 of the 12 languages Trellis translates into. Proven through tests with stand-in engines; nobody has yet heard the result on a real phone. Not on the web tier. Not built: the other 8 languages, making picked shows ahead of time, the host's own voice |
+| Cuttings (.ohparcel), web ML tier, FSRS | ✗ roadmap (P6) |
 
 ## Horizons (problems, not dated features)
 
@@ -86,5 +106,15 @@ English-only. This app is judged against her, end to end.
   UI must never promise karaoke it cannot keep.
 - **Scanned PDFs have no OCR path yet.** The honest answer today is "no text
   layer found"; the household-desktop OCR job is the intended cure.
-- **The 200-language translation tail** waits on a hand-rolled ONNX seq2seq
-  loop — the single riskiest ML item, deliberately off the v1 critical path.
+- **The long tail of languages.** Translation covers 25 pairs, all through
+  English, a sentence at a time. Small languages have neither a translator
+  nor a voice with a licence this app can carry.
+- **Nobody has heard the spoken translation on a real phone.** There is no
+  automatic check that speech sounds right, and no measure yet of how long
+  an hour-long episode takes on an ordinary phone.
+- **The host's own voice.** The engines that can copy a voice from a short
+  clip need a desktop today. The household's own computer is the intended
+  place for it. A machine-made voice is always labelled, in the player and
+  in the file.
+- **Study that a person wants to open.** The engine is sound; making a
+  course still takes too much work up front.

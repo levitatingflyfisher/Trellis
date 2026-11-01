@@ -26,8 +26,22 @@ Seven laws. Where a law is expressible as a test, the test is the law.
    nothing decays; Latest is a permanent archive.
 3. **Sessions are bounded.** A study session declares its size before it
    starts and has an end screen. No infinite queue exists.
+   The podcast Queue is not a study session and is bounded another way: the
+   person fills it by hand, and it ends. Going on to the next entry, and
+   taking an episode off once it is played or marked played, serve that
+   choice. What fills a queue stays the person's hand alone.
 4. **The Brain never runs unprompted.** Every inference has a user gesture in
    its call graph (tested: no Brain call reachable from timers or boot).
+   **Amended 1.6.x, owner, 10 November 2026: "Yes, for shows I pick":** a
+   show's own switch, "Make new episodes in <language> ahead", is a standing
+   gesture for on-device transcription, translation and speech, for that
+   show alone, for episodes that arrive after it was switched on, on Wi-Fi
+   while charging. It is one narrow exception, never a door for anything
+   else. The Brain itself (an LLM, anything taking `UserGesture`) is never
+   reachable from it. See [ADR-0021](0021-make-ahead.md).
+   `test/features/listen/make_ahead_line_test.dart` fails if a show with no
+   switch is made ahead; `make_ahead_sovereignty_test.dart` fails if the
+   listen feature or the background check can reach the Brain.
 5. **No streaks, no leaderboards, no guilt.** v1 ships zero notifications
    except live job progress. Stats are additive lifetime totals.
 6. **One egress chokepoint.** Cloud LLM, web-surface proxies, and model
@@ -39,6 +53,10 @@ Seven laws. Where a law is expressible as a test, the test is the law.
    person's own gesture, so it is the consent. The SSRF guard still runs
    first, and nothing beyond that one page is fetched; following a feed
    still takes its own tap.
+   **Amended 1.6.x (ADR-0021):** switching a show on to make ahead asks
+   once, on the same consent sheet, for every model that language needs.
+   Without that yes it never fetches a model; a no leaves the switch off.
+   The episode's own audio comes with the switch, on Wi-Fi only.
 7. **The permission surface is a test** (conformance C4, both directions,
    release merged manifest): INTERNET, FOREGROUND_SERVICE(dataSync,
    mediaPlayback), POST_NOTIFICATIONS, WAKE_LOCK — and nothing else.

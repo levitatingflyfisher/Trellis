@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
@@ -37,7 +39,7 @@ void main() {
     ]);
   }
 
-  Future<void> writeTranslation() async {
+  Future<void> writeTranslation([String lang = 'es']) async {
     const rows = [
       (0, 0, 'Hello there.', 'Hola.'),
       (0, 1, 'How are you?', '¿Cómo estás?'),
@@ -48,28 +50,50 @@ void main() {
           workId: work.id,
           segmentIdx: seg,
           sentenceIdx: i,
-          lang: 'es',
+          lang: lang,
           sourceText: src,
           body: body);
     }
   }
 
-  ListenChain chain({RecordingForegroundGate? gate}) => ListenChain(
+  ListenChain chain({
+    RecordingForegroundGate? gate,
+    Future<void>? transcribeUntil,
+    void Function(int workId)? stopTranscribing,
+    void Function(int workId)? stopTranslating,
+    Future<void>? translateUntil,
+    String voiceName = 'Test voice',
+    Future<File?> Function(File wav,
+            {required String title, required String voice})?
+        encode,
+  }) =>
+      ListenChain(
+        encode: encode,
         db: db,
         foreground: gate,
+        stopTranscribing: stopTranscribing,
+        stopTranslating: stopTranslating,
         transcribe: (w, e) async {
           ran.add('transcribe');
+          if (transcribeUntil != null) {
+            await transcribeUntil;
+            return;
+          }
           if (transcribeWorks) await writeTranscript();
         },
         translate: (w, source, target, progress) async {
           ran.add('translate $source>$target');
           if (translateFails != null) return translateFails;
-          await writeTranslation();
+          if (translateUntil != null) {
+            progress(1, 3);
+            await translateUntil;
+          }
+          await writeTranslation(target);
           progress(3, 3);
           return null;
         },
-        voiceFor: (lang) async => hasVoice
-            ? (name: 'Test voice', say: (String t) {
+        voiceFor: (_, lang) async => hasVoice
+            ? (name: voiceName, say: (String t) {
                 ran.add('say $t');
                 return synth(t);
               })
@@ -176,6 +200,38 @@ void main() {
     expect(ran, ['say Hola.', 'say ¿Cómo estás?', 'say Adiós.']);
   });
 
+  test('any language the voice can save is made the same way: French, '
+      'named as French', () async {
+    final id = await chain().start(work, 'fr');
+
+    expect(ran.take(2), ['transcribe', 'translate en>fr']);
+    expect(await spokenEpisodeOf(db, work.id, 'fr'), id);
+    expect((await db.spineDao.workById(id!))!.title,
+        'Harbour episode (French)');
+  });
+
+  test('an episode with no language of its own is translated from its '
+      'show’s language, not taken for English', () async {
+    await db.update(db.works).write(const WorksCompanion(lang: Value(null)));
+    await db.update(db.feeds)
+        .write(const FeedsCompanion(language: Value('fr-FR')));
+    work = (await db.spineDao.workById(work.id))!;
+
+    await chain().start(work, 'es');
+
+    expect(ran, contains('translate fr>es'));
+  });
+
+  test('an episode nobody knows the language of is taken for English',
+      () async {
+    await db.update(db.works).write(const WorksCompanion(lang: Value(null)));
+    work = (await db.spineDao.workById(work.id))!;
+
+    await chain().start(work, 'es');
+
+    expect(ran, contains('translate en>es'));
+  });
+
   test('no transcript came of it: it stops and says so', () async {
     transcribeWorks = false;
     final c = chain();
@@ -257,6 +313,82 @@ void main() {
 
     expect(c.stateOf(work.id), isNull);
     expect(await spokenEpisodeOf(db, work.id, 'es'), isNull);
+  });
+
+  // Seen on the emulator: Stop while transcribing changed nothing on the
+  // row for minutes, because the chain only looked at its flag once the
+  // whole transcript was done.
+  test('cancel while transcribing stops the transcription too', () async {
+    final done = Completer<void>();
+    final stopped = <int>[];
+    final c = chain(
+      transcribeUntil: done.future,
+      stopTranscribing: (id) {
+        stopped.add(id);
+        done.complete();
+      },
+    );
+
+    final run = c.start(work, 'es');
+    await pumpEventQueue();
+    expect(c.stateOf(work.id)?.stage, ListenStage.transcribing);
+
+    c.cancel(work.id);
+
+    expect(stopped, [work.id]);
+    expect(await run, isNull);
+    expect(c.stateOf(work.id), isNull);
+  });
+
+  test('cancel while translating stops the translation too', () async {
+    await writeTranscript();
+    final stopped = <int>[];
+    final until = Completer<void>();
+    final c = chain(stopTranslating: stopped.add, translateUntil: until.future);
+    final run = c.start(work, 'es');
+    await pumpEventQueue();
+    expect(c.stateOf(work.id)?.stage, ListenStage.translating);
+
+    c.cancel(work.id);
+    expect(stopped, [work.id]);
+
+    until.complete();
+    expect(await run, isNull);
+  });
+
+  test('cancel after the transcript does not touch transcription', () async {
+    final stopped = <int>[];
+    final c = chain(stopTranscribing: stopped.add);
+    c.addListener(() {
+      if (c.stateOf(work.id)?.stage == ListenStage.speaking) c.cancel(work.id);
+    });
+
+    expect(await c.start(work, 'es'), isNull);
+
+    expect(stopped, isEmpty);
+  });
+
+  test('the phone’s own voice is named plainly on the episode’s page and '
+      'in its file’s tag', () async {
+    final tags = <(String, String)>[];
+    final c = chain(
+        voiceName: 'the phone’s own voice, Speech Services by Google',
+        encode: (wav, {required title, required voice}) async {
+          tags.add((title, voice));
+          return null;
+        });
+
+    final id = await c.start(work, 'ru');
+
+    expect(tags, [
+      (
+        'Harbour episode (Russian)',
+        'the phone’s own voice, Speech Services by Google'
+      )
+    ]);
+    final about = (await db.feedsDao.notesOf(id!))!.plain;
+    expect(about, contains('machine-made voice (the phone’s own voice, '
+        'Speech Services by Google)'));
   });
 
   test('each stage has a plain line for the page', () {

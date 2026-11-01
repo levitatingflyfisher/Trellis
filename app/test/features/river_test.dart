@@ -564,8 +564,8 @@ void main() {
   });
 
   group('triage verbs (Campaign 5: Keep / Let it pass)', () {
-    testWidgets('swiping right Keeps a text item — promoted, read, undo '
-        'restores verbatim', (tester) async {
+    testWidgets('Keep from the menu: promoted, read, undo restores '
+        'verbatim', (tester) async {
       final profileId = await seedProfile();
       final feedId = await db.feedsDao
           .insertFeed(profileId: profileId, url: 'https://a/f');
@@ -579,11 +579,12 @@ void main() {
       await openRiver(tester);
 
       expect(find.byKey(Key('unread-dot-$workId')), findsOneWidget);
-      await tester.drag(
-          find.byKey(Key('swipe-$workId')), const Offset(500, 0));
+      await tester.tap(find.byKey(Key('menu-$workId')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Keep'));
       await tester.pumpAndSettle();
 
-      // The tile survives the swipe (dimmed rows, not vanished rows, is
+      // The tile survives Keep (dimmed rows, not vanished rows, is
       // this house's idiom) — only its state changed.
       expect(find.text('A text item'), findsOneWidget);
       expect(find.byKey(Key('unread-dot-$workId')), findsNothing);
@@ -599,8 +600,9 @@ void main() {
       expect(work!.persistence, 'ephemeron');
     });
 
-    testWidgets('swiping left lets a text item pass — read, never '
-        'promoted, undo restores', (tester) async {
+    testWidgets('a sideways drag on a row does nothing, either way: it '
+        'fired by accident while scrolling fast (owner, 9 Nov)',
+        (tester) async {
       final profileId = await seedProfile();
       final feedId = await db.feedsDao
           .insertFeed(profileId: profileId, url: 'https://a/f');
@@ -613,8 +615,34 @@ void main() {
       await pumpApp(tester, ScriptedFetcher((u, h) => textResponse(_rssOne)));
       await openRiver(tester);
 
-      await tester.drag(
-          find.byKey(Key('swipe-$workId')), const Offset(-500, 0));
+      for (final dx in [500.0, -500.0]) {
+        await tester.drag(
+            find.byKey(Key('latest-row-$workId')), Offset(dx, 0));
+        await tester.pumpAndSettle();
+      }
+
+      expect(find.byType(Dismissible), findsNothing);
+      expect(find.byKey(Key('unread-dot-$workId')), findsOneWidget);
+      expect((await db.spineDao.workById(workId))!.persistence, 'ephemeron');
+    });
+
+    testWidgets('Let it pass from the menu: read, never promoted, undo '
+        'restores', (tester) async {
+      final profileId = await seedProfile();
+      final feedId = await db.feedsDao
+          .insertFeed(profileId: profileId, url: 'https://a/f');
+      final workId = await seedRiverItem(
+          profileId: profileId,
+          feedId: feedId,
+          title: 'A text item',
+          publishedAtMs: 1000);
+
+      await pumpApp(tester, ScriptedFetcher((u, h) => textResponse(_rssOne)));
+      await openRiver(tester);
+
+      await tester.tap(find.byKey(Key('menu-$workId')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Let it pass'));
       await tester.pumpAndSettle();
 
       expect(find.byKey(Key('unread-dot-$workId')), findsNothing);

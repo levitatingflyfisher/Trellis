@@ -117,6 +117,32 @@ void main() {
     expect(result.sampleRate, 44100);
   });
 
+  // The model's own card lists en/ko/es/pt/fr, the language goes
+  // to it as a tag around the text, and its character table (the pinned
+  // unicode_indexer.json) holds every French and Portuguese letter the
+  // engine's own decomposition produces. docs/reference/tts-voices.md.
+  for (final (lang, text) in const [('fr', 'Bonjour.'), ('pt', 'Olá.')]) {
+    test('$lang renders through the same voice files', () async {
+      final handle = _FakeVoiceHandle();
+      final engine = SupertonicSpeechEngine(
+          files: files, openHandle: (_) async => handle);
+
+      await engine.synthesize(text, lang: lang);
+
+      expect(handle.calls, [(text: text, lang: lang)]);
+    });
+  }
+
+  test('Korean stays off: the character table cannot write 399 of its '
+      'syllables, and nothing in Trellis translates into it', () {
+    expect(supertonicSupportedLangs, {'en', 'es', 'fr', 'pt'});
+    final engine = SupertonicSpeechEngine(
+        files: files, openHandle: (_) async => _FakeVoiceHandle());
+
+    expect(() => engine.synthesize('안녕하세요.', lang: 'ko'),
+        throwsA(isA<SupertonicUnsupportedLangException>()));
+  });
+
   test('a null lang defaults to English — the one voice this entry ships',
       () async {
     final handle = _FakeVoiceHandle();
@@ -263,7 +289,7 @@ void main() {
         });
 
     await expectLater(
-      () => engine.synthesize('Bonjour.', lang: 'fr'),
+      () => engine.synthesize('Guten Tag.', lang: 'de'),
       throwsA(isA<SupertonicUnsupportedLangException>()),
     );
     expect(opened, isFalse);

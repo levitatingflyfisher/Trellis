@@ -179,6 +179,27 @@ void main() {
     expect(find.byType(NavigationBar), findsOneWidget);
   });
 
+  testWidgets('the sheet of ways in carries a small note on copy protection, '
+      'naming two tools, with no link (owner, 28 Oct)', (tester) async {
+    await seedText(await seedProfile(), 'A quiet text');
+    await pumpApp(tester);
+    await toTab(tester, 'Library');
+
+    await tester.tap(find.byKey(const Key('library-add')));
+    await tester.pumpAndSettle();
+
+    final note = find.byKey(const Key('add-copy-protection-note'));
+    expect(note, findsOneWidget);
+    final text = tester.widget<Text>(note);
+    expect(text.data, contains('copy protection'));
+    expect(text.data, contains('DMCA'));
+    expect(text.data, contains('DeDRM'));
+    expect(text.data, contains('Libation'));
+    expect(text.data, isNot(contains('http')));
+    expect(find.descendant(of: note, matching: find.byType(InkWell)),
+        findsNothing);
+  });
+
   testWidgets('+ Add on the Library offers every way in, and Subscribe '
       'opens inside the tab', (tester) async {
     final profileId = await seedProfile();

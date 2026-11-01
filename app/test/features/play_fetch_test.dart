@@ -67,7 +67,7 @@ void main() {
       expect(await FeedCheckSettings.downloadFirstOn(db), isFalse);
     });
 
-    testWidgets('its switch sits under Downloads, off until chosen',
+    testWidgets('a plain choice under Downloads, Stream until chosen',
         (tester) async {
       final settings = FeedCheckSettings(db, FakeScheduler());
       await tester.pumpWidget(MaterialApp(
@@ -76,15 +76,23 @@ void main() {
                   child: FeedCheckSection(settings: settings)))));
       await tester.pumpAndSettle();
 
-      final toggle = find.byKey(const Key('play-download-first'));
-      expect(find.text('Download first, then play'), findsOneWidget);
-      expect(tester.widget<SwitchListTile>(toggle).value, isFalse);
+      final stream = find.byKey(const Key('play-stream'));
+      final download = find.byKey(const Key('play-download-first'));
+      expect(find.text('Stream'), findsOneWidget);
+      expect(find.text('Download, then play'), findsOneWidget);
+      expect(find.text('When an episode isn’t downloaded, Play will'),
+          findsOneWidget);
+      bool? choice() => tester
+          .widget<RadioGroup<bool>>(find.byKey(const Key('play-choice')))
+          .groupValue;
+      expect(stream, findsOneWidget);
+      expect(choice(), isFalse, reason: 'Stream until chosen');
 
-      await tester.ensureVisible(toggle);
-      await tester.tap(toggle);
+      await tester.ensureVisible(download);
+      await tester.tap(download);
       await tester.pumpAndSettle();
 
-      expect(tester.widget<SwitchListTile>(toggle).value, isTrue);
+      expect(choice(), isTrue);
       expect(await FeedCheckSettings.downloadFirstOn(db), isTrue);
     });
   });

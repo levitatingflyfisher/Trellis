@@ -140,6 +140,8 @@ class SearchItemTile extends StatelessWidget {
               ? () => sel.toggle(work.id)
               : () => sel.enter(work.id),
       player: actions.player,
+      second: actions.listenButton(entry,
+          feedLang: state.feedLangs[episode?.feedId]),
       onPlay: isAudio
           ? () async {
               await works.play(work);

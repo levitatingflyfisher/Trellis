@@ -11,6 +11,7 @@ import 'package:trellis/features/reader/translation/translation_job.dart';
 
 import '../../support/fake_brain.dart';
 import '../../support/fake_sentence_translator.dart';
+import '../../support/fake_services.dart';
 
 /// TranslationJobController (ADR-0008 "Babel" Phase 3): the cancellable,
 /// resumable batch that fills in a work's TranslationSentence rows.
@@ -500,6 +501,63 @@ void main() {
       expect(stored[(0, 1)]!.body, 'de:Two.');
       expect(t.disposed, isTrue, reason: 'the ONNX sessions are freed');
       expect(await db.spineDao.translationRunLang(workId), isNull);
+    });
+
+    test('with a foreground gate, the whole run holds it and lets go at '
+        'the end, so plain Translate keeps going out of focus', () async {
+      final gate = RecordingForegroundGate();
+      final run = TranslationRun(
+        dao: db.spineDao,
+        workId: workId,
+        units: units(['One.', 'Two.']),
+        target: 'de',
+        steps: [TranslationStep(lang: 'de', open: () async => translator('de'))],
+        foreground: gate,
+        title: 'A',
+      );
+
+      await run.start();
+
+      expect(gate.events.first, 'start:A');
+      expect(gate.events.last, 'finished');
+      expect(run.state.phase, TranslationJobPhase.done);
+    });
+
+    test('a gate that refuses to start: the translation runs anyway and '
+        'nothing is finished that never started', () async {
+      final gate = ThrowingStartGate();
+      final run = TranslationRun(
+        dao: db.spineDao,
+        workId: workId,
+        units: units(['One.']),
+        target: 'de',
+        steps: [TranslationStep(lang: 'de', open: () async => translator('de'))],
+        foreground: gate,
+        title: 'A',
+      );
+
+      await run.start();
+
+      expect(run.state.phase, TranslationJobPhase.done);
+      expect(gate.events, isNot(contains('finished')));
+    });
+
+    test('a broken model still lets go of the hold', () async {
+      final gate = RecordingForegroundGate();
+      final run = TranslationRun(
+        dao: db.spineDao,
+        workId: workId,
+        units: units(['One.']),
+        target: 'de',
+        steps: [TranslationStep(lang: 'de', open: () async => null)],
+        foreground: gate,
+        title: 'A',
+      );
+
+      await run.start();
+
+      expect(run.state.phase, TranslationJobPhase.failed);
+      expect(gate.events.last, 'finished');
     });
 
     test('via English: pass 1 writes English, pass 2 translates the '

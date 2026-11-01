@@ -14,6 +14,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 
 import '../../db/database.dart';
+import '../../services/host_activity.dart';
 import 'share_intake.dart';
 import 'share_source.dart';
 
@@ -76,7 +77,8 @@ class ShareQueue extends ChangeNotifier {
       required this.source,
       required this.activeProfileId,
       this.writesReady,
-      void Function(String path)? discard})
+      void Function(String path)? discard,
+      this.hostResumed = appResumed})
       : _discard = discard ?? _deleteFile;
 
   final AppDatabase db;
@@ -89,6 +91,10 @@ class ShareQueue extends ChangeNotifier {
   final Future<void>? writesReady;
 
   final void Function(String path) _discard;
+
+  /// The app coming to the front: when the share channel has no activity
+  /// behind it yet (a start with no screen), the first pull waits for it.
+  final Future<void> Function() hostResumed;
 
   static const _key = 'share_pending';
 
@@ -138,19 +144,23 @@ class ShareQueue extends ChangeNotifier {
           .write(_key, jsonEncode([for (final p in all) p.toJson()]));
 
   /// Takes what waits on the platform side, then clears share copies no
-  /// waiting share still needs.
+  /// waiting share still needs. Started with no screen (see
+  /// [onceHostAttached]), it waits for the app to open first: the shares
+  /// stay on the platform side until then, so none is lost.
   Future<void> start() async {
     await writesReady;
     source.onArrival = () => unawaited(_pull());
-    await _pull();
+    await onceHostAttached(_pull, resumed: hostResumed);
     await purgeMissingProfiles();
-    await _serial(() async {
-      final keep = {
-        for (final p in await _read())
-          for (final f in p.payload.files) f.path,
-      };
-      await source.sweep(keep);
-    });
+    await onceHostAttached(
+        () => _serial(() async {
+              final keep = {
+                for (final p in await _read())
+                  for (final f in p.payload.files) f.path,
+              };
+              await source.sweep(keep);
+            }),
+        resumed: hostResumed);
   }
 
   Future<void> _pull() => _serial(() async {

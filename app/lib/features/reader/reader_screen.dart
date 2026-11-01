@@ -292,6 +292,14 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// Dedupes [_followAlongScroll] so it only calls `ensureVisible` once
   /// per segment the cursor enters, not once per rebuild.
   int _lastFollowedSegment = -1;
+
+  /// The lit word on Follow along, so the page can keep its line in view
+  /// inside a long segment ([_keepCursorWordInView]).
+  final GlobalKey _cursorWordKey = GlobalKey();
+
+  /// True while the page is moving itself to follow; a check in the
+  /// meantime would restart the motion every frame.
+  bool _followScrolling = false;
   bool _playing = false;
   double _wpm = 300;
   Timer? _timer;
@@ -436,7 +444,8 @@ class _ReaderScreenState extends State<ReaderScreen>
 
   /// Whisper's per-word stamps, `[word, t0, t1]` by DB segment idx, for
   /// the word-by-word motion the transcript view had (1.5.8). Empty for a
-  /// work without them; the word then moves evenly across its segment.
+  /// work without them; the word then moves through its segment by length
+  /// ([tokenStartTimes]).
   Map<int, List<List<Object>>> _wordTimings = const {};
 
   /// Polls the playhead every frame while following a playing work. The
@@ -967,50 +976,10 @@ class _ReaderScreenState extends State<ReaderScreen>
     );
   }
 
-  /// [_original] with each sentence replaced by its stored translation
-  /// (the original where there is none yet), and where each translated
-  /// sentence starts. Starts are counted by the tokenizer over each
-  /// prefix, the same authority `core.splitSentences` trusts.
-  (List<core.Segment>, Map<int, List<int>>) _translatedProjection() {
-    final blocks = <core.Segment>[];
-    final starts = <int, List<int>>{};
-    for (var bp = 0; bp < _original.length; bp++) {
-      final b = _original[bp];
-      final sentences = b.kind == core.SegmentKind.prose ||
-              b.kind == core.SegmentKind.heading
-          ? core.splitSentences(b.text)
-          : const <core.Sentence>[];
-      if (sentences.isEmpty) {
-        blocks.add(b);
-        continue;
-      }
-      final texts = [
-        for (var i = 0; i < sentences.length; i++)
-          translatedTextFor(
-                  stored: _translatedSentences,
-                  segIdx: b.idx,
-                  sentenceIdx: i,
-                  currentSourceText: sentences[i].text) ??
-              sentences[i].text
-      ];
-      starts[bp] = [
-        for (var i = 0; i < texts.length; i++)
-          i == 0
-              ? 0
-              : core
-                  .tokenizeDocument([
-                    core.Segment(
-                        idx: 0,
-                        kind: core.SegmentKind.prose,
-                        text: texts.sublist(0, i).join(' '))
-                  ])
-                  .words
-                  .length
-      ];
-      blocks.add(core.Segment(idx: b.idx, kind: b.kind, text: texts.join(' ')));
-    }
-    return (blocks, starts);
-  }
+  /// [_original] with each sentence replaced by its stored translation,
+  /// and where each translated sentence starts ([translatedProjection]).
+  (List<core.Segment>, Map<int, List<int>>) _translatedProjection() =>
+      translatedProjection(_original, _translatedSentences);
 
   /// Re-reads [_blocks] for the current choices, putting the cursor at
   /// the start of the same sentence in the new projection.
@@ -2033,6 +2002,8 @@ class _ReaderScreenState extends State<ReaderScreen>
         for (final leg in route.legs)
           TranslationStep(lang: leg.target, open: () => service.open(leg.spec)),
       ],
+      foreground: service.foreground,
+      title: widget.work.title,
     );
     run.addListener(_onTranslationProgress);
     setState(() {
@@ -3398,8 +3369,11 @@ class _ReaderScreenState extends State<ReaderScreen>
     // already advancing under _play()/_step() exactly as RSVP drives it —
     // this is the only piece RSVP never needed: keeping the viewport
     // following it (the old transcript view's ensureVisible idiom).
-    WidgetsBinding.instance.addPostFrameCallback(
-        (_) => _followAlongScroll(cursorAt(doc, _wordIdx).segment));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!_followAlongScroll(cursorAt(doc, _wordIdx).segment)) {
+        _keepCursorWordInView();
+      }
+    });
     _litSentence = _computeLitSentence(doc);
     // The print measure (proposal-2 §12): on wide screens the page sets as
     // a centered column rather than sprawling wall to wall — 680dp unless
@@ -3519,12 +3493,14 @@ class _ReaderScreenState extends State<ReaderScreen>
   /// to, so the page is rebuilt around it instead ([_recenterGen]) — the
   /// difference between a catch-up that works and one that silently
   /// doesn't.
-  void _followAlongScroll(int segment) {
+  ///
+  /// True when it moved the page.
+  bool _followAlongScroll(int segment) {
     if (!(_playing || _speaking || _followingAudio) ||
         _mode == ReaderMode.rsvp) {
-      return;
+      return false;
     }
-    if (segment == _lastFollowedSegment) return;
+    if (segment == _lastFollowedSegment) return false;
     _lastFollowedSegment = segment;
     final ctx = _segKeys[segment]?.currentContext;
     if (ctx == null) {
@@ -3534,10 +3510,42 @@ class _ReaderScreenState extends State<ReaderScreen>
           _recenterGen++;
         });
       }
+      return true;
+    }
+    _followScrollTo(ctx);
+    return true;
+  }
+
+  void _followScrollTo(BuildContext ctx) {
+    _followScrolling = true;
+    Scrollable.ensureVisible(ctx,
+            alignment: 0.3, duration: const Duration(milliseconds: 300))
+        .whenComplete(() => _followScrolling = false);
+  }
+
+  /// The old transcript page's motion inside a segment: a segment can run
+  /// far past the screen (a long whisper segment, an article paragraph),
+  /// and scrolling only when a new one starts left the lit word below the
+  /// fold. When the lit word leaves the band between a tenth and three
+  /// quarters of the page, its line glides back to a third of the way
+  /// down, the same place a new segment lands. Within the band nothing
+  /// moves, so the page holds still while the eyes read down it.
+  void _keepCursorWordInView() {
+    if (_followScrolling ||
+        !(_playing || _speaking || _followingAudio) ||
+        _mode != ReaderMode.scroll) {
       return;
     }
-    Scrollable.ensureVisible(ctx,
-        alignment: 0.3, duration: const Duration(milliseconds: 300));
+    final ctx = _cursorWordKey.currentContext;
+    if (ctx == null) return;
+    final word = ctx.findRenderObject();
+    final scrollable = Scrollable.maybeOf(ctx);
+    final view = scrollable?.context.findRenderObject();
+    if (word is! RenderBox || view is! RenderBox || !word.attached) return;
+    final top = word.localToGlobal(Offset.zero, ancestor: view).dy;
+    final height = view.size.height;
+    if (top >= height * 0.1 && top + word.size.height <= height * 0.75) return;
+    _followScrollTo(ctx);
   }
 
   // ───── Lines (Campaign 9 Phase 6: "a third way to read") ─────
@@ -3732,9 +3740,8 @@ class _ReaderScreenState extends State<ReaderScreen>
       runSpacing: 0,
       // Always ragged-right (1.6.0). A per-word Wrap can only "justify"
       // by spreading each line's words across the whole measure, the last
-      // line included: wide, uneven gaps that made the page hard to read
-      // and no different in use from Line. Justified text is Line's, where
-      // Flutter's own justification leaves the last line alone.
+      // line included: wide, uneven gaps that made the page hard to read.
+      // No mode justifies; the owner ruled stretched spacing out.
       alignment: WrapAlignment.start,
       // The drop-cap word stands taller than its run; bottom-aligning keeps
       // the rest of the line sitting on (near) its baseline.
@@ -3850,7 +3857,7 @@ class _ReaderScreenState extends State<ReaderScreen>
         : Text(doc.words[w],
             key: current ? const Key('cursor-word') : null, style: style);
     if (!current && !inLit) return child;
-    return CustomPaint(
+    final band = CustomPaint(
       key: current ? null : const Key('sentence-lit'),
       painter: WordBandPainter(
           color: current ? scheme.tertiary : scheme.tertiaryContainer,
@@ -3858,6 +3865,7 @@ class _ReaderScreenState extends State<ReaderScreen>
           radius: current ? 4 : 0),
       child: child,
     );
+    return current ? KeyedSubtree(key: _cursorWordKey, child: band) : band;
   }
 
   /// The width of a space in [style] at the reader's text scale: the gap

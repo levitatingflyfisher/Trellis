@@ -55,7 +55,16 @@ Map<String, Object> autoDownloadRequest() => const {
       'charging': false,
     };
 
-class ChannelFeedCheckScheduler implements FeedCheckScheduler, NetworkMeter {
+/// Both, or it waits: the one place the two conditions are spelled out
+/// for the system. Battery-low never applies, since charging is required.
+Map<String, Object> makeAheadRequest() => const {
+      'unmeteredOnly': true,
+      'batteryNotLow': false,
+      'charging': true,
+    };
+
+class ChannelFeedCheckScheduler
+    implements FeedCheckScheduler, NetworkMeter, ChargingMeter {
   const ChannelFeedCheckScheduler();
 
   @override
@@ -72,6 +81,21 @@ class ChannelFeedCheckScheduler implements FeedCheckScheduler, NetworkMeter {
       return true;
     }
   }
+
+  /// When it cannot say, the phone counts as not charging, the side that
+  /// makes no heavy work start.
+  @override
+  Future<bool> isCharging() async {
+    try {
+      return await _schedulerChannel.invokeMethod<bool>('isCharging') ?? false;
+    } on Exception {
+      return false;
+    }
+  }
+
+  @override
+  Future<void> requestMakeAhead() => _schedulerChannel.invokeMethod<void>(
+      'requestMakeAhead', makeAheadRequest());
 
   @override
   Future<void> schedulePeriodic(FeedCheckConstraints c,

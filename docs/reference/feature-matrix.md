@@ -53,7 +53,7 @@ land, entries gain a `✅ shipped` mark; until then this is the plan of record.
 - Beyond both donors (Campaign 5, ADR-0011, the Inoreader/Miniflux lesson) — per-feed rules: skip / mark-read-on-arrival / auto-keep, matched on title or description (contains/not-contains, case-insensitive), evaluated in order at ingest, before an item ever becomes a row. Editable from each feed's own settings screen.
 - Beyond both donors (Campaign 5, ADR-0011) — cross-feed dedup: a canonical-URL match (after tracker-parameter stripping) or an exact-normalized title within 48h hides the younger copy of a story syndicated across feeds; never within the same feed (a repost is the author's own choice). Suppressed rows are hidden, never deleted, and un-hide themselves if the canonical row they duplicate is later removed.
 - Beyond both donors (Campaign 5, ADR-0011, the Miniflux lesson) — tracker-parameter stripping: a curated, documented list (utm_*, ad-platform click ids, newsletter send tracking) stripped from stored article links and dedup comparisons; never from feed fetch URLs or episode audio URLs, whose query params can be load-bearing.
-- Latest (the donors' river; "River" was retired as a coined word, and "Inbox" by the naming ruling of ADR-0019): reverse-chronological by publish date only, unread/audio/text filters, read tracking. A permanent archive (ADR-0019, superseding ADR-0003 law 2): nothing decays and nothing is hidden by age; schema v27 un-hid whatever the retired 30-day sweep had hidden, and restoring an older backup does the same. Rows the old sweep had already deleted are gone from the database; a feed that still lists them re-adds them on refresh. Read 60 rows at a time by keyset, with the next page fetched as the list nears its end; a row action re-reads that row, a bulk change re-reads only what is loaded, and a publish-time index keeps the first page fast on a 20k-episode archive. A quiet "New since you last looked" line marks rows published since the profile's previous visit (a cold start or a return from the background, not a tab switch: Latest keeps its pages and place across tabs); no count, no badge. Campaign 5 (ADR-0011) added the triage verbs Keep and Let it pass (swipe or overflow menu — every row now has one; text/article rows had none before), both undoable to the exact prior state; no new "Kept" filter chip exists, by law — kept things live in the library.
+- Latest (the donors' river; "River" was retired as a coined word, and "Inbox" by the naming ruling of ADR-0019): reverse-chronological by publish date only, unread/audio/text filters, read tracking. A permanent archive (ADR-0019, superseding ADR-0003 law 2): nothing decays and nothing is hidden by age; schema v27 un-hid whatever the retired 30-day sweep had hidden, and restoring an older backup does the same. Rows the old sweep had already deleted are gone from the database; a feed that still lists them re-adds them on refresh. Read 60 rows at a time by keyset, with the next page fetched as the list nears its end; a row action re-reads that row, a bulk change re-reads only what is loaded, and a publish-time index keeps the first page fast on a 20k-episode archive. A quiet "New since you last looked" line marks rows published since the profile's previous visit (a cold start or a return from the background, not a tab switch: Latest keeps its pages and place across tabs); no count, no badge. Campaign 5 (ADR-0011) added the triage verbs Keep and Let it pass (in the overflow menu; every row has one; text/article rows had none before), both undoable to the exact prior state; no new "Kept" filter chip exists, by law — kept things live in the library.
 - Episode rows you can tell apart (ADR-0016 step 1): one shared row for Latest and the podcast page. Played rows fade (title in the muted text colour, artwork dimmed; a test pins 4.5:1 contrast in light and dark), a half-heard episode shows a thin bar and "23 min left", every row that knows its length shows it (`itunes:duration` is now parsed at ingest, and the player's measured length still overwrites it), and small worded markers say New, Downloaded, In Queue and Transcript. Per-episode artwork (`itunes:image` on the item) is fetched at ingest for the newest 20 distinct images that differ from the show's, named by URL so a shared image downloads once; older rows fall back to the show's art. "Played" is a recorded fact (`episodes.finished_at_ms`, schema v23): set when playback ends or enters its last 30 s, or by Mark played; Mark unplayed clears it and the saved position. Mark played never promotes the work (ADR-0003 law 2). **Not built**: the Video marker exists but the parser still drops non-audio enclosures, so it never shows. Auto-download landed with ADR-0018; see the Auto-download row.
 - The podcast page (ADR-0016 step 1): a show's own episodes as a place to listen from. Rows play, download (through the one consent dialog) and queue; newest or oldest first, remembered per show; "Play from here" puts this episode and the unplayed ones after it, in the order shown, at the front of the Queue and plays it; "Add unplayed to Queue" appends the rest; "Podcast settings" opens the show's settings. The failing-feed reason and the RFC 5005 "Fetch older episodes" footer stay. The Queue advances on its own only through what the listener put there (and, with "keep finished episodes" on, now moves past the episode that just ended instead of replaying it).
 - Library: pin/delete, progress bars. Corrected: this row previously also claimed "debounced search, sorts, ... rename, ... source lines, feed tiles" — none of that existed; `LibraryScreen` had no search, sort, or filter of any kind, and no rename action, before Campaign 5. What Campaign 5 (ADR-0011) actually built: instant (not debounced) title search, a filter model (type/feed/read-state/pinned, any combination) with saveable, reorderable, deletable named views shown as chips. Sort controls, rename, and per-row feed/source display are still not built — not removed by this campaign, never present.
@@ -206,6 +206,54 @@ separately for that reason. Statuses follow the same convention as above.
   the line with no blip from the resume point). The mini player's synced
   text opens the same view, live. The Queue and Library rows are their
   own widgets and do not offer Read yet.
+- **Make new episodes ahead, for shows you pick** (ADR-0021). A switch on
+  a show's page, off by default. New episodes are translated and voiced
+  ahead so the row's second button plays at once. On Wi-Fi while charging
+  only, at most 3 waiting per show, with a storage limit (2 GB by default)
+  that removes the oldest made-ahead audio first and never touches what
+  you made by tapping or marked Keep. Android only lets this start while
+  the app is open or a job is already running, so a phone left alone with
+  Trellis closed makes nothing. Not on the web.
+- **Listen in the learning language, in one tap, from the list.** An
+  episode's row has a second button beside Play, on every list that
+  shows episodes: Latest, a show's page, the Queue, the Library, History
+  and search results. Play is unchanged and plays the original at once.
+  The second button is the episode in the language being learned, and
+  it is one of three things. Not made yet: a tap makes it (transcribe,
+  translate, speak, save), after the one consent dialog when anything
+  must be downloaded, without leaving the list. Being made: the button
+  shows a ring and how far the stage is, and a tap offers Stop. Ready: a
+  tap plays it. With no learning language chosen the button is a
+  translate glyph and the first tap asks which language. It names the
+  language in full where the row has room and by its two-letter code on
+  a narrow phone; its tooltip and screen-reader label always say the
+  whole sentence ("Listen in French", "Making it in French: translating,
+  40%", "Play in French"). There is no button where the episode cannot
+  be made in that language: no translator from the episode's language,
+  no voice that can be saved, an episode already in that language, a
+  text item, an audiobook, an episode that is itself a made translation,
+  and the whole web tier. One episode is made at a time; a second tap on
+  another row puts that episode in line and says so. The progress
+  belongs to one owner for the whole app (`ListenJobs`), so it is the
+  same on every list and survives leaving the list. A finished episode
+  plays by itself only when the app is in front and nothing else is
+  playing; otherwise the app says it is ready and the button plays it.
+  The episode's page shows the four choices as one group (listen or
+  read, original or the learning language), with the progress, Stop and
+  Change under them. Proven through tests with stand-in engines
+  (`listen_row_button_test.dart`, `listen_wiring_test.dart`,
+  `work_page_four_choices_test.dart`); **not yet run on a real phone**.
+  **Not built**: making picked shows ahead of time.
+  Board-0126: the voice that saves it is the downloaded voice where it
+  speaks the language and is here, else the phone's own text-to-speech
+  voice, so any language the phone speaks and a translator reaches can
+  be kept (Russian and German from English; Japanese once an English to
+  Japanese translator exists). The language dialog names what it leaves
+  out and why, with a button to Android's text-to-speech settings
+  (`listen_languages_test.dart`, `phone_saved_voice_test.dart`,
+  `learning_language_dialog_test.dart`). The browser cannot record its
+  voices, so the web still has none of this: see
+  `docs/reference/tts-voices.md`.
 - ✅ shipped (1.5.3) — **A visible Play in the reader.** One button where
   the thumb rests (a floating button in Scroll and Lines; beside RSVP's
   own Play in RSVP): Listen / Pause for a work with aligned audio, and
@@ -291,11 +339,10 @@ the study crown above. Statuses follow the same convention.
   (`reader_typography_settings_screen.dart`) with live preview: typeface
   (Lora/Nunito — the two faces actually bundled, both C7 cmap-checked;
   never OpenDyslexic, see the honesty fix above), line height, font
-  scale, justification. Applies to the scroll/print reader only — RSVP
-  and the ticker keep their own tuned displays, which never needed this
-  control. **Honest ceiling**: justified text has no hyphenation (the
-  reader's own per-word `Wrap`, not `Text.justify`), so wide gaps can
-  appear on narrow screens or short lines; the settings copy says so.
+  scale. Applies to the scroll/print reader only — RSVP and the ticker
+  keep their own tuned displays, which never needed this control. The
+  justification switch was removed in 1.6.0: it stretched the gaps
+  between words, and the text is always ragged-right now.
 - ✅ shipped — **Parafoveal mode and the ORP anchor fix.** The donor's
   lost third RSVP display (its own name "ticker" was already taken by
   this app's existing classic mode's test vocabulary, so it ships here

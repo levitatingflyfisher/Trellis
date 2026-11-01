@@ -74,6 +74,26 @@ void main() {
       expect(bytes.length - 44, render.durationMs * 2);
     });
 
+    test('a sentence handed at another rate is brought to the file’s '
+        'rate, so it lasts as long as it was said', () async {
+      final wav = File('${dir.path}/out.wav');
+      final render = await renderSpoken(
+          sentences: const [
+            (seg: 0, text: 'Hola a todos.'),
+            (seg: 0, text: 'Adiós.'),
+          ],
+          synth: (t) async => t == 'Adiós.'
+              // 600 ms of sound, at twice the rate.
+              ? SynthResult(samples: Float32List(1200), sampleRate: 2000)
+              : synth(t),
+          wav: wav);
+
+      expect(render.sampleRate, 1000);
+      final last = render.sentences.last;
+      expect(last.endMs - last.startMs, 600);
+      expect(wav.lengthSync() - 44, render.durationMs * 2);
+    });
+
     test('progress is reported, and a cancel stops it and leaves no file',
         () async {
       final wav = File('${dir.path}/out.wav');
@@ -126,6 +146,16 @@ void main() {
         greaterThan((rows[0][2] as int) - (rows[0][1] as int)));
   });
 
+  test('Japanese words take one share each, as the page splits them', () {
+    final rows = estimateWordTimings('今日はカレーです。', 0, 900);
+    expect([for (final r in rows) r[0]], ['今', '日', 'は', 'カレー', 'で', 'す。']);
+    expect(rows.first[1], 0);
+    expect(rows.last[2], 900);
+    for (var i = 1; i < rows.length; i++) {
+      expect(rows[i][1], rows[i - 1][2], reason: 'no gaps between words');
+    }
+  });
+
   group('storing', () {
     late Work original;
     late int feedId;
@@ -150,21 +180,21 @@ void main() {
       original = (await db.spineDao.workById(id))!;
     });
 
-    Future<int> store() async {
+    Future<int> store(
+        {List<({int seg, String text})> sentences = const [
+          (seg: 0, text: 'Hola a todos.'),
+          (seg: 0, text: 'Buenos días.'),
+          (seg: 3, text: 'Adiós.'),
+        ],
+        String lang = 'es'}) async {
       final services = testServices(dir);
       final wav = File('${dir.path}/render.wav');
-      final render = await renderSpoken(
-          sentences: const [
-            (seg: 0, text: 'Hola a todos.'),
-            (seg: 0, text: 'Buenos días.'),
-            (seg: 3, text: 'Adiós.'),
-          ],
-          synth: synth,
-          wav: wav);
+      final render =
+          await renderSpoken(sentences: sentences, synth: synth, wav: wav);
       return storeSpokenEpisode(
           db: db,
           original: original,
-          lang: 'es',
+          lang: lang,
           voice: 'Supertonic M1',
           render: render,
           audio: wav,
@@ -205,6 +235,16 @@ void main() {
       final words = decodeWordTimingBlob(alignments.first.wordTimings!);
       expect([for (final w in words) w[0]],
           ['Hola', 'a', 'todos.', 'Buenos', 'días.']);
+    });
+
+    test('Japanese sentences join with no space after each 。', () async {
+      final id = await store(lang: 'ja', sentences: const [
+        (seg: 0, text: '今日は晴れです。'),
+        (seg: 0, text: '明日は雨です。'),
+      ]);
+
+      final segments = await db.spineDao.segmentsOf(id);
+      expect([for (final s in segments) s.body], ['今日は晴れです。明日は雨です。']);
     });
 
     test('it says on its page that the voice is machine made, and which',

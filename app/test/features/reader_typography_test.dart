@@ -1,3 +1,4 @@
+import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -103,34 +104,17 @@ void main() {
   });
 
   // 1.6.0, owner: Follow along "still sucks with the weird spacing of the
-  // words to fill the page". Justifying a per-word Wrap can only spread
-  // each line's words across the whole measure, the last line too, so
-  // Follow along never does it. Line still justifies, with real text
-  // justification that leaves the last line alone.
+  // words to fill the page". Justifying a per-word Wrap spreads each
+  // line's words across the whole measure, the last line too. No mode
+  // justifies, and an old stored "justified" choice is ignored.
   testWidgets('Follow along never stretches the gaps between words, even '
-      'with Justified on',
-      (tester) async {
+      'for a reader who once chose Justified', (tester) async {
     final (profileId, _) = await seed('Zero One Two Three.');
+    await (db.update(db.profiles)..where((p) => p.id.equals(profileId)))
+        .write(const ProfilesCompanion(
+            readerPrefsJson: Value('{"typography":{"justified":true}}')));
     await openReaderInScroll(tester);
-    var wrap = tester.widget<Wrap>(find.byType(Wrap).first);
-    expect(wrap.alignment, WrapAlignment.start);
-
-    await db.profilesDao.setReaderPrefs(
-        profileId, const ReaderPrefs(typography: ReaderTypography(justified: true)));
-    // Reopen (prefs are loaded once, in _load): back pops straight to the
-    // library screen already showing this title — re-pumping the whole
-    // app here would reuse the Navigator's element and skip its own
-    // initState, so re-enter through the same live tree instead.
-    // Back lands on the work page (1.5.4); its Read reopens the reader.
-    await tester.tap(find.byType(BackButton));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('mode-read')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('mode-toggle')));
-    await tester.pumpAndSettle();
-    await tester.tap(find.byKey(const Key('mode-item-page')));
-    await tester.pumpAndSettle();
-    wrap = tester.widget<Wrap>(find.byType(Wrap).first);
+    final wrap = tester.widget<Wrap>(find.byType(Wrap).first);
     expect(wrap.alignment, WrapAlignment.start);
   });
 

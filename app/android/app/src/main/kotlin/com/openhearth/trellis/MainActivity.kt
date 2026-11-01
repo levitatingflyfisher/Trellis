@@ -22,6 +22,8 @@ class MainActivity : AudioServiceActivity() {
         ShareInbox.attach(flutterEngine.dartExecutor.binaryMessenger, this)
         // The home-screen widget (1.5.5).
         WidgetBridge.attach(flutterEngine, this)
+        // The phone's own voice, saved to a file (board-0126).
+        PhoneVoice.attach(flutterEngine.dartExecutor.binaryMessenger, this)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {

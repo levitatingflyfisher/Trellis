@@ -6,6 +6,11 @@
 /// side at equal weight, and a mode that can't work says why instead of
 /// hiding. The page opens on the mode and language last used for this
 /// work, so coming back is one tap from where it was left.
+///
+/// An episode that can be made in the learning language shows four
+/// choices as one group instead: listen or read, in the original or in
+/// that language. Listening in it is the one tap, the same job as the
+/// second button on the episode's row.
 library;
 
 export '../transcribe/job_cards.dart' show transcribeEstimate;
@@ -158,6 +163,28 @@ class _WorkPageState extends State<WorkPage> {
       if (!_transcribed) _load();
     });
     _actions?.downloader?.addListener(_onDownloads);
+    _jobs?.addListener(_onJobs);
+    _wasReady = _offer?.ready ?? false;
+  }
+
+  ListenJobs? get _jobs => _actions?.listenJobs;
+
+  /// The learning language's choices for this episode; null where there
+  /// are none (a text, an audiobook, the web, or an episode that cannot
+  /// be made in it), and the page is then as it always was.
+  ListenOffer? get _offer => _isAudio && !_isAudiobook
+      ? _jobs?.offerFor(_work, _episode, feedLang: _feed?.language)
+      : null;
+
+  bool _wasReady = false;
+
+  /// A job that just finished wrote a transcript and a translation: the
+  /// page reads again, so Read in that language is there at once.
+  void _onJobs() {
+    if (!mounted) return;
+    final ready = _offer?.ready ?? false;
+    if (ready && !_wasReady) _load();
+    _wasReady = ready;
   }
 
   bool _onDisk(Episode? e) {
@@ -175,6 +202,7 @@ class _WorkPageState extends State<WorkPage> {
   void dispose() {
     _transcriptWrites?.cancel();
     _actions?.downloader?.removeListener(_onDownloads);
+    _jobs?.removeListener(_onJobs);
     super.dispose();
   }
 
@@ -298,12 +326,14 @@ class _WorkPageState extends State<WorkPage> {
   }
 
   /// Why Read can't run here, or null when it can.
-  String? get _readBlocked {
+  String? get _readBlocked => _readBlockedIn(_language.isOriginal);
+
+  String? _readBlockedIn(bool original) {
     if (_isAudiobook) return 'An audiobook has no text to read.';
     if (_isAudio &&
         _transcribed &&
         !_doors.readerDoors.canOpenTranscript &&
-        _language.isOriginal) {
+        original) {
       return 'The transcript needs the player, which isn’t here.';
     }
     return null;
@@ -404,6 +434,12 @@ class _WorkPageState extends State<WorkPage> {
   /// translation also opens Read in it, since reading it is what the tap
   /// asks for. The original just becomes the choice.
   Future<void> _pickLanguage(WorkLanguage l) async {
+    await _chooseLanguage(l);
+    if (!mounted) return;
+    if (!l.isOriginal && _readBlocked == null) await _read();
+  }
+
+  Future<void> _chooseLanguage(WorkLanguage l) async {
     final id = _work.id;
     await _db.spineDao.setReadLang(id, l.tag);
     if (l.isOriginal) {
@@ -414,7 +450,6 @@ class _WorkPageState extends State<WorkPage> {
     }
     if (!mounted) return;
     setState(() => _language = l);
-    if (!l.isOriginal && _readBlocked == null) await _read();
   }
 
   /// Translate opens the reader's Translate sheet, which asks the source
@@ -604,9 +639,21 @@ class _WorkPageState extends State<WorkPage> {
                   children: [
                     _header(context),
                     const SizedBox(height: 16),
-                    _modes(context),
-                    const SizedBox(height: 16),
-                    _languages(context),
+                    // The one tap's job moves while the page is open.
+                    ListenableBuilder(
+                      listenable: _jobs ?? const _Still(),
+                      builder: (context, _) {
+                        final offer = _offer;
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            _modes(context, offer),
+                            const SizedBox(height: 16),
+                            _languages(context, offer),
+                          ],
+                        );
+                      },
+                    ),
                     const SizedBox(height: 8),
                     _visibleActions(context),
                     const Divider(height: 32),
@@ -696,34 +743,72 @@ class _WorkPageState extends State<WorkPage> {
     );
   }
 
-  Widget _modes(BuildContext context) {
+  Widget _modes(BuildContext context, ListenOffer? offer) {
     final theme = Theme.of(context);
-    final listenWhy = _listenBlocked;
-    final readWhy = _readBlocked;
+    final four = offer != null;
+    // In the group of four the first column is always the original,
+    // whatever translation was last read.
+    final listenWhy = four
+        ? (_doors.player == null ? 'Playing isn’t available here.' : null)
+        : _listenBlocked;
+    final readWhy = four ? _readBlockedIn(true) : _readBlocked;
     const watchWhy = 'Video plays as sound for now: Listen plays it.';
-    Widget button(
-      WorkMode mode,
-      IconData icon,
-      String label,
-      String? why,
-      VoidCallback onPressed,
-    ) {
-      final selected = _mode == mode;
+    Widget choice({
+      required Key key,
+      required Widget icon,
+      required String label,
+      String? sub,
+      String? says,
+      bool selected = false,
+      required VoidCallback? onPressed,
+    }) {
       final style = ButtonStyle(
         minimumSize: const WidgetStatePropertyAll(Size.fromHeight(56)),
         padding: const WidgetStatePropertyAll(
-          EdgeInsets.symmetric(horizontal: 8),
+          EdgeInsets.symmetric(horizontal: 8, vertical: 6),
         ),
       );
-      final child = Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Icon(icon),
-          const SizedBox(height: 2),
-          Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
-        ],
+      // Built inside the button, so the small line takes the button's
+      // own colour and reads on the filled one too.
+      Widget child = Builder(
+        builder: (context) => Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            icon,
+            const SizedBox(height: 2),
+            Text(label, maxLines: 1, overflow: TextOverflow.ellipsis),
+            if (sub != null)
+              Text(
+                sub,
+                maxLines: 2,
+                textAlign: TextAlign.center,
+                overflow: TextOverflow.ellipsis,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: DefaultTextStyle.of(context).style.color,
+                ),
+              ),
+          ],
+        ),
       );
-      final action = why == null ? onPressed : null;
+      if (says != null) {
+        // One sentence for the whole button, which names the language.
+        child = Semantics(label: says, excludeSemantics: true, child: child);
+      }
+      final button = selected
+          ? FilledButton(
+              key: key,
+              style: style,
+              onPressed: onPressed,
+              child: child,
+            )
+          // Outlined, not tonal: one filled action per screen
+          // (1.5.9), and the others stay the same size, in reach.
+          : OutlinedButton(
+              key: key,
+              style: style,
+              onPressed: onPressed,
+              child: child,
+            );
       return Expanded(
         child: Semantics(
           key: selected ? const Key('mode-selected') : null,
@@ -731,29 +816,61 @@ class _WorkPageState extends State<WorkPage> {
           button: true,
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 4),
-            child: selected
-                ? FilledButton(
-                    key: Key('mode-${mode.name}'),
-                    style: style,
-                    onPressed: action,
-                    child: child,
-                  )
-                // Outlined, not tonal: one filled action per screen
-                // (1.5.9), and the others stay the same size, in reach.
-                : OutlinedButton(
-                    key: Key('mode-${mode.name}'),
-                    style: style,
-                    onPressed: action,
-                    child: child,
+            child: says == null
+                ? button
+                : Tooltip(
+                    message: says,
+                    excludeFromSemantics: true,
+                    child: button,
                   ),
           ),
         ),
       );
     }
 
+    Widget mode(
+      WorkMode mode,
+      IconData icon,
+      String label,
+      String? why,
+      VoidCallback onPressed, {
+      String? sub,
+    }) => choice(
+      key: Key('mode-${mode.name}'),
+      icon: Icon(icon),
+      label: label,
+      sub: sub,
+      selected: _mode == mode,
+      onPressed: why == null ? onPressed : null,
+    );
+
+    final original = four ? 'Original' : null;
+    final listen = mode(
+      WorkMode.listen,
+      Icons.headphones_outlined,
+      'Listen',
+      listenWhy,
+      four ? () => _inOriginal(_listen) : _listen,
+      sub: original,
+    );
+    final read = mode(
+      WorkMode.read,
+      Icons.chrome_reader_mode_outlined,
+      'Read',
+      readWhy,
+      four ? () => _inOriginal(_read) : _read,
+      sub: original,
+    );
+    final watch = _hasVideo
+        ? mode(WorkMode.watch, Icons.movie_outlined, 'Watch', watchWhy, () {})
+        : null;
+
+    final learning = offer == null ? null : _learning(offer);
     final reasons = [
       if (listenWhy != null) 'Listen: $listenWhy',
       if (readWhy != null) 'Read: $readWhy',
+      if (learning?.readWhy case final why?)
+        'Read in ${learning!.name}: $why',
       if (_hasVideo) 'Watch: $watchWhy',
       if (_isAudio && !_isAudiobook && !_transcribed && readWhy == null)
         'No transcript yet: Read opens the show notes.',
@@ -761,32 +878,54 @@ class _WorkPageState extends State<WorkPage> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Row(
-          children: [
-            button(
-              WorkMode.listen,
-              Icons.headphones_outlined,
-              'Listen',
-              listenWhy,
-              _listen,
-            ),
-            button(
-              WorkMode.read,
-              Icons.chrome_reader_mode_outlined,
-              'Read',
-              readWhy,
-              _read,
-            ),
-            if (_hasVideo)
-              button(
-                WorkMode.watch,
-                Icons.movie_outlined,
-                'Watch',
-                watchWhy,
-                () {},
+        if (offer == null || learning == null)
+          Row(children: [listen, read, ?watch])
+        else ...[
+          Row(
+            children: [
+              listen,
+              choice(
+                key: const Key('listen-in-language'),
+                icon: offer.making
+                    ? SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(
+                            value: offer.fraction, strokeWidth: 2.5),
+                      )
+                    : Icon(offer.waiting
+                        ? Icons.hourglass_empty
+                        : offer.ready
+                            ? Icons.play_circle
+                            : Icons.translate),
+                label: 'Listen',
+                sub: learning.sub,
+                says: offer.label,
+                onPressed: () => _jobs!.tap(context, _work, _episode!,
+                    feedLang: _feed?.language),
               ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Row(
+            children: [
+              read,
+              choice(
+                key: const Key('read-in-language'),
+                icon: const Icon(Icons.chrome_reader_mode_outlined),
+                label: 'Read',
+                sub: learning.sub,
+                says: 'Read in ${learning.name}',
+                onPressed: learning.read,
+              ),
+            ],
+          ),
+          if (watch != null) ...[
+            const SizedBox(height: 8),
+            Row(children: [watch]),
           ],
-        ),
+          _learningStatus(theme, offer),
+        ],
         for (final r in reasons)
           Padding(
             padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
@@ -813,75 +952,121 @@ class _WorkPageState extends State<WorkPage> {
                       )
                     : const SizedBox.shrink(),
           ),
-        // One tap to the episode in the learning language (1.6.0). Not on
-        // an episode that is itself a spoken translation.
-        if (_actions case final a?)
-          if (a.listen != null &&
-              a.services != null &&
-              a.transcriber != null &&
-              _isAudio &&
-              !_isAudiobook &&
-              _episode != null &&
-              !_episode!.guid.startsWith('spoken:'))
-            ListenInLanguageBar(
-              db: _db,
-              chain: a.listen!,
-              work: _work,
-              languages: savableListenLanguages(),
-              downloadsFor: (lang) => listenDownloads(
-                  db: _db,
-                  services: a.services!,
-                  transcriber: a.transcriber!,
-                  work: _work,
-                  episode: _episode!,
-                  lang: lang),
-              onPlay: _playSpoken,
-            ),
       ],
     );
   }
 
-  /// Plays the spoken translation, which is an episode of its own, and
-  /// says where it now lives.
-  Future<void> _playSpoken(int spokenWorkId, {required bool justMade}) async {
-    final spoken = await _db.spineDao.workById(spokenWorkId);
-    final player = _doors.player;
-    if (spoken == null || player == null) return;
-    // The job can run for half an hour. If the listener has left this
-    // page, or is in the middle of something else, it does not cut in:
-    // the episode is there, and the same button now plays it.
-    final elsewhere = player.playing && player.current?.id != spoken.id;
-    // Nor does it try from behind a dark screen or another app: Android
-    // refuses to let playback start there (seen on the emulator), and a
-    // refused start leaves the bar saying it plays when nothing does.
-    final inFront = WidgetsBinding.instance.lifecycleState == null ||
-        WidgetsBinding.instance.lifecycleState == AppLifecycleState.resumed;
-    if (justMade && (!mounted || elsewhere || !inFront)) {
-      if (mounted) {
-        ScaffoldMessenger.of(context)
-          ..hideCurrentSnackBar()
-          ..showSnackBar(SnackBar(
-              content: Text('“${spoken.title}” is ready. It is kept beside '
-                  'the original in this show.')));
-      }
-      return;
+  /// The first column of the four: the original, whatever translation
+  /// was read last.
+  Future<void> _inOriginal(Future<void> Function() go) async {
+    if (!_language.isOriginal) {
+      await _chooseLanguage(const WorkLanguage.original());
+      if (!mounted) return;
     }
-    await player.playWork(spoken);
-    if (!mounted) return;
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(
-          content: Text('Playing “${spoken.title}”. It is kept beside the '
-              'original in this show.')));
+    await go();
   }
 
-  Widget _languages(BuildContext context) {
+  /// The second column of the four: what it is called, and what Read in
+  /// it does. Reading the learning language opens its translation when
+  /// there is one, and otherwise the reader's Translate, which needs a
+  /// transcript.
+  ({String name, String sub, VoidCallback? read, String? readWhy}) _learning(
+    ListenOffer offer,
+  ) {
+    final lang = offer.lang;
+    final name = lang == null ? 'another language' : languageNameOf(lang);
+    final sub = lang == null ? 'Another language' : name;
+    final made = _translations.where((t) => t.tag == lang).toList()
+      // The reader's own sentence-by-sentence translation first.
+      ..sort((a, b) => (a.layer ? 1 : 0) - (b.layer ? 1 : 0));
+    if (made.isNotEmpty) {
+      return (
+        name: name,
+        sub: sub,
+        read: () => _pickLanguage(made.first),
+        readWhy: null,
+      );
+    }
+    if (_translate case final translate?) {
+      return (name: name, sub: sub, read: translate, readWhy: null);
+    }
+    final listenIt = lang == null ? 'Listen' : 'Listen in $name';
+    return (
+      name: name,
+      sub: sub,
+      read: null,
+      readWhy: !_transcribed
+          ? 'A translation needs a transcript first. $listenIt makes both.'
+          : 'This device can’t translate offline. $listenIt makes the '
+                'translation.',
+    );
+  }
+
+  /// Under the four: what the learning language's job is doing, with Stop
+  /// while it runs and Change for the language when it doesn't.
+  Widget _learningStatus(ThemeData theme, ListenOffer offer) {
+    final id = _work.id;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(4, 8, 4, 0),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (offer.making)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 6),
+              child: LinearProgressIndicator(
+                key: const Key('listen-in-language-progress'),
+                value: offer.fraction,
+              ),
+            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  offer.line,
+                  key: const Key('listen-in-language-line'),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: offer.failed
+                        ? theme.colorScheme.error
+                        : theme.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              if (offer.busy)
+                TextButton(
+                  key: const Key('listen-in-language-stop'),
+                  style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                  onPressed: () => _jobs!.stop(id),
+                  child: const Text('Stop'),
+                )
+              else if (offer.lang != null && offer.languages.length > 1)
+                TextButton(
+                  key: const Key('learning-language-change'),
+                  style: TextButton.styleFrom(minimumSize: const Size(48, 48)),
+                  onPressed: () => _jobs!.pickLanguage(
+                      context, offer.languages,
+                      of: (workLang: _work.lang, feedLang: _feed?.language)),
+                  child: const Text('Change'),
+                ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  /// The languages the work can be read in. Beside the group of four it
+  /// holds only the others: the original and the learning language are
+  /// columns of that group, and are not offered twice.
+  Widget _languages(BuildContext context, ListenOffer? offer) {
     final theme = Theme.of(context);
     final translate = _translate;
+    final four = offer != null;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Text('Language', style: theme.textTheme.titleSmall),
+        Text(four ? 'Other languages' : 'Language',
+            style: theme.textTheme.titleSmall),
         const SizedBox(height: 4),
         Wrap(
           spacing: 8,
@@ -889,14 +1074,16 @@ class _WorkPageState extends State<WorkPage> {
           children: [
             // Buttons, not chips: a chip keeps one line and clips a long
             // label at large text ("Original · Engli" at 320dp, 2x).
-            _LanguageButton(
-              key: const Key('lang-original'),
-              label: 'Original · $_originalName',
-              selected: _language.isOriginal,
-              onPressed: () => _pickLanguage(const WorkLanguage.original()),
-            ),
-            for (final t in _translations)
+            if (!four)
               _LanguageButton(
+                key: const Key('lang-original'),
+                label: 'Original · $_originalName',
+                selected: _language.isOriginal,
+                onPressed: () => _pickLanguage(const WorkLanguage.original()),
+              ),
+            for (final t in _translations)
+              if (!four || t.tag != offer.lang)
+                _LanguageButton(
                 key: Key('lang-${t.tag}'),
                 label: languageNameOf(t.tag),
                 selected: _language == t,
@@ -1046,6 +1233,16 @@ class _WorkPageState extends State<WorkPage> {
       ],
     ];
   }
+}
+
+/// Stands in for the one tap's owner where there is none: nothing here
+/// ever changes.
+class _Still implements Listenable {
+  const _Still();
+  @override
+  void addListener(VoidCallback listener) {}
+  @override
+  void removeListener(VoidCallback listener) {}
 }
 
 /// One language in the language row: filled and ticked when chosen. The

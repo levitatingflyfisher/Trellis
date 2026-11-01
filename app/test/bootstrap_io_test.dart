@@ -47,6 +47,14 @@ void main() {
     expect(s.foregroundGate, isA<NoopJobForegroundGate>());
   });
 
+  test('translation holds the same foreground gate as every other job',
+      () {
+    final dir = Directory.systemTemp.createTempSync('trellis-bootstrap');
+    addTearDown(() => dir.deleteSync(recursive: true));
+    final s = servicesFor(dir);
+    expect(s.translation!.foreground, same(s.foregroundGate));
+  });
+
   test('start-up lets go of Recently deleted past 30 days, past a broken '
       'file', () async {
     final dir = Directory.systemTemp.createTempSync('trellis-bootstrap');

@@ -131,48 +131,122 @@ void main() {
       expect(at(18500), 3);
     });
 
-    test('without stamps the word moves evenly across the segment', () {
+    // The owner, 26 Oct: "we lost the perfect word by word karaoke
+    // motion". Without whisper's word times, a long word takes longer to
+    // say than a short one, so the lit word moves by length, not evenly.
+    test('without stamps the word moves across the segment by its length',
+        () {
       final spine = spineWith(const [
         (segmentIdx: 2, tStartMs: 0, tEndMs: 10000),
-        (segmentIdx: 5, tStartMs: 10000, tEndMs: 20000),
+        (segmentIdx: 5, tStartMs: 10000, tEndMs: 22000),
       ]);
+      // "Second" is 6 letters, "two." 3: shares of 7 and 4 of 11 (a gap
+      // counts as one), so "two." starts at 10000 + 12000 * 7 / 11.
       expect(
           wordIndexAtAudioTime(
-              spine: spine, doc: doc, blocks: blocks, audioTimeMs: 15000),
+              spine: spine, doc: doc, blocks: blocks, audioTimeMs: 17500),
+          2,
+          reason: 'evenly, "two." would already be lit at 16000');
+      expect(
+          wordIndexAtAudioTime(
+              spine: spine, doc: doc, blocks: blocks, audioTimeMs: 17700),
           3);
       expect(
           wordIndexAtAudioTime(
               spine: spine,
               doc: doc,
               blocks: blocks,
-              audioTimeMs: 15000,
+              audioTimeMs: 17700,
               wordLevel: false),
           2,
           reason: 'a translation shown in place keeps to the segment');
     });
 
-    test('a stamp count that differs from the tokens maps proportionally',
+    test('token start times without stamps: shares by length, in order',
         () {
       expect(
-          localWordAtAudioTime(
-              audioTimeMs: 2500,
+          tokenStartTimes(
+              tokens: const ['a', 'abcdefgh', '—', 'b'],
+              segStartMs: 1000,
+              segEndMs: 2400,
+              stamps: const []),
+          // weights 2, 9, 1, 2 of 14 over 1400 ms
+          [1000, 1200, 2100, 2200]);
+      expect(
+          tokenStartTimes(
+              tokens: const ['a', 'b'],
+              segStartMs: 500,
+              segEndMs: null,
+              stamps: const []),
+          [500, 500],
+          reason: 'no end: no motion is made up');
+    });
+
+    test('token start times follow whisper by the letters, where the two '
+        'split words differently', () {
+      // whisper says "well-known." as one word; the page shows two.
+      expect(
+          tokenStartTimes(
+              tokens: const ['It', 'is', 'well-', 'known.'],
               segStartMs: 0,
-              segEndMs: 4000,
+              segEndMs: 1000,
               stamps: const [
-                ['a', 0, 1000],
-                ['b', 1000, 2000],
-                ['c', 2000, 3000],
-                ['d', 3000, 4000],
-              ],
-              tokenCount: 8),
-          4);
+                ['It', 0, 100],
+                ['is', 100, 200],
+                ['well-known.', 200, 1100],
+              ]),
+          // "known" starts 4 letters into the 9 of "wellknown".
+          [0, 100, 200, 600]);
+      // The page joins what whisper split: one token takes the first
+      // stamp's start.
+      expect(
+          tokenStartTimes(
+              tokens: const ['Hello', 'cannot', 'go'],
+              segStartMs: 0,
+              segEndMs: 900,
+              stamps: const [
+                ['Hello', 0, 300],
+                ['can', 300, 450],
+                ['not', 450, 600],
+                ['go', 600, 900],
+              ]),
+          [0, 300, 600]);
+      // Equal counts: each token is its own stamp.
+      expect(
+          tokenStartTimes(
+              tokens: const ['a', 'b'],
+              segStartMs: 0,
+              segEndMs: 50,
+              stamps: const [
+                ['a', 10, 20],
+                ['b', 30, 40],
+              ]),
+          [10, 30]);
+    });
+
+    test('the lit word is the last one started', () {
+      const stamps = [
+        ['a', 0, 1000],
+        ['b', 1000, 2000],
+        ['c', 2000, 3000],
+        ['d', 3000, 4000],
+      ];
+      int at(int t) => localWordAtAudioTime(
+          audioTimeMs: t,
+          segStartMs: 0,
+          segEndMs: 4000,
+          stamps: stamps,
+          tokens: const ['a', 'b', 'c', 'd']);
+      expect(at(0), 0);
+      expect(at(2500), 2);
+      expect(at(9999), 3);
       expect(
           localWordAtAudioTime(
               audioTimeMs: 0,
               segStartMs: 0,
               segEndMs: null,
               stamps: const [],
-              tokenCount: 5),
+              tokens: const ['a', 'b', 'c', 'd', 'e']),
           0);
     });
 
@@ -198,7 +272,8 @@ void main() {
       expect(
           audioTimeOfWord(
               spine: spine, doc: doc, blocks: blocks, globalIdx: 1),
-          5000);
+          6000,
+          reason: '"First" takes 6 of the 10 shares, "one." 4');
       expect(
           audioTimeOfWord(
               spine: spineWith(const []), doc: doc, blocks: blocks,

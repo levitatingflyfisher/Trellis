@@ -13,7 +13,7 @@ import 'dart:io';
 
 import 'package:comms_core/comms_core.dart';
 import 'package:drift/drift.dart' show DatabaseConnection;
-import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/foundation.dart' show debugPrint, visibleForTesting;
 import 'package:audio_service/audio_service.dart';
 import 'package:drift/native.dart';
 import 'package:path/path.dart' as p;
@@ -158,12 +158,41 @@ PlaybackSession _playbackSession = const NoPlaybackSession();
 /// which case sound plays with no lock-screen controls (boot_guard.dart).
 PlaybackSession get playbackSession => _playbackSession;
 
+/// Stands in a session where no platform can start one, so a test can
+/// press the real handler's keys through the app's own wiring.
+@visibleForTesting
+set debugPlaybackSession(PlaybackSession? session) =>
+    _playbackSession = session ?? const NoPlaybackSession();
+
 /// Lets the media session read what the headset's keys do (1.6.0), once
 /// there is a database to read them from. Before this, and where the
 /// session never started, the keys do their defaults or nothing.
 void bindHeadsetKeys(Future<HeadsetKeys> Function() read) {
   final session = _playbackSession;
   if (session is TrellisAudioHandler) session.headsetKeys = read;
+}
+
+/// Hands the media session the player that runs the queue (the shell's,
+/// made after the session starts), so the two episode keys do something.
+void bindEpisodeKeys(
+    {required Future<void> Function() next,
+    required Future<void> Function() previous}) {
+  final session = _playbackSession;
+  if (session is! TrellisAudioHandler) return;
+  session
+    ..onNextEpisode = next
+    ..onPreviousEpisode = previous;
+}
+
+/// Lets go of [next] and its pair, unless a newer shell has already bound
+/// its own: on a change of reader the new shell starts before the old one
+/// is disposed.
+void releaseEpisodeKeys(Future<void> Function() next) {
+  final session = _playbackSession;
+  if (session is! TrellisAudioHandler || session.onNextEpisode != next) return;
+  session
+    ..onNextEpisode = null
+    ..onPreviousEpisode = null;
 }
 
 Future<void> initAudioBackground() async {

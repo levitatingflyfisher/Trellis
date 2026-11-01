@@ -97,6 +97,9 @@ class RiverScreen extends StatefulWidget {
   /// nothing can run in the background.
   final FeedCheckSettings? feedCheck;
 
+  /// Opens the Jobs page, where a job's Pause, Try again and Discard are.
+  final VoidCallback onOpenJobs;
+
   const RiverScreen(
       {super.key,
       this.active = true,
@@ -108,6 +111,7 @@ class RiverScreen extends StatefulWidget {
       required this.repository,
       required this.playerController,
       required this.coordinator,
+      required this.onOpenJobs,
       this.downloadCoordinator,
       this.dspCoordinator,
       this.localMlAvailable = true,
@@ -595,7 +599,9 @@ class _RiverScreenState extends State<RiverScreen>
           children: [
             SearchEntry(
                 key: const Key('river-search'), onPressed: _openSearch),
-            TranscribeJobCards(coordinator: widget.coordinator),
+            TranscribeJobLines(
+                coordinator: widget.coordinator,
+                onOpenJobs: widget.onOpenJobs),
             Expanded(
               child: RefreshIndicator(
                 onRefresh: _refresh,
@@ -626,7 +632,9 @@ class _RiverScreenState extends State<RiverScreen>
       children: [
         SearchEntry(
             key: const Key('river-search'), onPressed: _openSearch),
-        TranscribeJobCards(coordinator: widget.coordinator),
+        TranscribeJobLines(
+                coordinator: widget.coordinator,
+                onOpenJobs: widget.onOpenJobs),
         _filterChips(),
         Expanded(
           child: RefreshIndicator(
@@ -692,7 +700,6 @@ class _RiverScreenState extends State<RiverScreen>
 
   Widget _itemTile(List<RiverEntry> visible, int index) {
     final e = visible[index];
-    final theme = Theme.of(context);
     final selecting = _selection.active;
     final isAudio = e.episode.enclosureUrl != null;
     final entry = (work: e.work, episode: e.episode);
@@ -708,6 +715,8 @@ class _RiverScreenState extends State<RiverScreen>
           : () => _openItem(e),
       onPlay: isAudio ? () => _playItem(e) : null,
       player: widget.playerController,
+      second: _actions.listenButton(entry,
+          feedLang: _rowState.feedLangs[e.episode.feedId]),
       onRead: _workDoors.canRead(entry)
           ? () async {
               await _workDoors.readFromRow(context, entry);
@@ -723,9 +732,8 @@ class _RiverScreenState extends State<RiverScreen>
           _RowDownload(
               coordinator: widget.downloadCoordinator!, workId: e.work.id),
       ],
-      // Overflow parity (ergonomic-ux): every row gets the menu, audio or
-      // not — swipe is the fast path, the menu is the reachable-by-anyone
-      // path, and Keep/Let it pass live in both.
+      // Every row gets the menu, audio or not: Keep and Let it pass live
+      // there.
       onMenu: (choice) => switch (choice) {
         'keep' => _keep(e),
         'pass' => _letItPass(e),
@@ -752,40 +760,9 @@ class _RiverScreenState extends State<RiverScreen>
               child: const Text('Mark everything older as played')),
       ]),
     );
-    // Swipe Keep / Let it pass (Campaign 5): confirmDismiss performs the
-    // gesture then always returns false, so the tile springs back showing
-    // its new state — the house idiom (archived rows dim rather than
-    // vanish) applied to triage too. Nothing is ever removed from the
-    // river by a swipe; only tap-to-open already changes what's visible
-    // here, and only via the unread dot.
-    return Dismissible(
-      key: Key('swipe-${e.work.id}'),
-      // A swipe while selecting would Keep or Let pass one row behind the
-      // listener's back.
-      direction:
-          selecting ? DismissDirection.none : DismissDirection.horizontal,
-      background: Container(
-        color: theme.colorScheme.primaryContainer,
-        alignment: Alignment.centerLeft,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: const Icon(Icons.bookmark_add_outlined),
-      ),
-      secondaryBackground: Container(
-        color: theme.colorScheme.surfaceContainerHighest,
-        alignment: Alignment.centerRight,
-        padding: const EdgeInsets.symmetric(horizontal: 20),
-        child: const Icon(Icons.done),
-      ),
-      confirmDismiss: (direction) async {
-        if (direction == DismissDirection.startToEnd) {
-          await _keep(e);
-        } else {
-          await _letItPass(e);
-        }
-        return false;
-      },
-      child: row,
-    );
+    // No swipe on a row (owner: "easy to do that when trying to
+    // scroll fast"). Keep and Let it pass are in the row's menu.
+    return KeyedSubtree(key: Key('latest-row-${e.work.id}'), child: row);
   }
 
 }

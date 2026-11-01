@@ -3140,7 +3140,8 @@ class FeedsDao extends DatabaseAccessor<AppDatabase> with _$FeedsDaoMixin {
   Future<void> clearAutoDownloadConsent() async {
     await update(feeds).write(const FeedsCompanion(autoDownload: Value(false)));
     await customStatement(
-        "DELETE FROM device_settings WHERE key LIKE 'auto_download_after:%'");
+        "DELETE FROM device_settings WHERE key LIKE 'auto_download_after:%' "
+        "OR key = 'make_ahead'");
   }
 
   /// Every reader's opted-in shows: auto-download belongs to the device,

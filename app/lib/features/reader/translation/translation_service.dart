@@ -8,6 +8,7 @@ library;
 import 'package:ml_runtime/ml_runtime.dart';
 
 import '../../models/model_store.dart';
+import '../../transcribe/foreground_gate.dart';
 import 'translation_route.dart' as route_plan;
 import 'translation_route.dart' show TranslationRoute;
 import 'translator.dart';
@@ -21,11 +22,16 @@ class TranslationService {
   /// mis-registered spec). [DeviceServices.translatorFor] in the app.
   final Future<SentenceTranslator?> Function(ModelSpec spec) openSpec;
 
+  /// The foreground service every job shares; a run the reader starts
+  /// holds it, so it goes on out of focus.
+  final JobForegroundGate? foreground;
+
   TranslationService({
     required this.registry,
     required this.tier,
     required this.store,
     required this.openSpec,
+    this.foreground,
   });
 
   Future<Map<String, int>> _missing() async => {

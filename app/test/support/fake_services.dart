@@ -13,6 +13,8 @@ import 'package:jobs_core/jobs_core.dart' show JobStore;
 import 'package:ml_runtime/ml_runtime.dart';
 import 'package:trellis/features/dsp/dsp_encoder.dart';
 import 'package:trellis/features/models/model_store.dart';
+import 'package:trellis/features/reader/speech/phone_voice.dart';
+import 'package:trellis/features/reader/speech/wav.dart';
 import 'package:trellis/features/transcribe/audio_fetcher.dart';
 import 'package:trellis/features/transcribe/decoder.dart';
 import 'package:trellis/features/transcribe/foreground_gate.dart';
@@ -254,6 +256,15 @@ class FakeDecoder implements Decoder {
 class RecordingForegroundGate implements JobForegroundGate {
   final List<String> events = [];
 
+  /// False is Android refusing a start from behind a dark screen.
+  bool allowStart = true;
+
+  @override
+  Future<bool> tryJobStarted(String title, String text) async {
+    events.add(allowStart ? 'start:$title' : 'refused:$title');
+    return allowStart;
+  }
+
   @override
   Future<void> jobStarted(String title, String text) async {
     events.add('start:$title');
@@ -308,10 +319,13 @@ DeviceServices testServices(
   TranscribeExecutor? executor,
   bool localMlAvailable = true,
   DeviceTier tier = DeviceTier.t1,
+  PhoneVoiceCache? phoneVoices,
+  ModelRegistry? registry,
 }) => DeviceServices(
   supportDir: dir,
   modelStore: modelStore ?? FakeModelStore(),
-  registry: ModelRegistry.starter(),
+  registry: registry ?? ModelRegistry.starter(),
+  phoneVoices: phoneVoices,
   decoder: decoder ?? FakeDecoder(),
   audioFetcher: audioFetcher ?? FakeAudioFetcher(),
   executor: executor ?? InlineTranscribeExecutor(),
@@ -333,4 +347,58 @@ class RecordingExecutor implements TranscribeExecutor {
     specs.add(spec);
     return _inner.start(spec, store);
   }
+}
+
+/// The phone's text-to-speech, with a voice for each of [langs]: each
+/// sentence it is asked to save is written as a short WAV at [rate], and
+/// remembered.
+class FakePhoneSpeechSaver implements PhoneSpeechSaver {
+  FakePhoneSpeechSaver(Iterable<String> langs,
+      {this.engine = 'Speech Services by Google', this.rate = 24000})
+      : langs = {...langs};
+
+  Set<String> langs;
+  final String? engine;
+  final int rate;
+  final said = <(String text, String lang, String? voice)>[];
+  int settingsOpened = 0;
+
+  /// A sentence containing this is refused by the engine.
+  String? refuse;
+
+  @override
+  Future<PhoneVoices?> voices() async => PhoneVoices(engine: engine, voices: [
+        for (final l in langs) SystemVoice(name: '$l-x-local', locale: l),
+      ]);
+
+  @override
+  Future<void> sayToFile(String text,
+      {required String lang, String? voice, required String path}) async {
+    if (!langs.contains(lang)) throw StateError('no $lang voice');
+    if (refuse != null && text.contains(refuse!)) {
+      throw StateError('refused');
+    }
+    said.add((text, lang, voice));
+    // A tenth of a second of sound for each character.
+    final samples = Float32List(text.length * rate ~/ 10)
+      ..fillRange(0, 10, 0.25);
+    File(path).writeAsBytesSync(wavBytes(samples, rate));
+  }
+
+  @override
+  Future<bool> openSettings() async {
+    settingsOpened++;
+    return true;
+  }
+}
+
+/// A [PhoneVoiceCache] that already knows the phone has a voice for each
+/// of [langs].
+PhoneVoiceCache phoneVoicesFor(Iterable<String> langs,
+    {String? engine = 'Speech Services by Google'}) {
+  final saver = FakePhoneSpeechSaver(langs, engine: engine);
+  return PhoneVoiceCache(saver,
+      known: PhoneVoices(engine: engine, voices: [
+        for (final l in langs) SystemVoice(name: '$l-x-local', locale: l),
+      ]));
 }

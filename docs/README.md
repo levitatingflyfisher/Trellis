@@ -5,6 +5,9 @@
 - **Tutorials** — none yet (first: "study a podcast in your target language").
 - **How-to** — [run-the-skein.md](how-to/run-the-skein.md): running the
   Skein archive daemon beside the app.
+  [convert-a-translation-model.md](how-to/convert-a-translation-model.md):
+  turning an upstream Marian model into the app's int8 ONNX pair, the
+  recipe ADR-0014's “converted by Trellis” rung requires.
 - **Reference** — [feature-matrix.md](reference/feature-matrix.md): every
   donor feature and where it lives here (the "nothing lost" ledger).
   [tts-voices.md](reference/tts-voices.md): the verbatim licensing record
@@ -22,7 +25,8 @@
   DSP, 0013 audiobooks are a door, 0014 Babel widens, 0015 honest feeds +
   the media-session gap, 0016 episodes you can tell apart, 0017 the
   fundamentals pass, 0018 background refresh, 0019 Latest is a permanent
-  archive, 0020 translation runs on device, verified. (This list was
+  archive, 0020 translation runs on device, verified, 0021 make ahead,
+  for shows the person picks. (This list was
   stale by six entries before Campaign 9 caught it, and by four again
   before 1.5.9. Keep it current going forward rather than letting it
   drift again.)

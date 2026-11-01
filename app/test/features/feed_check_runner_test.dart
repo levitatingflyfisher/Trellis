@@ -7,6 +7,7 @@ import 'package:trellis/features/feeds/auto_download.dart';
 import 'package:trellis/features/feeds/background/feed_check_runner.dart';
 import 'package:trellis/features/feeds/background/feed_check_settings.dart';
 import 'package:trellis/features/feeds/feeds_repository.dart';
+import 'package:trellis/features/listen/make_ahead.dart';
 
 import '../support/scripted_fetcher.dart';
 import 'feed_check_settings_test.dart' show FakeScheduler;
@@ -129,6 +130,68 @@ void main() {
     expect(started, [900],
         reason: 'only what was asked for by hand; the show’s new episode '
             'waits until checks are back on');
+  });
+
+  group('make ahead', () {
+    Future<int> showWith(String guid) async {
+      final ada = await db.profilesDao.create('Ada');
+      final id = await db.feedsDao
+          .insertFeed(profileId: ada, url: 'https://a.test/feed');
+      listings['https://a.test/feed'] = [guid];
+      return id;
+    }
+
+    Future<void> switchOn(int feedId, int after) =>
+        db.deviceSettingsDao.write(
+            makeAheadKey,
+            AheadBook(shows: {feedId: (after: after, agreedLang: null)})
+                .encode());
+
+    test('LAW: a check asks for no pass when no show is switched on',
+        () async {
+      await showWith('old');
+      final r = runner();
+      await r.run(FeedCheckTask.check);
+      listings['https://a.test/feed'] = ['old', 'new'];
+      await r.run(FeedCheckTask.check);
+      expect(scheduler.calls, isEmpty);
+    });
+
+    test('a check that brought something new into a switched-on show asks '
+        'for a pass; background checks off asks for none', () async {
+      final id = await showWith('old');
+      final r = runner();
+      await r.run(FeedCheckTask.check);
+      final mark = (await db.feedsDao.episodesOfFeed(id)).single.work.id;
+      await switchOn(id, mark);
+      await r.requestAutoDownloadIfPending();
+      expect(scheduler.calls, isEmpty, reason: 'nothing new yet');
+
+      listings['https://a.test/feed'] = ['old', 'new'];
+      await r.run(FeedCheckTask.check);
+      expect(scheduler.calls, ['make-ahead']);
+
+      scheduler.calls.clear();
+      await db.deviceSettingsDao.write(FeedCheckSettings.backgroundKey, 'off');
+      await r.requestAutoDownloadIfPending();
+      expect(scheduler.calls, isEmpty);
+    });
+
+    test('the pass runs the app’s line where there is one, and in the '
+        'worker’s engine simply reports done', () async {
+      var passes = 0;
+      final repo = FeedsRepository(db: db, fetcher: fetcher);
+      final inApp = FeedCheckRunner(
+          db: db,
+          repository: repo,
+          scheduler: scheduler,
+          onDisk: (_, _) => false,
+          startDownload: (AutoDownloadPick p) async => null,
+          makeAhead: () async => passes++);
+      expect(await inApp.run(FeedCheckTask.makeAhead), isTrue);
+      expect(passes, 1);
+      expect(await runner().run(FeedCheckTask.makeAhead), isTrue);
+    });
   });
 
   test('asked to stop, a check leaves the remaining readers for next time',

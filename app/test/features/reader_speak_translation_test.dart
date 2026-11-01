@@ -237,6 +237,17 @@ void main() {
     expect(tts.spokenVoices, [null, ruVoiceB]);
   });
 
+  testWidgets('the voices sheet says the voice picked is also the one that '
+      'makes kept audio (board-0126)', (tester) async {
+    await pumpReader(tester);
+    await openVoices(tester);
+    expect(find.byKey(const Key('voices-also-saves')), findsOneWidget);
+    expect(
+        tester.widget<Text>(find.byKey(const Key('voices-also-saves'))).data,
+        'Audio Trellis makes and keeps in a language uses the voice picked '
+        'for it here.');
+  });
+
   group('no voice for the language shows a plain message, not silence', () {
     testWidgets('Translation only, no Russian voice on the phone',
         (tester) async {

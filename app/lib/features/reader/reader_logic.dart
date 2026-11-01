@@ -102,13 +102,13 @@ int? wordIndexAtAudioTime({
       segStartMs: aligned.tStartMs,
       segEndMs: aligned.tEndMs,
       stamps: wordTimings[pos.segmentIdx] ?? const [],
-      tokenCount: end - starts[blockPos]);
+      tokens: doc.words.sublist(starts[blockPos], end));
   return globalWordIndex(doc, blockPos, local);
 }
 
-/// The inverse of [wordIndexAtAudioTime], for a tapped word: its own
-/// stamp's start, else its even share of its segment's span, else the
-/// segment's start. Null when the word's segment has no alignment.
+/// The inverse of [wordIndexAtAudioTime], for a tapped word: the time
+/// [tokenStartTimes] gives it, or the segment's start for a translation
+/// shown in place. Null when the word's segment has no alignment.
 int? audioTimeOfWord({
   required Spine spine,
   required TokenizedDocument doc,
@@ -130,43 +130,113 @@ int? audioTimeOfWord({
   final end = c.segment + 1 < starts.length
       ? starts[c.segment + 1]
       : doc.words.length;
-  final n = end - starts[c.segment];
-  if (n <= 1) return aligned.tStartMs;
-  final stamps = wordTimings[segIdx] ?? const [];
-  if (stamps.isNotEmpty) {
-    final i = stamps.length == n ? c.word : c.word * stamps.length ~/ n;
-    return stamps[i.clamp(0, stamps.length - 1)][1] as int;
-  }
-  return aligned.tStartMs +
-      (aligned.tEndMs - aligned.tStartMs) * c.word ~/ n;
+  final times = tokenStartTimes(
+      tokens: doc.words.sublist(starts[c.segment], end),
+      segStartMs: aligned.tStartMs,
+      segEndMs: aligned.tEndMs,
+      stamps: wordTimings[segIdx] ?? const []);
+  return times[c.word.clamp(0, times.length - 1)];
 }
 
-/// Which of a segment's [tokenCount] display words the playhead is on.
-/// With whisper's word [stamps] the last one started leads, as the
-/// transcript view lit it; whisper and the tokenizer can count words
-/// differently (the tokenizer splits "well-known"), so unequal counts map
-/// proportionally. Without stamps the word moves evenly across the
-/// segment's span — still a motion, never a fabricated precision beyond
-/// the segment's own bounds.
+/// Which of a segment's display [tokens] the playhead is on: the last one
+/// started by [tokenStartTimes], as the old transcript view lit whisper's
+/// words.
 int localWordAtAudioTime({
   required int audioTimeMs,
   required int segStartMs,
   required int? segEndMs,
   required List<List<Object>> stamps,
-  required int tokenCount,
+  required List<String> tokens,
 }) {
-  if (tokenCount <= 1) return 0;
-  if (stamps.isNotEmpty) {
-    var lit = 0;
-    for (var i = 0; i < stamps.length; i++) {
-      if ((stamps[i][1] as int) <= audioTimeMs) lit = i;
-    }
-    if (stamps.length == tokenCount) return lit;
-    return (lit * tokenCount ~/ stamps.length).clamp(0, tokenCount - 1);
+  if (tokens.length <= 1) return 0;
+  final times = tokenStartTimes(
+      tokens: tokens,
+      segStartMs: segStartMs,
+      segEndMs: segEndMs,
+      stamps: stamps);
+  // Tokens that share a start (no end to spread over, or a stamp whisper
+  // gave no length) light the first of them, never jump to the last.
+  var lit = 0;
+  for (var i = 1; i < times.length; i++) {
+    if (times[i] <= audioTimeMs && times[i] > times[lit]) lit = i;
   }
-  if (segEndMs == null || segEndMs <= segStartMs) return 0;
-  final frac = (audioTimeMs - segStartMs) / (segEndMs - segStartMs);
-  return (frac * tokenCount).floor().clamp(0, tokenCount - 1);
+  return lit;
+}
+
+final _notSpoken = RegExp(r'[^\p{L}\p{N}]', unicode: true);
+
+/// The letters and digits of [word]: what is said aloud.
+int _spokenLength(String word) => word.replaceAll(_notSpoken, '').length;
+
+/// When each of a segment's display [tokens] starts, ms, never going back.
+///
+/// With whisper's word [stamps] (`[word, t0, t1]` rows), tokens and stamps
+/// are matched by their letters, not by counting words: whisper and the
+/// page's tokenizer split differently ("well-known." is one whisper word
+/// and two tokens; whisper may split "cannot"). A token takes the time of
+/// the point in whisper's words where its first letter falls, read
+/// between that word's start and end.
+///
+/// Without stamps only the segment's own start and end are known. The
+/// segment's time is then spread over its tokens by their length (letters
+/// and digits, plus one for the gap): a long word takes longer to say
+/// than a short one. That is an estimate inside the segment; the segment's
+/// bounds stay exact. With no end, nothing moves.
+List<int> tokenStartTimes({
+  required List<String> tokens,
+  required int segStartMs,
+  required int? segEndMs,
+  required List<List<Object>> stamps,
+}) {
+  final n = tokens.length;
+  if (n == 0) return const [];
+  final lengths = [for (final t in tokens) _spokenLength(t)];
+  final tokenLetters = lengths.fold(0, (a, b) => a + b);
+  final stampLengths = [for (final s in stamps) _spokenLength(s[0] as String)];
+  final stampLetters = stampLengths.fold(0, (a, b) => a + b);
+  final out = <int>[];
+
+  if (stamps.isNotEmpty && tokenLetters > 0 && stampLetters > 0) {
+    // The two texts are normally the same letters; where they are not (a
+    // shortened link), each token's place is scaled onto whisper's.
+    final scale = stampLetters / tokenLetters;
+    final stampFrom = <int>[];
+    var sum = 0;
+    for (final l in stampLengths) {
+      stampFrom.add(sum);
+      sum += l;
+    }
+    var at = 0;
+    for (var i = 0; i < n; i++) {
+      final point = at * scale;
+      // The last spoken stamp starting at or before this point.
+      var k = stampLengths.indexWhere((l) => l > 0);
+      for (var j = k + 1; j < stamps.length; j++) {
+        if (stampLengths[j] > 0 && stampFrom[j] <= point) k = j;
+      }
+      final t0 = stamps[k][1] as int, t1 = stamps[k][2] as int;
+      final within =
+          ((point - stampFrom[k]) / stampLengths[k]).clamp(0.0, 1.0);
+      out.add(t0 + ((t1 - t0) * within).round());
+      at += lengths[i];
+    }
+  } else {
+    final end = segEndMs;
+    if (end == null || end <= segStartMs) {
+      return List.filled(n, segStartMs);
+    }
+    final weights = [for (final l in lengths) l + 1];
+    final total = weights.fold(0, (a, b) => a + b);
+    var used = 0;
+    for (var i = 0; i < n; i++) {
+      out.add(segStartMs + ((end - segStartMs) * used / total).round());
+      used += weights[i];
+    }
+  }
+  for (var i = 1; i < n; i++) {
+    if (out[i] < out[i - 1]) out[i] = out[i - 1];
+  }
+  return out;
 }
 
 // ───── Campaign 4 Phase 2: the lost priming visuals ─────

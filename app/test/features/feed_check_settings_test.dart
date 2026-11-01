@@ -1,4 +1,7 @@
+import 'dart:async';
+
 import 'package:drift/native.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:trellis/db/database.dart';
 import 'package:trellis/features/feeds/background/feed_check_settings.dart';
@@ -9,15 +12,23 @@ class FakeScheduler implements FeedCheckScheduler {
   final bool available;
   final List<String> calls = [];
 
+  /// False while Android runs the app with no screen: the scheduler's
+  /// channel lives on the activity.
+  bool attached = true;
+
   @override
   Future<void> schedulePeriodic(FeedCheckConstraints constraints,
-          {required bool replace}) async =>
-      calls.add('schedule unmetered=${constraints.unmeteredOnly} '
-          'replace=$replace');
+      {required bool replace}) async {
+    if (!attached) throw MissingPluginException('schedulePeriodic');
+    calls.add('schedule unmetered=${constraints.unmeteredOnly} '
+        'replace=$replace');
+  }
   @override
   Future<void> cancelPeriodic() async => calls.add('cancel');
   @override
   Future<void> requestAutoDownload() async => calls.add('auto-download');
+  @override
+  Future<void> requestMakeAhead() async => calls.add('make-ahead');
   @override
   Future<void> cancelAutoDownload() async => calls.add('cancel-auto');
 }
@@ -54,6 +65,32 @@ void main() {
     await settings.applyAtLaunch();
     expect(settings.background, isTrue);
     expect(settings.wifiOnly, isTrue);
+    expect(s.calls, ['schedule unmetered=true replace=false']);
+  });
+
+  // Seen on the emulator: a start with no screen (media resumption after
+  // a boot) ran applyAtLaunch and schedulePeriodic failed with
+  // MissingPluginException. It waits for the app to open instead.
+  test('a launch with no screen schedules once the app opens, without an '
+      'error', () async {
+    final s = FakeScheduler()..attached = false;
+    final opened = StreamController<void>.broadcast();
+    final settings = FeedCheckSettings(db, s,
+        hostResumed: () => opened.stream.first);
+    Object? failed;
+    var done = false;
+    unawaited(settings.applyAtLaunch().then((_) => done = true,
+        onError: (Object e) => failed = e));
+    await pumpEventQueue();
+    expect(failed, isNull);
+    expect(done, isFalse);
+    expect(s.calls, isEmpty);
+
+    s.attached = true;
+    opened.add(null);
+    await pumpEventQueue();
+    expect(failed, isNull);
+    expect(done, isTrue);
     expect(s.calls, ['schedule unmetered=true replace=false']);
   });
 

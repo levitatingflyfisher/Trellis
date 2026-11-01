@@ -125,7 +125,9 @@ void main() {
         scrollable: list, maxScrolls: 400);
     await tester.pumpAndSettle();
 
-    await tester.drag(find.byKey(Key('swipe-${ids[5]}')), const Offset(500, 0));
+    await tester.tap(find.byKey(Key('menu-${ids[5]}')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Keep'));
     await tester.pumpAndSettle();
 
     expect((await db.spineDao.workById(ids[5]!))!.persistence, 'work');
@@ -266,7 +268,7 @@ void main() {
           scrollable: list, maxScrolls: 50);
       await tester.pump();
       final meta = find.descendant(
-          of: find.byKey(Key('swipe-${ids[1]}')),
+          of: find.byKey(Key('latest-row-${ids[1]}')),
           matching: find.textContaining('min\u00A0read'));
       expect(meta, findsOneWidget,
           reason: 'page two’s sizes survive a re-read that started before '

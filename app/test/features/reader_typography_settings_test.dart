@@ -71,18 +71,17 @@ void main() {
     expect(saved.typography.typeface, ReaderTypeface.nunito);
   });
 
-  testWidgets('the justified toggle is off by default and names its own honesty',
-      (tester) async {
+  // 1.6.0, owner: the stretched spacing "sucks ... so don't do that". No
+  // reading mode justified any more, so a Justified switch changed only
+  // this preview: a setting that promised wide gaps and did nothing.
+  testWidgets('there is no Justified switch, and the preview is '
+      'ragged-right', (tester) async {
     await open(tester);
-    final toggle =
-        tester.widget<SwitchListTile>(find.byKey(const Key('justified-switch')));
-    expect(toggle.value, isFalse);
-    expect(find.textContaining('wide gaps'), findsOneWidget);
-
-    await tester.tap(find.byKey(const Key('justified-switch')));
-    await tester.pump();
-    final saved = await db.profilesDao.readerPrefs(profileId);
-    expect(saved.typography.justified, isTrue);
+    expect(find.byKey(const Key('justified-switch')), findsNothing);
+    expect(find.text('Justified text'), findsNothing);
+    final preview =
+        tester.widget<Text>(find.byKey(const Key('typography-preview')));
+    expect(preview.textAlign ?? TextAlign.start, TextAlign.start);
   });
 
   testWidgets('the paragraph-spacing stepper is 48dp and persists a step up',
@@ -161,6 +160,9 @@ void main() {
     await open(tester);
     await tester.scrollUntilVisible(find.byKey(const Key('about-rsvp')), 200);
     expect(find.textContaining('calls this RSVP'), findsOneWidget);
+    // The list builds lazily: the last line may sit just past the fold.
+    await tester.scrollUntilVisible(
+        find.textContaining('parafoveal preview'), 200);
     expect(find.textContaining('parafoveal preview'), findsOneWidget);
   });
 }

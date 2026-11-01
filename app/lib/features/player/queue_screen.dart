@@ -12,8 +12,7 @@ import '../works/work_row.dart';
 import 'player_controller.dart';
 
 /// The Queue tab: what's queued, in play order, in the same rows as every
-/// other list, with a drag handle to reorder and Remove from Queue at the
-/// end of each row's menu. A tab root, so it has no back arrow; the mini
+/// other list, with a visible Remove and a drag handle on each row. A tab root, so it has no back arrow; the mini
 /// bar's queue button switches to it.
 class QueueScreen extends StatefulWidget {
   final AppDatabase db;
@@ -56,6 +55,8 @@ class _QueueScreenState extends State<QueueScreen> {
   int? _playingId;
   int _queueRevision = 0;
 
+  final _undo = OhUndoController();
+
   late final EpisodeActions _actions = widget.actions ??
       EpisodeActions(
           db: widget.db, profileId: widget.profile.id, player: widget.player);
@@ -78,6 +79,7 @@ class _QueueScreenState extends State<QueueScreen> {
   @override
   void dispose() {
     widget.player?.removeListener(_onPlayer);
+    _undo.dispose();
     super.dispose();
   }
 
@@ -106,10 +108,26 @@ class _QueueScreenState extends State<QueueScreen> {
     });
   }
 
+  /// Takes [e] off the queue at once, with an Undo that puts it back in
+  /// the same place.
   Future<void> _remove(QueueEntry e) async {
-    await widget.db.queueDao
-        .remove(profileId: widget.profile.id, workId: e.work.id);
+    final dao = widget.db.queueDao;
+    final profileId = widget.profile.id;
+    final place = _entries?.indexOf(e) ?? 0;
+    await dao.remove(profileId: profileId, workId: e.work.id);
     await _load();
+    _undo.show(
+      message: 'Removed from Queue',
+      onUndo: () async {
+        await dao.playLast(
+            profileId: profileId,
+            workId: e.work.id,
+            nowMs: DateTime.now().millisecondsSinceEpoch);
+        await dao.reorder(
+            profileId: profileId, workId: e.work.id, newPosition: place);
+        if (mounted) await _load();
+      },
+    );
   }
 
   Future<void> _reorder(int oldIndex, int newIndex) async {
@@ -155,6 +173,7 @@ class _QueueScreenState extends State<QueueScreen> {
           ]),
         ],
       ),
+      bottomSheet: OhUndoBar(controller: _undo),
       body: CappedBody(child: switch (entries) {
         null => const Center(child: CircularProgressIndicator()),
         [] => const Center(child: Text('Nothing queued yet.')),
@@ -195,6 +214,8 @@ class _QueueScreenState extends State<QueueScreen> {
         removal?.then((_) => mounted ? _load() : null);
       },
       player: widget.player,
+      second: _actions.listenButton(entry,
+          feedLang: _rowState.feedLangs[episode?.feedId]),
       onPlay: isAudio && widget.player != null
           ? () async {
               await _doors.play(work);
@@ -221,17 +242,28 @@ class _QueueScreenState extends State<QueueScreen> {
             showTitle: e.feedTitle);
         await _load();
       },
-      trailing: ReorderableDragStartListener(
-        index: index,
-        child: SizedBox(
-          key: Key('queue-handle-${work.id}'),
-          width: 48,
-          height: 48,
-          child: Semantics(
-            label: 'Drag to reorder',
-            child: const Icon(Icons.drag_handle),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(
+            key: Key('queue-row-remove-${work.id}'),
+            tooltip: 'Remove from Queue',
+            icon: const Icon(Icons.close),
+            onPressed: () => _remove(e),
           ),
-        ),
+          ReorderableDragStartListener(
+            index: index,
+            child: SizedBox(
+              key: Key('queue-handle-${work.id}'),
+              width: 48,
+              height: 48,
+              child: Semantics(
+                label: 'Drag to reorder',
+                child: const Icon(Icons.drag_handle),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

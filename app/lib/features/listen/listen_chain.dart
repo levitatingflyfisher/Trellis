@@ -22,6 +22,8 @@ import '../reader/speech/speech_engine.dart';
 import '../reader/speech/spoken_text.dart';
 import '../reader/translation/language_names.dart';
 import '../reader/translation/sentence_units.dart';
+import '../reader/translation/translation_route.dart'
+    show pivotLanguage, resolveSourceLanguage;
 import '../transcribe/foreground_gate.dart';
 import 'spoken_episode.dart';
 
@@ -73,6 +75,18 @@ typedef SavedVoice = ({
   Future<SynthResult> Function(String text) say,
 });
 
+/// What an episode is taken to be spoken in, for choosing a translator:
+/// its own language (declared, or written there by the transcriber when
+/// it had none), else its show's. One that nobody knows is taken for
+/// English, which is what most episodes are; nothing here listens to
+/// the audio to find out. The page's offer and the chain both ask this,
+/// so the button never promises a route the chain will not take.
+String listenSourceLanguage(
+        {required String? workLang, required String? feedLang}) =>
+    resolveSourceLanguage(
+        workLang: workLang, feedLang: feedLang, transcriptLang: null) ??
+    pivotLanguage;
+
 class _Cancelled implements Exception {
   const _Cancelled();
 }
@@ -87,6 +101,8 @@ class ListenChain extends ChangeNotifier {
     required this.tempDir,
     this.encode,
     this.foreground,
+    this.stopTranscribing,
+    this.stopTranslating,
   });
 
   final AppDatabase db;
@@ -95,22 +111,33 @@ class ListenChain extends ChangeNotifier {
   /// whether or not it worked: the chain looks for the transcript itself.
   final Future<void> Function(Work work, Episode episode) transcribe;
 
+  /// Pauses [transcribe]'s work for a work id. Transcribing is the longest
+  /// stage by far, and [check] only runs when it is over, so without this
+  /// Stop would change nothing for many minutes. Its checkpoint is kept.
+  final void Function(int workId)? stopTranscribing;
+
+  /// Stops [translate]'s work for a work id at its next sentence, for the
+  /// same reason. The sentences already translated are kept.
+  final void Function(int workId)? stopTranslating;
+
   /// Translates [work]'s transcript from [source] into [target], fetching
   /// the translator if it has to. Null when done; else why not, as a
   /// sentence fit to show.
   final Future<String?> Function(Work work, String source, String target,
       void Function(int done, int total) progress) translate;
 
-  /// The voice that can be saved to a file for [lang]; null when there
-  /// is none on this device.
-  final Future<SavedVoice?> Function(String lang) voiceFor;
+  /// The voice that saves [work] in [lang] to a file; null when there is
+  /// none on this device. The work names whose choice of voice counts.
+  final Future<SavedVoice?> Function(Work work, String lang) voiceFor;
 
   final File Function(int workId, String url) audioFileFor;
   final Directory tempDir;
 
-  /// Packs the finished WAV into a smaller file and returns it, or null
-  /// to keep the WAV (no encoder here, or it failed).
-  final Future<File?> Function(File wav, {required String title})? encode;
+  /// Packs the finished WAV into a smaller file, tagged with its [title]
+  /// and the [voice] that said it, and returns it, or null to keep the
+  /// WAV (no encoder here, or it failed).
+  final Future<File?> Function(File wav,
+      {required String title, required String voice})? encode;
 
   /// Keeps the app alive behind a dark screen for the whole job: an
   /// hour's episode is many minutes of work, and Android freezes an app
@@ -144,10 +171,31 @@ class ListenChain extends ChangeNotifier {
     return url != null && audioFileFor(id, url).existsSync() ? id : null;
   }
 
-  /// Stops [workId]'s run at the next sentence. What earlier stages made
-  /// is kept.
+  /// [madeEpisodeOf] for every episode at once, by the original's work
+  /// id: what a list of rows asks, in one query.
+  Future<Map<int, int>> madeEpisodesIn(String lang) async {
+    final out = <int, int>{};
+    for (final MapEntry(key: original, value: id)
+        in (await spokenEpisodesIn(db, lang)).entries) {
+      final url = (await db.feedsDao.episodeOf(id))?.enclosureUrl;
+      if (url != null && audioFileFor(id, url).existsSync()) out[original] = id;
+    }
+    return out;
+  }
+
+  /// Stops [workId]'s run: at once while transcribing, else at the next
+  /// sentence. What earlier stages made is kept.
   void cancel(int workId) {
-    if (_running.containsKey(workId)) _cancelled.add(workId);
+    if (!_running.containsKey(workId)) return;
+    _cancelled.add(workId);
+    switch (stateOf(workId)?.stage) {
+      case ListenStage.transcribing:
+        stopTranscribing?.call(workId);
+      case ListenStage.translating:
+        stopTranslating?.call(workId);
+      default:
+        break;
+    }
   }
 
   /// Runs what is still missing for [work] in [lang] and returns the
@@ -211,7 +259,9 @@ class ListenChain extends ChangeNotifier {
         }
       }
       final fresh = (await db.spineDao.workById(work.id)) ?? work;
-      final source = _base(fresh.lang) ?? 'en';
+      final source = listenSourceLanguage(
+          workLang: fresh.lang,
+          feedLang: await db.feedsDao.languageOfWorkFeed(work.id));
       if (source == _base(lang)) {
         _set(work.id, fail('This episode is already in '
             '${languageDisplayName(lang)}.'));
@@ -248,7 +298,7 @@ class ListenChain extends ChangeNotifier {
       }
 
       // 3. The voice, and the file.
-      final voice = await voiceFor(lang);
+      final voice = await voiceFor(fresh, lang);
       if (voice == null) {
         _set(work.id, fail('There is no voice on this device whose '
             '${languageDisplayName(lang)} can be saved as audio. The '
@@ -267,7 +317,8 @@ class ListenChain extends ChangeNotifier {
               ListenStage.speaking, lang: lang, done: done, total: total)));
       File audio = wav;
       final packed = await encode?.call(wav,
-          title: '${fresh.title} (${languageDisplayName(lang)})');
+          title: '${fresh.title} (${languageDisplayName(lang)})',
+          voice: voice.name);
       if (packed != null) {
         audio = packed;
         if (wav.existsSync()) wav.deleteSync();

@@ -7,6 +7,33 @@ that ships no version bump. This file starts here as a narrative record
 alongside it, in the common "Unreleased" convention, not a replacement for
 it.
 
+## 1.6.5 — 2026-11-11
+
+1.6.4 was built but never published; everything it had is here.
+
+**Listen to an episode in the language you are learning**
+- The one tap now makes an episode in any language Trellis can translate into and your phone has a voice for: Russian, German, Italian and more, as well as Spanish, French and Portuguese. A foreign episode can be made in English.
+- **Japanese**: English episodes can be made in Japanese, translated on the device by ElanMT-BT (CC BY-SA 4.0).
+- With no downloaded voice for a language, the phone’s own voice speaks and saves it. The episode says which voice made it.
+- “Which language are you learning?” lists what can be made and says in words why a language is missing, with a button to Android’s voice settings.
+- A second button beside Play on every episode row: make it, see it being made, then play it in your learning language. The episode’s page groups Listen and Read, original and translation.
+- **Make ahead**: switch a show on and its new episodes are made in your learning language on Wi-Fi while charging, so they play at once. Off by default; at most 3 per show; a storage limit removes the oldest first.
+- A one-tap job carries on after the app is closed or killed, and Stop really stops it.
+
+**Everyday listening**
+- Headphone keys skip forward and change episode.
+- No more sideways swipe on Latest; every Queue row has a plain Remove, with Undo; Mark played takes an episode off the Queue.
+- The widget’s Play always does something: it plays, or opens the app.
+- Translate keeps going with the screen off.
+- Settings say “Stream” or “Download, then play” plainly, and “Download on Wi-Fi only”.
+- Running jobs take one short line on Latest instead of big cards.
+- Follow along lights the word being said and keeps it in view, even at 4×. The “Justified text” switch, which did nothing, is gone.
+
+**Fixes**
+- An episode with no language of its own takes its show’s language.
+- “Change” on an episode’s page opened an empty screen.
+- Japanese text no longer gets a space after every 。.
+
 ## 1.6.3 — 2026-11-10
 
 - The web app is smaller: the parts that only work on a phone (listening in another language, PDF reading) are no longer downloaded by a browser that can’t use them. The web bundle is 17,016 bytes lighter, compressed.

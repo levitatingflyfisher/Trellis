@@ -143,25 +143,59 @@ void main() {
   });
 
   testWidgets('translation pairs fold into one section that names each '
-      'pair by its languages and credits OPUS-MT', (tester) async {
+      'pair by its languages and credits their makers', (tester) async {
     await pump(tester,
         store: FakeModelStore(downloadedIds: {'opus-mt-en-de'}));
     expect(find.byKey(const Key('model-download-opus-mt-en-ROMANCE')),
         findsNothing, reason: 'folded until opened');
-    expect(find.textContaining('1 of 25 downloaded'), findsOneWidget);
+    expect(find.textContaining('1 of 26 downloaded'), findsOneWidget);
 
     await tester.scrollUntilVisible(
         find.byKey(const Key('models-translation')), 200);
     await tester.tap(find.byKey(const Key('models-translation')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('opus-mt-credit')), findsOneWidget);
-    expect(opusMtCredit, contains('CC-BY 4.0'));
-    expect(opusMtCredit, contains('Apache-2.0'));
-    expect(opusMtCredit, contains('https://github.com/Helsinki-NLP/Opus-MT'));
+    expect(translationModelsCredit, contains('CC-BY 4.0'));
+    expect(translationModelsCredit, contains('Apache-2.0'));
+    expect(translationModelsCredit,
+        contains('https://github.com/Helsinki-NLP/Opus-MT'));
+    expect(
+        translationModelsCredit,
+        contains('English to Japanese: ElanMT-BT by ELAN MITSUA Project / '
+            'Abstract Engine, under CC BY-SA 4.0, converted to ONNX by '
+            'Trellis'));
+    expect(translationModelsCredit,
+        contains('https://huggingface.co/Mitsua/elan-mt-bt-en-ja'));
+    expect(
+        translationModelsCredit,
+        contains('The converted files, the licence text and the export '
+            'recipe are kept at https://github.com/levitatingflyfisher/'
+            'Trellis/releases/tag/models-enja-1, which is never '
+            'deleted.'));
 
     final pt = find.text('English to Portuguese translation, offline');
     await tester.scrollUntilVisible(pt, 200);
     expect(pt, findsOneWidget);
+  });
+
+  testWidgets('the Japanese pair says Trellis converted it, from what, and '
+      'under which licence; a pair taken as published says nothing of the '
+      'kind', (tester) async {
+    await pump(tester);
+    await tester.scrollUntilVisible(
+        find.byKey(const Key('models-translation')), 200);
+    await tester.tap(find.byKey(const Key('models-translation')));
+    await tester.pumpAndSettle();
+
+    final ja = find.text('English to Japanese translation, offline');
+    await tester.scrollUntilVisible(ja, 200);
+    expect(ja, findsOneWidget);
+    expect(
+        find.byKey(const Key('model-converted-elanmt-bt-en-ja')), findsOneWidget);
+    expect(find.text('Converted by Trellis from ElanMT-BT '
+        '(Mitsua/elan-mt-bt-en-ja)'), findsOneWidget);
+    expect(find.textContaining('CC-BY-SA-4.0'), findsOneWidget);
+    expect(find.byKey(const Key('model-converted-opus-mt-en-de')), findsNothing);
   });
 
   testWidgets('a pair downloaded before its config files were registered '
@@ -176,7 +210,7 @@ void main() {
     expect(store.downloadsStarted, [spec.id],
         reason: 'no consent dialog for a few KB of an already-kept model');
     expect(find.byKey(const Key('consent-dialog')), findsNothing);
-    expect(find.textContaining('1 of 25 downloaded'), findsOneWidget);
+    expect(find.textContaining('1 of 26 downloaded'), findsOneWidget);
   });
 
   testWidgets('a downloaded pair whose decoder was re-pinned reads as an '

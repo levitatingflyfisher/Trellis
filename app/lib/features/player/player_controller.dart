@@ -625,9 +625,11 @@ class PlayerController extends ChangeNotifier {
       // Asking is itself a wait, even when nothing is fetched: an X or
       // another Play pressed during it has already won.
       if (intent != _playIntent) return;
+      _passedOver.clear();
     }
 
     final gen = ++_loadGen;
+    _noteLeaving(work);
     if (_current != null) await saveProgress();
     await _awaitRelease();
     if (gen != _loadGen) return;
@@ -756,8 +758,12 @@ class PlayerController extends ChangeNotifier {
   /// position, or file 0 offset 0 for a book never opened before.
   Future<void> playAudiobook(Work work, {bool auto = false}) async {
     if (_current?.id == work.id && _player != null) return toggle();
-    if (!auto) _playIntent++;
+    if (!auto) {
+      _playIntent++;
+      _passedOver.clear();
+    }
     final gen = ++_loadGen;
+    _noteLeaving(work);
     final files = await db.audiobooksDao.filesOf(work.id);
     if (files.isEmpty || gen != _loadGen) return;
     if (_current != null) await saveProgress();
@@ -1181,6 +1187,8 @@ class PlayerController extends ChangeNotifier {
     _currentFileIdx = null;
     _rehydratedPositionMs = null;
     _rehydratedDurationMs = null;
+    _passedOver.clear();
+    _behind.clear();
     if (_sleepMode != null) cancelSleepTimer();
     notifyListeners();
     if (p != null) {
@@ -1318,6 +1326,84 @@ class PlayerController extends ChangeNotifier {
   int get queueRevision => _queueRevision;
   int _queueRevision = 0;
 
+  /// What Next episode passed over this run. They stay in the queue, as
+  /// the listener left them, but the queue's own going-on leaves them out:
+  /// otherwise the next finish would land back on the one just skipped.
+  final Set<int> _passedOver = {};
+
+  /// The episodes the player left, oldest first, for Previous episode. In
+  /// memory on purpose: the queue forgets a finished episode outright, so
+  /// no row can say what came before.
+  final List<int> _behind = [];
+  static const _maxBehind = 50;
+
+  /// Set for the one load that is Previous episode going back, so that
+  /// load does not count the episode it leaves as behind it.
+  bool _steppingBack = false;
+
+  /// Within this far into an episode, Previous means the one before it;
+  /// past it, the start of this one: what a track key does on any player.
+  static const previousWithin = Duration(seconds: 5);
+
+  void _noteLeaving(Work next) {
+    final was = _current;
+    final back = _steppingBack;
+    _steppingBack = false;
+    _passedOver.remove(next.id);
+    if (back || was == null || was.id == next.id) return;
+    _behind
+      ..remove(was.id)
+      ..add(was.id);
+    if (_behind.length > _maxBehind) _behind.removeAt(0);
+  }
+
+  /// A headset's or a car's "Next episode": moves on to what the queue
+  /// plays next, without calling this one played or taking it off the
+  /// queue. A stray press must lose nothing. With nothing further to go
+  /// to, this episode simply plays on.
+  Future<void> nextEpisode() async {
+    final from = _current?.id;
+    try {
+      final keep = await db.profilesDao.keepFinishedInQueue(profileId);
+      if (from != null) _passedOver.add(from);
+      final upcoming = await _upcomingAfter(from, keep: keep);
+      if (upcoming == null) {
+        _passedOver.remove(from);
+        return;
+      }
+      await _playOn(upcoming.workId);
+    } catch (e) {
+      debugPrint('Player: Next episode would not play: $e');
+    }
+  }
+
+  /// A headset's or a car's "Previous episode": some way in, back to the
+  /// start of this episode; in its first seconds, back to the episode
+  /// before it (at that one's own place), if this run has one.
+  Future<void> previousEpisode() async {
+    final work = _current;
+    if (work == null) return;
+    try {
+      final p = _player;
+      final inMs = p == null ? (_rehydratedPositionMs ?? 0) : _placeMs(p);
+      if (inMs <= previousWithin.inMilliseconds && _behind.isNotEmpty) {
+        _steppingBack = true;
+        await _playOn(_behind.removeLast());
+        return;
+      }
+      if (p == null) {
+        await _playOn(work.id);
+      }
+      final loaded = _player;
+      if (loaded != null && _current?.id == work.id) {
+        await _startOver(loaded);
+      }
+    } catch (e) {
+      _steppingBack = false;
+      debugPrint('Player: Previous episode would not play: $e');
+    }
+  }
+
   /// The queue's law (P4 mercy #3): finishing removes the episode from the
   /// queue by default — a household setting can keep it instead — then
   /// auto-advances to whatever is now at the head. Playing the head goes
@@ -1335,7 +1421,13 @@ class PlayerController extends ChangeNotifier {
     }
     final upcoming = await _upcomingAfter(finishedWorkId, keep: keep);
     if (upcoming == null) return false;
-    final next = await db.spineDao.workById(upcoming.workId);
+    return _playOn(upcoming.workId);
+  }
+
+  /// Loads [workId] as the player moving on by itself: streams whatever
+  /// the setting, as nobody is looking at a screen to be told it waits.
+  Future<bool> _playOn(int workId) async {
+    final next = await db.spineDao.workById(workId);
     if (next == null) return false;
     // Campaign 7 (ADR-0013): an audiobook work carries no sourceUrl for
     // playWork's single-file law to stream — it needs the multi-file
@@ -1353,10 +1445,12 @@ class PlayerController extends ChangeNotifier {
   /// so position says nothing: next is the first entry that isn't this
   /// one and isn't already played. Kept played ones are skipped, or two
   /// kept episodes would loop forever.
-  Future<QueueRow?> _upcomingAfter(int finishedWorkId,
+  Future<QueueRow?> _upcomingAfter(int? finishedWorkId,
       {required bool keep}) async {
     for (final r in await db.queueDao.queueOf(profileId)) {
-      if (r.workId == finishedWorkId) continue;
+      if (r.workId == finishedWorkId || _passedOver.contains(r.workId)) {
+        continue;
+      }
       if (keep) {
         final ep = await db.feedsDao.episodeOf(r.workId);
         if (ep?.finishedAtMs != null) continue;

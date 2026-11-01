@@ -25,6 +25,11 @@ void main() {
     expect(autoDownloadRequest()['batteryNotLow'], isTrue);
   });
 
+  test('a make-ahead pass waits for both Wi-Fi and charging', () {
+    expect(makeAheadRequest()['unmeteredOnly'], isTrue);
+    expect(makeAheadRequest()['charging'], isTrue);
+  });
+
   test('launch keeps the schedule; a changed switch updates it; nothing '
       'replaces it', () {
     final c = constraintsFor(wifiOnly: true);
@@ -62,11 +67,21 @@ void main() {
       final keys = {
         ...periodicRequest(constraintsFor(wifiOnly: true), replace: true).keys,
         ...autoDownloadRequest().keys,
+        ...makeAheadRequest().keys,
       };
       for (final k in keys) {
         expect(src, contains('args["$k"]'), reason: k);
       }
       expect(src, contains('"update"'));
+    });
+
+    test('make ahead has its own pass, and reads charging from the '
+        'battery with no permission of its own', () {
+      final src = scheduler.readAsStringSync();
+      expect(src, contains('"requestMakeAhead"'));
+      expect(src, contains('task("makeAhead")'));
+      expect(src, contains('"isCharging"'));
+      expect(src, contains('ACTION_BATTERY_CHANGED'));
     });
 
     test('answers whether the network is metered from the connectivity '

@@ -23,6 +23,10 @@
 /// `licenses` names the license of the weights: onnx-community's own
 /// cards say CC-BY-4.0; Xenova's cards carry none, so the upstream
 /// Helsinki-NLP card's license is recorded instead.
+///
+/// One pair is not OPUS-MT and has no third-party export: English to
+/// Japanese is ElanMT-BT (CC BY-SA 4.0), a Marian model of the same
+/// shape, converted to int8 ONNX by Trellis itself ([_convertedFrom]).
 library;
 
 import 'registry.dart';
@@ -1015,7 +1019,55 @@ const List<_Pair> _pairs = [
       ),
     ],
   ),
+  (
+    'elanmt-bt-en-ja',
+    'en',
+    'ja',
+    null,
+    'CC-BY-SA-4.0',
+    [
+      (
+        'https://github.com/levitatingflyfisher/Trellis/releases/download/models-enja-1/encoder_model_quantized.onnx',
+        'b8698e3dee264d0e71d4bdd7469933c33a0ca4e08fb377a10dee70e528d3a7cc',
+        35890766
+      ),
+      (
+        'https://github.com/levitatingflyfisher/Trellis/releases/download/models-enja-1/decoder_model_merged_quantized.onnx',
+        '5ae7b58e2bfb69f67f0183fbb612a2145f902b5bc47567d844738c99c75b2463',
+        59457806
+      ),
+      (
+        'https://huggingface.co/Mitsua/elan-mt-bt-en-ja/resolve/02c48e7031386cd2d41974b0ff1aaf52f010c5fa/source.spm',
+        'a6824c2996a4877cae8a0240f11a112ab0e4ea1f22e54cd42179376fe558f4ff',
+        792751
+      ),
+      (
+        'https://huggingface.co/Mitsua/elan-mt-bt-en-ja/resolve/02c48e7031386cd2d41974b0ff1aaf52f010c5fa/vocab.json',
+        'f508b75734ee21cf16b3816b7b29dea400f1f5998f47b7695cef1979ca49e106',
+        881911
+      ),
+      (
+        'https://huggingface.co/Mitsua/elan-mt-bt-en-ja/resolve/02c48e7031386cd2d41974b0ff1aaf52f010c5fa/config.json',
+        '78298efb7b70a119900886b41de089e2543c1234bb7d767defa09ea494cb7ab7',
+        1075
+      ),
+      (
+        'https://huggingface.co/Mitsua/elan-mt-bt-en-ja/resolve/02c48e7031386cd2d41974b0ff1aaf52f010c5fa/tokenizer_config.json',
+        '3c4a72a28f4db53dbf21d87b35d0ebee03ea76304f95940a809f9e18ab5220aa',
+        854
+      ),
+    ],
+  ),
 ];
+
+/// The pairs Trellis converted itself (ADR-0014's amendment of
+/// 2026-11-11), to the upstream each was made from. Their two ONNX graphs
+/// are Trellis release assets; their four small files come from the
+/// upstream commit unchanged. The recipe is app/tool/
+/// convert_marian_onnx.py (docs/how-to/convert-a-translation-model.md).
+const Map<String, String> _convertedFrom = {
+  'elanmt-bt-en-ja': 'ElanMT-BT (Mitsua/elan-mt-bt-en-ja)',
+};
 
 /// Every pair as a [ModelSpec]. A multi-target export (en-ROMANCE,
 /// en-zh, en-ar) is told which language to write by its `>>xx<<` token,
@@ -1037,6 +1089,7 @@ List<ModelSpec> translationCatalog() => [
           minTier: DeviceTier.t1,
           langs: {target},
           sourceLang: source,
+          convertedFrom: _convertedFrom[id],
           marianLayout: MarianModelLayout(
             encoderFileName: 'encoder_model_quantized.onnx',
             decoderMergedFileName: 'decoder_model_merged_quantized.onnx',

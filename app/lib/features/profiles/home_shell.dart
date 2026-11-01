@@ -4,6 +4,7 @@ import 'package:comms_core/comms_core.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
+import '../../bootstrap/bootstrap.dart' show bindEpisodeKeys, releaseEpisodeKeys;
 import '../../db/database.dart';
 import '../../services/device_services.dart';
 import '../backup/backup_screen.dart';
@@ -26,6 +27,7 @@ import '../intake/share_queue.dart';
 import '../jobs/job_center.dart';
 import '../jobs/jobs_screen.dart';
 import '../library/library_screen.dart';
+import '../listen/listen.dart' show MakeAheadLine;
 import '../models/models_screen.dart';
 import '../player/accelerometer_samples.dart';
 import '../player/audiobook_chapters.dart';
@@ -100,7 +102,7 @@ class HomeShell extends StatefulWidget {
   State<HomeShell> createState() => _HomeShellState();
 }
 
-class _HomeShellState extends State<HomeShell> {
+class _HomeShellState extends State<HomeShell> with WidgetsBindingObserver {
   static const _queueTab = 1;
   static const _libraryTab = 2;
 
@@ -525,6 +527,10 @@ class _HomeShellState extends State<HomeShell> {
     widget.shares?.addListener(_onSharesChanged);
     unawaited(_takeShares());
     _coordinator.onTranscribed = _onTranscribed;
+    unawaited(_resumeListenLine());
+    WidgetsBinding.instance.addObserver(this);
+    bindEpisodeKeys(
+        next: _player.nextEpisode, previous: _player.previousEpisode);
     // Campaign 9 Phase 2 ("resume after restart"): shows the mini bar
     // paused at wherever playback last was, before anything is tapped —
     // see PlayerController.rehydrateLastPlayed's own doc for why this is
@@ -560,6 +566,8 @@ class _HomeShellState extends State<HomeShell> {
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    releaseEpisodeKeys(_player.nextEpisode);
     widget.shares?.removeListener(_onSharesChanged);
     if (_coordinator.onTranscribed == _onTranscribed) {
       _coordinator.onTranscribed = null;
@@ -663,7 +671,7 @@ class _HomeShellState extends State<HomeShell> {
         db: widget.db,
         profile: widget.profile,
         custody: widget.services.backupCustody,
-        beforeRestore: widget.jobs.stopAll));
+        beforeRestore: _stopJobsForRestore));
     if (restored == true) {
       await widget.jobs.reload();
       widget.onSwitchProfile();
@@ -719,8 +727,40 @@ class _HomeShellState extends State<HomeShell> {
         CapturesScreen(db: widget.db, controller: _player, work: work)));
   }
 
+  /// The one-tap jobs a kill interrupted. From the shell and not from a
+  /// list, so they carry on whichever tab the app opens on.
+  Future<void> _resumeListenLine() async {
+    await widget.jobs.restored;
+    if (!mounted) return;
+    final jobs = _episodeActions.listenJobs;
+    await jobs?.resumeLine();
+    widget.jobs.makeAheadPass = jobs?.makeAheadPass;
+  }
+
+  /// Coming back to the front is when Android lets a make-ahead run start
+  /// (ADR-0021), and when a voice installed in Android's settings meanwhile
+  /// can be offered.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      final jobs = _episodeActions.listenJobs;
+      unawaited(jobs?.makeAheadPass());
+      unawaited(jobs?.refreshVoices());
+    }
+  }
+
+  /// Before a restore replaces every work. The one-tap line goes first:
+  /// stopping it also pauses the transcription it is waiting on.
+  Future<void> _stopJobsForRestore() async {
+    await _episodeActions.listenJobs?.stopAll();
+    await widget.jobs.stopAll();
+  }
+
   void _openJobs() {
-    unawaited(_pushPage<void>(JobsScreen(jobs: widget.jobs)));
+    final listen = _episodeActions.listenJobs;
+    unawaited(_pushPage<void>(JobsScreen(
+        jobs: widget.jobs,
+        aheadLine: listen == null ? null : MakeAheadLine(jobs: listen))));
   }
 
   /// The queue is a tab now (user: "I freaking hate how hidden the up
@@ -861,6 +901,7 @@ class _HomeShellState extends State<HomeShell> {
             repository: _repository,
             playerController: _player,
             coordinator: _coordinator,
+            onOpenJobs: _openJobs,
             downloadCoordinator: _downloadCoordinator,
             dspCoordinator: _dspCoordinator,
             localMlAvailable: widget.services.localMlAvailable,

@@ -90,6 +90,7 @@ class _HomeFlowState extends State<HomeFlow> {
       repository: repository,
       scheduler: widget.feedCheckScheduler,
       downloads: downloads,
+      makeAhead: () async => _jobs.makeAheadPass?.call(),
     );
     return runner;
   }();

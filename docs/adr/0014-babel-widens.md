@@ -396,3 +396,60 @@ was not met, so the subtitle's honesty holds without a code change;
   has a tested translator and a tested chunked-batch controller path
   already waiting, not a blank page; what remains is the DECISION layer
   (which tier, whose consent, which UI), not the translation mechanics.
+
+## Amendment, 2026-11-11: a rung for a model Trellis converted itself
+
+**The ladder as it stood.** Phase 0 took a pair's ONNX files only from a
+trusted source: official organisations first (onnx-community), then known
+quantizers (Xenova), then curated catalogs, and never a mirror on an
+individual account (`docs/reference/mt-models.md`). It had no rung for
+files Trellis made itself.
+
+**Why it needs one.** The owner wants Japanese as a learning language.
+The best English to Japanese model with a licence that fits
+(`Mitsua/elan-mt-bt-en-ja`, ElanMT-BT: CC BY-SA 4.0, trained only on
+openly licensed text) is a plain Marian model the app already runs, but
+nobody trusted has exported it to ONNX. The only exports of other en-ja
+models sit on individual accounts, which the ladder refuses. Without a
+new rung, Japanese stays out.
+
+**The rung.** A model Trellis converted itself is allowed when all four
+hold:
+
+1. The exact conversion recipe and its pinned versions are committed in
+   this repo (`app/tool/convert_marian_onnx.py`, explained in
+   `docs/how-to/convert-a-translation-model.md`).
+2. The upstream model is named by its full commit, never a branch, and
+   its weights are checked against the upstream's own hash.
+3. The converted files are pinned in the catalog by sha256 and size, like
+   every other file, and are checked by downloading them back from where
+   they are hosted before the catalog entry merges.
+4. The Models screen credits the pair as “converted by Trellis from
+   <upstream>”, with the upstream's licence.
+
+**Why this rung is as trustworthy as the ones above it.** A third-party
+export is trusted because of who made it; a Trellis conversion is trusted
+because anyone can make it again. The recipe is in the repo, the input is
+pinned by commit and hash, and the output is pinned by hash. The one
+thing that is not reproducible is the exact bytes of the merged decoder:
+the exporter names internal nodes differently on each run. The weights
+and operations do come out the same, and
+`app/tool/compare_onnx_weights.py` checks that. So the hash pins the
+uploaded file, and the recipe proves what that file is.
+
+**What it costs.** Trellis hosts the two converted files, so a pair on
+this rung is the one place the app downloads a model from Trellis rather
+than from its maker. They are assets of a permanent release on the
+Trellis repo, one per conversion (English to Japanese: tag
+`models-enja-1`). That release keeps the converted files, the upstream
+licence text, a note of what changed and the export recipe, and is never
+deleted: a phone that pinned those hashes must always be able to fetch
+them. CC BY-SA 4.0 applies to the
+converted files; the app's own code stays MIT because the model is a
+separate download, not linked code.
+
+**First use.** ElanMT-BT en-ja, upstream commit
+`02c48e7031386cd2d41974b0ff1aaf52f010c5fa`. Ruled acceptable by the
+Trellis lead on 2026-11-11; the board ruled the same day that it ships,
+hosted at the release `models-enja-1`. Its catalog entry waits until the
+files are there and downloaded back with matching hashes.

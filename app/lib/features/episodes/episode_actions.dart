@@ -75,20 +75,51 @@ class EpisodeActions {
     this.openShow,
     int Function()? nowMs,
     this.transcribeRate = deviceTranscribeRate,
+    ListenJobs? listenJobs,
   }) : services = localMlAvailable ? services : null,
+       _givenListenJobs = listenJobs,
        shareText = shareText ?? (useDefaultShare ? defaultShareText : null),
        _nowMs = nowMs ?? (() => DateTime.now().millisecondsSinceEpoch);
 
   bool get canDownload => localMlAvailable && downloader != null;
 
+  final ListenJobs? _givenListenJobs;
+
+  /// One for each transcriber, which is one for the app. Every screen
+  /// builds its own actions, and each used to build its own chain: an
+  /// episode being made in Latest was unknown to the show's page. Keyed
+  /// on the transcriber because every screen is already handed the same
+  /// one, so nothing new has to be passed down.
+  static final _listenJobsOf = Expando<ListenJobs>('listen jobs');
+
   /// One tap to an episode in the learning language (1.6.0): transcribe,
-  /// translate, speak and save as one job. Null where this tier can't.
-  /// One for the life of these actions, so a run survives leaving the
-  /// episode's page.
-  late final ListenChain? listen = services != null && transcriber != null
-      ? deviceListenChain(
-          db: db, services: services!, transcriber: transcriber!)
-      : null;
+  /// translate, speak and save as one job, from a row or from the
+  /// episode's page. Null where this tier can't. Shared by every list
+  /// (see [_listenJobsOf]), so a job shows the same wherever its episode
+  /// is drawn and survives leaving the screen it was started on.
+  late final ListenJobs? listenJobs = _givenListenJobs ??
+      (services != null && transcriber != null
+          ? _listenJobsOf[transcriber!] ??= deviceListenJobs(
+              db: db,
+              services: services!,
+              transcriber: transcriber!,
+              player: player)
+          : null);
+
+  /// The second button of [e]'s row: the episode in the learning
+  /// language. Null where this tier has no such thing (the web), and for
+  /// anything that is not an episode with audio; the button itself draws
+  /// nothing for an episode that cannot be made. [feedLang] is the show's
+  /// language, for an episode that names none.
+  Widget? listenButton(WorkEntry e, {String? feedLang}) {
+    final jobs = listenJobs;
+    final episode = e.episode;
+    if (jobs == null || episode == null || episode.enclosureUrl == null) {
+      return null;
+    }
+    return ListenRowButton(
+        jobs: jobs, work: e.work, episode: episode, feedLang: feedLang);
+  }
 
   /// Disk truth; false, never a throw, where there is nothing to check.
   /// Remembered until the downloader changes or [forgetArtwork], so a
@@ -137,6 +168,9 @@ class EpisodeActions {
   void forgetArtwork() {
     _artwork.clear();
     _downloaded.clear();
+    // Made audio can be deleted like any download: look again at which
+    // episodes are ready in the learning language.
+    unawaited(listenJobs?.refresh());
   }
 
   Future<void> play(Work work) async => player?.playWork(work);
@@ -147,8 +181,14 @@ class EpisodeActions {
   Future<void> playLast(int workId) => db.queueDao
       .playLast(profileId: profileId, workId: workId, nowMs: _nowMs());
 
-  Future<void> markPlayed(int workId) =>
-      db.feedsDao.markPlayed(workId, _nowMs());
+  /// Off the queue too, as hearing it to the end would be, under the same
+  /// household setting.
+  Future<void> markPlayed(int workId) async {
+    await db.feedsDao.markPlayed(workId, _nowMs());
+    if (!await db.profilesDao.keepFinishedInQueue(profileId)) {
+      await db.queueDao.remove(profileId: profileId, workId: workId);
+    }
+  }
 
   Future<void> markUnplayed(int workId) =>
       db.feedsDao.markUnplayed(profileId: profileId, workId: workId);

@@ -88,4 +88,59 @@ void main() {
       expect(segmentCjkRun(''), isEmpty);
     });
   });
+
+  group('joinSentences', () {
+    test('Latin sentences take one space between them', () {
+      expect(joinSentences(['Hello there.', 'How are you?']),
+          'Hello there. How are you?');
+    });
+
+    test('a Japanese sentence end takes no space after it', () {
+      expect(joinSentences(['今日は晴れです。', '明日は雨です！', 'そうですか？', '本当']),
+          '今日は晴れです。明日は雨です！そうですか？本当');
+    });
+
+    test('a closing bracket after the full stop still takes no space', () {
+      expect(joinSentences(['彼は「行こう。」', 'と言った。']), '彼は「行こう。」と言った。');
+    });
+
+    test('a Japanese sentence without its full stop keeps the space, so two '
+        'sentences never run together unmarked', () {
+      expect(joinSentences(['見出し', '本文です。']), '見出し 本文です。');
+    });
+
+    test('mixed: a Japanese end then an English sentence takes nothing; an '
+        'English end then Japanese takes a space', () {
+      expect(joinSentences(['はい。', 'OK.', 'いいえ。']), 'はい。OK. いいえ。');
+    });
+
+    test('stray outer spaces on a stored sentence do not double up', () {
+      expect(joinSentences(['今日は晴れです。 ', ' 明日は雨です。']),
+          '今日は晴れです。明日は雨です。');
+      expect(joinSentences([' Hello. ', ' Bye.']), 'Hello. Bye.');
+    });
+
+    test('the joined text splits into the same words as its sentences one by '
+        'one, which is how the reader finds where each sentence starts', () {
+      List<String> words(String text) => tokenizeDocument(
+              [Segment(idx: 0, kind: SegmentKind.prose, text: text)])
+          .words;
+      for (final sentences in [
+        ['今日は晴れです。', '明日は雨です。'],
+        ['彼は「行こう。」', 'と言った。'],
+        ['はい（注。）', 'OK.'],
+        ['はい。）', 'OK.'],
+        ['Hello.', 'こんにちは。', 'Bye.'],
+      ]) {
+        expect(words(joinSentences(sentences)),
+            [for (final s in sentences) ...words(s)],
+            reason: sentences.join(' | '));
+      }
+    });
+
+    test('nothing in, nothing out; one in, the same one out', () {
+      expect(joinSentences(const []), '');
+      expect(joinSentences(['一つ。']), '一つ。');
+    });
+  });
 }

@@ -44,9 +44,20 @@ class SupertonicVoiceFiles {
 /// embedding, if it turns out to generalize") — this M1 embedding has
 /// been reviewed for English; Spanish output through it has NOT been
 /// verified by ear on real hardware. See ADR-0008's amendment for the
-/// full honesty accounting. Widening further (ko/pt/fr) is the same
-/// move, still unverified, not done here.
-const supertonicSupportedLangs = {'en', 'es'};
+/// full honesty accounting.
+///
+/// French and Portuguese were switched on for the one tap ("Listen in
+/// French"), on three checks recorded in docs/reference/tts-voices.md:
+/// the model's own card lists them; the language reaches the model only
+/// as a tag around the text, with no phonemizer or per-language step; and
+/// the pinned character table writes every letter of both once the
+/// engine has decomposed it (bar a few rare ones, named there). Like
+/// Spanish, neither has been heard on a phone.
+///
+/// Korean, the model's fifth language, stays off: the character table
+/// cannot write 399 of its 11,172 syllables (they would be said as
+/// silence), and no pair translates into Korean.
+const supertonicSupportedLangs = {'en', 'es', 'fr', 'pt'};
 
 /// The thinnest boundary over flutter_onnxruntime's four ONNX sessions —
 /// narrow enough that a host test can fake it entirely, mirroring

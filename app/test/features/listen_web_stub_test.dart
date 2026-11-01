@@ -16,18 +16,58 @@ void main() {
     for (final user in [
       'lib/features/works/work_page.dart',
       'lib/features/episodes/episode_actions.dart',
+      'lib/features/feeds/feed_detail_screen.dart',
     ]) {
       final text = read(user);
       expect(text, contains("listen/listen.dart'"), reason: user);
       for (final direct in [
         'listen_chain.dart',
         'listen_device.dart',
-        'listen_in_language_bar.dart',
+        'listen_jobs.dart',
+        'listen_row_button.dart',
         'spoken_episode.dart',
+        'make_ahead_jobs.dart',
+        'make_ahead_switch.dart',
       ]) {
         expect(text, isNot(contains(direct)), reason: '$user imports $direct');
       }
     }
+  });
+
+  test('on the web no row gets a second button: the stand-in offers '
+      'nothing and its button draws nothing', () {
+    final stub = read('lib/features/listen/listen_unsupported.dart');
+    expect(stub, contains('offerFor('));
+    expect(
+        RegExp(r'ListenOffer\? offerFor\([^)]*\)\s*=>\s*null;', dotAll: true)
+            .hasMatch(stub),
+        isTrue);
+    final button = stub.substring(stub.indexOf('class ListenRowButton'));
+    expect(
+        button.substring(0, button.indexOf('\n}\n')),
+        contains('Widget build(BuildContext context) => '
+            'const SizedBox.shrink();'));
+  });
+
+  test('on the web no show has a make-ahead switch or line, and its door '
+      'is the only way in', () {
+    final stub = read('lib/features/listen/listen_unsupported.dart');
+    expect(
+        RegExp(r'MakeAheadOffer\? aheadOfferFor\(Feed feed\) => null;')
+            .hasMatch(stub),
+        isTrue);
+    for (final name in ['class MakeAheadTile', 'class MakeAheadLine']) {
+      final body = stub.substring(stub.indexOf(name));
+      expect(
+          body.substring(0, body.indexOf('\n}\n')),
+          contains('Widget build(BuildContext context) => '
+              'const SizedBox.shrink();'),
+          reason: name);
+    }
+    expect(read('lib/features/listen/listen_native.dart'),
+        contains("export 'make_ahead_switch.dart'"));
+    expect(read('lib/features/feeds/feed_detail_screen.dart'),
+        contains("listen/listen.dart'"));
   });
 
   test('the door hands the web the stand-in, and everything else the real '
@@ -41,17 +81,44 @@ void main() {
   test('the stand-in names everything the app asks the door for', () {
     final stub = read('lib/features/listen/listen_unsupported.dart');
     for (final name in [
-      'class ListenChain',
-      'deviceListenChain(',
-      'savableListenLanguages()',
-      'listenDownloads(',
-      'class ListenInLanguageBar',
+      'class ListenJobs',
+      'class ListenOffer',
+      'deviceListenJobs(',
+      'class ListenRowButton',
+      'class MakeAheadOffer',
+      'class MakeAheadTile',
+      'class MakeAheadLine',
+      'makeAheadPass()',
+      'refreshVoices()',
+      'aheadOfferFor(',
+      'setMakeAhead(',
     ]) {
       expect(stub, contains(name), reason: name);
     }
     // And pulls in none of what it stands in for.
-    for (final heavy in ['ffmpeg', 'listen_chain.dart', 'listen_device.dart']) {
+    for (final heavy in [
+      'ffmpeg',
+      'listen_chain.dart',
+      'listen_device.dart',
+      'listen_jobs.dart',
+      'listen_row_button.dart',
+    ]) {
       expect(stub, isNot(contains(heavy)), reason: heavy);
+    }
+  });
+
+  test('rows and the episode’s page offer only the languages that can be '
+      'made for that episode', () {
+    // Both ask the one owner, which is given the device's rule.
+    expect(read('lib/features/listen/listen_device.dart'),
+        contains('listenLanguagesFor(services, workLang: workLang, '
+            'feedLang: feedLang)'));
+    for (final user in [
+      'lib/features/works/work_page.dart',
+      'lib/features/episodes/episode_actions.dart',
+    ]) {
+      expect(read(user), isNot(contains('savableListenLanguages')),
+          reason: user);
     }
   });
 
